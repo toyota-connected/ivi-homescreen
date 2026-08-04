@@ -48,6 +48,8 @@
 #include "backend/drm_kms_egl/drm_cursor.h"
 #include "backend/drm_kms_egl/scene_layer_source_gl.h"
 #include "display/drm_display.h"
+#include "drm-cxx/src/display/connector_info.hpp"  // ColorimetryInfo / Chromaticity
+#include "drm-cxx/src/display/hdr_metadata.hpp"  // HdrSourceMetadata / TransferFunction
 #include "drm-cxx/src/modeset/atomic.hpp"
 #include "ihs/platform_view.h"
 #include "libflutter_engine.h"
@@ -88,6 +90,36 @@ std::optional<drm::planes::ColorRange> ToColorRange(uint8_t color_range) {
     default:
       return std::nullopt;
   }
+}
+
+// Map the frame's HDR static metadata (mirrored IhsHdrMetadata, valid only when
+// Dmabuf::has_hdr) to drm-cxx's HdrSourceMetadata for the connector's
+// HDR_OUTPUT_METADATA. Primaries are 0.00002-unit uint16 -> CIE xy float;
+// luminances clamp to the CTA-861.3 uint16 fields.
+drm::display::HdrSourceMetadata ToHdrSourceMetadata(
+    const ICompositorSurface::Dmabuf::HdrMetadata& h) {
+  drm::display::HdrSourceMetadata out{};
+  // IhsTransfer: 2=HLG, otherwise PQ (has_hdr implies PQ or HLG).
+  out.eotf = h.transfer == 2 ? drm::display::TransferFunction::Bt2100Hlg
+                             : drm::display::TransferFunction::SmpteSt2084Pq;
+  const auto xy = [](uint16_t v) { return static_cast<float>(v) * 0.00002F; };
+  out.display_primaries.red = {xy(h.display_primaries_x[0]),
+                               xy(h.display_primaries_y[0])};
+  out.display_primaries.green = {xy(h.display_primaries_x[1]),
+                                 xy(h.display_primaries_y[1])};
+  out.display_primaries.blue = {xy(h.display_primaries_x[2]),
+                                xy(h.display_primaries_y[2])};
+  out.display_primaries.white = {xy(h.white_point_x), xy(h.white_point_y)};
+  const auto clamp16 = [](uint32_t v) {
+    return static_cast<uint16_t>(v > 0xFFFFU ? 0xFFFFU : v);
+  };
+  out.max_display_mastering_luminance =
+      clamp16(h.max_display_mastering_luminance);
+  out.min_display_mastering_luminance =
+      clamp16(h.min_display_mastering_luminance);
+  out.max_content_light_level = h.max_content_light_level;
+  out.max_frame_average_light_level = h.max_frame_average_light_level;
+  return out;
 }
 
 // The planar/packed YUV fourccs a video producer submits — so the scene
@@ -2435,6 +2467,11 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   frame_batons.reserve(layer_count);
   frame_pv_tags.reserve(layer_count);
 
+  // The connector's HDR_OUTPUT_METADATA this present: set from an HDR video
+  // PV's frame (the topmost such PV wins), or left empty for SDR — which clears
+  // any prior HDR signaling. Applied to the scene just before commit.
+  std::optional<drm::display::HdrSourceMetadata> output_hdr;
+
   // GetDmabuf hands back an owned (dup'd) fd per platform view; close them on
   // every exit path (each GL-fallback return below, and the normal exit). The
   // pool's first-sight import dups again for the KMS framebuffer, so closing
@@ -2541,6 +2578,15 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
           continue;
         }
         return PresentViaGlFallback(layers, layer_count);
+      }
+      // An HDR video PV drives the connector's HDR_OUTPUT_METADATA. Read the
+      // view's *persisted* HDR (not the deliver-once frame) so it holds steady
+      // across reuse presents — toggling it would re-sync the sink's HDR mode
+      // every few frames (flicker). Layers walk bottom-to-top, so the topmost
+      // HDR PV wins.
+      ICompositorSurface::Dmabuf::HdrMetadata hmeta{};
+      if (surface->GetHdrMetadata(&hmeta)) {
+        output_hdr = ToHdrSourceMetadata(hmeta);
       }
       frame_layers.push_back(
           {fl, nullptr, nullptr, surface.get(), db, surface});
@@ -2783,6 +2829,18 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
                                  : drm::planes::ContentType::Generic;
       desc.display.color_encoding = ToColorEncoding(db.color_space);
       desc.display.color_range = ToColorRange(db.color_range);
+      // HDR video also carries its wide-gamut primaries + source EOTF, so the
+      // scene auto-derives the connector's Colorspace (BT.2020) and the HDR
+      // signaling from the layer — without which the sink never sees BT.2020
+      // colorimetry and stays in SDR. The frame's mastering metadata
+      // (luminance / MaxCLL) rides set_output_metadata above.
+      ICompositorSurface::Dmabuf::HdrMetadata hmeta{};
+      if (fl.pv_surface && fl.pv_surface->GetHdrMetadata(&hmeta)) {
+        desc.display.color_primaries = drm::scene::ColorPrimaries::Bt2020;
+        desc.display.source_eotf =
+            hmeta.transfer == 2 ? drm::display::TransferFunction::Bt2100Hlg
+                                : drm::display::TransferFunction::SmpteSt2084Pq;
+      }
       desc.identity_tag = fl.pv_tag;
       auto handle = scene_->add_layer(std::move(desc));
       if (!handle) {
@@ -2890,6 +2948,12 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       blocking_modeset ? DRM_MODE_ATOMIC_ALLOW_MODESET
                        : (DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK);
   const uint64_t t2 = profile ? NsNow() : 0;
+
+  // Signal this frame's HDR metadata on the connector (or clear to SDR when no
+  // HDR PV). The scene wires it into the commit below; a no-op on connectors
+  // without HDR_OUTPUT_METADATA, and content-hashed so an unchanged value is
+  // cheap on repeat.
+  scene_->set_output_metadata(output_hdr);
 
   auto report = scene_->commit(commit_flags, static_cast<IFlipSink*>(this));
   if (!report) {
