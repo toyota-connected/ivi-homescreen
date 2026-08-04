@@ -141,4 +141,37 @@ OutputResolution ResolveOutputDetailed(const OutputMatch& match,
   return {OutputResolution::Status::kUnresolved, {}};
 }
 
+OutputTransition ClassifyOutputTransition(
+    const std::optional<std::string>& current,
+    const OutputResolution& wanted,
+    const OutputEvent event,
+    const std::string_view changed) {
+  const bool on_the_changed_output = event == OutputEvent::kChanged &&
+                                     current.has_value() && changed == *current;
+
+  if (wanted.bound()) {
+    if (!current.has_value()) {
+      return OutputTransition::kAppeared;
+    }
+    if (*current != wanted.name) {
+      return OutputTransition::kMoved;
+    }
+    // Where it belongs. Still worth a notification if that output was itself
+    // reconfigured, since the mode it was negotiated against may be gone.
+    return on_the_changed_output ? OutputTransition::kReconfigured
+                                 : OutputTransition::kNone;
+  }
+
+  if (wanted.status == OutputResolution::Status::kUnresolved &&
+      current.has_value()) {
+    return OutputTransition::kLost;
+  }
+
+  // Unconstrained: the backend's own pick stands, and re-resolving says
+  // nothing about it. Only a reconfiguration of the very output the view is on
+  // is actionable here.
+  return on_the_changed_output ? OutputTransition::kReconfigured
+                               : OutputTransition::kNone;
+}
+
 }  // namespace homescreen

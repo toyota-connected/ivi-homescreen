@@ -348,6 +348,22 @@ class Display : public IDisplay,
    * @relation
    * wayland, flutter
    */
+  /**
+   * @brief Name of the wl_output at @p index, as OutputInfo::name carries it.
+   *
+   * The inverse of WlOutputIndexForName. A view records this so it knows which
+   * output it was actually placed on, including when it was placed by index
+   * rather than by name.
+   */
+  [[nodiscard]] std::optional<std::string> WlOutputNameForIndex(
+      const uint32_t index) const {
+    if (index < m_all_outputs.size() && m_all_outputs[index] &&
+        m_all_outputs[index]->done) {
+      return m_all_outputs[index]->name;
+    }
+    return std::nullopt;
+  }
+
   [[nodiscard]] std::optional<uint32_t> WlOutputIndexForName(
       const std::string& name) const {
     for (size_t i = 0; i < m_all_outputs.size(); ++i) {
