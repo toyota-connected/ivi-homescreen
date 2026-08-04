@@ -10,8 +10,7 @@ This document describes the *structure* of the code base: the major
 subsystems, how they fit together, and where each concern lives on disk. It is
 derived from the in-tree code comments and the source itself. For *usage*
 (build flags, `config.toml` keys, CLI options), see the
-[README](../../README.md); this document intentionally does not repeat the
-generated configuration/CLI reference tables.
+[configuration README](../../shell/configuration/README.md); this document intentionally does not repeat the generated configuration/CLI reference tables.
 
 ## Table of Contents
 
