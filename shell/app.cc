@@ -42,7 +42,7 @@
 #include "view/flutter_view.h"
 
 #if BUILD_WATCHDOG
-#include "watchdog.h"
+#include "watchdog/watchdog.h"
 #endif
 
 #include <chrono>

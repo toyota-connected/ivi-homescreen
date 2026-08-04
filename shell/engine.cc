@@ -32,7 +32,7 @@
 #include "hexdump.h"
 #include "logging/logger.hpp"
 #if BUILD_WATCHDOG
-#include "watchdog.h"
+#include "watchdog/watchdog.h"
 #endif
 #include "main_loop_waker.h"
 #include "utils.h"
