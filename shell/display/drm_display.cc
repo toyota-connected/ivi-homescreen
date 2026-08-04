@@ -466,6 +466,12 @@ std::vector<uint32_t> DrmDisplay::ReservedPlanes() const {
 }
 
 void DrmDisplay::StartEvents() {
+  if (!input_enabled_) {
+    // Seat left unstarted on purpose (SetInputEnabled(false)) — libinput never
+    // opens /dev/input/event*. The leased factory does this when a host Wayland
+    // session is present; the reason was logged there.
+    return;
+  }
   if (seat_) {
     seat_->Start();
   }

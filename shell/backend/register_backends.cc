@@ -48,6 +48,7 @@
 #endif
 #if BUILD_BACKEND_WAYLAND_LEASED_DRM
 #include "backend/wayland_leased_drm/lease_client.h"
+#include "backend/wayland_leased_drm/leased_input_policy.h"
 #endif
 #if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN
 #include "display/drm_device_resolver.h"  // ResolveDrmDevice
@@ -83,6 +84,13 @@
 #endif
 #if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
 #include "wayland/display.h"
+#endif
+
+#if BUILD_BACKEND_WAYLAND_LEASED_DRM
+// Defined near WaylandSessionAvailable() (which it needs); declared here
+// because the leased make_display factories in the anonymous namespace below
+// call it.
+static bool ResolveLeasedInputEnabled(const Configuration::Config& config);
 #endif
 
 namespace {
@@ -234,10 +242,15 @@ std::shared_ptr<IDisplay> MakeLeasedDrmDisplay(
   // display -- the DRM backend factories take everything else from it too. The
   // gate captures the hold by value: fd_owner_ holds the same share, so the
   // callable cannot outlive what it reads.
-  return std::make_shared<DrmDisplay>(
+  auto display = std::make_shared<DrmDisplay>(
       DrmDisplay::AdoptFd{}, static_cast<int32_t>(w), static_cast<int32_t>(h),
       60.0, fd, std::move(card), hold, hold->connector_id(),
       [hold] { return hold->revoked(); });
+  // Gate direct-evdev input on the leased-input policy (see
+  // ResolveLeasedInputEnabled). Set before StartEvents(), which FlutterView
+  // calls later.
+  display->SetInputEnabled(ResolveLeasedInputEnabled(configs[0]));
+  return display;
 }
 #endif
 
@@ -306,6 +319,11 @@ std::shared_ptr<IDisplay> MakeLeasedSoftwareDisplay(
   auto display = MakeSoftwareDisplay(configs);
   auto* sw = dynamic_cast<SoftwareDisplay*>(display.get());
   assert(sw != nullptr);
+  // Same leased-input policy as the DRM tiers: the seat is already constructed
+  // (MakeSoftwareDisplay wires it unless IVI_SW_INPUT=none), but gating
+  // StartEvents keeps libinput from opening devices when a host Wayland session
+  // is present. Set before StartEvents().
+  sw->SetInputEnabled(ResolveLeasedInputEnabled(configs[0]));
   SoftwareDisplay::LeasedScanout scanout;
   scanout.fd = hold->fd();
   scanout.connector_id = hold->connector_id();
@@ -834,6 +852,56 @@ static bool WaylandSessionAvailable() {
   }
   return std::filesystem::exists(std::filesystem::path(xdg) / sock, ec);
 }
+
+#if BUILD_BACKEND_WAYLAND_LEASED_DRM
+// Decide whether a leased backend should read input from raw evdev.
+//
+// A leased client has no wl_surface, so the compositor delivers it no input --
+// its only source is libinput on /dev/input/event*, and those reads are NOT
+// grabbed. On a host with a live Wayland session that means every keystroke and
+// pointer event reaches BOTH this process and the session compositor: input is
+// duplicated, not stolen. `lease_input` sets the policy:
+//   off  -> never read evdev.
+//   on   -> always read evdev (embedded-under-compositor, where the operator
+//           has partitioned input devices and wants this panel to have some).
+//   auto -> read evdev on an embedded target, but disable it when a host
+//           Wayland session is detected, warning why. The default.
+//
+// The policy itself (the decision table) lives in leased_input_policy.h so it
+// can be unit-tested without this file's dependency graph; this wrapper does
+// the config read, session detection, and logging around it.
+static bool ResolveLeasedInputEnabled(const Configuration::Config& config) {
+  const std::string mode = config.view.lease_input.value_or("auto");
+  if (homescreen::IsUnrecognizedLeasedInputMode(mode)) {
+    ihs::log::warn(
+        "[leased-drm] lease_input='{}' unrecognized (auto|on|off); using auto",
+        mode);
+  }
+  const homescreen::LeasedInputDecision decision =
+      homescreen::DecideLeasedInput(mode, WaylandSessionAvailable());
+  switch (decision) {
+    case homescreen::LeasedInputDecision::kDisabledByConfig:
+      ihs::log::info("[leased-drm] input disabled (lease_input=off)");
+      break;
+    case homescreen::LeasedInputDecision::kDisabledUnderSession: {
+      const char* wl = std::getenv("WAYLAND_DISPLAY");
+      ihs::log::warn(
+          "[leased-drm] a Wayland session is present (WAYLAND_DISPLAY={}); "
+          "disabling direct evdev input so it is not duplicated into both this "
+          "homescreen and the session compositor -- this process has no "
+          "wl_surface and its libinput reads are ungrabbed. Set lease_input=on "
+          "to force input on (embedded-under-compositor with partitioned input "
+          "devices).",
+          wl != nullptr ? wl : "");
+      break;
+    }
+    case homescreen::LeasedInputDecision::kForcedOn:
+    case homescreen::LeasedInputDecision::kEnabledAuto:
+      break;
+  }
+  return homescreen::LeasedInputEnabled(decision);
+}
+#endif
 
 std::string ResolveKeyForConfig(const backend::BackendRegistry& reg,
                                 const Configuration::Config& config) {

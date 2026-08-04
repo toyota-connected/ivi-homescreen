@@ -28,6 +28,7 @@
 // them (EMIT_INTERFACE_TABLES); a wl_interface is direction-agnostic.
 
 #include "backend/wayland_leased_drm/lease_client.h"
+#include "backend/wayland_leased_drm/leased_input_policy.h"
 
 #include "wayland-protocols/drm_lease_v1_client.hpp"
 
@@ -843,6 +844,76 @@ TEST(LeaseClient, ConnectorWithdrawnDuringGrantIsNotAUseAfterFree) {
       << "connector_name was read from a Connector freed by PruneWithdrawn";
   EXPECT_FALSE(res.hold->revoked())
       << "a post-grant withdraw is not a revocation";
+}
+
+// ── lease_input policy (WS8) ────────────────────────────────────────────────
+//
+// A leased client has no wl_surface, so its only input is ungrabbed libinput on
+// /dev/input/event*; under a host Wayland session that duplicates every event
+// into both this process and the session compositor. DecideLeasedInput encodes
+// the policy: off disables, on forces on, auto disables only when a session is
+// present.
+using homescreen::DecideLeasedInput;
+using homescreen::IsUnrecognizedLeasedInputMode;
+using homescreen::LeasedInputDecision;
+using homescreen::LeasedInputEnabled;
+
+TEST(LeasedInputPolicy, OffAlwaysDisables) {
+  for (const char* m : {"off", "none", "false", "0"}) {
+    EXPECT_EQ(DecideLeasedInput(m, /*session=*/true),
+              LeasedInputDecision::kDisabledByConfig)
+        << m << " under a session";
+    EXPECT_EQ(DecideLeasedInput(m, /*session=*/false),
+              LeasedInputDecision::kDisabledByConfig)
+        << m << " with no session";
+    EXPECT_FALSE(LeasedInputEnabled(DecideLeasedInput(m, false))) << m;
+  }
+}
+
+TEST(LeasedInputPolicy, OnAlwaysEnablesEvenUnderASession) {
+  for (const char* m : {"on", "yes", "true", "1"}) {
+    EXPECT_EQ(DecideLeasedInput(m, /*session=*/true),
+              LeasedInputDecision::kForcedOn)
+        << m << " must override the session check";
+    EXPECT_TRUE(LeasedInputEnabled(DecideLeasedInput(m, true))) << m;
+  }
+}
+
+TEST(LeasedInputPolicy, AutoDisablesUnderASessionEnablesWithout) {
+  // The whole point: safe on a dev host, live on an embedded target.
+  for (const char* m : {"auto", "", "typo"}) {
+    EXPECT_EQ(DecideLeasedInput(m, /*session=*/true),
+              LeasedInputDecision::kDisabledUnderSession)
+        << "'" << m << "' + session should disable";
+    EXPECT_FALSE(LeasedInputEnabled(DecideLeasedInput(m, true))) << m;
+    EXPECT_EQ(DecideLeasedInput(m, /*session=*/false),
+              LeasedInputDecision::kEnabledAuto)
+        << "'" << m << "' + no session should enable";
+    EXPECT_TRUE(LeasedInputEnabled(DecideLeasedInput(m, false))) << m;
+  }
+}
+
+TEST(LeasedInputPolicy, UnrecognizedModeIsFlaggedButFallsBackToAuto) {
+  EXPECT_TRUE(IsUnrecognizedLeasedInputMode("typo"));
+  EXPECT_FALSE(IsUnrecognizedLeasedInputMode("auto"));
+  EXPECT_FALSE(IsUnrecognizedLeasedInputMode(""));
+  EXPECT_FALSE(IsUnrecognizedLeasedInputMode("off"));
+  EXPECT_FALSE(IsUnrecognizedLeasedInputMode("on"));
+
+  // Every spelling the gate accepts, so a correct config never warns.
+  for (const char* m : {"yes", "true", "1", "none", "false", "0"}) {
+    EXPECT_FALSE(IsUnrecognizedLeasedInputMode(m)) << m;
+  }
+
+  // Matching is case-sensitive: "Off" is not "off". It is reported and treated
+  // as auto rather than silently disabling input, which is the safer way to be
+  // wrong -- but it is a real way to mis-write the key, so pin the behavior.
+  for (const char* m : {"Off", "ON", "Auto"}) {
+    EXPECT_TRUE(IsUnrecognizedLeasedInputMode(m)) << m;
+    EXPECT_EQ(DecideLeasedInput(m, /*session=*/true),
+              LeasedInputDecision::kDisabledUnderSession)
+        << m;
+  }
 }
 
 }  // namespace
