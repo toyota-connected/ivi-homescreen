@@ -226,6 +226,22 @@ class ICompositorSurface {
     // COLOR_ENCODING / COLOR_RANGE CSC. DEFAULT (0) leaves the scene's default.
     uint8_t color_space{0};
     uint8_t color_range{0};
+    // HDR static metadata for an HDR (PQ/HLG) video, mirrored from the
+    // producer's IhsHdrMetadata. Not carried per-frame on the Dmabuf — the DRM
+    // scene path reads the view's persisted value via @c GetHdrMetadata (steady
+    // across reuse presents) and lowers it to the connector's
+    // HDR_OUTPUT_METADATA. This is the shape @c GetHdrMetadata fills.
+    struct HdrMetadata {
+      uint8_t transfer{0};                // 0=SDR, 1=PQ, 2=HLG (IhsTransfer)
+      uint16_t display_primaries_x[3]{};  // R,G,B in 0.00002 units
+      uint16_t display_primaries_y[3]{};
+      uint16_t white_point_x{0};
+      uint16_t white_point_y{0};
+      uint32_t max_display_mastering_luminance{0};  // cd/m^2
+      uint32_t min_display_mastering_luminance{0};  // 0.0001 cd/m^2
+      uint16_t max_content_light_level{0};
+      uint16_t max_frame_average_light_level{0};
+    };
     int acquire_fence_fd{-1};
     // The producer's identity for this frame (IhsFrame.buffer_id, its ring
     // slot). The compositor hands it back via OnScanoutRelease when the plane
@@ -248,6 +264,22 @@ class ICompositorSurface {
    * closes it once it has imported the buffer.
    */
   [[nodiscard]] virtual bool GetDmabuf(Dmabuf* /*out*/) const { return false; }
+
+  /**
+   * @brief The surface's current HDR static metadata, if its content is HDR.
+   *
+   * Unlike @c GetDmabuf (deliver-once — valid only on a fresh frame), this
+   * reports the view's *persisted* HDR state, so the compositor can hold the
+   * connector's HDR_OUTPUT_METADATA steady across presents where the view is
+   * merely reused (no new frame). Toggling it per-present would re-sync the
+   * sink's HDR mode every few frames — visible flicker. Returns false for SDR
+   * content (the default), which clears HDR only when the HDR view actually
+   * leaves the scene.
+   */
+  [[nodiscard]] virtual bool GetHdrMetadata(
+      Dmabuf::HdrMetadata* /*out*/) const {
+    return false;
+  }
 
   /**
    * @brief Whether the Vulkan image is a dma-buf the producer rewrites on

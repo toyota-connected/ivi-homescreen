@@ -245,6 +245,11 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     // rides OnScanoutRelease) from one superseded before it was ever scanned
     // out (its release eventfd must be signalled at supersede instead).
     uint64_t stash_seq{0};
+    // Owned copy of the frame's HDR metadata: frame.hdr points at plugin memory
+    // we must not retain, so its contents are copied here at submit and
+    // frame.hdr nulled. has_hdr is false for SDR frames.
+    bool has_hdr{false};
+    IhsHdrMetadata hdr{};
   };
   mutable PendingEglFrame pending_egl;
   mutable std::map<uint32_t, EglDmabufImporter::ImportedTexture> buffers_egl;
@@ -294,6 +299,35 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   void SetScanoutPlane(uint32_t plane_id) override {
     drm_plane_id.store(plane_id, std::memory_order_relaxed);
   }
+
+#if IVI_HAVE_EGL
+  // Persisted HDR metadata (from the last submit), so the compositor holds the
+  // connector's HDR_OUTPUT_METADATA steady while this view is on screen even on
+  // presents with no fresh frame. Compositor thread; guarded like the frame.
+  // EGL-only: the persisted HDR rides pending_egl, and the DRM scene path (the
+  // sole consumer) is EGL-backed. In Vulkan-only builds the base
+  // ICompositorSurface::GetHdrMetadata default (false) applies.
+  [[nodiscard]] bool GetHdrMetadata(
+      ICompositorSurface::Dmabuf::HdrMetadata* out) const override {
+    const std::lock_guard<std::mutex> lock(mutex);
+    if (!pending_egl.valid || !pending_egl.has_hdr) {
+      return false;
+    }
+    const IhsHdrMetadata& h = pending_egl.hdr;
+    out->transfer = h.transfer;
+    for (int i = 0; i < 3; ++i) {
+      out->display_primaries_x[i] = h.display_primaries_x[i];
+      out->display_primaries_y[i] = h.display_primaries_y[i];
+    }
+    out->white_point_x = h.white_point_x;
+    out->white_point_y = h.white_point_y;
+    out->max_display_mastering_luminance = h.max_display_mastering_luminance;
+    out->min_display_mastering_luminance = h.min_display_mastering_luminance;
+    out->max_content_light_level = h.max_content_light_level;
+    out->max_frame_average_light_level = h.max_frame_average_light_level;
+    return true;
+  }
+#endif  // IVI_HAVE_EGL
 
 #if IVI_HAVE_VULKAN
   // The compositor samples the most recently submitted buffer. Null until the
@@ -427,6 +461,9 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     out->modifier = f.format.modifier;
     out->color_space = f.color_space;  // YUV colorimetry for the plane CSC
     out->color_range = f.color_range;
+    // HDR metadata is not carried per-frame on the Dmabuf: the DRM scene path
+    // reads the view's persisted metadata via GetHdrMetadata (steady across
+    // reuse presents) rather than the deliver-once frame.
     out->width = f.width;
     out->height = f.height;
     out->plane_count = np;
@@ -1165,7 +1202,13 @@ int HostSubmit(void* user_data,
         close(v->pending_egl.acquire_fence_fd);
       }
     }
-    v->pending_egl.frame = *frame;       // take ownership of the plane fds
+    v->pending_egl.frame = *frame;  // take ownership of the plane fds
+    // Copy the HDR metadata contents while the plugin's pointer is still valid,
+    // then null the retained pointer (it aims at plugin-owned memory).
+    v->pending_egl.has_hdr = frame->hdr != nullptr;
+    if (v->pending_egl.has_hdr) {
+      v->pending_egl.hdr = *frame->hdr;
+    }
     v->pending_egl.frame.hdr = nullptr;  // do not retain the plugin's hdr ptr
     v->pending_egl.acquire_fence_fd = acquire_fence_fd;  // ownership moves here
     v->pending_egl.stash_seq = v->submit_seq;
