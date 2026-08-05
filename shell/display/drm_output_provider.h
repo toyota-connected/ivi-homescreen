@@ -57,6 +57,21 @@ class DrmOutputProvider final : public IOutputProvider {
   // LeaseHold that owns it). -1 (the default) restores the open-by-path path.
   void SetEnumerationFd(int fd);
 
+  /**
+   * @brief Re-enumerate and report what changed since the last look.
+   *
+   * Called after a connector uevent. Diffing rather than trusting the event's
+   * CONNECTOR hint is deliberate: the hint is absent on older kernels and on
+   * blanket events (GPU reset), and a rescan is correct in every case.
+   *
+   * Must run on the thread the listener expects -- the caller marshals.
+   */
+  void RescanAndNotify();
+
+  /// Tells the provider a hotplug source is live, so SupportsHotplug() stops
+  /// reporting that no callbacks are delivered.
+  void SetHotplugAvailable(bool available);
+
  private:
   // The card this provider enumerates (e.g. "/dev/dri/card1"). Unused when
   // enumeration_fd_ is set, except for diagnostics.
@@ -67,6 +82,10 @@ class DrmOutputProvider final : public IOutputProvider {
 
   // Set by SetOutputListener; consumed once the hotplug monitor is wired.
   IOutputListener* listener_ = nullptr;
+  bool hotplug_available_ = false;
+  // Last enumeration, to diff the next one against. Seeded when a listener is
+  // installed so the first rescan reports changes since then, not everything.
+  std::vector<OutputInfo> last_;
 };
 
 }  // namespace homescreen

@@ -31,6 +31,8 @@
 #include "asio/io_context.hpp"
 #include "asio/posix/stream_descriptor.hpp"
 
+#include <drm-cxx/display/hotplug_monitor.hpp>
+
 #include "display/drm_output_provider.h"
 #include "display/idisplay.h"
 #include "input/iseat.h"
@@ -137,6 +139,19 @@ class DrmDisplay final : public IDisplay {
   // DrmBackend consults this to route its DRM device open through the
   // seat; when null, the backend falls back to direct open + the legacy
   // VT/master guards.
+  /**
+   * @brief Wire the App reactor that output callbacks must run on.
+   *
+   * Hotplug uevents arrive on the DrmSession's own dispatch thread, and
+   * IOutputListener is contracted to run on the loop thread -- App's handler
+   * walks its views and calls into backends, so it must not run concurrently
+   * with the reactor. Installing the loop here is what lets the uevent be
+   * marshalled onto it, and is also what enables hotplug reporting at all.
+   *
+   * Mirrors the Wayland Display's SetEventLoop; App calls both.
+   */
+  void SetEventLoop(asio::io_context& ioc);
+
   [[nodiscard]] homescreen::DrmSession* session() const {
     return session_.get();
   }
@@ -309,6 +324,17 @@ class DrmDisplay final : public IDisplay {
 
   // Enumerates this card's connectors as outputs (libdrm only, no master).
   homescreen::DrmOutputProvider output_provider_;
+  // Connector hotplug, owned here rather than on DrmSession: the monitor is a
+  // plain udev netlink socket and needs no seat, while the session is absent
+  // on the direct-open path (--drm-no-seat) that headless and kiosk targets
+  // use -- exactly where hotplug still has to work.
+  std::optional<drm::display::HotplugMonitor> hotplug_;
+  // Wraps hotplug_'s fd for the reactor. Owned by the monitor, so this must
+  // release() -- never close() -- it on teardown.
+  std::optional<asio::posix::stream_descriptor> hotplug_fd_;
+  // Set by the uevent handler, read once after the drain: see ArmHotplugWait.
+  bool hotplug_pending_{false};
+  void ArmHotplugWait();
 
   // Active cursor sprite retargeting sink (set by FlutterView after the
   // backend creates its cursor). Owned by DrmBackend; null when no cursor.

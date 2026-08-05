@@ -25,6 +25,8 @@
 
 using homescreen::BackendFamily;
 using homescreen::ClassifyOutputTransition;
+using homescreen::DiffOutputs;
+using homescreen::OutputChange;
 using homescreen::OutputEvent;
 using homescreen::OutputInfo;
 using homescreen::OutputMatch;
@@ -396,4 +398,99 @@ TEST(OutputTransitions, AViewWithNoBindingAndNoConstraintHasNothingToDo) {
   EXPECT_EQ(ClassifyOutputTransition(std::nullopt, Unconstrained(),
                                      OutputEvent::kChanged, "DSI-1"),
             OutputTransition::kNone);
+}
+
+// ---------------------------------------------------------------------------
+// DiffOutputs: turning two enumerations of a card into add/remove/change
+// events. A DRM connector persists across an unplug with `connected` moving,
+// so this is not a set difference on names.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+OutputInfo Head(std::string name, const bool connected, const int w = 1920) {
+  OutputInfo o;
+  o.name = std::move(name);
+  o.connected = connected;
+  o.width_px = w;
+  o.height_px = 1080;
+  o.refresh_hz = 60.0;
+  return o;
+}
+
+}  // namespace
+
+TEST(OutputDiff, NoChangeYieldsNothing) {
+  const std::vector<OutputInfo> heads{Head("DSI-1", true),
+                                      Head("HDMI-A-1", false)};
+  EXPECT_TRUE(DiffOutputs(heads, heads).empty());
+}
+
+TEST(OutputDiff, UnplugIsAConnectedFlagGoingFalse) {
+  // The connector object stays; only `connected` moves. Treating this as a
+  // set difference on names would report nothing at all.
+  const std::vector<OutputInfo> before{Head("HDMI-A-1", true)};
+  const std::vector<OutputInfo> after{Head("HDMI-A-1", false)};
+  const auto d = DiffOutputs(before, after);
+  ASSERT_EQ(d.size(), 1u);
+  EXPECT_EQ(d[0].event, OutputEvent::kRemoved);
+  EXPECT_EQ(d[0].output.name, "HDMI-A-1");
+}
+
+TEST(OutputDiff, AConnectorVanishingIsAlsoARemoval) {
+  const std::vector<OutputInfo> before{Head("DP-2", true)};
+  const std::vector<OutputInfo> after{};
+  const auto d = DiffOutputs(before, after);
+  ASSERT_EQ(d.size(), 1u);
+  EXPECT_EQ(d[0].event, OutputEvent::kRemoved);
+}
+
+TEST(OutputDiff, APortThatWasNeverConnectedIsNotAnEvent) {
+  // Every DRM card enumerates ports with nothing attached; they must not look
+  // like arrivals or departures.
+  const std::vector<OutputInfo> before{Head("HDMI-A-2", false)};
+  const std::vector<OutputInfo> after{Head("HDMI-A-2", false)};
+  EXPECT_TRUE(DiffOutputs(before, after).empty());
+}
+
+TEST(OutputDiff, PlugInIsAnAddition) {
+  const std::vector<OutputInfo> before{Head("HDMI-A-1", false)};
+  const std::vector<OutputInfo> after{Head("HDMI-A-1", true)};
+  const auto d = DiffOutputs(before, after);
+  ASSERT_EQ(d.size(), 1u);
+  EXPECT_EQ(d[0].event, OutputEvent::kAdded);
+}
+
+TEST(OutputDiff, AModeChangeOnTheSamePanelIsAChange) {
+  const std::vector<OutputInfo> before{Head("DSI-1", true, 1920)};
+  const std::vector<OutputInfo> after{Head("DSI-1", true, 1280)};
+  const auto d = DiffOutputs(before, after);
+  ASSERT_EQ(d.size(), 1u);
+  EXPECT_EQ(d[0].event, OutputEvent::kChanged);
+  EXPECT_EQ(d[0].output.width_px, 1280);
+}
+
+TEST(OutputDiff, SwappingPanelsOnOnePortIsAReconfiguration) {
+  // Scenario 3: a different monitor on the same connector. The connector never
+  // reports disconnected in a single rescan, so this is not a remove/add pair
+  // -- it is one connector whose panel identity changed, and a view bound by
+  // name stays bound and is told to renegotiate.
+  OutputInfo old_panel = Head("HDMI-A-1", true);
+  old_panel.serial = "AAA";
+  OutputInfo new_panel = Head("HDMI-A-1", true);
+  new_panel.serial = "BBB";
+
+  const auto d = DiffOutputs({old_panel}, {new_panel});
+  ASSERT_EQ(d.size(), 1u) << "same name, still connected: a reconfiguration";
+  EXPECT_EQ(d[0].event, OutputEvent::kChanged);
+  EXPECT_EQ(d[0].output.serial, "BBB");
+}
+
+TEST(OutputDiff, RemovalsAreOrderedBeforeAdditions) {
+  const std::vector<OutputInfo> before{Head("DSI-1", true)};
+  const std::vector<OutputInfo> after{Head("HDMI-A-1", true)};
+  const auto d = DiffOutputs(before, after);
+  ASSERT_EQ(d.size(), 2u);
+  EXPECT_EQ(d[0].event, OutputEvent::kRemoved);
+  EXPECT_EQ(d[1].event, OutputEvent::kAdded);
 }

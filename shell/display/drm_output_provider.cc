@@ -169,14 +169,54 @@ std::vector<OutputInfo> DrmOutputProvider::EnumerateOutputs() const {
 
 void DrmOutputProvider::SetOutputListener(IOutputListener* listener) {
   listener_ = listener;
+  // Seed the baseline at install time so the first rescan reports what changed
+  // from here on. Without it every connected output would look new the first
+  // time a uevent arrived, and views already bound to them would be told their
+  // output had just appeared.
+  last_ = listener != nullptr ? EnumerateOutputs() : std::vector<OutputInfo>{};
+}
+
+void DrmOutputProvider::SetHotplugAvailable(const bool available) {
+  hotplug_available_ = available;
+}
+
+void DrmOutputProvider::RescanAndNotify() {
+  if (listener_ == nullptr) {
+    return;
+  }
+  std::vector<OutputInfo> now = EnumerateOutputs();
+  const std::vector<OutputChange> changes = DiffOutputs(last_, now);
+  last_ = std::move(now);
+  if (changes.empty()) {
+    // Common: a uevent that does not change the connector set (a GPU reset, or
+    // a property nobody here reads). Traced so the path is observable when
+    // nothing comes of it -- otherwise a silent rescan is indistinguishable
+    // from a uevent that never arrived.
+    ihs::log::debug("[DrmOutputProvider] uevent: no output changes");
+    return;
+  }
+  ihs::log::debug("[DrmOutputProvider] {} output change(s) after a uevent",
+                  changes.size());
+  for (const auto& c : changes) {
+    switch (c.event) {
+      case OutputEvent::kRemoved:
+        listener_->OnOutputRemoved(c.output.name);
+        break;
+      case OutputEvent::kAdded:
+        listener_->OnOutputAdded(c.output);
+        break;
+      case OutputEvent::kChanged:
+        listener_->OnOutputChanged(c.output);
+        break;
+    }
+  }
 }
 
 bool DrmOutputProvider::SupportsHotplug() const {
-  // DRM connectors hotplug, but the udev monitor that would diff the connector
-  // set and drive the listener is not wired here yet -- so outputs are
-  // enumerated on demand and no change callbacks are delivered. This reports
-  // that honestly (per the method contract) until the monitor lands.
-  return false;
+  // True once a udev connector monitor is feeding RescanAndNotify. Without one
+  // outputs are still enumerated on demand, but no callbacks are delivered --
+  // which is what this reports, per the method contract.
+  return hotplug_available_;
 }
 
 }  // namespace homescreen

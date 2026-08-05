@@ -32,6 +32,9 @@
 
 #include "config/common.h"
 
+#if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN
+#include "display/drm_display.h"
+#endif
 #include "display/output_manager.h"
 #include "display/output_provider.h"
 #if BUILD_COMPOSITOR
@@ -252,6 +255,17 @@ App::App(const std::vector<Configuration::Config>& configs) {
   // primary_ioc_.
   for (const auto& display : m_displays) {
     if (auto* d = dynamic_cast<Display*>(display.get())) {
+      d->SetEventLoop(primary_ioc_);
+    }
+  }
+#endif
+
+#if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN
+  // Same for the DRM displays: their hotplug uevents arrive on the session's
+  // own thread, and installing the reactor here is what lets them be
+  // marshalled onto it before any listener is attached below.
+  for (const auto& display : m_displays) {
+    if (auto* d = dynamic_cast<DrmDisplay*>(display.get())) {
       d->SetEventLoop(primary_ioc_);
     }
   }
