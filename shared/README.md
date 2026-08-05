@@ -237,6 +237,41 @@ The logging sinks are selected from the environment at `ihs_log_start()`:
 | `IHS_LOG_FILE_MAX_BYTES` | — | Rotation size for the `file` sink |
 | `IHS_LOG_FILE_MAX_FILES` | — | Rotation count for the `file` sink |
 
+### DLT sink
+
+Make sure DLT support is enabled via `-DENABLE_DLT=ON` when building `ihs_shared` and that the DLT libraries are available on the system:
+
+**Ubuntu**:
+
+```bash
+sudo apt-get install libdlt-dev dlt-viewer dlt-daemon dlt-tools
+```
+
+**Fedora**:
+
+```bash
+sudo dnf install dlt-libs-devel dlt-daemon dlt-tools
+```
+
+To enable DLT logging, set the following environment variables before running the homescreen shell:
+
+```bash
+export IHS_LOG_SINK=dlt
+export IHS_LOG_LEVEL=verbose
+```
+
+**Logging with DLT**: Start new terminal
+
+```bash
+dlt-daemon
+```
+
+**View DLT log output in a terminal**:
+
+```bash
+dlt-receive -a localhost
+```
+
 ---
 
 ## Diagnostics/Debug
