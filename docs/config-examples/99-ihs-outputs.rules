@@ -1,0 +1,54 @@
+# ivi-homescreen: give each display a stable role name.
+#
+# Install as /etc/udev/rules.d/99-ihs-outputs.rules
+#
+# Why this exists. A view is pinned to an output with [view.output], and every
+# key available for that is board-specific:
+#
+#   - the connector name moves: the DSI panel is DSI-1 on a Raspberry Pi 4 and
+#     DSI-2 on a Pi 5, on different cards;
+#   - the EDID serial is unusable: both Pi DSI panels publish no EDID at all,
+#     and identical monitors routinely share a serial;
+#   - /dev/dri/cardN is assigned in probe order, so the numbers differ per board.
+#
+# IHS_OUTPUT_NAME names the *role* instead, so one config binds correctly on
+# every board: [view.output] output_id = 'cluster'.
+#
+# Matching. DRM connectors appear to udev as DEVTYPE=drm_connector, matched as
+# ENV{DEVTYPE} -- DEVTYPE is a property, not a match key of its own. ID_PATH is
+# per GPU, NOT per connector -- on a Pi 4 all three connectors share
+# "platform-gpu" -- so ID_PATH alone cannot identify one. Each rule therefore
+# pairs ID_PATH with a KERNEL pattern, and the pattern uses card* because the
+# card number is not stable.
+#
+# Only the rules whose ID_PATH matches the running board take effect, so this
+# one file can serve both. Adjust the names on the right to your product.
+
+ACTION=="remove", GOTO="ihs_outputs_end"
+SUBSYSTEM!="drm", GOTO="ihs_outputs_end"
+ENV{DEVTYPE}!="drm_connector", GOTO="ihs_outputs_end"
+
+# ---- Raspberry Pi 4 (vc4-drm; DSI and both HDMI ports on one card) ----------
+# Verified on a Pi 4 Model B Rev 1.2: DSI-1 + HDMI-A-1 connected, ID_PATH
+# "platform-gpu" shared by all three connectors.
+ENV{ID_PATH}=="platform-gpu", KERNEL=="card*-DSI-1", \
+    ENV{IHS_OUTPUT_NAME}="cluster"
+ENV{ID_PATH}=="platform-gpu", KERNEL=="card*-HDMI-A-1", \
+    ENV{IHS_OUTPUT_NAME}="center-stack"
+ENV{ID_PATH}=="platform-gpu", KERNEL=="card*-HDMI-A-2", \
+    ENV{IHS_OUTPUT_NAME}="passenger"
+
+# ---- Raspberry Pi 5 --------------------------------------------------------
+# The DSI panel hangs off its own controller (drm-rp1-dsi), so it has an
+# ID_PATH of its own and the KERNEL pattern is belt-and-braces. Verified on a
+# Pi 5 Model B Rev 1.0: DSI-2 connected at "platform-1f00130000.dsi".
+ENV{ID_PATH}=="platform-1f00130000.dsi", KERNEL=="card*-DSI-*", \
+    ENV{IHS_OUTPUT_NAME}="cluster"
+
+# HDMI on the Pi 5 is on the vc4 card, a different ID_PATH from the Pi 4's.
+ENV{ID_PATH}=="platform-axi:gpu", KERNEL=="card*-HDMI-A-1", \
+    ENV{IHS_OUTPUT_NAME}="center-stack"
+ENV{ID_PATH}=="platform-axi:gpu", KERNEL=="card*-HDMI-A-2", \
+    ENV{IHS_OUTPUT_NAME}="passenger"
+
+LABEL="ihs_outputs_end"
