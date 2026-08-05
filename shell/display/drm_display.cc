@@ -278,6 +278,18 @@ DrmDisplay::DrmDisplay(AdoptFd,
 }
 
 DrmDisplay::~DrmDisplay() {
+  // Detach the hotplug descriptor before anything else. The fd belongs to the
+  // HotplugMonitor, so release() it -- closing it here would leave the monitor
+  // holding a stale fd, and asio would close it a second time. Cancel first so
+  // no handler is left queued on a reactor that is going away.
+  if (hotplug_fd_.has_value()) {
+    std::error_code ec;
+    hotplug_fd_->cancel(ec);
+    (void)hotplug_fd_->release();
+    hotplug_fd_.reset();
+  }
+  hotplug_.reset();
+
   // Stop the per-card flip reader first -- it runs its own thread and holds the
   // fd via flip_descriptor_, so it must be torn down before the fd is closed.
   StopFlipReader();
@@ -463,6 +475,66 @@ void DrmDisplay::ReservePlanes(const std::vector<uint32_t>& planes) {
 std::vector<uint32_t> DrmDisplay::ReservedPlanes() const {
   const std::lock_guard<std::mutex> lock(reserved_planes_mu_);
   return reserved_planes_;
+}
+
+void DrmDisplay::SetEventLoop(asio::io_context& ioc) {
+  // Same gate the session's monitor honors.
+  const char* gate = std::getenv("IVI_DRM_HOTPLUG");
+  if (gate != nullptr && std::string_view(gate) == "0") {
+    ihs::log::debug(
+        "[DrmDisplay] connector hotplug disabled (IVI_DRM_HOTPLUG=0)");
+    return;
+  }
+
+  auto hp = drm::display::HotplugMonitor::open();
+  if (!hp) {
+    // Non-fatal: everything else works, just without connector notifications.
+    ihs::log::warn("[DrmDisplay] hotplug monitor unavailable: {}",
+                   hp.error().message());
+    return;
+  }
+  hotplug_.emplace(std::move(*hp));
+  hotplug_->set_handler([this](const drm::display::HotplugEvent& e) {
+    // Only note that something happened. dispatch() calls this once per
+    // accepted uevent, and a plug event routinely produces several; rescanning
+    // here would re-enumerate the card once per event and report the same
+    // change repeatedly. The rescan happens once, after the drain.
+    //
+    // The CONNECTOR hint is deliberately ignored: it is absent on older
+    // kernels and on blanket events (GPU reset), and a full rescan is correct
+    // in every case -- including the one the hint would get wrong.
+    (void)e;
+    hotplug_pending_ = true;
+  });
+
+  hotplug_fd_.emplace(ioc, hotplug_->fd());
+  ArmHotplugWait();
+  output_provider_.SetHotplugAvailable(true);
+  ihs::log::debug("[DrmDisplay] connector hotplug wired to the App reactor");
+}
+
+void DrmDisplay::ArmHotplugWait() {
+  if (!hotplug_fd_.has_value()) {
+    return;
+  }
+  hotplug_fd_->async_wait(
+      asio::posix::stream_descriptor::wait_read,
+      [this](const std::error_code& ec) {
+        if (ec) {
+          return;  // cancelled at teardown
+        }
+        // dispatch() drains every pending uevent and calls the handler for
+        // each that passes its DRM + HOTPLUG filter; the handler only sets the
+        // flag, so a burst of events becomes one rescan here.
+        hotplug_pending_ = false;
+        if (hotplug_ && !hotplug_->dispatch()) {
+          ihs::log::warn("[DrmDisplay] hotplug dispatch failed");
+        }
+        if (hotplug_pending_) {
+          output_provider_.RescanAndNotify();
+        }
+        ArmHotplugWait();
+      });
 }
 
 void DrmDisplay::StartEvents() {
