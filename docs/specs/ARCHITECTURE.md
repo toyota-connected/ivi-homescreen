@@ -360,9 +360,8 @@ Details: [`shell/accessibility/README.md`](../../shell/accessibility/README.md).
 
 ### 6.4. Logging and Tracing
 
-[`shell/logging/`](../../shell/logging/) sets the process-wide default context
-for shell log lines (spdlog-based; with `ENABLE_DLT=ON` a DLT bridge routes logs
-to the DLT daemon). The logging bridge, tracing, and the ring registry live in
+[`shell/logging`](../../shell/logging/README.md) sets the process-wide default context
+for shell log lines. The logging bridge, tracing, DLT support and the ring registry live in
 exactly one place at runtime — the `ihs_shared` `.so` (§7.2) — so the process
 never ends up with two copies of that state.
 

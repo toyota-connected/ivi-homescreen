@@ -169,6 +169,10 @@ shell logging surface honors them transparently.
 | `IHS_LOG_FILE_MAX_FILES` | — | Number of rotated files to keep. |
 | `IHS_DLT_LIBRARY` | `libdlt.so.2` | Soname/path override for the DLT library the bridge `dlopen`s (also used by the load test to point at the stub). |
 
+### DLT sink
+
+DLT is implemented via [`ihs_shared`](../../shared/src/logging/sink_dlt.cpp) and is optional ([docs](../../shared/README.md)).
+
 ---
 
 ## Diagnostics/Debug
@@ -186,9 +190,9 @@ shell logging surface honors them transparently.
   (`level ≤ IHS_LEVEL_ERROR`); info/debug/verbose are async. Call
   `IHS_LOGGING_FLUSH()` before a controlled exit if you need pending records
   drained.
-- **`{`/`}` in a runtime string throws or mis-formats.** Use the single-argument
-  (verbatim) overload — pass the string as the only argument — so it bypasses the
-  formatter entirely.
+- **`{`/`}` in a runtime string throws or mis-formats.** Use the
+  single-argument (verbatim) overload — pass the string as the only
+  argument — so it bypasses the formatter entirely.
 - **Debug/trace lines missing in a release build.** `IHS_DEBUG` / `IHS_TRACE`
   are compiled out under `NDEBUG` by design.
 - **`IHS_LOG_SINK=dlt` produces no DLT output.** Verify `ihs_shared` was built

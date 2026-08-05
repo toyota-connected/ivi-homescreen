@@ -49,41 +49,10 @@ There are two ways to reference this repo:
 
 ## Logging
 
-Logging level support
+Homescreen provides a built-in logging framework and supports DLT logging.
 
-* trace
-* debug
-* info
-* warn
-* error
-* critical
-* off
-
-If environmental variable IHS_LOG_LEVEL is set, it will override the default logging level of info. The logging level can also be set via the command line argument --log-level <level>.
-
-### DLT logging
-
-To test DLT logging on desktop use the following
-
-Ubuntu packages
-
-    sudo apt-get install libdlt-dev dlt-viewer dlt-daemon dlt-tools
-
-Fedora packages
-
-    sudo dnf install dlt-libs-devel dlt-daemon dlt-tools
-
-### Logging with DLT
-
-Start new terminal
-
-    dlt-daemon
-
-#### View DLT log output in a terminal
-
-Start new terminal
-
-    dlt-receive -a localhost
+See [Logging](shell/logging/README.md) for details on and log levels and logging
+and [DLT logging](shared/README.md#dlt-sink) for details on enabling DLT logging and configuring the DLT daemon.
 
 ## Sanitizer Support
 
