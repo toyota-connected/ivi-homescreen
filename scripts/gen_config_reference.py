@@ -106,8 +106,9 @@ META = {
     "output.drm_connector": ("(none)", "e.g. HDMI-A-1", "drm", "DRM: match this connector name (overrides output.name)."),
     "output.serial": ("(none)", "EDID serial", "drm", "DRM: refine the match to this EDID serial when it is unique."),
     "output.index": ("(none)", "int", "all", "Deprecated: match the Nth connected output (prefer a name)."),
-    "output.preload": ("false", "true|false", "all", "Warm the engine (suspended) at startup even if the output is absent."),
-    "output.on_disconnect": ("suspend", "suspend|teardown", "all", "What to do with the view when its output disappears."),
+    "output.preload": ("false", "true|false", "all", "Warm the engine (suspended) at startup even if the output is absent. Parsed but not acted on yet: a view is built either way."),
+    "output.output_id": ("(none)", "role name from a udev rule", "drm", "Bind by integrator-assigned role (the connector's IHS_OUTPUT_NAME udev property) rather than by port. The only key that survives a change of board; matched above serial. A miss parks the view instead of falling through. DRM only: the Wayland backend does not populate it yet."),
+    "output.on_disconnect": ("suspend", "suspend|teardown", "all", "What to do with the view when its output disappears. suspend parks it: platform views are told to stop producing and frame production stops, with the engine kept warm so returning is immediate. teardown (free the engine) is not implemented yet -- it warns and suspends instead."),
     "output.x": ("0", "int (px)", "all", "This display's X position in the combined desktop space (multi-display input layout)."),
     "output.y": ("0", "int (px)", "all", "This display's Y position in the combined desktop space (multi-display input layout)."),
     "output.touch_device": ("(primary)", "device-name substring", "all", "Route touch from this panel (libinput device-name substring) to this view; unset sends touch to the primary view."),
@@ -180,21 +181,28 @@ def extract():
         keys.setdefault("sentry." + k, "string")
     # [view.output] entries are read through a table helper (ParseOutputMatch
     # reads t["<field>"]), and [[view.output]] arrays iterate the node, so the
-    # at_path() scraper above can't see the leaf keys. List them here so they
-    # stay in the reference table.
-    for k, t in (
-        ("output.name", "string"),
-        ("output.wl_name", "string"),
-        ("output.drm_connector", "string"),
-        ("output.serial", "string"),
-        ("output.index", "int"),
-        ("output.preload", "bool"),
-        ("output.on_disconnect", "string"),
-        ("output.x", "int"),
-        ("output.y", "int"),
-        ("output.touch_device", "string"),
-    ):
-        keys.setdefault(k, t)
+    # at_path() scraper above cannot see the leaf keys. Scrape that helper
+    # directly rather than listing them here: a hand-kept list silently stops
+    # covering this table the moment someone adds a key, which is exactly how
+    # output_id shipped undocumented.
+    #
+    # Anchored on the definition line and the next brace at column 0, and any
+    # is_*() predicate counts -- mapping only the ones in use today would put
+    # the hole straight back for the first key parsed with a different one.
+    m = re.search(r"^\w[^\n]*\bParseOutputMatch\b[^\n]*\{[^\S\n]*$", text, re.M)
+    if m is None:
+        # Never silently yield nothing: that would drop the whole table from
+        # the reference and from the "every key needs META" check with it.
+        sys.exit(
+            "error: ParseOutputMatch definition not found in "
+            f"{CFG}; update the scraper in {Path(__file__).name}"
+        )
+    body = text[m.end() :]
+    close = re.search(r"^\}", body, re.M)
+    if close is not None:
+        body = body[: close.start()]
+    for key, tok in re.findall(r't\["([a-z_]+)"\]\.(is_\w+)\(\)', body):
+        keys.setdefault("output." + key, TYPE.get(tok, tok))
     return keys
 
 
