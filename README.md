@@ -380,6 +380,7 @@ annotated all-keys file see
 | `[view.output]` | `index` | `int` | `(none)` | `int` | all |
 | `[view.output]` | `name` | `string` | `(primary)` | `e.g. DP-1, HDMI-A-1` | all |
 | `[view.output]` | `on_disconnect` | `string` | `suspend` | `suspend\|teardown` | all |
+| `[view.output]` | `output_id` | `string` | `(none)` | `role name from a udev rule` | drm |
 | `[view.output]` | `preload` | `bool` | `false` | `true\|false` | all |
 | `[view.output]` | `serial` | `string` | `(none)` | `EDID serial` | drm |
 | `[view.output]` | `touch_device` | `string` | `(primary)` | `device-name substring` | all |
@@ -526,12 +527,76 @@ a fixed port often publishes no EDID at all (both Raspberry Pi DSI panels report
 zero bytes), and two identical monitors commonly share one. When a serial is
 ambiguous the resolver says so and falls back to the connector name.
 
-**There is currently no key that is portable across boards.** Every option above
-is stable per board and none survives a hardware change, so a config that must
-serve more than one board needs one file per board today — or a `name` that
-happens to agree, which is not something to rely on. A role-naming mechanism
-(an integrator-supplied udev property) is planned to close this; until it lands,
-prefer per-board configuration over a key that looks portable and is not.
+**For a config that must serve more than one board, name the role.** Every key
+above is stable per board and none survives a hardware change: the connector
+name moves, the card number moves, and a panel with no EDID has no serial to
+match on. Nothing the hardware reports names the *role* a display plays.
+
+A udev rule can. udev models DRM connectors as devices (`DEVTYPE=drm_connector`),
+so a rule can attach a property to one, and `[view.output] output_id` matches on
+it:
+
+```toml
+[view.output]
+output_id = 'cluster'
+```
+
+```
+# /etc/udev/rules.d/99-ihs-outputs.rules
+ENV{ID_PATH}=="platform-gpu", KERNEL=="card*-DSI-1", ENV{IHS_OUTPUT_NAME}="cluster"
+```
+
+One config then binds correctly on both boards, which is the whole point: the
+DSI panel is `DSI-1` on a Pi 4 and `DSI-2` on a Pi 5, and `output_id = 'cluster'`
+reaches it on either. A worked example covering both boards ships as
+[`99-ihs-outputs.rules`](docs/config-examples/99-ihs-outputs.rules).
+
+Two things to know when writing the rule:
+
+- `DEVTYPE` is a property, not a match key of its own — it must be written
+  `ENV{DEVTYPE}=="drm_connector"`, and `udevadm verify` rejects the other form.
+- `ID_PATH` is per GPU, **not** per connector. On a Pi 4 all three connectors
+  share `platform-gpu`, so `ID_PATH` alone cannot identify one; pair it with a
+  `KERNEL` pattern as above.
+
+`output_id` is matched *above* `serial`, and unlike the other keys a miss parks
+the view rather than falling through to a lower tier — naming a role is a
+deliberate statement about which physical display a view belongs on, and
+quietly binding an instrument cluster to the passenger screen because the rule
+was missing is not a graceful degradation. Check the log if a view does not
+appear:
+
+```
+[OutputResolver] output_id 'cluster' matches no connected output; the view is parked
+```
+
+**DRM only for now.** `DrmOutputProvider` fills `output_id`; the Wayland
+`Display` does not, because a `wl_output` carries no connector identity a client
+can join on — and the name a compositor advertises need not be the kernel's (see
+the Mutter caveat above). An `output_id` match on Wayland therefore finds
+nothing and parks, which the log reports.
+
+### When an output disappears
+
+Both backends report connector hotplug: Wayland through `wl_output`
+add/remove/`done`, DRM through a udev connector monitor. On each change every
+view on that display is re-resolved and compared with the output it is actually
+on, and `[view.output] on_disconnect` decides what happens to a view whose
+output has gone:
+
+- `suspend` (the default) parks the view. Its platform views are told to stop
+  producing — a camera or video plugin should pause its decode there — and
+  frame production stops by withholding the vsync baton, so the UI thread,
+  rasterizer, GPU and scanout all go quiet. The engine and the surface are kept,
+  so returning is immediate: the view resumes when its output comes back.
+- `teardown` is **not implemented yet**. It warns and suspends instead, rather
+  than appearing to free the engine.
+
+`preload` is likewise parsed but not acted on yet: a view is built either way.
+
+Moving a running view onto a *different* output is also not implemented — the
+transition is detected, logged, and the view's platform views are told their
+grant is stale, but the view is not rebound.
 
 > Breaking change vs. earlier releases: the flat `[window_activation_area]`
 > table, `view.window_type`, `view.shell`/`view.backend` strings, `view.vm_args`,
