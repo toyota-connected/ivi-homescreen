@@ -78,14 +78,21 @@ struct FlagView {
 
   bool is_hidden = false;
   bool is_read_only = false;
-  bool is_selected = false;
   bool is_live_region = false;
   bool is_focusable = false;
-  bool is_focused = false;
 
-  // No legacy enum bit exists for these; they stay false when translated from
-  // the enum rather than being guessed at.
+  // These three have a companion "does it apply" only in the struct form; the
+  // legacy enum has a bare bit, so absence and false are indistinguishable
+  // there and has_* is forced true to say so.
+  bool has_selected_state = false;
+  bool is_selected = false;
+  bool has_focused_state = false;
+  bool is_focused = false;
+  bool has_required_state = false;
   bool is_required = false;
+
+  // No legacy enum bit exists for this; it stays false when translated from
+  // the enum rather than being guessed at.
   bool is_accessibility_focus_blocked = false;
 };
 
@@ -119,10 +126,16 @@ FlagView FromLegacy(FlutterSemanticsFlag flags) {
 
   v.is_hidden = Has(flags, kFlutterSemanticsFlagIsHidden);
   v.is_read_only = Has(flags, kFlutterSemanticsFlagIsReadOnly);
-  v.is_selected = Has(flags, kFlutterSemanticsFlagIsSelected);
   v.is_live_region = Has(flags, kFlutterSemanticsFlagIsLiveRegion);
   v.is_focusable = Has(flags, kFlutterSemanticsFlagIsFocusable);
+
+  // Bare bits: the enum cannot say "does not apply", so these always apply.
+  v.has_selected_state = true;
+  v.is_selected = Has(flags, kFlutterSemanticsFlagIsSelected);
+  v.has_focused_state = true;
   v.is_focused = Has(flags, kFlutterSemanticsFlagIsFocused);
+  // No enum bit at all, so requiredness genuinely does not apply here.
+  v.has_required_state = false;
   return v;
 }
 
@@ -157,13 +170,16 @@ FlagView FromStruct(const FlutterSemanticsFlags& flags) {
 
   v.is_hidden = flags.is_hidden;
   v.is_read_only = flags.is_read_only;
-  v.is_selected = flags.is_selected == kFlutterTristateTrue;
   v.is_live_region = flags.is_live_region;
   // The struct has no is_focusable; a node the engine reports a focus state
   // for is focusable by construction.
   v.is_focusable = flags.is_focused != kFlutterTristateNone;
-  v.is_focused = flags.is_focused == kFlutterTristateTrue;
 
+  v.has_selected_state = flags.is_selected != kFlutterTristateNone;
+  v.is_selected = flags.is_selected == kFlutterTristateTrue;
+  v.has_focused_state = flags.is_focused != kFlutterTristateNone;
+  v.is_focused = flags.is_focused == kFlutterTristateTrue;
+  v.has_required_state = flags.is_required != kFlutterTristateNone;
   v.is_required = flags.is_required == kFlutterTristateTrue;
   // Appended after this port's oldest supported engine; absent means false,
   // never a read past the end of what the engine wrote.
@@ -250,6 +266,39 @@ NodeSpec TranslateView(int32_t id,
   spec.focused = flags.is_focused;
   spec.required = flags.is_required;
   spec.a11y_focus_blocked = flags.is_accessibility_focus_blocked;
+
+  // The three-valued forms. A state the node does not carry stays kNone, which
+  // is the distinction the bools above cannot express.
+  spec.check_state =
+      flags.has_checked_state
+          ? (flags.is_check_state_mixed
+                 ? CheckState::kMixed
+                 : (flags.is_checked ? CheckState::kTrue : CheckState::kFalse))
+          : CheckState::kNone;
+  spec.enabled_state =
+      flags.has_enabled_state
+          ? (flags.is_enabled ? Tristate::kTrue : Tristate::kFalse)
+          : Tristate::kNone;
+  spec.toggled_state =
+      flags.has_toggled_state
+          ? (flags.is_toggled ? Tristate::kTrue : Tristate::kFalse)
+          : Tristate::kNone;
+  spec.expanded_state =
+      flags.has_expanded_state
+          ? (flags.is_expanded ? Tristate::kTrue : Tristate::kFalse)
+          : Tristate::kNone;
+  spec.selected_state =
+      flags.has_selected_state
+          ? (flags.is_selected ? Tristate::kTrue : Tristate::kFalse)
+          : Tristate::kNone;
+  spec.focused_state =
+      flags.has_focused_state
+          ? (flags.is_focused ? Tristate::kTrue : Tristate::kFalse)
+          : Tristate::kNone;
+  spec.required_state =
+      flags.has_required_state
+          ? (flags.is_required ? Tristate::kTrue : Tristate::kFalse)
+          : Tristate::kNone;
 
   spec.action_tap = Has(actions, kFlutterSemanticsActionTap);
   spec.action_long_press = Has(actions, kFlutterSemanticsActionLongPress);
