@@ -46,6 +46,7 @@ add_library(ihs_shared SHARED
         src/config.cc
         src/platform_view.cc
         src/semantics.cc
+        src/mcp_provider.cc
 )
 add_library(ivi_homescreen::ihs_shared ALIAS ihs_shared)
 

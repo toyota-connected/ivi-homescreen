@@ -28,6 +28,8 @@
 
 #include "ihs/config.h"
 #include "ihs/ihs.h"
+#include "ihs/ihs_mcp_provider.h"
+#include "ihs/ihs_semantics.h"
 #include "ihs/location.h"
 #include "ihs/logging.h"
 #include "ihs/trace.h"
@@ -194,6 +196,30 @@ int main(void) {
           "register a filter");
     CHECK(ihs_location_register_filter(NULL, &flt_ops, NULL) == 0,
           "reject a NULL filter key");
+  }
+
+  /* Semantics hub and MCP provider surfaces. Both are meant to be consumed by
+   * an out-of-tree FFI plugin, so the point here is that they parse and link
+   * as strict C11 from an installed package -- the same property ffigen needs.
+   * Exercised, not merely included: an unreferenced header would still compile
+   * if a declaration were unresolvable at link time. */
+  {
+    const IhsSemanticsSnapshot* snapshot = ihs_semantics_acquire_snapshot();
+    /* No engine in this process, so there is nothing published. */
+    CHECK(snapshot == NULL, "no semantics snapshot without an engine");
+    ihs_semantics_release_snapshot(NULL); /* documented as a no-op */
+
+    CHECK(ihs_semantics_register(NULL, NULL) == IHS_SEMANTICS_ERR_INVALID,
+          "reject a NULL consumer desc");
+    CHECK((IHS_SEMANTICS_ACTION_NO_A11Y_FOCUS &
+           IHS_SEMANTICS_ACTION_DID_GAIN_A11Y_FOCUS) == 0,
+          "the automation mask withholds accessibility focus");
+
+    CHECK(ihs_mcp_provider_register(NULL, NULL) == IHS_MCP_ERR_INVALID,
+          "reject a NULL provider desc");
+    ihs_mcp_provider_unregister(NULL); /* must tolerate NULL */
+    CHECK((IHS_MCP_CAP_READ_ONLY & IHS_MCP_CAP_INTERACT) == 0,
+          "read-only capability does not permit interaction");
   }
 
   printf("OK ihs_shared consumer smoke: abi=0x%08x logging=%s\n",
