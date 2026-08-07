@@ -29,15 +29,23 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Update apt package index
+        # cache-apt-pkgs-action resolves package versions before it runs its
+        # own apt update, so it pins whatever the runner image's stale index
+        # lists. When Ubuntu supersedes a revision and drops the old .deb from
+        # the mirror (e.g. libinput 1.25.0-1ubuntu3.4), that pinned fetch 404s
+        # and aborts the whole install. Refresh the index up front so it pins
+        # the version currently on the mirror.
+        run: sudo apt-get update
       - name: Install build + test deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build pkg-config git python3 \
-            curl ca-certificates xz-utils \
-            libxkbcommon-dev libwayland-dev wayland-protocols \
-            libegl1-mesa-dev libgles2-mesa-dev mesa-common-dev \
-            libdrm-dev libgbm-dev libinput-dev libudev-dev libseat-dev \
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: >-
+            build-essential cmake ninja-build pkg-config git python3
+            curl ca-certificates xz-utils
+            libxkbcommon-dev libwayland-dev wayland-protocols
+            libegl1-mesa-dev libgles2-mesa-dev mesa-common-dev
+            libdrm-dev libgbm-dev libinput-dev libudev-dev libseat-dev
             libpugixml-dev libcurl4-openssl-dev
 
       - name: Fetch emb
@@ -62,15 +70,23 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Update apt package index
+        # cache-apt-pkgs-action resolves package versions before it runs its
+        # own apt update, so it pins whatever the runner image's stale index
+        # lists. When Ubuntu supersedes a revision and drops the old .deb from
+        # the mirror (e.g. libinput 1.25.0-1ubuntu3.4), that pinned fetch 404s
+        # and aborts the whole install. Refresh the index up front so it pins
+        # the version currently on the mirror.
+        run: sudo apt-get update
       - name: Install build + test deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build pkg-config git python3 \
-            curl ca-certificates unzip xz-utils \
-            libxkbcommon-dev libwayland-dev wayland-protocols \
-            libegl1-mesa-dev libgles2-mesa-dev mesa-common-dev \
-            libdrm-dev libgbm-dev libinput-dev libudev-dev libseat-dev \
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: >-
+            build-essential cmake ninja-build pkg-config git python3
+            curl ca-certificates unzip xz-utils
+            libxkbcommon-dev libwayland-dev wayland-protocols
+            libegl1-mesa-dev libgles2-mesa-dev mesa-common-dev
+            libdrm-dev libgbm-dev libinput-dev libudev-dev libseat-dev
             libpugixml-dev libcurl4-openssl-dev
 
       - name: Fetch emb
@@ -85,8 +101,11 @@ jobs:
           eval "$(./emb_cli/bootstrap.sh --shellenv)"
           ./scripts/watchdog_integration.sh
 
-      - name: Install systemd dev library
-        run: sudo apt-get install -y --no-install-recommends libsystemd-dev
+      - name: Install build deps
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: >-
+            libsystemd-dev
 
       - name: Run integration test for systemd watchdog
         shell: bash

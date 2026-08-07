@@ -40,10 +40,19 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends cmake ninja-build g++
+      - name: Update apt package index
+        # cache-apt-pkgs-action resolves package versions before it runs its
+        # own apt update, so it pins whatever the runner image's stale index
+        # lists. When Ubuntu supersedes a revision and drops the old .deb from
+        # the mirror (e.g. libinput 1.25.0-1ubuntu3.4), that pinned fetch 404s
+        # and aborts the whole install. Refresh the index up front so it pins
+        # the version currently on the mirror.
+        run: sudo apt-get update
+      - name: Install build deps
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: >-
+            cmake ninja-build g++
 
       - name: Build + install ihs_shared
         run: |
@@ -103,10 +112,19 @@ jobs:
       - name: Fetch fmt submodule (raw-fmt reference)
         run: git submodule update --init --depth 1 third_party/fmt
 
-      - name: Install toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends cmake ninja-build g++
+      - name: Update apt package index
+        # cache-apt-pkgs-action resolves package versions before it runs its
+        # own apt update, so it pins whatever the runner image's stale index
+        # lists. When Ubuntu supersedes a revision and drops the old .deb from
+        # the mirror (e.g. libinput 1.25.0-1ubuntu3.4), that pinned fetch 404s
+        # and aborts the whole install. Refresh the index up front so it pins
+        # the version currently on the mirror.
+        run: sudo apt-get update
+      - name: Install build deps
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: >-
+            cmake ninja-build g++
 
       - name: Build + install ihs_shared
         run: |
@@ -129,10 +147,18 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install toolchain + libabigail
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+      - name: Update apt package index
+        # cache-apt-pkgs-action resolves package versions before it runs its
+        # own apt update, so it pins whatever the runner image's stale index
+        # lists. When Ubuntu supersedes a revision and drops the old .deb from
+        # the mirror (e.g. libinput 1.25.0-1ubuntu3.4), that pinned fetch 404s
+        # and aborts the whole install. Refresh the index up front so it pins
+        # the version currently on the mirror.
+        run: sudo apt-get update
+      - name: Install build deps
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: >-
             cmake ninja-build g++ abigail-tools
 
       - name: Build ihs_shared
@@ -185,17 +211,23 @@ jobs:
   # by the load harness against a libdlt stub.
   dlt-daemon-e2e:
     if: >-
-      ${{ github.server_url == 'https://github.com'
-          && (github.event_name == 'workflow_dispatch'
-              || github.event_name == 'push') }}
+      ${{ github.server_url == 'https://github.com' && (github.event_name == 'workflow_dispatch' || github.event_name == 'push') }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install toolchain + dlt-daemon
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+      - name: Update apt package index
+        # cache-apt-pkgs-action resolves package versions before it runs its
+        # own apt update, so it pins whatever the runner image's stale index
+        # lists. When Ubuntu supersedes a revision and drops the old .deb from
+        # the mirror (e.g. libinput 1.25.0-1ubuntu3.4), that pinned fetch 404s
+        # and aborts the whole install. Refresh the index up front so it pins
+        # the version currently on the mirror.
+        run: sudo apt-get update
+      - name: Install build deps
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: >-
             cmake ninja-build gcc g++ dlt-daemon dlt-tools
 
       - name: Build + install ihs_shared
