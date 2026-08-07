@@ -55,7 +55,8 @@ add_executable(${PROJECT_NAME}
 if (BUILD_ACCESSIBILITY)
     target_sources(${PROJECT_NAME} PRIVATE
             accessibility/accessibility_tree.cc
-            accessibility/semantics_translator.cc)
+            accessibility/semantics_translator.cc
+            accessibility/semantics_publisher.cc)
 endif ()
 
 # Wayland-specific TUs:

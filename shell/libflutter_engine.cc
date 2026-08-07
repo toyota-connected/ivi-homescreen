@@ -92,6 +92,9 @@ bool PopulateExports(void* lib) {
           "FlutterEngineUpdateAccessibilityFeatures");
   require(&g_exports.DispatchSemanticsAction,
           "FlutterEngineDispatchSemanticsAction");
+  // Optional, not required: see the note in libflutter_engine.h. An engine
+  // without it is still perfectly usable through the deprecated entry point.
+  optional(&g_exports.SendSemanticsAction, "FlutterEngineSendSemanticsAction");
   require(&g_exports.OnVsync, "FlutterEngineOnVsync");
   require(&g_exports.ReloadSystemFonts, "FlutterEngineReloadSystemFonts");
   require(&g_exports.TraceEventDurationBegin,
