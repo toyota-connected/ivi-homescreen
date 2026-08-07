@@ -16,9 +16,27 @@
 
 #include "semantics_translator.h"
 
+#include <cstddef>
+
 namespace accessibility {
 
 namespace {
+
+// FlutterSemanticsFlags carries its own struct_size, filled in by the engine,
+// and members are appended to it across engine revisions exactly as they are
+// on FlutterSemanticsNode2. A member the engine did not write lies past the
+// end of its allocation, so reading it is an out-of-bounds read.
+//
+// `is_accessibility_focus_blocked` is the only member appended after the
+// oldest engine revision this port supports; everything above it is present in
+// all of them. Any member added later needs the same gate.
+constexpr size_t kA11yFocusBlockedEnd =
+    offsetof(FlutterSemanticsFlags, is_accessibility_focus_blocked) +
+    sizeof(bool);
+
+static_assert(kA11yFocusBlockedEnd <= sizeof(FlutterSemanticsFlags),
+              "is_accessibility_focus_blocked bounds overrun "
+              "FlutterSemanticsFlags");
 
 bool Has(FlutterSemanticsFlag flags, FlutterSemanticsFlag bit) {
   return (static_cast<uint32_t>(flags) & static_cast<uint32_t>(bit)) != 0;
@@ -147,7 +165,11 @@ FlagView FromStruct(const FlutterSemanticsFlags& flags) {
   v.is_focused = flags.is_focused == kFlutterTristateTrue;
 
   v.is_required = flags.is_required == kFlutterTristateTrue;
-  v.is_accessibility_focus_blocked = flags.is_accessibility_focus_blocked;
+  // Appended after this port's oldest supported engine; absent means false,
+  // never a read past the end of what the engine wrote.
+  v.is_accessibility_focus_blocked =
+      flags.struct_size >= kA11yFocusBlockedEnd &&
+      flags.is_accessibility_focus_blocked;
   return v;
 }
 

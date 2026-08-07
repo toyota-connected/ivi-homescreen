@@ -650,6 +650,58 @@ TEST_F(AccessibilityTreeTest, OlderEngineStructSizeIsNotReadPast) {
   EXPECT_TRUE(node.GetSpec().action_tap);
 }
 
+// The concrete deployed case, not a synthetic one: the engine revision this
+// port targets writes a FlutterSemanticsNode2 that ends just before
+// `identifier`, but does carry `flags2`. The gate must reject exactly one of
+// the two. Sizing the allocation to that struct turns a mistake in the offset
+// arithmetic into an ASan fault rather than a silently garbage pointer.
+TEST_F(AccessibilityTreeTest, TargetEngineNodeSizeReadsFlags2ButNotIdentifier) {
+  constexpr size_t kTargetSize = offsetof(FlutterSemanticsNode2, identifier);
+  ASSERT_LT(kTargetSize, sizeof(FlutterSemanticsNode2));
+
+  auto storage = std::make_unique<unsigned char[]>(kTargetSize);
+  std::memset(storage.get(), 0, kTargetSize);
+  auto* fl = reinterpret_cast<FlutterSemanticsNode2*>(storage.get());
+  fl->struct_size = kTargetSize;
+  fl->id = 4;
+  fl->label = "Volume";
+  fl->hint = "";
+  fl->value = "";
+  fl->tooltip = "";
+
+  FlutterSemanticsFlags flags{};
+  flags.struct_size = sizeof(FlutterSemanticsFlags);
+  flags.is_slider = true;
+  fl->flags2 = &flags;
+
+  const AccessibilityNode node(*fl);
+  EXPECT_STREQ(node.GetIdentifier(), "");  // past struct_size, not read
+  // flags2 is within struct_size, so it is honored.
+  EXPECT_EQ(node.GetSpec().role, accessibility::Role::kSlider);
+}
+
+// FlutterSemanticsFlags is versioned by struct_size too, and gains members the
+// same way the node does. Reading a member the engine did not write is an
+// out-of-bounds read on the flags allocation rather than the node's.
+TEST_F(AccessibilityTreeTest, ShorterFlags2StructIsNotReadPast) {
+  constexpr size_t kShortFlags =
+      offsetof(FlutterSemanticsFlags, is_accessibility_focus_blocked);
+  ASSERT_LT(kShortFlags, sizeof(FlutterSemanticsFlags));
+
+  auto storage = std::make_unique<unsigned char[]>(kShortFlags);
+  std::memset(storage.get(), 0, kShortFlags);
+  auto* flags = reinterpret_cast<FlutterSemanticsFlags*>(storage.get());
+  flags->struct_size = kShortFlags;
+  flags->is_button = true;
+
+  NodeBuilder builder(1, {}, "Save");
+  builder.node.flags2 = flags;
+
+  const AccessibilityNode node(builder.node);
+  EXPECT_EQ(node.GetSpec().role, accessibility::Role::kButton);
+  EXPECT_FALSE(node.GetSpec().a11y_focus_blocked);  // absent, not garbage
+}
+
 // Actions added after the enum's original ceiling are retained like any other.
 TEST_F(AccessibilityTreeTest, RetainsActionsAddedAfterLegacyCeiling) {
   NodeBuilder builder(1, {}, "Details");
