@@ -188,6 +188,11 @@ add_subdirectory(backend_output_binding-test)
 add_subdirectory(vsync_park-test)
 add_subdirectory(mutation_stack-test)
 add_subdirectory(semantics_hub-test)
+# The MCP registry is only compiled into ihs_shared when BUILD_MCP is on, so
+# its tests would have nothing to link against otherwise.
+if (BUILD_MCP)
+    add_subdirectory(mcp_provider-test)
+endif ()
 add_subdirectory(pixel_swizzle-test)
 add_subdirectory(scale_policy-test)
 add_subdirectory(text_input-test)
