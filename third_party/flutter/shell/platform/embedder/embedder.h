@@ -105,6 +105,15 @@ typedef enum {
   kFlutterAccessibilityFeatureHighContrast = 1 << 5,
   /// Request to show on/off labels inside switches.
   kFlutterAccessibilityFeatureOnOffSwitchLabels = 1 << 6,
+  /// Indicate the platform does not support announcements.
+  kFlutterAccessibilityFeatureNoAnnounce = 1 << 7,
+  /// Indicate the platform disallows auto-playing animated images.
+  kFlutterAccessibilityFeatureNoAutoPlayAnimatedImages = 1 << 8,
+  /// Indicate the platform disallows auto-playing videos.
+  kFlutterAccessibilityFeatureNoAutoPlayVideos = 1 << 9,
+  /// Request to show deterministic (non-blinking) cursor in editable text
+  /// fields.
+  kFlutterAccessibilityFeatureDeterministicCursor = 1 << 10,
 } FlutterAccessibilityFeature;
 
 /// The set of possible actions that can be conveyed to a semantics node.
@@ -164,11 +173,22 @@ typedef enum {
   kFlutterSemanticsActionSetText = 1 << 21,
   /// Request that the respective focusable widget gain input focus.
   kFlutterSemanticsActionFocus = 1 << 22,
+  /// Request that scrolls the current scrollable container to a given scroll
+  /// offset.
+  kFlutterSemanticsActionScrollToOffset = 1 << 23,
+  /// A request that the node should be expanded.
+  kFlutterSemanticsActionExpand = 1 << 24,
+  /// A request that the node should be collapsed.
+  kFlutterSemanticsActionCollapse = 1 << 25,
 } FlutterSemanticsAction;
 
 /// The set of properties that may be associated with a semantics node.
 ///
 /// Must match the `SemanticsFlag` enum in semantics.dart.
+///
+/// @deprecated     Use `FlutterSemanticsFlags` instead. No new flags will
+///                 be added to `FlutterSemanticsFlag`. New flags will
+///                 continue to be added to `FlutterSemanticsFlags`.
 typedef enum {
   /// The semantics node has the quality of either being "checked" or
   /// "unchecked".
@@ -243,7 +263,105 @@ typedef enum {
   kFlutterSemanticsFlagHasExpandedState = 1 << 26,
   /// Whether a semantic node that hasExpandedState is currently expanded.
   kFlutterSemanticsFlagIsExpanded = 1 << 27,
+  /// The semantics node has the quality of either being "selected" or
+  /// "not selected".
+  kFlutterSemanticsFlagHasSelectedState = 1 << 28,
+  /// Whether a semantics node has the quality of being required.
+  kFlutterSemanticsFlagHasRequiredState = 1 << 29,
+  /// Whether user input is required on the semantics node before a form can be
+  /// submitted.
+  ///
+  /// Only applicable when kFlutterSemanticsFlagHasRequiredState flag is on.
+  kFlutterSemanticsFlagIsRequired = 1 << 30,
 } FlutterSemanticsFlag;
+
+typedef enum {
+  /// The property is not applicable to this semantics node.
+  kFlutterTristateNone,
+  /// The property is applicable and its state is "true" or "on".
+  kFlutterTristateTrue,
+  /// The property is applicable and its state is "false" or "off".
+  kFlutterTristateFalse,
+} FlutterTristate;
+
+typedef enum {
+  /// The semantics node does not have check state.
+  kFlutterCheckStateNone,
+  /// The semantics node is checked.
+  kFlutterCheckStateTrue,
+  /// The semantics node is not checked.
+  kFlutterCheckStateFalse,
+  /// The semantics node represents a checkbox in mixed state.
+  kFlutterCheckStateMixed,
+} FlutterCheckState;
+
+typedef struct {
+  /// The size of this struct. Must be sizeof(FlutterSemanticsFlags).
+  size_t struct_size;
+  /// Whether a semantics node is checked.
+  FlutterCheckState is_checked;
+  /// Whether a semantics node is selected.
+  FlutterTristate is_selected;
+  /// Whether a semantic node is currently enabled.
+  FlutterTristate is_enabled;
+  /// If true, the semantics node is "on". If false, the semantics node is
+  /// "off".
+  FlutterTristate is_toggled;
+  /// Whether a semantic node that is currently expanded.
+  FlutterTristate is_expanded;
+  /// Whether user input is required on the semantics node before a form can be
+  /// submitted.
+  FlutterTristate is_required;
+  /// Whether the semantic node currently holds the user's focus.
+  FlutterTristate is_focused;
+  /// Whether the semantic node represents a button.
+  bool is_button;
+  /// Whether the semantic node represents a text field.
+  bool is_text_field;
+  /// Whether a semantic node is in a mutually exclusive group.
+  bool is_in_mutually_exclusive_group;
+  /// Whether a semantic node is a header that divides content into sections.
+  bool is_header;
+  /// Whether the value of the semantics node is obscured.
+  bool is_obscured;
+  /// Whether the semantics node is the root of a subtree for which a route name
+  /// should be announced.
+  bool scopes_route;
+  /// Whether the semantics node label is the name of a visually distinct route.
+  bool names_route;
+  /// Whether the semantics node is considered hidden.
+  bool is_hidden;
+  /// Whether the semantics node represents an image.
+  bool is_image;
+  /// Whether the semantics node is a live region.
+  bool is_live_region;
+  /// Whether the platform can scroll the semantics node when the user attempts
+  /// to move the accessibility focus to an offscreen child.
+  ///
+  /// For example, a `ListView` widget has implicit scrolling so that users can
+  /// easily move the accessibility focus to the next set of children. A
+  /// `PageView` widget does not have implicit scrolling, so that users don't
+  /// navigate to the next page when reaching the end of the current one.
+  bool has_implicit_scrolling;
+  /// Whether the value of the semantics node is coming from a multi-line text
+  /// field.
+  ///
+  /// This is used for text fields to distinguish single-line text fields from
+  /// multi-line ones.
+  bool is_multiline;
+  /// Whether the semantic node is read only.
+  ///
+  /// Only applicable when kFlutterSemanticsFlagIsTextField flag is on.
+  bool is_read_only;
+  /// Whether the semantics node represents a link.
+  bool is_link;
+  /// Whether the semantics node represents a slider.
+  bool is_slider;
+  /// Whether the semantics node represents a keyboard key.
+  bool is_keyboard_key;
+  /// Whether to block a11y focus for the semantics node.
+  bool is_accessibility_focus_blocked;
+} FlutterSemanticsFlags;
 
 typedef enum {
   /// Text has unknown text direction.
@@ -304,6 +422,9 @@ typedef enum {
   /// Specifies an OpenGL frame-buffer target type. Framebuffers are specified
   /// using the FlutterOpenGLFramebuffer struct.
   kFlutterOpenGLTargetTypeFramebuffer,
+  /// Specifies an OpenGL on-screen surface target type. Surfaces are specified
+  /// using the FlutterOpenGLSurface struct.
+  kFlutterOpenGLTargetTypeSurface,
 } FlutterOpenGLTargetType;
 
 /// A pixel format to be used for software rendering.
@@ -318,9 +439,10 @@ typedef enum {
 ///     occupying the lowest memory address.
 ///
 ///   - all other formats are called packed formats, and the component order
-///     as specified in the format name refers to the order in the native type.
-///     for example, for kFlutterSoftwarePixelFormatRGB565, the R component
-///     uses the 5 least significant bits of the uint16_t pixel value.
+///     as specified in the format name refers to the order from most
+///     significant to least significant bits in the native type. for example,
+///     for kFlutterSoftwarePixelFormatRGB565, R occupies the 5 most significant
+///     bits, G the middle 6 bits, and B the 5 least significant bits.
 ///
 /// Each pixel format in this list is documented with an example on how to get
 /// the color components from the pixel.
@@ -333,33 +455,61 @@ typedef enum {
 ///   can get the p for a RGBA8888 formatted buffer like this:
 ///   const uint8_t *p = ((const uint8_t*) allocation) + row_bytes*y + x*4;
 typedef enum {
-  /// pixel with 8 bit grayscale value.
+  /// Pixel with 8 bit grayscale value.
   /// The grayscale value is the luma value calculated from r, g, b
   /// according to BT.709. (gray = r*0.2126 + g*0.7152 + b*0.0722)
   kFlutterSoftwarePixelFormatGray8,
 
-  /// pixel with 5 bits red, 6 bits green, 5 bits blue, in 16-bit word.
-  ///   r = p & 0x3F; g = (p>>5) & 0x3F; b = p>>11;
+  /// Pixel with 5 bits red, 6 bits green, 5 bits blue, in 16-bit word.
+  ///   r = (p >> 11) & 0x1F;
+  ///   g = (p >> 5) & 0x3F;
+  ///   b = p & 0x1F;
+  ///
+  /// On most (== little-endian) systems, this is equivalent to wayland format
+  /// RGB565 (WL_DRM_FORMAT_RGB565, WL_SHM_FORMAT_RGB565).
   kFlutterSoftwarePixelFormatRGB565,
 
-  /// pixel with 4 bits for alpha, red, green, blue; in 16-bit word.
-  ///   r = p & 0xF;  g = (p>>4) & 0xF;  b = (p>>8) & 0xF;   a = p>>12;
+  /// Pixel with 4 bits each for alpha, red, green, blue; in 16-bit word.
+  ///   r = (p >> 8) & 0xF;
+  ///   g = (p >> 4) & 0xF;
+  ///   b = p & 0xF;
+  ///   a = (p >> 12) & 0xF;
+  ///
+  /// On most (== little-endian) systems, this is equivalent to wayland format
+  /// RGBA4444 (WL_DRM_FORMAT_RGBA4444, WL_SHM_FORMAT_RGBA4444).
   kFlutterSoftwarePixelFormatRGBA4444,
 
-  /// pixel with 8 bits for red, green, blue, alpha.
-  ///   r = p[0]; g = p[1]; b = p[2]; a = p[3];
+  /// Pixel with 8 bits each for red, green, blue, alpha.
+  ///   r = p[0];
+  ///   g = p[1];
+  ///   b = p[2];
+  ///   a = p[3];
+  ///
+  /// This is equivalent to wayland format ABGR8888 (WL_DRM_FORMAT_ABGR8888,
+  /// WL_SHM_FORMAT_ABGR8888).
   kFlutterSoftwarePixelFormatRGBA8888,
 
-  /// pixel with 8 bits for red, green and blue and 8 unused bits.
-  ///   r = p[0]; g = p[1]; b = p[2];
+  /// Pixel with 8 bits each for red, green and blue and 8 unused bits.
+  ///   r = p[0];
+  ///   g = p[1];
+  ///   b = p[2];
+  ///
+  /// This is equivalent to wayland format XBGR8888 (WL_DRM_FORMAT_XBGR8888,
+  /// WL_SHM_FORMAT_XBGR8888).
   kFlutterSoftwarePixelFormatRGBX8888,
 
-  /// pixel with 8 bits for blue, green, red and alpha.
-  ///   r = p[2]; g = p[1]; b = p[0]; a = p[3];
+  /// Pixel with 8 bits each for blue, green, red and alpha.
+  ///   r = p[2];
+  ///   g = p[1];
+  ///   b = p[0];
+  ///   a = p[3];
+  ///
+  /// This is equivalent to wayland format ARGB8888 (WL_DRM_FORMAT_ARGB8888,
+  /// WL_SHM_FORMAT_ARGB8888).
   kFlutterSoftwarePixelFormatBGRA8888,
 
-  /// either kFlutterSoftwarePixelFormatBGRA8888 or
-  /// kFlutterSoftwarePixelFormatRGBA8888 depending on CPU endianess and OS
+  /// Either kFlutterSoftwarePixelFormatBGRA8888 or
+  /// kFlutterSoftwarePixelFormatRGBA8888 depending on CPU endianess and OS.
   kFlutterSoftwarePixelFormatNative32,
 } FlutterSoftwarePixelFormat;
 
@@ -387,9 +537,14 @@ typedef struct {
 } FlutterOpenGLTexture;
 
 typedef struct {
-  /// The target of the color attachment of the frame-buffer. For example,
-  /// GL_TEXTURE_2D or GL_RENDERBUFFER. In case of ambiguity when dealing with
-  /// Window bound frame-buffers, 0 may be used.
+  /// The format of the color attachment of the frame-buffer. For example,
+  /// GL_RGBA8.
+  ///
+  /// In case of ambiguity when dealing with Window bound frame-buffers, 0 may
+  /// be used.
+  ///
+  /// @bug      This field is incorrectly named as "target" when it actually
+  ///           refers to a format.
   uint32_t target;
 
   /// The name of the framebuffer.
@@ -402,6 +557,62 @@ typedef struct {
   /// collect the framebuffer.
   VoidCallback destruction_callback;
 } FlutterOpenGLFramebuffer;
+
+typedef bool (*FlutterOpenGLSurfaceCallback)(void* /* user data */,
+                                             bool* /* opengl state changed */);
+
+typedef struct {
+  /// The size of this struct. Must be sizeof(FlutterOpenGLSurface).
+  size_t struct_size;
+
+  /// User data to be passed to the make_current, clear_current and
+  /// destruction callbacks.
+  void* user_data;
+
+  /// Callback invoked (on an engine-managed thread) that asks the embedder to
+  /// make the surface current.
+  ///
+  /// Should return true if the operation succeeded, false if the surface could
+  /// not be made current and rendering should be cancelled.
+  ///
+  /// The second parameter 'opengl state changed' should be set to true if
+  /// any OpenGL API state is different than before this callback was called.
+  /// In that case, Flutter will invalidate the internal OpenGL API state cache,
+  /// which is a somewhat expensive operation.
+  ///
+  /// @attention required. (non-null)
+  FlutterOpenGLSurfaceCallback make_current_callback;
+
+  /// Callback invoked (on an engine-managed thread) when the current surface
+  /// can be cleared.
+  ///
+  /// Should return true if the operation succeeded, false if an error ocurred.
+  /// That error will be logged but otherwise not handled by the engine.
+  ///
+  /// The second parameter 'opengl state changed' is the same as with the
+  /// @ref make_current_callback.
+  ///
+  /// The embedder might clear the surface here after it was previously made
+  /// current. That's not required however, it's also possible to clear it in
+  /// the destruction callback. There's no way to signal OpenGL state
+  /// changes in the destruction callback though.
+  ///
+  /// @attention required. (non-null)
+  FlutterOpenGLSurfaceCallback clear_current_callback;
+
+  /// Callback invoked (on an engine-managed thread) that asks the embedder to
+  /// collect the surface.
+  ///
+  /// @attention required. (non-null)
+  VoidCallback destruction_callback;
+
+  /// The surface format.
+  ///
+  /// Allowed values:
+  ///   - GL_RGBA8
+  ///   - GL_BGRA8_EXT
+  uint32_t format;
+} FlutterOpenGLSurface;
 
 typedef bool (*BoolCallback)(void* /* user data */);
 typedef FlutterTransformation (*TransformationCallback)(void* /* user data */);
@@ -863,6 +1074,29 @@ typedef struct {
   FlutterEngineDisplayId display_id;
   /// The view that this event is describing.
   int64_t view_id;
+  /// If `true`, the window has size constraints.
+  /// If `false`, the constraint values are ignored.
+  bool has_constraints;
+  /// Minimum physical width of the window.
+  ///
+  /// If |has_constraints| is `true`, this must be less than or equal to
+  /// |max_width_constraint| and |width|.
+  size_t min_width_constraint;
+  /// Minimum physical height of the window.
+  ///
+  /// If |has_constraints| is `true`, this must be less than or equal to
+  /// |max_height_constraint| and |height|.
+  size_t min_height_constraint;
+  /// Maximum physical width of the window.
+  ///
+  /// If |has_constraints| is `true`, this must be greater than or equal to
+  /// |min_width_constraint| and |width|.
+  size_t max_width_constraint;
+  /// Maximum physical height of the window.
+  ///
+  /// If |has_constraints| is `true`, this must be greater than or equal to
+  /// |min_height_constraint| and |height|.
+  size_t max_height_constraint;
 } FlutterWindowMetricsEvent;
 
 typedef struct {
@@ -960,6 +1194,74 @@ typedef struct {
   /// The |result| argument will be deallocated when the callback returns.
   FlutterRemoveViewCallback remove_view_callback;
 } FlutterRemoveViewInfo;
+
+/// Represents the direction in which the focus transitioned across
+/// [FlutterView]s.
+typedef enum {
+  /// Indicates the focus transition did not have a direction.
+  ///
+  /// This is typically associated with focus being programmatically requested
+  /// or when focus is lost.
+  kUndefined,
+
+  /// Indicates the focus transition was performed in a forward direction.
+  ///
+  /// This is typically result of the user pressing tab.
+  kForward,
+
+  /// Indicates the focus transition was performed in a backward direction.
+  ///
+  /// This is typically result of the user pressing shift + tab.
+  kBackward,
+} FlutterViewFocusDirection;
+
+/// Represents the focus state of a given [FlutterView].
+typedef enum {
+  /// Specifies that a view does not have platform focus.
+  kUnfocused,
+
+  /// Specifies that a view has platform focus.
+  kFocused,
+} FlutterViewFocusState;
+
+/// A view focus event is sent to the engine by the embedder when a native view
+/// focus state has changed.
+///
+/// Passed through FlutterEngineSendViewFocusEvent.
+typedef struct {
+  /// The size of this struct.
+  /// Must be sizeof(FlutterViewFocusEvent).
+  size_t struct_size;
+
+  /// The identifier of the view that received the focus event.
+  FlutterViewId view_id;
+
+  /// The focus state of the view.
+  FlutterViewFocusState state;
+
+  /// The direction in which the focus transitioned across [FlutterView]s.
+  FlutterViewFocusDirection direction;
+} FlutterViewFocusEvent;
+
+/// A FlutterViewFocusChangeRequest is sent by the engine to the embedder when
+/// when a FlutterView focus state has changed and native view focus
+/// needs to be updated.
+///
+/// Received in FlutterProjectArgs.view_focus_change_request_callback.
+typedef struct {
+  /// The size of this struct.
+  /// Must be sizeof(FlutterViewFocusChangeRequest).
+  size_t struct_size;
+
+  /// The identifier of the view that received the focus event.
+  FlutterViewId view_id;
+
+  /// The focus state of the view.
+  FlutterViewFocusState state;
+
+  /// The direction in which the focus transitioned across [FlutterView]s.
+  FlutterViewFocusDirection direction;
+} FlutterViewFocusChangeRequest;
 
 /// The phase of the pointer event.
 typedef enum {
@@ -1069,6 +1371,14 @@ typedef struct {
   double rotation;
   /// The identifier of the view that received the pointer event.
   FlutterViewId view_id;
+  /// The pressure of the current pointer, where 0.0 is the default value.
+  double pressure;
+  /// The minimum bound of the pressure of the current pointer, where 0.0 is the
+  /// default minimum bound.
+  double pressure_min;
+  /// The maximum bound of the pressure of the current pointer, where 0.0 is the
+  /// default maximum bound.
+  double pressure_max;
 } FlutterPointerEvent;
 
 typedef enum {
@@ -1320,6 +1630,10 @@ typedef struct {
   FlutterPlatformViewIdentifier platform_view_id;
   /// A textual tooltip attached to the node.
   const char* tooltip;
+  /// The heading level for this node. A value of 0 means the node is not a
+  /// heading; higher values (1, 2, …) indicate the heading rank, with lower
+  /// numbers being higher-level headings.
+  int32_t heading_level;
 } FlutterSemanticsNode;
 
 /// A node in the Flutter semantics tree.
@@ -1336,7 +1650,11 @@ typedef struct {
   /// The unique identifier for this node.
   int32_t id;
   /// The set of semantics flags associated with this node.
-  FlutterSemanticsFlag flags;
+  ///
+  /// @deprecated     Use `flags2` instead. No new flags will
+  ///                 be added to `FlutterSemanticsFlag`. New flags will
+  ///                 continue to be added to `FlutterSemanticsFlags`.
+  FlutterSemanticsFlag flags__deprecated__;
   /// The set of semantics actions applicable to this node.
   FlutterSemanticsAction actions;
   /// The position at which the text selection originates.
@@ -1420,6 +1738,18 @@ typedef struct {
   // Array of string attributes associated with the `decreased_value`.
   // Has length `decreased_value_attribute_count`.
   const FlutterStringAttribute** decreased_value_attributes;
+  // The set of semantics flags associated with this node. Prefer to use this
+  // over `flags__deprecated__`.
+  FlutterSemanticsFlags* flags2;
+  /// The heading level for this node. A value of 0 means the node is not a
+  /// heading; higher values (1, 2, …) indicate the heading rank, with lower
+  /// numbers being higher-level headings.
+  int32_t heading_level;
+  /// An identifier for the semantics node in native accessibility hierarchy.
+  /// This value should not be exposed to the users of the app.
+  /// This is usually used for UI testing with tools that work by querying the
+  /// native accessibility, like UI Automator, XCUITest, or Appium.
+  const char* identifier;
 } FlutterSemanticsNode2;
 
 /// `FlutterSemanticsCustomAction` ID used as a sentinel to signal the end of a
@@ -1513,6 +1843,8 @@ typedef struct {
   /// Array of semantics custom action pointers. Has length
   /// `custom_action_count`.
   FlutterSemanticsCustomAction2** custom_actions;
+  // The ID of the view that this update is associated with.
+  FlutterViewId view_id;
 } FlutterSemanticsUpdate2;
 
 typedef void (*FlutterUpdateSemanticsNodeCallback)(
@@ -1533,7 +1865,7 @@ typedef void (*FlutterUpdateSemanticsCallback2)(
 
 /// An update to whether a message channel has a listener set or not.
 typedef struct {
-  // The size of the struct. Must be sizeof(FlutterChannelUpdate).
+  /// The size of the struct. Must be sizeof(FlutterChannelUpdate).
   size_t struct_size;
   /// The name of the channel.
   const char* channel;
@@ -1543,6 +1875,10 @@ typedef struct {
 
 typedef void (*FlutterChannelUpdateCallback)(
     const FlutterChannelUpdate* /* channel update */,
+    void* /* user data */);
+
+typedef void (*FlutterViewFocusChangeRequestCallback)(
+    const FlutterViewFocusChangeRequest* /* request */,
     void* /* user data */);
 
 typedef struct _FlutterTaskRunner* FlutterTaskRunner;
@@ -1584,6 +1920,8 @@ typedef struct {
   /// A unique identifier for the task runner. If multiple task runners service
   /// tasks on the same thread, their identifiers must match.
   size_t identifier;
+  /// The callback invoked when the task runner is destroyed.
+  VoidCallback destruction_callback;
 } FlutterTaskRunnerDescription;
 
 typedef struct {
@@ -1602,6 +1940,10 @@ typedef struct {
   /// Specify a callback that is used to set the thread priority for embedder
   /// task runners.
   void (*thread_priority_setter)(FlutterThreadPriority);
+  /// Specify the task runner for the thread on which the UI tasks will be run.
+  /// This may be same as platform_task_runner, in which case the Flutter engine
+  /// will run the UI isolate on platform thread.
+  const FlutterTaskRunnerDescription* ui_task_runner;
 } FlutterCustomTaskRunners;
 
 typedef struct {
@@ -1614,6 +1956,9 @@ typedef struct {
     /// A framebuffer for Flutter to render into. The embedder must ensure that
     /// the framebuffer is complete.
     FlutterOpenGLFramebuffer framebuffer;
+    /// A surface for Flutter to render into. Basically a wrapper around
+    /// a closure that'll be called when the surface should be made current.
+    FlutterOpenGLSurface surface;
   };
 } FlutterOpenGLBackingStore;
 
@@ -1635,6 +1980,7 @@ typedef struct {
 } FlutterSoftwareBackingStore;
 
 typedef struct {
+  /// The size of this struct. Must be sizeof(FlutterSoftwareBackingStore2).
   size_t struct_size;
   /// A pointer to the raw bytes of the allocation described by this software
   /// backing store.
@@ -1651,7 +1997,8 @@ typedef struct {
   /// store.
   VoidCallback destruction_callback;
   /// The pixel format that the engine should use to render into the allocation.
-  /// In most cases, kR
+  ///
+  /// On Linux, kFlutterSoftwarePixelFormatBGRA8888 is most commonly used.
   FlutterSoftwarePixelFormat pixel_format;
 } FlutterSoftwareBackingStore2;
 
@@ -1808,6 +2155,7 @@ typedef struct {
 /// Contains additional information about the backing store provided
 /// during presentation to the embedder.
 typedef struct {
+  /// The size of this struct. Must be sizeof(FlutterBackingStorePresentInfo).
   size_t struct_size;
 
   /// The area of the backing store that contains Flutter contents. Pixels
@@ -1920,6 +2268,14 @@ typedef struct {
   /// The callback should return true if the operation was successful.
   FlutterLayersPresentCallback present_layers_callback;
   /// Avoid caching backing stores provided by this compositor.
+  ///
+  /// The engine has an internal backing store cache. Instead of
+  /// creating & destroying backing stores for every frame, created
+  /// backing stores are automatically reused for subsequent frames.
+  ///
+  /// If you wish to change this behavior and destroy backing stores after
+  /// they've been used once, and create new backing stores for every frame,
+  /// you can set this bool to true.
   bool avoid_backing_store_cache;
   /// Callback invoked by the engine to composite the contents of each layer
   /// onto the specified view.
@@ -1969,7 +2325,7 @@ typedef const FlutterLocale* (*FlutterComputePlatformResolvedLocaleCallback)(
     size_t /* Number of locales*/);
 
 typedef struct {
-  /// This size of this struct. Must be sizeof(FlutterDisplay).
+  /// The size of this struct. Must be sizeof(FlutterEngineDisplay).
   size_t struct_size;
 
   FlutterEngineDisplayId display_id;
@@ -2434,7 +2790,43 @@ typedef struct {
   /// being registered on the framework side. The callback is invoked from
   /// a task posted to the platform thread.
   FlutterChannelUpdateCallback channel_update_callback;
+
+  /// The callback invoked by the engine when FlutterView focus state has
+  /// changed. The embedder can use this callback to request focus change for
+  /// the native view. The callback is invoked from a task posted to the
+  /// platform thread.
+  FlutterViewFocusChangeRequestCallback view_focus_change_request_callback;
+
+  /// Opaque identifier provided by the engine. Accessible in Dart code through
+  /// `PlatformDispatcher.instance.engineId`. Can be used in native code to
+  /// retrieve the engine instance that is running the Dart code.
+  int64_t engine_id;
+
+  /// If true, the engine will decode images in wide gamut color spaces
+  /// (Display P3) when supported. If false, images are decoded to sRGB.
+  bool enable_wide_gamut;
 } FlutterProjectArgs;
+
+typedef struct {
+  /// The size of this struct. Must be
+  /// sizeof(FlutterSendSemanticsActionInfo).
+  size_t struct_size;
+
+  /// The ID of the view that includes the node.
+  FlutterViewId view_id;
+
+  /// The semantics node identifier.
+  uint64_t node_id;
+
+  /// The semantics action.
+  FlutterSemanticsAction action;
+
+  /// Data associated with the action.
+  const uint8_t* data;
+
+  /// The data length.
+  size_t data_length;
+} FlutterSendSemanticsActionInfo;
 
 #ifndef FLUTTER_ENGINE_NO_PROTOTYPES
 
@@ -2483,8 +2875,8 @@ FlutterEngineResult FlutterEngineCollectAOTData(FlutterEngineAOTData data);
 ///             engine may need the embedder to post tasks back to it before
 ///             `FlutterEngineRun` has returned. Embedders can only post tasks
 ///             to the engine if they have a handle to the engine. In such
-///             cases, embedders are advised to get the engine handle via the
-///             `FlutterInitializeCall`. Then they can call
+///             cases, embedders are advised to get the engine handle by calling
+///             `FlutterEngineInitialize`. Then they can call
 ///             `FlutterEngineRunInitialized` knowing that they will be able to
 ///             service custom tasks on other threads with the engine handle.
 ///
@@ -2637,6 +3029,16 @@ FLUTTER_EXPORT
 FlutterEngineResult FlutterEngineRemoveView(FLUTTER_API_SYMBOL(FlutterEngine)
                                                 engine,
                                             const FlutterRemoveViewInfo* info);
+
+//------------------------------------------------------------------------------
+/// @brief      Notifies the engine that platform view focus state has changed.
+///
+/// @param[in]  engine  A running engine instance
+/// @param[in]  event   The focus event data describing the change.
+FLUTTER_EXPORT
+FlutterEngineResult FlutterEngineSendViewFocusEvent(
+    FLUTTER_API_SYMBOL(FlutterEngine) engine,
+    const FlutterViewFocusEvent* event);
 
 FLUTTER_EXPORT
 FlutterEngineResult FlutterEngineSendWindowMetricsEvent(
@@ -2859,7 +3261,10 @@ FlutterEngineResult FlutterEngineUpdateAccessibilityFeatures(
     FlutterAccessibilityFeature features);
 
 //------------------------------------------------------------------------------
-/// @brief      Dispatch a semantics action to the specified semantics node.
+/// @brief      Dispatch a semantics action to the specified semantics node
+///             in the implicit view.
+///
+/// @deprecated Use `FlutterEngineSendSemanticsAction` instead.
 ///
 /// @param[in]  engine       A running engine instance.
 /// @param[in]  node_id      The semantics node identifier.
@@ -2876,6 +3281,22 @@ FlutterEngineResult FlutterEngineDispatchSemanticsAction(
     FlutterSemanticsAction action,
     const uint8_t* data,
     size_t data_length);
+
+//------------------------------------------------------------------------------
+/// @brief      Dispatch a semantics action to the specified semantics node
+///             within a specific view.
+///
+/// @param[in]  engine  A running engine instance.
+/// @param[in]  info    The dispatch semantics on view arguments.
+///                     This can be deallocated once
+///                     |FlutterEngineSendSemanticsAction| returns.
+///
+/// @return     The result of the call.
+///
+FLUTTER_EXPORT
+FlutterEngineResult FlutterEngineSendSemanticsAction(
+    FLUTTER_API_SYMBOL(FlutterEngine) engine,
+    const FlutterSendSemanticsActionInfo* info);
 
 //------------------------------------------------------------------------------
 /// @brief      Notify the engine that a vsync event occurred. A baton passed to
@@ -2994,7 +3415,7 @@ uint64_t FlutterEngineGetCurrentTime();
 
 //------------------------------------------------------------------------------
 /// @brief      Inform the engine to run the specified task. This task has been
-///             given to the engine via the
+///             given to the embedder via the
 ///             `FlutterTaskRunnerDescription.post_task_callback`. This call
 ///             must only be made at the target time specified in that callback.
 ///             Running the task before that time is undefined behavior.
@@ -3264,6 +3685,9 @@ typedef FlutterEngineResult (*FlutterEngineDispatchSemanticsActionFnPtr)(
     FlutterSemanticsAction action,
     const uint8_t* data,
     size_t data_length);
+typedef FlutterEngineResult (*FlutterEngineSendSemanticsActionFnPtr)(
+    FLUTTER_API_SYMBOL(FlutterEngine) engine,
+    const FlutterSendSemanticsActionInfo* info);
 typedef FlutterEngineResult (*FlutterEngineOnVsyncFnPtr)(
     FLUTTER_API_SYMBOL(FlutterEngine) engine,
     intptr_t baton,
@@ -3314,6 +3738,9 @@ typedef FlutterEngineResult (*FlutterEngineAddViewFnPtr)(
 typedef FlutterEngineResult (*FlutterEngineRemoveViewFnPtr)(
     FLUTTER_API_SYMBOL(FlutterEngine) engine,
     const FlutterRemoveViewInfo* info);
+typedef FlutterEngineResult (*FlutterEngineSendViewFocusEventFnPtr)(
+    FLUTTER_API_SYMBOL(FlutterEngine) engine,
+    const FlutterViewFocusEvent* event);
 
 /// Function-pointer-based versions of the APIs above.
 typedef struct {
@@ -3362,6 +3789,8 @@ typedef struct {
   FlutterEngineSetNextFrameCallbackFnPtr SetNextFrameCallback;
   FlutterEngineAddViewFnPtr AddView;
   FlutterEngineRemoveViewFnPtr RemoveView;
+  FlutterEngineSendViewFocusEventFnPtr SendViewFocusEvent;
+  FlutterEngineSendSemanticsActionFnPtr SendSemanticsAction;
 } FlutterEngineProcTable;
 
 //------------------------------------------------------------------------------

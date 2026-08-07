@@ -97,6 +97,13 @@ class AccessibilityNode {
   // Returns the value of the node.
   [[nodiscard]] const char* GetValue() const { return m_value.c_str(); };
 
+  // Returns the application-assigned stable identifier, or "" when the node
+  // carries no annotation. Unlike GetId(), this survives tree rebuilds, so it
+  // is the addressing key a caller should prefer where it is present.
+  [[nodiscard]] const char* GetIdentifier() const {
+    return m_identifier.c_str();
+  };
+
   // Returns the bounds of the node, in its own coordinate system. Composing
   // GetTransform() down the traversal path yields screen space.
   [[nodiscard]] FlutterRect GetBounds() const { return m_bounds; };
@@ -151,12 +158,13 @@ class AccessibilityNode {
   // The scalar members are set unconditionally by Update() (called from the
   // constructor), but carry in-class initializers so the type is never left
   // with an indeterminate field on any construction path.
-  int32_t m_id = -1;       // ID of the node.
-  std::string m_label;     // Label of the node (owned copy).
-  std::string m_hint;      // Hint text of the node (owned copy).
-  std::string m_value;     // Value of the node (owned copy).
-  std::string m_tooltip;   // Tooltip text of the node (owned copy).
-  FlutterRect m_bounds{};  // Bounds of the node.
+  int32_t m_id = -1;         // ID of the node.
+  std::string m_label;       // Label of the node (owned copy).
+  std::string m_hint;        // Hint text of the node (owned copy).
+  std::string m_value;       // Value of the node (owned copy).
+  std::string m_tooltip;     // Tooltip text of the node (owned copy).
+  std::string m_identifier;  // App-assigned stable ID (owned copy); may be "".
+  FlutterRect m_bounds{};    // Bounds of the node.
   FlutterTransformation m_transform{};  // Node-to-parent transform.
   FlutterSemanticsFlag m_flags =
       static_cast<FlutterSemanticsFlag>(0);  // Flags associated with the node.

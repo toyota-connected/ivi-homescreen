@@ -402,7 +402,15 @@ FlutterEngineResult Engine::SetWindowSize(const size_t height,
       // view_id targeted a non-existent view on every engine past the first, so
       // that engine never scheduled a frame. One engine driving multiple views
       // (FlutterEngineAddView) would use the real per-view ids here.
-      .view_id = 0};
+      .view_id = 0,
+      // The engine gained optional size constraints; this port does not
+      // negotiate them, so declare their absence explicitly rather than
+      // leaving the trailing members to implicit initialization.
+      .has_constraints = false,
+      .min_width_constraint = 0,
+      .min_height_constraint = 0,
+      .max_width_constraint = 0,
+      .max_height_constraint = 0};
 
   if (LibFlutterEngine->SendWindowMetricsEvent(m_flutter_engine, &fwme) !=
       kSuccess) {
@@ -470,7 +478,15 @@ FlutterEngineResult Engine::AddView(const int64_t view_id,
       .physical_view_inset_bottom = 0,
       .physical_view_inset_left = 0,
       .display_id = display_id,
-      .view_id = view_id};
+      .view_id = view_id,
+      // The engine gained optional size constraints; this port does not
+      // negotiate them, so declare their absence explicitly rather than
+      // leaving the trailing members to implicit initialization.
+      .has_constraints = false,
+      .min_width_constraint = 0,
+      .min_height_constraint = 0,
+      .max_width_constraint = 0,
+      .max_height_constraint = 0};
   const FlutterAddViewInfo info = {
       .struct_size = sizeof(FlutterAddViewInfo),
       .view_id = view_id,
@@ -523,7 +539,15 @@ FlutterEngineResult Engine::SetPixelRatio(double pixel_ratio) {
       // view_id targeted a non-existent view on every engine past the first, so
       // that engine never scheduled a frame. One engine driving multiple views
       // (FlutterEngineAddView) would use the real per-view ids here.
-      .view_id = 0};
+      .view_id = 0,
+      // The engine gained optional size constraints; this port does not
+      // negotiate them, so declare their absence explicitly rather than
+      // leaving the trailing members to implicit initialization.
+      .has_constraints = false,
+      .min_width_constraint = 0,
+      .min_height_constraint = 0,
+      .max_width_constraint = 0,
+      .max_height_constraint = 0};
 
   const auto result =
       LibFlutterEngine->SendWindowMetricsEvent(m_flutter_engine, &fwme);

@@ -14,8 +14,10 @@
  * limitations under the License.
  */
 
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <iterator>
 #include <memory>
@@ -37,15 +39,17 @@ namespace {
 struct NodeBuilder {
   FlutterSemanticsNode2 node{};
   std::string label;
+  std::string identifier;
   std::vector<int32_t> children;
   std::vector<int32_t> custom_action_ids;
+  FlutterSemanticsFlags flags2{};
 
   NodeBuilder(int32_t id, std::vector<int32_t> kids, std::string lbl) {
     label = std::move(lbl);
     children = std::move(kids);
     node.struct_size = sizeof(FlutterSemanticsNode2);
     node.id = id;
-    node.flags = static_cast<FlutterSemanticsFlag>(0);
+    node.flags__deprecated__ = static_cast<FlutterSemanticsFlag>(0);
     node.actions = static_cast<FlutterSemanticsAction>(0);
     node.label = label.c_str();
     node.hint = "";
@@ -53,6 +57,10 @@ struct NodeBuilder {
     node.increased_value = "";
     node.decreased_value = "";
     node.tooltip = "";
+    node.identifier = "";
+    // Default to the legacy path: the engine only populates flags2 on newer
+    // revisions, and Update() must stay correct when it is absent.
+    node.flags2 = nullptr;
     node.child_count = children.size();
     node.children_in_traversal_order =
         children.empty() ? nullptr : children.data();
@@ -66,6 +74,21 @@ struct NodeBuilder {
     node.custom_accessibility_actions_count = custom_action_ids.size();
     node.custom_accessibility_actions =
         custom_action_ids.empty() ? nullptr : custom_action_ids.data();
+  }
+
+  // Points the node at an owned identifier string, as the embedder does.
+  void WithIdentifier(std::string id) {
+    identifier = std::move(id);
+    node.identifier = identifier.c_str();
+  }
+
+  // Opts this node into the FlutterSemanticsFlags struct, returning it for
+  // field assignment. struct_size is set so the node looks like a newer
+  // engine's output.
+  FlutterSemanticsFlags& WithFlags2() {
+    flags2.struct_size = sizeof(FlutterSemanticsFlags);
+    node.flags2 = &flags2;
+    return flags2;
   }
 };
 
@@ -131,7 +154,7 @@ TEST_F(AccessibilityTreeTest, LabelSurvivesSourceBufferDestruction) {
   FlutterSemanticsNode2 fl{};
   fl.struct_size = sizeof(FlutterSemanticsNode2);
   fl.id = 0;
-  fl.flags = static_cast<FlutterSemanticsFlag>(0);
+  fl.flags__deprecated__ = static_cast<FlutterSemanticsFlag>(0);
   fl.actions = static_cast<FlutterSemanticsAction>(0);
   fl.label = source->c_str();
   fl.hint = "";
@@ -152,7 +175,7 @@ TEST_F(AccessibilityTreeTest, NullStringsCoalesceToEmpty) {
   FlutterSemanticsNode2 fl{};
   fl.struct_size = sizeof(FlutterSemanticsNode2);
   fl.id = 7;
-  fl.flags = static_cast<FlutterSemanticsFlag>(0);
+  fl.flags__deprecated__ = static_cast<FlutterSemanticsFlag>(0);
   fl.actions = static_cast<FlutterSemanticsAction>(0);
   fl.label = nullptr;
   fl.hint = nullptr;
@@ -210,7 +233,7 @@ TEST_F(AccessibilityTreeTest,
   AccessibilityTree tree;
   NodeBuilder root1(0, {1}, "root");
   NodeBuilder child(1, {}, "child");
-  child.node.flags = kFlutterSemanticsFlagIsFocused;
+  child.node.flags__deprecated__ = kFlutterSemanticsFlagIsFocused;
   Apply(tree, {&root1.node, &child.node});
   ASSERT_EQ(tree.NumberOfNodes(), 2);
   ASSERT_EQ(tree.GetFocusedNode(), 1);
@@ -397,7 +420,7 @@ TEST_F(AccessibilityTreeTest, RedeclaringCustomActionReplacesIt) {
 // inline flag check, so the node reports the full derived role.
 TEST_F(AccessibilityTreeTest, SpecIsDerivedThroughTheTranslator) {
   NodeBuilder field(5, {}, "Name");
-  field.node.flags = static_cast<FlutterSemanticsFlag>(
+  field.node.flags__deprecated__ = static_cast<FlutterSemanticsFlag>(
       kFlutterSemanticsFlagIsTextField | kFlutterSemanticsFlagHasEnabledState);
   field.node.actions = kFlutterSemanticsActionSetText;
 
@@ -435,13 +458,13 @@ TEST_F(AccessibilityTreeTest, GetRoleMapsOnlyWindowAndButton) {
   EXPECT_EQ(AccessibilityNode(root.node).GetRole(), SEMANTIC_ROLE_WINDOW);
 
   NodeBuilder button(1, {}, "Play");
-  button.node.flags = kFlutterSemanticsFlagIsButton;
+  button.node.flags__deprecated__ = kFlutterSemanticsFlagIsButton;
   const AccessibilityNode button_node(button.node);
   EXPECT_EQ(button_node.GetRole(), SEMANTIC_ROLE_BUTTON);
   EXPECT_EQ(button_node.GetSpec().role, accessibility::Role::kButton);
 
   NodeBuilder slider(2, {}, "Volume");
-  slider.node.flags = kFlutterSemanticsFlagIsSlider;
+  slider.node.flags__deprecated__ = kFlutterSemanticsFlagIsSlider;
   const AccessibilityNode slider_node(slider.node);
   EXPECT_EQ(slider_node.GetRole(), SEMANTIC_ROLE_UNKNOWN);
   EXPECT_EQ(slider_node.GetSpec().role, accessibility::Role::kSlider);
@@ -457,6 +480,7 @@ TEST_F(AccessibilityTreeTest, DumpTreeEmitsActionsTransformAndCustomActions) {
       kFlutterSemanticsActionIncrease | kFlutterSemanticsActionDecrease);
   root.node.transform = {2.0, 0.0, 30.0, 0.0, 4.0, 50.0, 0.0, 0.0, 1.0};
   root.WithCustomActions({3});
+  root.WithIdentifier("hvac.temp.driver");
   CustomActionBuilder sync(3, "Sync zones", "Copies the driver setting");
   Apply(tree, {&root.node}, {&sync.action});
 
@@ -474,6 +498,9 @@ TEST_F(AccessibilityTreeTest, DumpTreeEmitsActionsTransformAndCustomActions) {
   ASSERT_TRUE(doc.HasMember("nodes"));
   ASSERT_EQ(doc["nodes"].Size(), 1u);
   const rapidjson::Value& node = doc["nodes"][0];
+
+  ASSERT_TRUE(node.HasMember("identifier"));
+  EXPECT_STREQ(node["identifier"].GetString(), "hvac.temp.driver");
 
   // 1 << 6 | 1 << 7 — the increase/decrease bits, emitted as the raw mask.
   ASSERT_TRUE(node.HasMember("actions"));
@@ -494,6 +521,148 @@ TEST_F(AccessibilityTreeTest, DumpTreeEmitsActionsTransformAndCustomActions) {
   EXPECT_STREQ(doc["custom_actions"][0]["label"].GetString(), "Sync zones");
   EXPECT_STREQ(doc["custom_actions"][0]["hint"].GetString(),
                "Copies the driver setting");
+}
+
+// The application-assigned identifier is retained, owned, and null-safe — it
+// is the addressing key that survives tree rebuilds, unlike `id`.
+TEST_F(AccessibilityTreeTest, RetainsIdentifier) {
+  AccessibilityTree tree;
+  NodeBuilder root(0, {}, "root");
+  {
+    NodeBuilder scoped(0, {}, "root");
+    scoped.WithIdentifier("hvac.temp.driver");
+    Apply(tree, {&scoped.node});
+  }  // the embedder's backing string is gone from here on
+
+  const AccessibilityNode* node = FindById(tree, 0);
+  ASSERT_NE(node, nullptr);
+  EXPECT_STREQ(node->GetIdentifier(), "hvac.temp.driver");
+
+  // Unannotated and explicitly-null both coalesce to empty, never a null deref.
+  NodeBuilder bare(1, {}, "bare");
+  EXPECT_STREQ(AccessibilityNode(bare.node).GetIdentifier(), "");
+  bare.node.identifier = nullptr;
+  EXPECT_STREQ(AccessibilityNode(bare.node).GetIdentifier(), "");
+}
+
+// An identifier the application withdraws must not linger on the node.
+TEST_F(AccessibilityTreeTest, UpdateReplacesIdentifier) {
+  AccessibilityTree tree;
+  NodeBuilder before(0, {}, "root");
+  before.WithIdentifier("old.id");
+  Apply(tree, {&before.node});
+  ASSERT_STREQ(FindById(tree, 0)->GetIdentifier(), "old.id");
+
+  NodeBuilder after(0, {}, "root");
+  Apply(tree, {&after.node});
+  EXPECT_STREQ(FindById(tree, 0)->GetIdentifier(), "");
+}
+
+// When the engine supplies FlutterSemanticsFlags it is authoritative, even
+// where it disagrees with the deprecated enum bitmask on the same node.
+TEST_F(AccessibilityTreeTest, Flags2WinsOverLegacyEnum) {
+  NodeBuilder builder(1, {}, "control");
+  builder.node.flags__deprecated__ = kFlutterSemanticsFlagIsButton;
+  builder.WithFlags2().is_slider = true;
+
+  const AccessibilityNode node(builder.node);
+  EXPECT_EQ(node.GetSpec().role, accessibility::Role::kSlider);
+}
+
+// Tristates carry information the enum could not: "applies and is false" is
+// distinct from "does not apply". A node explicitly reported as not-enabled is
+// disabled; one where enablement does not apply is not.
+TEST_F(AccessibilityTreeTest, Flags2TristatesDistinguishAbsentFromFalse) {
+  NodeBuilder disabled(1, {}, "Save");
+  FlutterSemanticsFlags& d = disabled.WithFlags2();
+  d.is_button = true;
+  d.is_enabled = kFlutterTristateFalse;
+  EXPECT_TRUE(AccessibilityNode(disabled.node).GetSpec().disabled);
+
+  NodeBuilder inapplicable(2, {}, "Label");
+  FlutterSemanticsFlags& i = inapplicable.WithFlags2();
+  i.is_enabled = kFlutterTristateNone;
+  EXPECT_FALSE(AccessibilityNode(inapplicable.node).GetSpec().disabled);
+
+  // Mixed check state arrives as its own value rather than a companion bit.
+  NodeBuilder mixed(3, {}, "Select all");
+  mixed.WithFlags2().is_checked = kFlutterCheckStateMixed;
+  const AccessibilityNode mixed_node(mixed.node);
+  EXPECT_EQ(mixed_node.GetSpec().role, accessibility::Role::kCheckBox);
+  EXPECT_TRUE(mixed_node.GetSpec().checked_mixed);
+  EXPECT_FALSE(mixed_node.GetSpec().checked);
+}
+
+// A null flags2 (older engine) must still translate, via the deprecated enum.
+TEST_F(AccessibilityTreeTest, NullFlags2FallsBackToLegacyEnum) {
+  NodeBuilder builder(1, {}, "Play");
+  builder.node.flags2 = nullptr;
+  builder.node.flags__deprecated__ = kFlutterSemanticsFlagIsButton;
+
+  EXPECT_EQ(AccessibilityNode(builder.node).GetSpec().role,
+            accessibility::Role::kButton);
+}
+
+// Focus tracking reads the derived spec, so it follows flags2 when present
+// rather than only the deprecated bitmask.
+TEST_F(AccessibilityTreeTest, FocusTrackedThroughFlags2) {
+  AccessibilityTree tree;
+  NodeBuilder root(0, {1}, "root");
+  NodeBuilder child(1, {}, "child");
+  child.WithFlags2().is_focused = kFlutterTristateTrue;
+  Apply(tree, {&root.node, &child.node});
+
+  EXPECT_EQ(tree.GetFocusedNode(), 1);
+}
+
+// An engine older than this header writes a shorter FlutterSemanticsNode2 and
+// reports that length in struct_size. Members appended after that point are
+// past the end of its allocation, so they must not be read at all — under ASan
+// this test fails outright if the struct_size gate is dropped.
+//
+// The node is placed at the very end of a heap allocation sized to the *old*
+// struct, so any read past it is a genuine out-of-bounds access rather than a
+// read of adjacent live memory that happens to look fine.
+TEST_F(AccessibilityTreeTest, OlderEngineStructSizeIsNotReadPast) {
+  constexpr size_t kOldSize = offsetof(FlutterSemanticsNode2, flags2);
+  ASSERT_LT(kOldSize, sizeof(FlutterSemanticsNode2))
+      << "flags2/identifier must be appended members for this test to mean "
+         "anything";
+
+  auto storage = std::make_unique<unsigned char[]>(kOldSize);
+  std::memset(storage.get(), 0, kOldSize);
+  auto* fl = reinterpret_cast<FlutterSemanticsNode2*>(storage.get());
+  fl->struct_size = kOldSize;  // engine predating flags2 and identifier
+  fl->id = 3;
+  fl->flags__deprecated__ = kFlutterSemanticsFlagIsButton;
+  fl->actions = kFlutterSemanticsActionTap;
+  fl->label = "Play";
+  fl->hint = "";
+  fl->value = "";
+  fl->tooltip = "";
+
+  const AccessibilityNode node(*fl);
+  EXPECT_EQ(node.GetId(), 3);
+  EXPECT_STREQ(node.GetLabel(), "Play");
+  EXPECT_STREQ(node.GetIdentifier(), "");  // absent, not garbage
+  // Role still derives, via the deprecated enum.
+  EXPECT_EQ(node.GetSpec().role, accessibility::Role::kButton);
+  EXPECT_TRUE(node.GetSpec().action_tap);
+}
+
+// Actions added after the enum's original ceiling are retained like any other.
+TEST_F(AccessibilityTreeTest, RetainsActionsAddedAfterLegacyCeiling) {
+  NodeBuilder builder(1, {}, "Details");
+  builder.node.actions = static_cast<FlutterSemanticsAction>(
+      kFlutterSemanticsActionScrollToOffset | kFlutterSemanticsActionExpand |
+      kFlutterSemanticsActionCollapse);
+
+  const AccessibilityNode node(builder.node);
+  EXPECT_TRUE(node.HasAction(kFlutterSemanticsActionScrollToOffset));
+  EXPECT_TRUE(node.GetSpec().action_scroll_to_offset);
+  EXPECT_TRUE(node.GetSpec().action_expand);
+  EXPECT_TRUE(node.GetSpec().action_collapse);
+  EXPECT_FALSE(node.GetSpec().action_tap);
 }
 
 // The declarations live in an unordered_map, so the dump sorts them by ID.
