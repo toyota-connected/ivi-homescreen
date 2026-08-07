@@ -17,9 +17,41 @@
 #include "accessibility_tree.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <unordered_set>
+
+namespace {
+
+// The engine sets `struct_size` to the size of the FlutterSemanticsNode2 the
+// *engine* was built against, which may be older than the header this port
+// compiles with. Members appended by a later embedder revision then lie past
+// the end of the engine's allocation, so reading them is an out-of-bounds
+// read, not merely a stale value.
+//
+// Both members below were added after the original FlutterSemanticsNode2, so
+// every read of them is gated on the engine having written that far. Members
+// present in the original struct (id, rect, transform, actions,
+// custom_accessibility_actions, the text fields) need no gate.
+constexpr bool NodeWroteThrough(const FlutterSemanticsNode2& node,
+                                const size_t member_end) {
+  return node.struct_size >= member_end;
+}
+
+constexpr size_t kIdentifierEnd =
+    offsetof(FlutterSemanticsNode2, identifier) + sizeof(const char*);
+constexpr size_t kFlags2End =
+    offsetof(FlutterSemanticsNode2, flags2) + sizeof(FlutterSemanticsFlags*);
+
+// Catches a member changing type or moving to the end of the struct, either of
+// which would silently break the bounds arithmetic above.
+static_assert(kIdentifierEnd <= sizeof(FlutterSemanticsNode2),
+              "identifier bounds overrun FlutterSemanticsNode2");
+static_assert(kFlags2End <= sizeof(FlutterSemanticsNode2),
+              "flags2 bounds overrun FlutterSemanticsNode2");
+
+}  // namespace
 
 #include <rapidjson/document.h>
 #include <rapidjson/prettywriter.h>
@@ -42,11 +74,18 @@ void AccessibilityNode::Update(const FlutterSemanticsNode2& fl_node) {
   m_hint = fl_node.hint ? fl_node.hint : "";
   m_value = fl_node.value ? fl_node.value : "";
   m_tooltip = fl_node.tooltip ? fl_node.tooltip : "";
+  // Application-assigned stable ID. Unlike `id`, it survives tree rebuilds and
+  // is the addressing key a caller should prefer. Empty when unannotated, and
+  // when the engine predates the field entirely.
+  const bool has_identifier = NodeWroteThrough(fl_node, kIdentifierEnd);
+  m_identifier = (has_identifier && fl_node.identifier != nullptr)
+                     ? fl_node.identifier
+                     : "";
   m_bounds = fl_node.rect;
   // Parent-local bounds are only meaningful alongside the node-to-parent
   // transform, so retain it here rather than composing at read time.
   m_transform = fl_node.transform;
-  m_flags = fl_node.flags;
+  m_flags = fl_node.flags__deprecated__;
   m_actions = fl_node.actions;
 
   // Replace (not append) the children in traversal order, so a reorder or a
@@ -74,8 +113,13 @@ void AccessibilityNode::Update(const FlutterSemanticsNode2& fl_node) {
 
   // Derive role and states last: Translate() disambiguates a label-only leaf
   // from a generic container, so it needs the refreshed label and children.
-  m_spec = accessibility::Translate(m_id, m_flags, m_actions, !m_label.empty(),
-                                    !m_children.empty());
+  // Prefer the FlutterSemanticsFlags struct. An engine predating the member
+  // never wrote it, and one that has it may still leave it null; Translate()
+  // falls back to the deprecated enum in both cases.
+  const FlutterSemanticsFlags* flags2 =
+      NodeWroteThrough(fl_node, kFlags2End) ? fl_node.flags2 : nullptr;
+  m_spec = accessibility::Translate(m_id, flags2, m_flags, m_actions,
+                                    !m_label.empty(), !m_children.empty());
 }
 
 uint8_t AccessibilityNode::GetRole() const {
@@ -126,7 +170,9 @@ void AccessibilityTree::HandleFlutterUpdate(
     const FlutterSemanticsNode2* node = update->nodes[i];
     AccessibilityNode* mirror = GetNode(*node);
     mirror->Update(*node);
-    if (node->flags & kFlutterSemanticsFlagIsFocused) {
+    // Read focus off the derived spec rather than the raw bitmask, so the
+    // FlutterSemanticsFlags struct is honored when the engine supplies it.
+    if (mirror->GetSpec().focused) {
       SetFocusedNode(node->id);
     }
   }
@@ -246,6 +292,9 @@ void AccessibilityTree::DumpTree(const char* target_file) const {
   for (auto& node : nodes) {
     rapidjson::Value node_obj(rapidjson::kObjectType);
     node_obj.AddMember("id", node->GetId(), allocator);
+    node_obj.AddMember("identifier",
+                       rapidjson::Value(node->GetIdentifier(), allocator),
+                       allocator);
     node_obj.AddMember("label", rapidjson::Value(node->GetLabel(), allocator),
                        allocator);
     node_obj.AddMember("hint", rapidjson::Value(node->GetHint(), allocator),
@@ -279,7 +328,9 @@ void AccessibilityTree::DumpTree(const char* target_file) const {
     transform_obj.AddMember("pers2", transform.pers2, allocator);
     node_obj.AddMember("transform", transform_obj, allocator);
 
-    // Flags and actions, as the raw bitmasks the embedder supplied.
+    // Actions as the raw bitmask the embedder supplied. `flags` is the
+    // deprecated enum bitmask, retained for continuity of this dump's shape;
+    // the authoritative derived state is in the node's spec.
     node_obj.AddMember("flags", node->GetFlags(), allocator);
     node_obj.AddMember("actions", node->GetActions(), allocator);
 

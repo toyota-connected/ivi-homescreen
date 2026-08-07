@@ -56,17 +56,22 @@ struct NodeSpec {
   Role role = Role::kUnknown;
 
   // States derived from flags.
-  bool disabled = false;       // HasEnabledState && !IsEnabled
+  bool disabled = false;       // enabled state present and not enabled
   bool hidden = false;         // IsHidden
   bool read_only = false;      // IsReadOnly
   bool selected = false;       // IsSelected
-  bool expanded = false;       // HasExpandedState && IsExpanded
-  bool checked = false;        // HasCheckedState && IsChecked
-  bool checked_mixed = false;  // IsCheckStateMixed
-  bool toggled = false;        // HasToggledState && IsToggled
+  bool expanded = false;       // expanded state present and expanded
+  bool checked = false;        // checked state present and checked
+  bool checked_mixed = false;  // checked state is mixed (tristate checkbox)
+  bool toggled = false;        // toggled state present and on
   bool live = false;           // IsLiveRegion
   bool focusable = false;      // IsFocusable
   bool focused = false;        // IsFocused
+
+  // States only the FlutterSemanticsFlags struct can express. Always false
+  // when translated from the legacy enum, which has no equivalent bit.
+  bool required = false;            // input required before form submission
+  bool a11y_focus_blocked = false;  // node blocks accessibility focus
 
   // Actions the AT can invoke, from the action bitmask.
   bool action_tap = false;
@@ -80,12 +85,30 @@ struct NodeSpec {
   bool action_show_on_screen = false;
   bool action_set_text = false;
   bool action_focus = false;
+  bool action_scroll_to_offset = false;
+  bool action_expand = false;
+  bool action_collapse = false;
 };
 
 // Pure translation from a Flutter semantics node's identity + flags + actions
 // to a NodeSpec. `has_label` / `has_children` disambiguate a label-only leaf
 // from a generic container when no stronger role flag matches. Stateless and
 // side-effect free.
+//
+// Preferred form. `flags` is `FlutterSemanticsNode2::flags2`, which the engine
+// may leave null; when it is null the translation falls back to `legacy_flags`
+// (`flags__deprecated__`). The struct is the richer source — its tristates
+// distinguish "property does not apply" from "applies and is false", which the
+// enum could only encode as a pair of bits — so it wins whenever present.
+NodeSpec Translate(int32_t id,
+                   const FlutterSemanticsFlags* flags,
+                   FlutterSemanticsFlag legacy_flags,
+                   FlutterSemanticsAction actions,
+                   bool has_label,
+                   bool has_children);
+
+// Legacy-enum-only overload, equivalent to passing a null `flags`. Retained
+// for callers that have no FlutterSemanticsFlags to hand.
 NodeSpec Translate(int32_t id,
                    FlutterSemanticsFlag flags,
                    FlutterSemanticsAction actions,
