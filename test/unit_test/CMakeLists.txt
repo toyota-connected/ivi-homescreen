@@ -60,8 +60,16 @@ set(CMAKE_THREAD_PREFER_PTHREAD ON)
 include(FindThreads)
 
 # Calculate test coverage
+#
+# -fprofile-update=atomic is required, not an optimization: gcov's counters are
+# plain increments by default, so two threads executing the same instrumented
+# line race and can leave a counter negative. geninfo then refuses the whole
+# capture ("Unexpected negative count"), failing the coverage job rather than
+# just skewing a number. Any test that runs instrumented code on more than one
+# thread hits this. The atomic updates cost throughput, which the coverage
+# build can afford and the other builds never see.
 if(COVERAGE)
-    set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} --coverage")
+    set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} --coverage -fprofile-update=atomic")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} --coverage")
     file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/run-ut-coverage.sh
         DESTINATION ${CMAKE_BINARY_DIR})
@@ -179,6 +187,7 @@ add_subdirectory(platform_view_registry-test)
 add_subdirectory(backend_output_binding-test)
 add_subdirectory(vsync_park-test)
 add_subdirectory(mutation_stack-test)
+add_subdirectory(semantics_hub-test)
 add_subdirectory(pixel_swizzle-test)
 add_subdirectory(scale_policy-test)
 add_subdirectory(text_input-test)
@@ -191,4 +200,5 @@ add_subdirectory(text_input-test)
 if (BUILD_ACCESSIBILITY)
     add_subdirectory(semantics_translator-test)
     add_subdirectory(accessibility_tree-test)
+    add_subdirectory(semantics_publisher-test)
 endif ()
