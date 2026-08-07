@@ -411,6 +411,26 @@ else ()
 endif ()
 
 #
+# MCP (Model Context Protocol) surface
+#
+# Off by default and deliberately so: this exposes the UI to being driven from
+# outside the process, so an image has to opt in at build time here and again at
+# runtime through config before any of it is reachable. Mirrors
+# BUILD_ACCESSIBILITY, and needs it -- the UI surface is served from the
+# semantics tree, which BUILD_ACCESSIBILITY builds.
+option(BUILD_MCP "Build the MCP surface" OFF)
+if (BUILD_MCP AND NOT BUILD_ACCESSIBILITY)
+    MESSAGE(FATAL_ERROR
+            "BUILD_MCP requires BUILD_ACCESSIBILITY: the MCP surface is served "
+            "from the semantics tree. Configure with -D BUILD_ACCESSIBILITY=ON.")
+endif ()
+if (BUILD_MCP)
+    MESSAGE(STATUS "MCP ..................... Enabled")
+else ()
+    MESSAGE(STATUS "MCP ..................... Disabled")
+endif ()
+
+#
 # Static linking
 #
 option(ENABLE_STATIC_LINK "Link stdlib with static libs" OFF)

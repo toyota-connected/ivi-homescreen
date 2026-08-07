@@ -28,8 +28,17 @@
 
 #include "ihs/config.h"
 #include "ihs/ihs.h"
-#include "ihs/ihs_mcp_provider.h"
 #include "ihs/ihs_semantics.h"
+
+/* The MCP headers are only installed when the package was built with
+ * BUILD_MCP, so a consumer discovers the surface by its presence rather than
+ * being told out of band. */
+#if defined(__has_include)
+#if __has_include("ihs/ihs_mcp_provider.h")
+#include "ihs/ihs_mcp_provider.h"
+#define CONSUMER_HAS_MCP 1
+#endif
+#endif
 #include "ihs/location.h"
 #include "ihs/logging.h"
 #include "ihs/trace.h"
@@ -215,14 +224,22 @@ int main(void) {
            IHS_SEMANTICS_ACTION_DID_GAIN_A11Y_FOCUS) == 0,
           "the automation mask withholds accessibility focus");
 
+#ifdef CONSUMER_HAS_MCP
     CHECK(ihs_mcp_provider_register(NULL, NULL) == IHS_MCP_ERR_INVALID,
           "reject a NULL provider desc");
     ihs_mcp_provider_unregister(NULL); /* must tolerate NULL */
     CHECK((IHS_MCP_CAP_READ_ONLY & IHS_MCP_CAP_INTERACT) == 0,
           "read-only capability does not permit interaction");
+#endif
   }
 
-  printf("OK ihs_shared consumer smoke: abi=0x%08x logging=%s\n",
-         api->abi_version, api->logging != NULL ? "present" : "absent");
+  printf("OK ihs_shared consumer smoke: abi=0x%08x logging=%s mcp=%s\n",
+         api->abi_version, api->logging != NULL ? "present" : "absent",
+#ifdef CONSUMER_HAS_MCP
+         "present"
+#else
+         "absent"
+#endif
+  );
   return 0;
 }
