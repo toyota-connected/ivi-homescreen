@@ -24,11 +24,17 @@
 #include "logging/logging.h"
 #include "profiling/pv_latency.h"
 
+#include <asio/post.hpp>
+
 #include <dlfcn.h>
 #include <cassert>
 
 #include "config/common.h"
 #include "engine.h"
+#if BUILD_ACCESSIBILITY
+#include "ihs/ihs_semantics_host.h"
+#include "shell/accessibility/semantics_publisher.h"
+#endif
 #include "hexdump.h"
 #include "logging/logger.hpp"
 #if BUILD_WATCHDOG
@@ -367,8 +373,10 @@ FlutterEngineResult Engine::Run(FlutterDesktopEngineState* state) {
       static_cast<FlutterAccessibilityFeature>(m_accessibility_features));
 
 #if BUILD_ACCESSIBILITY
-  // Enable Semantics
-  LibFlutterEngine->UpdateSemanticsEnabled(m_flutter_engine, true);
+  // Semantics is no longer switched on unconditionally. The hub reference-
+  // counts its consumers and asks for it through this host, so a build with
+  // the subsystem compiled in but nobody listening costs the engine nothing.
+  InstallSemanticsHost();
 #endif
 
   IHS_TRACE("({}) -Engine::Run", m_index);
@@ -927,6 +935,97 @@ void Engine::onLogMessageCallback(const char* tag,
 }
 
 #if BUILD_ACCESSIBILITY
+void Engine::InstallSemanticsHost() {
+  IhsSemanticsHost host{};
+  host.struct_size = sizeof(IhsSemanticsHost);
+  host.user_data = this;
+
+  host.set_semantics_enabled = [](void* user_data, const bool enabled) {
+    auto* engine = static_cast<Engine*>(user_data);
+    if (engine->m_flutter_engine == nullptr) {
+      return;
+    }
+    LibFlutterEngine->UpdateSemanticsEnabled(engine->m_flutter_engine, enabled);
+  };
+
+  host.dispatch = [](void* user_data, const int64_t view_id,
+                     const int32_t node_id, const uint64_t action,
+                     const uint8_t* data, const size_t data_length) -> int {
+    auto* engine = static_cast<Engine*>(user_data);
+    return engine->DispatchSemanticsAction(view_id, node_id, action, data,
+                                           data_length);
+  };
+
+  ihs_semantics_set_host(&host);
+}
+
+int Engine::DispatchSemanticsAction(const int64_t view_id,
+                                    const int32_t node_id,
+                                    const uint64_t action,
+                                    const uint8_t* data,
+                                    const size_t data_length) {
+  if (m_flutter_engine == nullptr) {
+    return IHS_SEMANTICS_ERR_UNAVAILABLE;
+  }
+
+  const FlutterSemanticsAction fl_action =
+      accessibility::ToFlutterSemanticsAction(action);
+  if (fl_action == static_cast<FlutterSemanticsAction>(0)) {
+    // The hub's action bits are its own; one with no framework equivalent is
+    // a translation gap, not something to forward as a zero mask.
+    return IHS_SEMANTICS_ERR_UNSUPPORTED_ACTION;
+  }
+
+  // The hub does not thread-hop -- deliberately, since the task runner is
+  // ours. Copy the payload and post: `data` is only valid for this call, and
+  // the engine reads it on the platform thread afterwards.
+  std::vector<uint8_t> payload;
+  if (data != nullptr && data_length > 0) {
+    payload.assign(data, data + data_length);
+  }
+
+  // The strand is serviced by the same thread that runs Flutter tasks, so
+  // posting here lands the call on the platform thread with no extra
+  // synchronization.
+  asio::post(*m_platform_task_runner->GetStrandContext(),
+             [this, view_id, node_id, fl_action,
+              payload = std::move(payload)]() mutable {
+               if (m_flutter_engine == nullptr) {
+                 return;
+               }
+               const uint8_t* bytes =
+                   payload.empty() ? nullptr : payload.data();
+               if (LibFlutterEngine->SendSemanticsAction != nullptr) {
+                 FlutterSendSemanticsActionInfo info = {};
+                 info.struct_size = sizeof(FlutterSendSemanticsActionInfo);
+                 info.view_id = view_id;
+                 info.node_id = static_cast<uint64_t>(node_id);
+                 info.action = fl_action;
+                 info.data = bytes;
+                 info.data_length = payload.size();
+                 LibFlutterEngine->SendSemanticsAction(m_flutter_engine, &info);
+                 return;
+               }
+               // Older engine: the deprecated entry point has no view id, so
+               // a multiview dispatch would land on the wrong view. Refuse
+               // rather than silently target the implicit one.
+               if (view_id != 0) {
+                 ihs::log::warn(
+                     "Dropping semantics action for view {}: this engine only "
+                     "exposes the single-view dispatch entry point",
+                     view_id);
+                 return;
+               }
+               LibFlutterEngine->DispatchSemanticsAction(
+                   m_flutter_engine, static_cast<uint64_t>(node_id), fl_action,
+                   bytes, payload.size());
+             });
+
+  // Accepted for delivery. Whether the widget does anything with it is not
+  // knowable here, and the hub's contract says so.
+  return IHS_SEMANTICS_OK;
+}
+
 void Engine::onSemanticsUpdateCallback(const FlutterSemanticsUpdate2* update,
                                        void* user_data) {
   FlutterDesktopEngineState const* engine_state =
@@ -939,6 +1038,14 @@ void Engine::onSemanticsUpdateCallback(const FlutterSemanticsUpdate2* update,
       update->struct_size, update->node_count, update->custom_action_count);
 
   accessibility_tree->HandleFlutterUpdate(update);
+
+  // Hand the refreshed tree to the semantics hub. Publication is whole-tree
+  // and happens here, at the batch boundary, because that is the only point at
+  // which the mirror is known consistent.
+  const int status = accessibility::PublishTree(*accessibility_tree);
+  if (status != IHS_SEMANTICS_OK) {
+    ihs::log::warn("Failed to publish semantics snapshot: {}", status);
+  }
 }
 #endif
 #if BUILD_WATCHDOG

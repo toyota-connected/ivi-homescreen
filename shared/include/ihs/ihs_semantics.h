@@ -42,7 +42,7 @@
  *      three updates has missed nothing. Always fetch the latest snapshot on
  *      wake rather than trying to track individual updates.
  *   4. ihs_semantics_acquire_snapshot for the current tree; release it when
- *      done. Acquire/release are lock-free and callable from any thread.
+ *      done. Acquire/release are O(1) and callable from any thread.
  *   5. ihs_semantics_dispatch to invoke an action. The hub serializes onto the
  *      platform thread, enforces the consumer's action_allow_mask, and traces
  *      the dispatch with the consumer name so "which actor did this" is
@@ -56,9 +56,9 @@
  * event loop instead.
  *
  * Threading: register/unregister and dispatch are callable from any thread.
- * Snapshot acquire/release are callable from any thread and are lock-free. The
- * done callback passed to dispatch is invoked on the platform thread. Snapshot
- * contents are immutable for the lifetime of the reference held.
+ * Snapshot acquire/release are callable from any thread. The done callback
+ * passed to dispatch runs on the caller's thread before dispatch returns.
+ * Snapshot contents are immutable for the lifetime of the reference held.
  */
 
 #ifndef IHS_SEMANTICS_H_
@@ -336,8 +336,12 @@ IHS_EXPORT const IhsSemanticsCustomAction* ihs_semantics_find_custom_action(
 
 /*
  * Take a reference on the current tree, or null when semantics is not running.
- * Lock-free and callable from any thread. Every successful acquire must be
- * paired with exactly one release.
+ * Callable from any thread. Every successful acquire must be paired with
+ * exactly one release.
+ *
+ * Acquire is O(1) and contends only with the pointer swap in publish, never
+ * with another consumer's work -- which is the property that matters: no
+ * consumer can stall the platform thread, and none can stall another.
  */
 IHS_EXPORT const IhsSemanticsSnapshot* ihs_semantics_acquire_snapshot(void);
 
@@ -387,14 +391,15 @@ IHS_EXPORT int ihs_semantics_register(const IhsSemanticsConsumerDesc* desc,
 IHS_EXPORT void ihs_semantics_unregister(IhsSemanticsConsumer* consumer);
 
 /*
- * Invoked on the platform thread when a dispatch has been handed to the
- * framework. `status` is IHS_SEMANTICS_OK, or the reason it went no further.
+ * Invoked once a dispatch has been accepted for delivery, with
+ * IHS_SEMANTICS_OK, or the reason it went no further. Called on the thread
+ * that called ihs_semantics_dispatch, before that call returns.
  *
- * Delivery to the framework is not the same as the UI having reacted: the
- * framework routes the action to whatever handler the widget registered, and
- * that may complete later, or do nothing at all. A caller that needs to know
- * what changed should compare snapshot generations rather than infer anything
- * from this callback.
+ * Acceptance is not execution, and is emphatically not the UI having reacted:
+ * the request still has to reach the platform thread and be routed to whatever
+ * handler the widget registered, which may complete later or do nothing at
+ * all. A caller that needs to know what actually changed must compare snapshot
+ * generations; nothing about this callback implies a visible effect.
  */
 typedef void (*IhsSemanticsDoneCallback)(int status, void* user_data);
 

@@ -47,6 +47,12 @@ struct LibFlutterEngineExports {
   FlutterEngineUpdateAccessibilityFeaturesFnPtr UpdateAccessibilityFeatures =
       nullptr;
   FlutterEngineDispatchSemanticsActionFnPtr DispatchSemanticsAction = nullptr;
+  /* Optional: added to the embedder ABI after the oldest engine this port
+   * supports, so it stays null on an older libflutter_engine.so. Callers must
+   * null-test and fall back to DispatchSemanticsAction, which loses only the
+   * view id. Requiring it would turn an older engine from degraded into one
+   * the shell refuses to start against. */
+  FlutterEngineSendSemanticsActionFnPtr SendSemanticsAction = nullptr;
   FlutterEngineOnVsyncFnPtr OnVsync = nullptr;
   FlutterEngineReloadSystemFontsFnPtr ReloadSystemFonts = nullptr;
   FlutterEngineTraceEventDurationBeginFnPtr TraceEventDurationBegin = nullptr;

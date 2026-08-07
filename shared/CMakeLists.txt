@@ -45,6 +45,7 @@ add_library(ihs_shared SHARED
         src/trace.cc
         src/config.cc
         src/platform_view.cc
+        src/semantics.cc
 )
 add_library(ivi_homescreen::ihs_shared ALIAS ihs_shared)
 
@@ -98,8 +99,11 @@ target_compile_options(ihs_shared PRIVATE -Wall -Wextra)
 # add_subdirectory(shared) in the root so ihs_shared would otherwise be built
 # without --coverage and produce no .gcda data. Wire it here so lcov captures
 # shared/ sources when COVERAGE=ON.
+# -fprofile-update=atomic for the same reason as the test tree: ihs_shared is
+# read concurrently by design (snapshot acquire from any thread), so its
+# counters are raced by construction and non-atomic updates corrupt them.
 if (COVERAGE)
-    target_compile_options(ihs_shared PRIVATE --coverage)
+    target_compile_options(ihs_shared PRIVATE --coverage -fprofile-update=atomic)
     target_link_options(ihs_shared PRIVATE --coverage)
 endif ()
 

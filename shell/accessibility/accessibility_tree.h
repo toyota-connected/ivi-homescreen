@@ -17,6 +17,7 @@
 #ifndef SHELL_ACCESSIBILITY_ACCESSIBILITY_TREE_H_
 #define SHELL_ACCESSIBILITY_ACCESSIBILITY_TREE_H_
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -229,6 +230,28 @@ class AccessibilityTree {
   [[nodiscard]] size_t NumberOfCustomActions() const {
     return custom_actions.size();
   };
+
+  // Retrieves a node by its tree id, or nullptr when absent. O(1); prefer this
+  // to walking GetNodeByIdx when following a parent's child ids.
+  [[nodiscard]] AccessibilityNode* FindNode(const int32_t node_id) const {
+    const auto it = node_index.find(node_id);
+    return it != node_index.end() ? it->second : nullptr;
+  }
+
+  // Invokes `fn` for each declared custom action, in ascending id order so
+  // repeated traversals of an unchanged tree agree with each other.
+  template <typename Fn>
+  void ForEachCustomAction(Fn&& fn) const {
+    std::vector<int32_t> ids;
+    ids.reserve(custom_actions.size());
+    for (const auto& entry : custom_actions) {
+      ids.push_back(entry.first);
+    }
+    std::sort(ids.begin(), ids.end());
+    for (const int32_t id : ids) {
+      fn(custom_actions.at(id));
+    }
+  }
 
 #if ENABLE_ACCESSKIT
   // Initializes AccessKit support.

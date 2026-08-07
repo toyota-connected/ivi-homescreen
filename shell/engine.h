@@ -405,6 +405,21 @@ class Engine {
     return m_flutter_engine;
   }
 
+#if BUILD_ACCESSIBILITY
+  // Installs this engine as the semantics hub's host, so the hub can turn
+  // engine semantics on and off with its consumer count and route dispatches
+  // onto the platform thread. Called once, at the end of Run().
+  void InstallSemanticsHost();
+
+  // Hub dispatch seam: validates what only the engine can, copies the payload,
+  // and posts onto the platform thread. Returns an IhsSemanticsStatus.
+  int DispatchSemanticsAction(int64_t view_id,
+                              int32_t node_id,
+                              uint64_t action,
+                              const uint8_t* data,
+                              size_t data_length);
+#endif
+
   [[nodiscard]] TaskRunner* GetPlatformTaskRunner() const {
     return m_platform_task_runner.get();
   }
