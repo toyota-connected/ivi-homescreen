@@ -16,9 +16,13 @@
 
 #include <cstdint>
 #include <cstdlib>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <vector>
+
+#include <rapidjson/document.h>
 
 #include "gtest/gtest.h"
 
@@ -34,6 +38,7 @@ struct NodeBuilder {
   FlutterSemanticsNode2 node{};
   std::string label;
   std::vector<int32_t> children;
+  std::vector<int32_t> custom_action_ids;
 
   NodeBuilder(int32_t id, std::vector<int32_t> kids, std::string lbl) {
     label = std::move(lbl);
@@ -53,16 +58,46 @@ struct NodeBuilder {
         children.empty() ? nullptr : children.data();
     node.children_in_hit_test_order = node.children_in_traversal_order;
   }
+
+  // Points the node at an owned custom-action ID array, mirroring how the
+  // embedder hands over a borrowed array the tree must copy.
+  void WithCustomActions(std::vector<int32_t> ids) {
+    custom_action_ids = std::move(ids);
+    node.custom_accessibility_actions_count = custom_action_ids.size();
+    node.custom_accessibility_actions =
+        custom_action_ids.empty() ? nullptr : custom_action_ids.data();
+  }
 };
 
-// Drives HandleFlutterUpdate from a set of already-built nodes.
-void Apply(AccessibilityTree& tree, std::vector<FlutterSemanticsNode2*> nodes) {
+// Owns the backing strings for a FlutterSemanticsCustomAction2, for the same
+// reason NodeBuilder owns the node's: the embedder's pointers are transient.
+struct CustomActionBuilder {
+  FlutterSemanticsCustomAction2 action{};
+  std::string label;
+  std::string hint;
+
+  CustomActionBuilder(int32_t id, std::string lbl, std::string hnt) {
+    label = std::move(lbl);
+    hint = std::move(hnt);
+    action.struct_size = sizeof(FlutterSemanticsCustomAction2);
+    action.id = id;
+    action.override_action = static_cast<FlutterSemanticsAction>(0);
+    action.label = label.c_str();
+    action.hint = hint.c_str();
+  }
+};
+
+// Drives HandleFlutterUpdate from a set of already-built nodes and custom
+// action declarations.
+void Apply(AccessibilityTree& tree,
+           std::vector<FlutterSemanticsNode2*> nodes,
+           std::vector<FlutterSemanticsCustomAction2*> actions = {}) {
   FlutterSemanticsUpdate2 update{};
   update.struct_size = sizeof(FlutterSemanticsUpdate2);
   update.node_count = nodes.size();
   update.nodes = nodes.data();
-  update.custom_action_count = 0;
-  update.custom_actions = nullptr;
+  update.custom_action_count = actions.size();
+  update.custom_actions = actions.empty() ? nullptr : actions.data();
   tree.HandleFlutterUpdate(&update);
 }
 
@@ -186,4 +221,312 @@ TEST_F(AccessibilityTreeTest,
   EXPECT_EQ(tree.NumberOfNodes(), 1);
   EXPECT_EQ(FindById(tree, 1), nullptr);
   EXPECT_EQ(tree.GetFocusedNode(), 0);  // focus fell back to root
+}
+
+// The action bitmask is retained verbatim, and HasAction() tests single bits
+// against it. Without this the node cannot say which verbs a caller may invoke.
+TEST_F(AccessibilityTreeTest, RetainsActionBitmask) {
+  NodeBuilder slider(0, {}, "Volume");
+  slider.node.actions = static_cast<FlutterSemanticsAction>(
+      kFlutterSemanticsActionIncrease | kFlutterSemanticsActionDecrease);
+
+  AccessibilityNode node(slider.node);
+  EXPECT_EQ(static_cast<uint32_t>(node.GetActions()),
+            static_cast<uint32_t>(kFlutterSemanticsActionIncrease |
+                                  kFlutterSemanticsActionDecrease));
+  EXPECT_TRUE(node.HasAction(kFlutterSemanticsActionIncrease));
+  EXPECT_TRUE(node.HasAction(kFlutterSemanticsActionDecrease));
+  EXPECT_FALSE(node.HasAction(kFlutterSemanticsActionTap));
+}
+
+// HasAction() requires every requested bit, so a caller can test a combination
+// without it passing on a partial match.
+TEST_F(AccessibilityTreeTest, HasActionRequiresAllRequestedBits) {
+  NodeBuilder builder(0, {}, "partial");
+  builder.node.actions = kFlutterSemanticsActionIncrease;
+
+  const AccessibilityNode node(builder.node);
+  EXPECT_FALSE(node.HasAction(static_cast<FlutterSemanticsAction>(
+      kFlutterSemanticsActionIncrease | kFlutterSemanticsActionDecrease)));
+}
+
+// The node-to-parent transform is retained: parent-local bounds are not
+// comparable across the tree without it.
+TEST_F(AccessibilityTreeTest, RetainsTransform) {
+  NodeBuilder builder(0, {}, "root");
+  builder.node.transform = {2.0, 0.0, 30.0, 0.0, 4.0, 50.0, 0.0, 0.0, 1.0};
+
+  const AccessibilityNode node(builder.node);
+  EXPECT_DOUBLE_EQ(node.GetTransform().scaleX, 2.0);
+  EXPECT_DOUBLE_EQ(node.GetTransform().scaleY, 4.0);
+  EXPECT_DOUBLE_EQ(node.GetTransform().transX, 30.0);
+  EXPECT_DOUBLE_EQ(node.GetTransform().transY, 50.0);
+  EXPECT_DOUBLE_EQ(node.GetTransform().pers2, 1.0);
+}
+
+// A custom action batch is resolved into the tree's declaration table and the
+// referencing node keeps the IDs. Previously the batch was iterated and
+// discarded, so custom actions were invisible to every consumer.
+TEST_F(AccessibilityTreeTest, ResolvesCustomActionsAgainstDeclarations) {
+  AccessibilityTree tree;
+  NodeBuilder root(0, {}, "root");
+  root.WithCustomActions({3, 7});
+  CustomActionBuilder sync(3, "Sync zones", "Copies the driver setting");
+  CustomActionBuilder reset(7, "Reset", "");
+  Apply(tree, {&root.node}, {&sync.action, &reset.action});
+
+  const AccessibilityNode* node = FindById(tree, 0);
+  ASSERT_NE(node, nullptr);
+  ASSERT_EQ(node->NumberOfCustomActions(), 2u);
+  EXPECT_EQ(node->GetCustomActionId(0), 3);
+  EXPECT_EQ(node->GetCustomActionId(1), 7);
+  EXPECT_EQ(node->GetCustomActionId(2), -1);   // out of bounds
+  EXPECT_EQ(node->GetCustomActionId(-1), -1);  // out of bounds
+
+  EXPECT_EQ(tree.NumberOfCustomActions(), 2u);
+  const AccessibilityCustomAction* action = tree.FindCustomAction(3);
+  ASSERT_NE(action, nullptr);
+  EXPECT_EQ(action->id, 3);
+  EXPECT_EQ(action->label, "Sync zones");
+  EXPECT_EQ(action->hint, "Copies the driver setting");
+  EXPECT_EQ(tree.FindCustomAction(99), nullptr);  // never declared
+}
+
+// The declaration's strings are owned, like the node text: the embedder frees
+// its buffers when the update callback returns.
+TEST_F(AccessibilityTreeTest, CustomActionStringsSurviveSourceDestruction) {
+  AccessibilityTree tree;
+  NodeBuilder root(0, {}, "root");
+  {
+    CustomActionBuilder sync(3, "Sync zones", "Copies the driver setting");
+    Apply(tree, {&root.node}, {&sync.action});
+  }  // the embedder's backing strings are gone from here on
+
+  const AccessibilityCustomAction* action = tree.FindCustomAction(3);
+  ASSERT_NE(action, nullptr);
+  EXPECT_EQ(action->label, "Sync zones");
+  EXPECT_EQ(action->hint, "Copies the driver setting");
+}
+
+// A null label or hint on a declaration coalesces to empty rather than being
+// fed to std::string(nullptr) (undefined behavior), matching the node text.
+TEST_F(AccessibilityTreeTest, CustomActionNullStringsCoalesceToEmpty) {
+  AccessibilityTree tree;
+  NodeBuilder root(0, {}, "root");
+  CustomActionBuilder bare(4, "", "");
+  bare.action.label = nullptr;
+  bare.action.hint = nullptr;
+  Apply(tree, {&root.node}, {&bare.action});
+
+  const AccessibilityCustomAction* action = tree.FindCustomAction(4);
+  ASSERT_NE(action, nullptr);
+  EXPECT_EQ(action->label, "");
+  EXPECT_EQ(action->hint, "");
+}
+
+// A null entry inside the declaration array is skipped rather than
+// dereferenced, and does not abort the rest of the batch.
+TEST_F(AccessibilityTreeTest, NullCustomActionEntryIsSkipped) {
+  AccessibilityTree tree;
+  NodeBuilder root(0, {}, "root");
+  CustomActionBuilder sync(3, "Sync zones", "");
+  Apply(tree, {&root.node}, {nullptr, &sync.action});
+
+  EXPECT_EQ(tree.NumberOfCustomActions(), 1u);
+  ASSERT_NE(tree.FindCustomAction(3), nullptr);
+}
+
+// Custom action IDs follow the same replace-don't-append rule as children: an
+// action the application withdraws from a node must not linger on it.
+TEST_F(AccessibilityTreeTest, UpdateReplacesNodeCustomActions) {
+  AccessibilityTree tree;
+  NodeBuilder root1(0, {}, "root");
+  root1.WithCustomActions({3, 7});
+  CustomActionBuilder sync(3, "Sync zones", "");
+  CustomActionBuilder reset(7, "Reset", "");
+  Apply(tree, {&root1.node}, {&sync.action, &reset.action});
+  ASSERT_EQ(FindById(tree, 0)->NumberOfCustomActions(), 2u);
+
+  NodeBuilder root2(0, {}, "root");
+  root2.WithCustomActions({7});
+  Apply(tree, {&root2.node});
+  const AccessibilityNode* node = FindById(tree, 0);
+  ASSERT_EQ(node->NumberOfCustomActions(), 1u);
+  EXPECT_EQ(node->GetCustomActionId(0), 7);
+}
+
+// Declarations deliberately outlive the nodes that reference them: Flutter
+// assigns a custom action its ID once and may declare it in an earlier batch
+// than the node that uses it, so dropping an unreferenced entry would lose it
+// permanently.
+TEST_F(AccessibilityTreeTest, CustomActionDeclarationsSurviveNodePruning) {
+  AccessibilityTree tree;
+  NodeBuilder root1(0, {1}, "root");
+  NodeBuilder child(1, {}, "child");
+  child.WithCustomActions({3});
+  CustomActionBuilder sync(3, "Sync zones", "");
+  Apply(tree, {&root1.node, &child.node}, {&sync.action});
+  ASSERT_EQ(tree.NumberOfCustomActions(), 1u);
+
+  // Detach the only node that referenced the action.
+  NodeBuilder root2(0, {}, "root");
+  Apply(tree, {&root2.node});
+  ASSERT_EQ(FindById(tree, 1), nullptr);
+  EXPECT_EQ(tree.NumberOfCustomActions(), 1u);
+  ASSERT_NE(tree.FindCustomAction(3), nullptr);
+}
+
+// Re-declaring an ID refreshes the label and hint in place rather than
+// accumulating a second entry.
+TEST_F(AccessibilityTreeTest, RedeclaringCustomActionReplacesIt) {
+  AccessibilityTree tree;
+  NodeBuilder root(0, {}, "root");
+  CustomActionBuilder before(3, "Sync zones", "old");
+  Apply(tree, {&root.node}, {&before.action});
+  CustomActionBuilder after(3, "Sync all zones", "new");
+  Apply(tree, {&root.node}, {&after.action});
+
+  EXPECT_EQ(tree.NumberOfCustomActions(), 1u);
+  const AccessibilityCustomAction* action = tree.FindCustomAction(3);
+  ASSERT_NE(action, nullptr);
+  EXPECT_EQ(action->label, "Sync all zones");
+  EXPECT_EQ(action->hint, "new");
+}
+
+// Role and states now come from accessibility::Translate() rather than an
+// inline flag check, so the node reports the full derived role.
+TEST_F(AccessibilityTreeTest, SpecIsDerivedThroughTheTranslator) {
+  NodeBuilder field(5, {}, "Name");
+  field.node.flags = static_cast<FlutterSemanticsFlag>(
+      kFlutterSemanticsFlagIsTextField | kFlutterSemanticsFlagHasEnabledState);
+  field.node.actions = kFlutterSemanticsActionSetText;
+
+  const AccessibilityNode node(field.node);
+  EXPECT_EQ(node.GetSpec().role, accessibility::Role::kTextInput);
+  EXPECT_TRUE(node.GetSpec().disabled);  // HasEnabledState && !IsEnabled
+  EXPECT_TRUE(node.GetSpec().action_set_text);
+  EXPECT_FALSE(node.GetSpec().action_tap);
+}
+
+// Translate() distinguishes a label-only leaf from a generic container, so the
+// spec must be derived after the label and children have been refreshed.
+TEST_F(AccessibilityTreeTest, SpecReflectsRefreshedLabelAndChildren) {
+  AccessibilityTree tree;
+  NodeBuilder root(0, {1}, "root");
+  NodeBuilder leaf(1, {}, "Now playing");
+  Apply(tree, {&root.node, &leaf.node});
+  ASSERT_EQ(FindById(tree, 1)->GetSpec().role, accessibility::Role::kLabel);
+
+  // Re-send the same node with a child: it is a container now, not a label.
+  NodeBuilder branch(1, {2}, "Now playing");
+  NodeBuilder grandchild(2, {}, "");
+  NodeBuilder root2(0, {1}, "root");
+  Apply(tree, {&root2.node, &branch.node, &grandchild.node});
+  EXPECT_EQ(FindById(tree, 1)->GetSpec().role,
+            accessibility::Role::kGenericContainer);
+}
+
+// GetRole() still reports the numeric encoding the AccessKit bridge consumes.
+// Only window and button have a SemanticRole constant; every other derived
+// role collapses to unknown, which is what this node reported before roles
+// were derived through the translator.
+TEST_F(AccessibilityTreeTest, GetRoleMapsOnlyWindowAndButton) {
+  NodeBuilder root(0, {}, "root");
+  EXPECT_EQ(AccessibilityNode(root.node).GetRole(), SEMANTIC_ROLE_WINDOW);
+
+  NodeBuilder button(1, {}, "Play");
+  button.node.flags = kFlutterSemanticsFlagIsButton;
+  const AccessibilityNode button_node(button.node);
+  EXPECT_EQ(button_node.GetRole(), SEMANTIC_ROLE_BUTTON);
+  EXPECT_EQ(button_node.GetSpec().role, accessibility::Role::kButton);
+
+  NodeBuilder slider(2, {}, "Volume");
+  slider.node.flags = kFlutterSemanticsFlagIsSlider;
+  const AccessibilityNode slider_node(slider.node);
+  EXPECT_EQ(slider_node.GetRole(), SEMANTIC_ROLE_UNKNOWN);
+  EXPECT_EQ(slider_node.GetSpec().role, accessibility::Role::kSlider);
+}
+
+// The dump is the only way to inspect a running shell's tree, so the retained
+// fields have to reach it — a field kept on the node but omitted here is
+// invisible in the field.
+TEST_F(AccessibilityTreeTest, DumpTreeEmitsActionsTransformAndCustomActions) {
+  AccessibilityTree tree;
+  NodeBuilder root(0, {}, "root");
+  root.node.actions = static_cast<FlutterSemanticsAction>(
+      kFlutterSemanticsActionIncrease | kFlutterSemanticsActionDecrease);
+  root.node.transform = {2.0, 0.0, 30.0, 0.0, 4.0, 50.0, 0.0, 0.0, 1.0};
+  root.WithCustomActions({3});
+  CustomActionBuilder sync(3, "Sync zones", "Copies the driver setting");
+  Apply(tree, {&root.node}, {&sync.action});
+
+  const std::string target =
+      std::string(TEST_SCRATCH_DIR) + "/dump_tree_enriched.json";
+  tree.DumpTree(target.c_str());
+
+  std::ifstream ifs(target);
+  ASSERT_TRUE(ifs.is_open());
+  const std::string json((std::istreambuf_iterator<char>(ifs)),
+                         std::istreambuf_iterator<char>());
+
+  rapidjson::Document doc;
+  ASSERT_FALSE(doc.Parse(json.c_str()).HasParseError());
+  ASSERT_TRUE(doc.HasMember("nodes"));
+  ASSERT_EQ(doc["nodes"].Size(), 1u);
+  const rapidjson::Value& node = doc["nodes"][0];
+
+  // 1 << 6 | 1 << 7 — the increase/decrease bits, emitted as the raw mask.
+  ASSERT_TRUE(node.HasMember("actions"));
+  EXPECT_EQ(node["actions"].GetInt(), (1 << 6) | (1 << 7));
+
+  ASSERT_TRUE(node.HasMember("transform"));
+  EXPECT_DOUBLE_EQ(node["transform"]["scaleX"].GetDouble(), 2.0);
+  EXPECT_DOUBLE_EQ(node["transform"]["transY"].GetDouble(), 50.0);
+
+  ASSERT_TRUE(node.HasMember("custom_actions"));
+  ASSERT_EQ(node["custom_actions"].Size(), 1u);
+  EXPECT_EQ(node["custom_actions"][0].GetInt(), 3);
+
+  // The declarations are emitted once at the top level, not per node.
+  ASSERT_TRUE(doc.HasMember("custom_actions"));
+  ASSERT_EQ(doc["custom_actions"].Size(), 1u);
+  EXPECT_EQ(doc["custom_actions"][0]["id"].GetInt(), 3);
+  EXPECT_STREQ(doc["custom_actions"][0]["label"].GetString(), "Sync zones");
+  EXPECT_STREQ(doc["custom_actions"][0]["hint"].GetString(),
+               "Copies the driver setting");
+}
+
+// The declarations live in an unordered_map, so the dump sorts them by ID.
+// Without that, two dumps of the same tree can differ only in ordering and
+// cannot be compared.
+TEST_F(AccessibilityTreeTest, DumpTreeEmitsCustomActionsInIdOrder) {
+  AccessibilityTree tree;
+  NodeBuilder root(0, {}, "root");
+  root.WithCustomActions({9, 1, 5});
+  CustomActionBuilder c9(9, "nine", "");
+  CustomActionBuilder c1(1, "one", "");
+  CustomActionBuilder c5(5, "five", "");
+  Apply(tree, {&root.node}, {&c9.action, &c1.action, &c5.action});
+
+  const std::string target =
+      std::string(TEST_SCRATCH_DIR) + "/dump_tree_action_order.json";
+  tree.DumpTree(target.c_str());
+
+  std::ifstream ifs(target);
+  ASSERT_TRUE(ifs.is_open());
+  const std::string json((std::istreambuf_iterator<char>(ifs)),
+                         std::istreambuf_iterator<char>());
+
+  rapidjson::Document doc;
+  ASSERT_FALSE(doc.Parse(json.c_str()).HasParseError());
+  ASSERT_EQ(doc["custom_actions"].Size(), 3u);
+  EXPECT_EQ(doc["custom_actions"][0]["id"].GetInt(), 1);
+  EXPECT_EQ(doc["custom_actions"][1]["id"].GetInt(), 5);
+  EXPECT_EQ(doc["custom_actions"][2]["id"].GetInt(), 9);
+
+  // The per-node ID list keeps the order the application declared it in.
+  ASSERT_EQ(doc["nodes"][0]["custom_actions"].Size(), 3u);
+  EXPECT_EQ(doc["nodes"][0]["custom_actions"][0].GetInt(), 9);
+  EXPECT_EQ(doc["nodes"][0]["custom_actions"][1].GetInt(), 1);
+  EXPECT_EQ(doc["nodes"][0]["custom_actions"][2].GetInt(), 5);
 }
