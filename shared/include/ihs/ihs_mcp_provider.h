@@ -54,7 +54,16 @@
  *
  * This surface has no dependency on the semantics hub or on any Flutter
  * header. A provider may be an out-of-tree FFI plugin; see docs/PLUGIN_ABI.md
- * for the boundary rules.
+ * for the boundary rules. Registration lives in libihs_shared for that reason
+ * and no other: a dlopen'd plugin can only bind to a shared object, so a
+ * provider implemented in one has to resolve these symbols from there.
+ *
+ * Built only when BUILD_MCP is on, which is off by default. This is remote
+ * control of the UI, so an image opts in at build time and again at runtime
+ * through config before any of it is reachable. With BUILD_MCP off the
+ * implementation is not compiled, no ihs_mcp_* symbol is exported, and this
+ * header is not installed -- so an out-of-tree consumer finds out at the
+ * include rather than at the link.
  */
 
 #ifndef IHS_MCP_PROVIDER_H_

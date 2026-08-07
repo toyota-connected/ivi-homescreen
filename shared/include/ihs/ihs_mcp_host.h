@@ -32,6 +32,8 @@
  * server, and keeps the server's job to translating MCP messages into these
  * calls.
  *
+ * Built only when BUILD_MCP is on; see ihs/ihs_mcp_provider.h.
+ *
  * Threading: callable from any thread; the registry serializes internally.
  * Provider callbacks are invoked on the calling thread, which for the real
  * server is the host thread -- matching what ihs_mcp_provider.h promises
