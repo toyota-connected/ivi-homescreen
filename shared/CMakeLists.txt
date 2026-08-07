@@ -32,6 +32,9 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     if (NOT DEFINED ENABLE_DLT)
         option(ENABLE_DLT "Build the DLT logging bridge into ihs_shared" ON)
     endif ()
+    if (NOT DEFINED BUILD_MCP)
+        option(BUILD_MCP "Build the MCP provider registry into ihs_shared" OFF)
+    endif ()
 endif ()
 
 include(GNUInstallDirs)
@@ -146,6 +149,29 @@ if (ENABLE_DLT)
     )
     target_compile_definitions(ihs_shared PRIVATE ENABLE_DLT=1)
     target_link_libraries(ihs_shared PRIVATE ${CMAKE_DL_LIBS})
+
+endif ()
+
+#
+# MCP provider registry.
+#
+# Default OFF, and off in production images: this is the registration point for
+# a surface whose whole purpose is letting something outside the process drive
+# the UI. It lives in ihs_shared rather than the shell because a dlopen'd FFI
+# plugin can only bind to a shared object, so a provider implemented in a
+# plugin has to resolve ihs_mcp_provider_register from here -- the same reason
+# the platform-view surface lives here. That is an argument about where it goes
+# when it is built, not about building it always.
+#
+# With this off, no MCP source is compiled, no ihs_mcp_* symbol is exported,
+# and the headers are not installed, so an out-of-tree consumer cannot even
+# declare against a surface this build does not have.
+if (BUILD_MCP)
+    target_sources(ihs_shared PRIVATE src/mcp_provider.cc)
+    target_compile_definitions(ihs_shared PUBLIC IHS_WITH_MCP=1)
+    message(STATUS "MCP provider registry . Enabled")
+else ()
+    message(STATUS "MCP provider registry . Disabled")
 endif ()
 
 # Location service (the ihs_location_* C ABI): the gpsd and geoclue providers
@@ -210,10 +236,20 @@ install(TARGETS ihs_shared EXPORT ihs_shared_targets
 # copy could not compile standalone. It is a shell-internal integration point,
 # consumed in-tree from the source include directory; nothing out-of-tree needs
 # to declare the setter.
+# The MCP headers follow their implementation: with BUILD_MCP off there are no
+# ihs_mcp_* symbols to link, so installing headers that declare them would let
+# an out-of-tree consumer compile against a surface that is not there and fail
+# at link instead of at the include.
+set(_ihs_header_excludes PATTERN "flutter_desktop_bridge.h" EXCLUDE)
+if (NOT BUILD_MCP)
+    list(APPEND _ihs_header_excludes
+            PATTERN "ihs_mcp_provider.h" EXCLUDE
+            PATTERN "ihs_mcp_host.h" EXCLUDE)
+endif ()
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/ihs
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
         FILES_MATCHING PATTERN "*.h"
-        PATTERN "flutter_desktop_bridge.h" EXCLUDE
+        ${_ihs_header_excludes}
 )
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/include/ihs/ihs_export.h
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ihs
