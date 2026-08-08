@@ -32,6 +32,10 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     if (NOT DEFINED ENABLE_DLT)
         option(ENABLE_DLT "Build the DLT logging bridge into ihs_shared" ON)
     endif ()
+    if (NOT DEFINED BUILD_ACCESSIBILITY)
+        option(BUILD_ACCESSIBILITY
+                "Build the semantics hub into ihs_shared" OFF)
+    endif ()
     if (NOT DEFINED BUILD_MCP)
         option(BUILD_MCP "Build the MCP provider registry into ihs_shared" OFF)
     endif ()
@@ -48,7 +52,6 @@ add_library(ihs_shared SHARED
         src/trace.cc
         src/config.cc
         src/platform_view.cc
-        src/semantics.cc
 )
 add_library(ivi_homescreen::ihs_shared ALIAS ihs_shared)
 
@@ -153,6 +156,24 @@ if (ENABLE_DLT)
 endif ()
 
 #
+# Semantics hub.
+#
+# Only useful alongside the accessibility semantics tree that feeds it -- with
+# BUILD_ACCESSIBILITY off nothing ever calls ihs_semantics_publish, so the hub
+# would sit in every image as code that cannot be reached. Gated for the same
+# reason as the MCP registry, though the case is milder: this is accessibility
+# infrastructure rather than remote control.
+#
+# BUILD_MCP requires BUILD_ACCESSIBILITY in the homescreen tree, so an MCP
+# build always has the hub the semantics provider reads from.
+if (BUILD_ACCESSIBILITY)
+    target_sources(ihs_shared PRIVATE src/semantics.cc)
+    message(STATUS "Semantics hub ......... Enabled")
+else ()
+    message(STATUS "Semantics hub ......... Disabled")
+endif ()
+
+#
 # MCP provider registry.
 #
 # Default OFF, and off in production images: this is the registration point for
@@ -241,6 +262,11 @@ install(TARGETS ihs_shared EXPORT ihs_shared_targets
 # an out-of-tree consumer compile against a surface that is not there and fail
 # at link instead of at the include.
 set(_ihs_header_excludes PATTERN "flutter_desktop_bridge.h" EXCLUDE)
+if (NOT BUILD_ACCESSIBILITY)
+    list(APPEND _ihs_header_excludes
+            PATTERN "ihs_semantics.h" EXCLUDE
+            PATTERN "ihs_semantics_host.h" EXCLUDE)
+endif ()
 if (NOT BUILD_MCP)
     list(APPEND _ihs_header_excludes
             PATTERN "ihs_mcp_provider.h" EXCLUDE
