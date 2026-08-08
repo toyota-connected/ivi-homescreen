@@ -187,7 +187,6 @@ add_subdirectory(platform_view_registry-test)
 add_subdirectory(backend_output_binding-test)
 add_subdirectory(vsync_park-test)
 add_subdirectory(mutation_stack-test)
-add_subdirectory(semantics_hub-test)
 # The MCP registry is only compiled into ihs_shared when BUILD_MCP is on, so
 # its tests would have nothing to link against otherwise.
 if (BUILD_MCP)
@@ -206,4 +205,6 @@ if (BUILD_ACCESSIBILITY)
     add_subdirectory(semantics_translator-test)
     add_subdirectory(accessibility_tree-test)
     add_subdirectory(semantics_publisher-test)
+    # The hub itself is only in ihs_shared when BUILD_ACCESSIBILITY is on.
+    add_subdirectory(semantics_hub-test)
 endif ()
