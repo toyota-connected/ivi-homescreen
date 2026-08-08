@@ -69,8 +69,18 @@ target_link_libraries(platform_homescreen PUBLIC PkgConfig::XKBCOMMON_PLATFORM)
 # Wayland protocol headers directly. The generated protocol headers attach to
 # the shell binary in shell/CMakeLists.txt.
 
-find_package(ACCESSKIT QUIET)
-if (ACCESSKIT_FOUND)
+# AccessKit, when asked for. REQUIRED rather than QUIET: this used to probe
+# silently and skip the adapter when the package was absent, so a build that
+# meant to include AccessKit and did not find it produced a binary without it
+# and said nothing. Now the request is explicit (BUILD_ACCESSKIT) and so is the
+# failure. The package arrives through the .emb augment gated on the same
+# define; ACCESSKIT_DIR or CMAKE_PREFIX_PATH also work for a local checkout.
+#
+# ENABLE_ACCESSKIT stays the compile definition the sources guard on, so
+# nothing in the C++ changes: BUILD_ACCESSKIT is the request, ENABLE_ACCESSKIT
+# is the result.
+if (BUILD_ACCESSKIT)
+    find_package(ACCESSKIT REQUIRED)
     target_include_directories(platform_homescreen PUBLIC
             ${ACCESSKIT_INCLUDE_DIRS}
     )
