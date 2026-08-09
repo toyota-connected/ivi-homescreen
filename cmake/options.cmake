@@ -431,6 +431,55 @@ else ()
 endif ()
 
 #
+# AccessKit platform accessibility adapter
+#
+# Off by default. Needs BUILD_ACCESSIBILITY, since the adapter is fed by the
+# semantics tree.
+#
+# The AccessKit C bindings are not a system package on any target here and are
+# not fetched by the build. Supply them by unpacking an accesskit-c release and
+# pointing CMake at the resulting directory:
+#
+#   -D BUILD_ACCESSKIT=ON -D CMAKE_PREFIX_PATH=/path/to/accesskit-c-<version>
+#
+# (or ACCESSKIT_DIR). The release is consumed *in place*: its
+# accesskit-config.cmake sits at the archive root and is never installed, and
+# its install() rules write back into its own tree rather than into
+# CMAKE_INSTALL_PREFIX, so pointing at an install prefix does not work.
+#
+# Automating this through the .emb augment mechanism was tried and does not fit,
+# for two independent reasons worth recording so it is not retried blind:
+#
+#   1. An augment builds and installs into the overlay sysroot, but this
+#      package installs into its own directory, so the overlay stays empty and
+#      find_package still fails. Native `--target local` reaches exactly this
+#      point: the augment builds, then configuration fails to find ACCESSKIT.
+#   2. Cross-compiling additionally fails before that. accesskit-c's CMakeLists
+#      pulls Corrosion and calls cargo; an augment is configured with the plain
+#      cross toolchain, so cargo links the crate's *host* build scripts with the
+#      aarch64 gcc and dies on `unrecognized command-line option '-m64'`. emb
+#      solves this in cargoEnv() with target-suffixed CC_<triple> /
+#      CARGO_TARGET_<TRIPLE>_LINKER, but that is wired into the cargo module
+#      path, not into augments, whose build kinds are only cmake and meson.
+#      Building for aarch64 would also need `rustup target add
+#      aarch64-unknown-linux-gnu`.
+#
+# Unpacking the prebuilt libraries instead does not cover the boards: the
+# release ships linux/x86_64 and linux/x86 only, while accesskit.cmake maps
+# aarch64 to a lib/linux/arm64 directory the archive does not contain.
+option(BUILD_ACCESSKIT "Build the AccessKit accessibility adapter" OFF)
+if (BUILD_ACCESSKIT AND NOT BUILD_ACCESSIBILITY)
+    MESSAGE(FATAL_ERROR
+            "BUILD_ACCESSKIT requires BUILD_ACCESSIBILITY: the adapter is fed "
+            "by the semantics tree. Configure with -D BUILD_ACCESSIBILITY=ON.")
+endif ()
+if (BUILD_ACCESSKIT)
+    MESSAGE(STATUS "AccessKit ............... Enabled")
+else ()
+    MESSAGE(STATUS "AccessKit ............... Disabled")
+endif ()
+
+#
 # Static linking
 #
 option(ENABLE_STATIC_LINK "Link stdlib with static libs" OFF)
