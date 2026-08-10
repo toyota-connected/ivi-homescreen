@@ -1,0 +1,48 @@
+# Fixture for OsgiConfig.LoadOsgiConfigReadsFromDisk.
+#
+# Exercises the on-disk path: a [global] table the OSGi parser must ignore, an
+# [[view]] entry alongside the OSGi bundles, and per-bundle backend/args tables
+# that reach Configuration::get_view_parameters.
+
+[global]
+app_id = 'homescreen'
+
+[[view]]
+bundle = '/bundles/primary'
+width = 1920
+height = 1080
+
+[osgi]
+# No framework_core/cpu_core here on purpose: they are validated against the
+# process affinity mask, which varies by runner. Affinity behavior is covered
+# by the mask-derived cases in the test source instead.
+
+[[osgi.bundles]]
+symbolic_name = 'com.ivi.cluster'
+bundle = '/usr/share/ivi/bundles/cluster'
+priority = 'critical'
+startup_timeout_ms = 500
+width = 1280
+height = 720
+
+  [osgi.bundles.backend]
+  type = 'drm-kms-egl'
+
+    [osgi.bundles.backend.drm]
+    connector = 'eDP-1'
+    mode = '1280x720@60'
+
+  [osgi.bundles.args]
+  engine = ['--old_gen_heap_size=32']
+  dart = []
+
+[[osgi.bundles]]
+symbolic_name = 'com.ivi.navigation'
+bundle = '/usr/share/ivi/bundles/navigation'
+priority = 'normal'
+
+  [osgi.bundles.backend]
+  type = 'wayland-egl'
+
+  [osgi.bundles.args]
+  engine = ['--old_gen_heap_size=64']
