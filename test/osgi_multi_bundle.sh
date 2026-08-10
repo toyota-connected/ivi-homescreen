@@ -85,34 +85,9 @@ summary() {
     [[ "$FAIL" -eq 0 ]] && exit 0 || exit 1
 }
 
-# Identify the vkms card by its connector signature: vkms always advertises
-# connectors named "cardN-Virtual-M" and real GPUs do not. Same method as
-# test/drm_kms_vkms.sh, which is the source of truth for it -- matching the
-# driver symlink instead is unreliable because its name has changed across
-# kernel versions (platform -> faux_driver).
-find_vkms_card() {
-    local c card
-    for c in /sys/class/drm/card[0-9]*; do
-        [ -d "$c/device" ] || continue        # skip connector/encoder children
-        card="$(basename "$c")"
-        if compgen -G "/sys/class/drm/${card}-Virtual-*" >/dev/null; then
-            echo "/dev/dri/${card}"
-            return 0
-        fi
-    done
-    return 1
-}
-
-# Scanout connectors on a card, in sysfs order. Writeback is excluded: it is a
-# capture target, not a scanout one, so a bundle cannot be pinned to it.
-connectors_of() {  # connectors_of <cardN>
-    local card="$1" c
-    for c in /sys/class/drm/"${card}"-*; do
-        [ -e "$c/status" ] || continue
-        case "$c" in *Writeback*) continue ;; esac
-        basename "$c" | sed "s/^${card}-//"
-    done
-}
+# Shared DRM discovery: see test/lib/drm_card.sh for why nothing is hardcoded.
+# shellcheck source=test/lib/drm_card.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/drm_card.sh"
 
 [ -n "$HOMESCREEN" ] || die "set HOMESCREEN to the homescreen binary"
 [ -x "$HOMESCREEN" ] || die "HOMESCREEN not executable: $HOMESCREEN"
@@ -139,7 +114,7 @@ fi
 # on a developer's desktop. Targeting real hardware requires saying so.
 DEVICE_SOURCE="explicit"
 if [ "$DRM_DEVICE_EXPLICIT" -eq 0 ]; then
-    if DRM_DEVICE="$(find_vkms_card)"; then
+    if DRM_DEVICE="$(ihs_find_vkms_card)"; then
         DEVICE_SOURCE="auto-detected vkms"
     else
         DRM_DEVICE=""
@@ -150,7 +125,7 @@ CARD="$(basename "${DRM_DEVICE:-none}")"
 if [ -n "$DRM_DEVICE" ] && [ -z "$CONNECTOR_A" ]; then
     # Connector names are card-specific -- vkms advertises Virtual-N, a real
     # GPU HDMI-A-1/DP-1 -- so they are read off the card rather than defaulted.
-    mapfile -t CONNS < <(connectors_of "$CARD")
+    mapfile -t CONNS < <(ihs_connectors_of "$CARD")
     CONNECTOR_A="${CONNS[0]:-}"
     CONNECTOR_B="${CONNS[1]:-}"
 fi

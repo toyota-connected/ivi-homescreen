@@ -16,9 +16,14 @@
 # Env:
 #   HOMESCREEN       path to the homescreen binary (required)
 #   BUNDLE           path to the multi_view_test bundle (required)
-#   DRM_DEVICE       /dev/dri/cardN            (default /dev/dri/card1)
-#   CONNECTOR_A      first output connector    (default HDMI-A-1)
-#   CONNECTOR_B      second output connector   (default DP-1)
+#   DRM_DEVICE       /dev/dri/cardN. Unset = auto-detect the vkms card.
+#                    Card numbering is NOT stable, and this harness takes DRM
+#                    master and drives a modeset, so there is deliberately no
+#                    numeric default -- one would blank a real display on any
+#                    machine where that number is the GPU. Set it explicitly to
+#                    opt in to real hardware.
+#   CONNECTOR_A      first output connector    (default: 1st on the card)
+#   CONNECTOR_B      second output connector   (default: 2nd on the card)
 #   DURATION         seconds to run            (default 6)
 #   STARTUP_GRACE    seconds before liveness   (default 2)
 #   COUNT_FLIPS      1 = prove page flips on both CRTCs via strace (default 0)
@@ -29,9 +34,10 @@ set -uo pipefail
 
 HOMESCREEN="${HOMESCREEN:-}"
 BUNDLE="${BUNDLE:-}"
-DRM_DEVICE="${DRM_DEVICE:-/dev/dri/card1}"
-CONNECTOR_A="${CONNECTOR_A:-HDMI-A-1}"
-CONNECTOR_B="${CONNECTOR_B:-DP-1}"
+# No numeric defaults: see the DRM_DEVICE note above.
+DRM_DEVICE="${DRM_DEVICE:-}"
+CONNECTOR_A="${CONNECTOR_A:-}"
+CONNECTOR_B="${CONNECTOR_B:-}"
 DURATION="${DURATION:-6}"
 STARTUP_GRACE="${STARTUP_GRACE:-2}"
 COUNT_FLIPS="${COUNT_FLIPS:-0}"
@@ -45,7 +51,27 @@ note() { echo "  $*"; }
 [ -x "$HOMESCREEN" ] || die "HOMESCREEN not executable: $HOMESCREEN"
 [ -n "$BUNDLE" ] || die "set BUNDLE to the multi_view_test bundle dir"
 [ -d "$BUNDLE" ] || die "BUNDLE not a directory: $BUNDLE"
+# Shared DRM discovery: see test/lib/drm_card.sh for why nothing is hardcoded.
+# shellcheck source=test/lib/drm_card.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/drm_card.sh"
+
+# Auto-detection resolves vkms and nothing else, so it can never pick a real
+# GPU by accident; naming a node explicitly is how you ask for one.
+if [ -z "$DRM_DEVICE" ]; then
+  DRM_DEVICE="$(ihs_find_vkms_card)" \
+    || die "no vkms card found; set DRM_DEVICE explicitly to target real hardware"
+fi
 [ -c "$DRM_DEVICE" ] || die "DRM_DEVICE not a device node: $DRM_DEVICE"
+
+# Connector names are card-specific (Virtual-N on vkms, HDMI-A-1/DP-1 on a real
+# GPU), so read them off the resolved card rather than defaulting to either set.
+if [ -z "$CONNECTOR_A" ]; then
+  mapfile -t _CONNS < <(ihs_connectors_of "$(basename "$DRM_DEVICE")")
+  CONNECTOR_A="${_CONNS[0]:-}"
+  CONNECTOR_B="${_CONNS[1]:-}"
+fi
+[ -n "$CONNECTOR_A" ] && [ -n "$CONNECTOR_B" ] \
+  || die "need 2 scanout connectors on $(basename "$DRM_DEVICE")"
 
 # The binary must be DRM-KMS-EGL built (the compositor scans out to KMS).
 if [ "$(strings "$HOMESCREEN" | grep -c '\[DrmBackend\]')" -eq 0 ]; then
