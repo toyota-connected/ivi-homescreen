@@ -562,6 +562,40 @@ message(STATUS "Wayland (any conn.) .... ${IVI_WAYLAND_ANY}")
 message(STATUS "Leased DRM tiers ....... egl=${IVI_LEASED_DRM_EGL} vulkan=${IVI_LEASED_DRM_VULKAN} software=${IVI_LEASED_DRM_SOFTWARE}")
 
 #
+# OSGi multi-bundle framework
+#
+# Runs several Flutter bundles as independently-managed "bundles" with an OSGi
+# lifecycle, a shared service registry, and a Dart-side framework isolate. The
+# shell side is additive: with ENABLE_OSGI=OFF no OSGi translation unit is
+# compiled and the binary is byte-for-byte what it was before.
+#
+# Requires the dynamically-linked Dart API (dart_api_dl) to hand each bundle
+# isolate its framework SendPort -- see
+# third_party/flutter/third_party/dart/runtime/include/PROVENANCE.md.
+option(ENABLE_OSGI "Enable OSGi multi-bundle framework" OFF)
+if (ENABLE_OSGI)
+    MESSAGE(STATUS "OSGi ................... Enabled")
+    set(DART_INCLUDE_DIR
+            "${CMAKE_SOURCE_DIR}/third_party/flutter/third_party/dart/runtime/include"
+            CACHE INTERNAL "Vendored Dart embedding headers (incl. dart_api_dl)")
+    # Fail at configure time rather than with a wall of missing-symbol errors.
+    # The DL files are vendored, not fetched, so a shallow/partial checkout or a
+    # stale tree is the likely cause.
+    foreach (_dart_dl_file dart_api_dl.h dart_api_dl.c dart_native_api.h
+            dart_version.h internal/dart_api_dl_impl.h)
+        if (NOT EXISTS "${DART_INCLUDE_DIR}/${_dart_dl_file}")
+            message(FATAL_ERROR
+                    "ENABLE_OSGI requires the vendored Dart DL headers, but "
+                    "${DART_INCLUDE_DIR}/${_dart_dl_file} is missing. See "
+                    "${DART_INCLUDE_DIR}/PROVENANCE.md for how to re-pin them.")
+        endif ()
+    endforeach ()
+    unset(_dart_dl_file)
+else ()
+    MESSAGE(STATUS "OSGi ................... Disabled")
+endif ()
+
+#
 # Docs
 #
 option(BUILD_DOCS "Build documentation" OFF)

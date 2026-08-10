@@ -494,6 +494,19 @@ if (BUILD_CRASH_HANDLER)
     target_sources(${PROJECT_NAME} PRIVATE crash_handler.cc)
 endif ()
 
+# OSGi multi-bundle framework. Strictly additive: nothing here is compiled
+# unless ENABLE_OSGI=ON. The Dart DL symbol table lives in the dart_api_dl
+# target (third_party/CMakeLists.txt), which also carries its include dir.
+if (ENABLE_OSGI)
+    target_sources(${PROJECT_NAME} PRIVATE
+            osgi/bundle_manifest.cc
+            osgi/cpu_affinity.cc
+            osgi/osgi_config.cc
+    )
+    target_link_libraries(${PROJECT_NAME} PRIVATE dart_api_dl)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE ENABLE_OSGI=1)
+endif ()
+
 target_compile_definitions(${PROJECT_NAME}
         PRIVATE
         HAVE_STRCHRNUL
