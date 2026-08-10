@@ -22,6 +22,8 @@
 #include <string_view>
 
 #include "config/common.h"  // ENABLE_DLT — keep before logger.hpp / member decl
+#include <unordered_map>
+
 #include "configuration/configuration.h"
 #include "display/output.h"
 #include "logging/logger.hpp"
@@ -60,6 +62,39 @@ class App final {
   [[nodiscard]] int Loop() const;
 
   /**
+   * @brief Construct and start one additional view after construction.
+   *
+   * The constructor builds every view in @p configs back to back, and
+   * FlutterView::Initialize() runs the engine -- so by the time it returns,
+   * every engine is already competing for the GPU. That is the right shape for
+   * a fixed view set, but it cannot express "this view must be up before the
+   * next one starts", which is exactly what an OSGi critical bundle is.
+   *
+   * This is the incremental entry point: it resolves @p config against the
+   * displays already built (reusing the one for its device-context, or
+   * creating a display when the context is new), constructs the view, and runs
+   * its engine -- one view, when the caller says so.
+   *
+   * Safe to call before or after Run(). Returns nullptr if no backend resolves
+   * for the config, which the caller reports as a failed bundle rather than
+   * taking the whole process down.
+   *
+   * @relation flutter, osgi
+   */
+  FlutterView* AddView(const Configuration::Config& config);
+
+  /**
+   * @brief Tear down a view previously returned by AddView().
+   *
+   * Returns true if @p view was owned by this App. Used when a bundle fails to
+   * report ACTIVE within its deadline: a half-started bundle must not be left
+   * holding a surface and a vsync registration.
+   *
+   * @relation flutter, osgi
+   */
+  bool RemoveView(FlutterView* view);
+
+  /**
    * @brief Run the application until shutdown is requested.
    *
    * Drives the shared asio reactor (a single io_context) on the calling thread
@@ -80,6 +115,18 @@ class App final {
   // device). A homogeneous config set yields a single shared display.
   std::vector<std::shared_ptr<IDisplay>> BuildDisplays(
       const std::vector<Configuration::Config>& configs);
+
+  // Display for @p config's device-context, reusing an existing one when the
+  // context already has a display and creating one otherwise. Shared by
+  // BuildDisplays and AddView so both place a view on the same display for the
+  // same (backend, device) -- two displays on one device would fight over the
+  // DRM master.
+  std::shared_ptr<IDisplay> DisplayForContext(
+      const Configuration::Config& config);
+
+  // Start watching @p display's outputs, if it reports hotplug at all. Called
+  // for displays built at construction and for any created later by AddView.
+  void WatchDisplayOutputs(const std::shared_ptr<IDisplay>& display);
 
   // Watches one display's outputs on App's behalf. IOutputListener reports
   // what changed but not which display reported it, and App can drive several
@@ -104,6 +151,13 @@ class App final {
   // The displays the App drives. One entry per distinct device-context; a
   // homogeneous config set yields a single shared display.
   std::vector<std::shared_ptr<IDisplay>> m_displays;
+  // Context key -> display, so AddView can join a view to the display its
+  // device-context already has instead of creating a second one.
+  std::unordered_map<std::string, std::shared_ptr<IDisplay>> m_display_by_context;
+  // True once Run() has started the displays, so a view added later knows to
+  // start its display itself rather than waiting for a StartEvents pass that
+  // has already happened.
+  bool m_displays_started{false};
   std::vector<std::unique_ptr<FlutterView>> m_views;
   // One per display that reports hotplug; cleared before the displays go.
   std::vector<std::unique_ptr<OutputWatch>> m_output_watches;

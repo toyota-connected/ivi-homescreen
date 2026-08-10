@@ -180,11 +180,93 @@ std::vector<std::shared_ptr<IDisplay>> App::BuildDisplays(
     }
     auto display = descriptor->make_display(group_configs);
     m_displays.push_back(display);
+    // Remember which context this display serves so a view added later joins
+    // it instead of creating a second display on the same device.
+    m_display_by_context.emplace(ck, display);
     for (const size_t idx : members) {
       per_config[idx] = display;
     }
   }
   return per_config;
+}
+
+std::shared_ptr<IDisplay> App::DisplayForContext(
+    const Configuration::Config& config) {
+  auto& reg = backend::BackendRegistry::Instance();
+  const std::string ck = ContextKey(reg, config);
+  if (const auto it = m_display_by_context.find(ck);
+      it != m_display_by_context.end()) {
+    return it->second;
+  }
+
+  const std::string key = ResolveKeyForConfig(reg, config);
+  const backend::BackendDescriptor* descriptor = reg.Resolve(key);
+  if (descriptor == nullptr) {
+    // Not exit(): unlike the constructor path, this runs while a shell is
+    // already up, and one bundle naming an unbuildable backend must not take
+    // the running system down with it.
+    ihs::log::error("[App] no backend resolved for context '{}'", ck);
+    return nullptr;
+  }
+  auto display = descriptor->make_display({config});
+  m_displays.push_back(display);
+  m_display_by_context.emplace(ck, display);
+  return display;
+}
+
+void App::WatchDisplayOutputs(const std::shared_ptr<IDisplay>& display) {
+  auto* provider = display->GetOutputProvider();
+  if (provider == nullptr || !provider->SupportsHotplug()) {
+    return;  // e.g. the software sink, and DRM until its monitor is wired
+  }
+  auto watch = std::make_unique<OutputWatch>(this, display.get());
+  provider->SetOutputListener(watch.get());
+  m_output_watches.push_back(std::move(watch));
+  ihs::log::debug("[App] watching outputs on a display ({} live now)",
+                  provider->EnumerateOutputs().size());
+}
+
+FlutterView* App::AddView(const Configuration::Config& config) {
+  const size_t display_count_before = m_displays.size();
+  auto display = DisplayForContext(config);
+  if (display == nullptr) {
+    return nullptr;
+  }
+  const bool display_is_new = m_displays.size() != display_count_before;
+
+  // Index continues the constructor's sequence: it is the engine index that
+  // shows up in the logs, and a duplicate would make two engines
+  // indistinguishable there.
+  auto view = std::make_unique<FlutterView>(config, m_views.size(), display);
+  // Initialize() runs the engine. Doing it here, one view at a time, is the
+  // whole point of this entry point.
+  view->Initialize();
+  FlutterView* raw = view.get();
+  m_views.emplace_back(std::move(view));
+
+  if (display_is_new) {
+    WatchDisplayOutputs(display);
+    // The constructor's StartEvents pass has already run by the time anything
+    // calls AddView after Run(); a display created now has to be started here
+    // or it would never pump.
+    if (m_displays_started) {
+      display->StartEvents();
+    }
+  }
+  return raw;
+}
+
+bool App::RemoveView(FlutterView* view) {
+  const auto it = std::find_if(
+      m_views.begin(), m_views.end(),
+      [view](const std::unique_ptr<FlutterView>& v) { return v.get() == view; });
+  if (it == m_views.end()) {
+    return false;
+  }
+  // The display is left in place: it may still serve other views, and it is
+  // owned by m_displays / m_display_by_context, not by the view.
+  m_views.erase(it);
+  return true;
 }
 
 App::App(const std::vector<Configuration::Config>& configs) {
@@ -276,20 +358,14 @@ App::App(const std::vector<Configuration::Config>& configs) {
   // compares against a real binding and finds nothing to do -- which is the
   // correct answer at startup, not a special case.
   for (const auto& display : m_displays) {
-    auto* provider = display->GetOutputProvider();
-    if (provider == nullptr || !provider->SupportsHotplug()) {
-      continue;  // e.g. the software sink, and DRM until its monitor is wired
-    }
-    auto watch = std::make_unique<OutputWatch>(this, display.get());
-    provider->SetOutputListener(watch.get());
-    m_output_watches.push_back(std::move(watch));
-    ihs::log::debug("[App] watching outputs on a display ({} live now)",
-                    provider->EnumerateOutputs().size());
+    WatchDisplayOutputs(display);
   }
 
   for (const auto& display : m_displays) {
     display->StartEvents();
   }
+  // Anything AddView creates from here on has to start its own display.
+  m_displays_started = true;
 
 #if BUILD_BACKEND_HEADLESS_VULKAN
   // Bring up the in-process ihs-vk-export bridge last: the headless-vulkan
