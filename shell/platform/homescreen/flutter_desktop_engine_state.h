@@ -2,6 +2,8 @@
 
 #include <asio/io_context_strand.hpp>
 
+#include "config/common.h"
+
 #include "flutter/shell/platform/common/client_wrapper/include/flutter/plugin_registrar.h"
 #include "flutter/shell/platform/common/incoming_message_dispatcher.h"
 #include "flutter_desktop_plugin_registrar.h"
@@ -12,6 +14,9 @@
 #include "platform/homescreen/platform_handler.h"
 #if BUILD_WATCHDOG
 #include "platform/homescreen/watchdog_plugin.h"
+#endif
+#if ENABLE_OSGI
+#include "osgi/osgi_bridge_plugin.h"
 #endif
 #include "platform/homescreen/platform_views/platform_view_registry.h"
 #include "platform/homescreen/platform_views/platform_views_handler.h"
@@ -81,6 +86,10 @@ struct FlutterDesktopEngineState {
 
 #if BUILD_WATCHDOG
   std::unique_ptr<WatchdogPlugin> watchdog_handler{};
+#endif
+
+#if ENABLE_OSGI
+  std::unique_ptr<ihs::osgi::OsgiBridgePlugin> osgi_bridge_handler{};
 #endif
 
   AccessibilityTree* accessibility_tree = nullptr;
