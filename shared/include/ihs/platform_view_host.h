@@ -75,6 +75,13 @@ extern "C" {
  *                 read back the cached grant payload for @view.
  *   submit        hand a produced frame for @view to the compositor present
  *                 path.
+ *   assets_path   absolute path to the running bundle's flutter_assets
+ *                 directory, or NULL if the engine has not resolved one.
+ *                 Borrowed and owned by the shell; valid for the engine's
+ *                 lifetime. A plugin that loads its own assets by relative
+ *                 path needs this: unlike the compositor-surface entry point,
+ *                 which is handed the directory at initialize(), nothing in
+ *                 the platform-view path told a plugin where the bundle is.
  */
 typedef struct IhsPvHost {
   size_t struct_size;
@@ -108,6 +115,9 @@ typedef struct IhsPvHost {
                 const IhsFrame* frame,
                 int acquire_fence_fd,
                 int* out_release_fence_fd);
+
+  /* Appended after the initial layout; read only when struct_size covers it. */
+  const char* (*assets_path)(void* user_data);
 } IhsPvHost;
 
 /*
