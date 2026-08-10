@@ -28,6 +28,8 @@
  * thread. The mutex guards only the installed host pointer.
  */
 
+#include <cstddef>
+
 #include "ihs/platform_view.h"
 #include "ihs/platform_view_host.h"
 
@@ -139,6 +141,22 @@ extern "C" int ihs_pv_query_capabilities(IhsPvCapabilities* out) {
     return IHS_PV_ERR_NO_REGISTRY;
   }
   return h->query_capabilities(h->user_data, out);
+}
+
+extern "C" const char* ihs_pv_assets_path(void) {
+  const IhsPvHost* h = host();
+  if (h == nullptr) {
+    return nullptr;
+  }
+  // Appended to IhsPvHost after its initial layout. A shell built against the
+  // older header reports a smaller struct_size and has no member here, so the
+  // bounds check is what makes reading it safe rather than a guess.
+  constexpr size_t kNeeded =
+      offsetof(IhsPvHost, assets_path) + sizeof(h->assets_path);
+  if (h->struct_size < kNeeded || h->assets_path == nullptr) {
+    return nullptr;
+  }
+  return h->assets_path(h->user_data);
 }
 
 extern "C" int ihs_pv_vulkan_context(IhsVulkanContext* out) {
@@ -268,6 +286,7 @@ const IhsPlatformViewApi* platform_view_api() noexcept {
       &ihs_pv_register_factory,   &ihs_pv_unregister_factory,
       &ihs_pv_negotiate,          &ihs_pv_grant_drm_plane_id,
       &ihs_pv_grant_shm_fd,       &ihs_pv_submit,
+      &ihs_pv_assets_path,
   };
   return &api;
 }

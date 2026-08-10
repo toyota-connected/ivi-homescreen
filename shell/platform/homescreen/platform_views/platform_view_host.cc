@@ -1335,6 +1335,15 @@ int HostSubmit(void* user_data,
 
 // Process-global host; user_data re-points at the most recently installed
 // engine (single-engine today).
+const char* HostAssetsPath(void* user_data) {
+  const auto* state = static_cast<FlutterDesktopEngineState*>(user_data);
+  if (state == nullptr || state->flutter_asset_directory.empty()) {
+    return nullptr;
+  }
+  // Borrowed: owned by the engine state, which outlives every platform view.
+  return state->flutter_asset_directory.c_str();
+}
+
 IhsPvHost g_host{};
 
 }  // namespace
@@ -1349,6 +1358,7 @@ void InstallPlatformViewHost(FlutterDesktopEngineState* engine_state) {
   g_host.register_factory = HostRegisterFactory;
   g_host.unregister_factory = HostUnregisterFactory;
   g_host.query_capabilities = HostQueryCapabilities;
+  g_host.assets_path = HostAssetsPath;
   g_host.vulkan_context = HostVulkanContext;
   g_host.egl_context = HostEglContext;
   g_host.grant = HostGrant;

@@ -214,6 +214,19 @@ typedef struct IhsPvCapabilities {
 IHS_EXPORT int ihs_pv_query_capabilities(IhsPvCapabilities* out);
 
 /*
+ * Absolute path to the running bundle's flutter_assets directory, or NULL if
+ * the shell is older than this entry point, has no host installed, or has not
+ * resolved a bundle. Borrowed: owned by the shell and valid for the engine's
+ * lifetime; copy it if you need to outlive the call.
+ *
+ * A plugin that resolves its own assets by relative path needs this. The
+ * compositor-surface path receives the directory as an initialize() argument;
+ * the platform-view path had no equivalent, so such a plugin had nothing to
+ * resolve against.
+ */
+IHS_EXPORT const char* ihs_pv_assets_path(void);
+
+/*
  * The backend's Vulkan objects, offered to a plugin that renders on a Vulkan
  * backend. Handles are void* so this header stays free of vulkan.h; cast to the
  * matching Vk* type.
@@ -544,6 +557,9 @@ typedef struct IhsPlatformViewApi {
                 const IhsFrame* frame,
                 int acquire_fence_fd,
                 int* out_release_fence_fd);
+
+  /* Appended after the initial layout; check struct_size before calling. */
+  const char* (*assets_path)(void);
 } IhsPlatformViewApi;
 
 #ifdef __cplusplus
