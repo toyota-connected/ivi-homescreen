@@ -93,10 +93,32 @@ jobs:
           restore-keys: |
             emb-store-${{ matrix.pios }}-
 
+      # Retried: ghcr.io intermittently answers a valid credential with
+      # "denied", and a bare login turns that into a red build that never
+      # compiled anything. POSIX sh so the same idiom works here (bash) and in
+      # the container job below (dash). The token is re-fed on every attempt --
+      # --password-stdin consumes it, so the pipeline must live inside the loop.
       - name: Log in to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
         run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" \
-            | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          i=1
+          while :; do
+            if printf '%s' "$GHCR_TOKEN" \
+                 | docker login ghcr.io -u "$GHCR_USER" --password-stdin; then
+              break
+            fi
+            if [ "$i" -ge 5 ]; then
+              echo "::error::docker login ghcr.io failed after $i attempts"
+              exit 1
+            fi
+            # Surfaced, not swallowed: a rising retry count is the early signal
+            # that the registry is degrading rather than blipping.
+            echo "::warning::docker login ghcr.io failed (attempt $i/5); retrying"
+            sleep $(( i * 3 ))
+            i=$(( i + 1 ))
+          done
 
       # oras uploads the resolved store entries to the OCI cache in the publish
       # step below (EMB_CACHE_REGISTRY). Cache the binary keyed on the version so
@@ -113,6 +135,9 @@ jobs:
           path: ~/oras-bin
           key: oras-${{ env.ORAS_VERSION }}-linux-amd64
       - name: Install + log in oras
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
         run: |
           # Fetch from GitHub releases only on a cache miss (version bump or
           # eviction); the cache restores ~/oras-bin/oras otherwise.
@@ -123,8 +148,22 @@ jobs:
               | tar -xzf - -C "$HOME/oras-bin" oras
           fi
           sudo install -m 0755 "$HOME/oras-bin/oras" /usr/local/bin/oras
-          echo "${{ secrets.GITHUB_TOKEN }}" \
-            | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+          # Retried for the same reason as the docker login above: the download
+          # was already hardened, the authentication never was.
+          i=1
+          while :; do
+            if printf '%s' "$GHCR_TOKEN" \
+                 | oras login ghcr.io -u "$GHCR_USER" --password-stdin; then
+              break
+            fi
+            if [ "$i" -ge 5 ]; then
+              echo "::error::oras login ghcr.io failed after $i attempts"
+              exit 1
+            fi
+            echo "::warning::oras login ghcr.io failed (attempt $i/5); retrying"
+            sleep $(( i * 3 ))
+            i=$(( i + 1 ))
+          done
 
       # rpi5-<os> is the canonical publish target: the sysroot (and thus the
       # image) is model-independent, so one image per OS serves rpi4/zero-2w
@@ -200,6 +239,9 @@ jobs:
           path: /usr/local/bin/oras
           key: oras-${{ env.ORAS_VERSION }}-linux-amd64
       - name: Install + log in oras
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
         run: |
           # Only fetch from GitHub releases on a cache miss (version bump); the
           # cache restores /usr/local/bin/oras otherwise.
@@ -208,8 +250,24 @@ jobs:
               "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_amd64.tar.gz" \
               | tar -xzf - -C /usr/local/bin oras
           fi
-          echo "${{ secrets.GITHUB_TOKEN }}" \
-            | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+          # This is the login that has actually failed in CI: ~25 matrix jobs
+          # authenticate to ghcr.io at once, which is exactly the concentration
+          # that provokes a spurious "denied". No shell: bash here on purpose --
+          # the loop is POSIX so it runs under the container's dash unchanged.
+          i=1
+          while :; do
+            if printf '%s' "$GHCR_TOKEN" \
+                 | oras login ghcr.io -u "$GHCR_USER" --password-stdin; then
+              break
+            fi
+            if [ "$i" -ge 5 ]; then
+              echo "::error::oras login ghcr.io failed after $i attempts"
+              exit 1
+            fi
+            echo "::warning::oras login ghcr.io failed (attempt $i/5); retrying"
+            sleep $(( i * 3 ))
+            i=$(( i + 1 ))
+          done
 
       # The image bakes the toolchain + sysroot at /emb, so -w /emb resolves as
       # a pure cache hit (no download/extract). Host build tools (cmake, ninja,
