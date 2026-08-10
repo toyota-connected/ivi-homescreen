@@ -505,6 +505,7 @@ if (ENABLE_OSGI)
             osgi/osgi_bridge_plugin.cc
             osgi/osgi_config.cc
             osgi/priority.cc
+            osgi/startup_orchestrator.cc
             osgi/startup_plan.cc
             osgi/vsync_coordinator.cc
     )
