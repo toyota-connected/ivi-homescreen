@@ -29,6 +29,11 @@
  */
 #define ILLEGAL_ISOLATE_ID ILLEGAL_PORT
 
+/**
+ * ILLEGAL_ISOLATE_GROUP_ID is a number guaranteed never to be associated with a
+ * valid isolate group.
+ */
+#define ILLEGAL_ISOLATE_GROUP_ID 0
 
 /*
  * =======
@@ -122,23 +127,23 @@ DART_EXPORT void Dart_RegisterRootServiceRequestCallback(
  * The pointers in this structure are not going to be cached or freed by the VM.
  */
 
- #define DART_EMBEDDER_INFORMATION_CURRENT_VERSION (0x00000001)
+#define DART_EMBEDDER_INFORMATION_CURRENT_VERSION (0x00000001)
 
 typedef struct {
   int32_t version;
-  const char* name;  // [optional] The name of the embedder
+  const char* name;     // [optional] The name of the embedder
   int64_t current_rss;  // [optional] the current RSS of the embedder
-  int64_t max_rss;  // [optional] the maximum RSS of the embedder
+  int64_t max_rss;      // [optional] the maximum RSS of the embedder
 } Dart_EmbedderInformation;
 
 /**
- * Callback provided by the embedder that is used by the vm to request
+ * Callback provided by the embedder that is used by the VM to request
  * information.
  *
  * \return Returns a pointer to a Dart_EmbedderInformation structure.
  * The embedder keeps the ownership of the structure and any field in it.
  * The embedder must ensure that the structure will remain valid until the
- * next invokation of the callback.
+ * next invocation of the callback.
  */
 typedef void (*Dart_EmbedderInformationCallback)(
     Dart_EmbedderInformation* info);
@@ -152,8 +157,8 @@ typedef void (*Dart_EmbedderInformationCallback)(
  * \param callback The callback to invoke.
  * \param user_data The user data passed to the callback.
  *
- * NOTE: If multiple callbacks with the same name are registered, only
- * the last callback registered will be remembered.
+ * NOTE: If multiple callbacks are registered, only the last callback registered
+ * will be remembered.
  */
 DART_EXPORT void Dart_SetEmbedderInformationCallback(
     Dart_EmbedderInformationCallback callback);
@@ -169,7 +174,7 @@ DART_EXPORT void Dart_SetEmbedderInformationCallback(
  * \param response_json_length The length of the returned json response.
  * \param error An optional error, must be free()ed by caller.
  *
- * \return Whether the call was sucessfully performed.
+ * \return Whether the call was successfully performed.
  *
  * NOTE: This method does not need a current isolate and must not have the
  * vm-isolate being the current isolate. It must be called after
@@ -249,69 +254,6 @@ DART_EXPORT char* Dart_ServiceSendDataEvent(const char* stream_id,
                                             const uint8_t* bytes,
                                             intptr_t bytes_length);
 
-/**
- * Usage statistics for a space/generation at a particular moment in time.
- *
- * \param used Amount of memory used, in bytes.
- *
- * \param capacity Memory capacity, in bytes.
- *
- * \param external External memory, in bytes.
- *
- * \param collections How many times the garbage collector has run in this
- *   space.
- *
- * \param time Cumulative time spent collecting garbage in this space, in
- *   seconds.
- *
- * \param avg_collection_period Average time between garbage collector running
- *   in this space, in milliseconds.
- */
-typedef struct {
-  intptr_t used;
-  intptr_t capacity;
-  intptr_t external;
-  intptr_t collections;
-  double time;
-  double avg_collection_period;
-} Dart_GCStats;
-
-/**
- * A Garbage Collection event with memory usage statistics.
- *
- * \param type The event type. Static lifetime.
- *
- * \param reason The reason for the GC event. Static lifetime.
- *
- * \param new_space Data for New Space.
- *
- * \param old_space Data for Old Space.
- */
-typedef struct {
-  const char* type;
-  const char* reason;
-  const char* isolate_id;
-
-  Dart_GCStats new_space;
-  Dart_GCStats old_space;
-} Dart_GCEvent;
-
-/**
- * A callback invoked when the VM emits a GC event.
- *
- * \param event The GC event data. Pointer only valid for the duration of the
- *   callback.
- */
-typedef void (*Dart_GCEventCallback)(Dart_GCEvent* event);
-
-/**
- * Sets the native GC event callback.
- *
- * \param callback A function pointer to an event handler callback function.
- *   A NULL value removes the existing listen callback function if any.
- */
-DART_EXPORT void Dart_SetGCEventCallback(Dart_GCEventCallback callback);
-
 /*
  * ========
  * Reload support
@@ -347,7 +289,7 @@ DART_EXPORT bool Dart_IsReloading();
  * Enable tracking of specified timeline category. This is operational
  * only when systrace timeline functionality is turned on.
  *
- * \param categories A comma seperated list of categories that need to
+ * \param categories A comma separated list of categories that need to
  *   be enabled, the categories are
  *   "all" : All categories
  *   "API" - Execution of Dart C API functions
@@ -358,12 +300,13 @@ DART_EXPORT bool Dart_IsReloading();
  *   "Embedder" - Execution of Dart embedder code
  *   "GC" - Execution of Dart Garbage Collector
  *   "Isolate" - Dart Isolate lifecycle execution
- *   "VM" - Excution in Dart VM runtime code
+ *   "Microtask" - Execution of Dart microtasks
+ *   "VM" - Execution in Dart VM runtime code
  *   "" - None
  *
  *  When "all" is specified all the categories are enabled.
- *  When a comma seperated list of categories is specified, the categories
- *   that are specified will be enabled and the rest will be disabled. 
+ *  When a comma separated list of categories is specified, the categories
+ *   that are specified will be enabled and the rest will be disabled.
  *  When "" is specified all the categories are disabled.
  *  The category names are case sensitive.
  *  eg:  Dart_EnableTimelineCategory("all");
@@ -414,11 +357,45 @@ typedef enum {
 /**
  * Add a timeline event to the embedder stream.
  *
+ * Note regarding flow events: events must be associated with flow IDs in two
+ * different ways to allow flow events to be serialized correctly in both
+ * Chrome's JSON trace event format and Perfetto's proto trace format. Events
+ * of type |Dart_Timeline_Event_Flow_Begin|, |Dart_Timeline_Event_Flow_Step|,
+ * and |Dart_Timeline_Event_Flow_End| must be reported to support serialization
+ * in Chrome's trace format. The |flow_ids| argument must be supplied when
+ * reporting events of type |Dart_Timeline_Event_Begin|,
+ * |Dart_Timeline_Event_Duration|, |Dart_Timeline_Event_Instant|,
+ * |Dart_Timeline_Event_Async_Begin|, and |Dart_Timeline_Event_Async_Instant| to
+ * support serialization in Perfetto's proto format.
+ *
+ * The Dart VM can use various underlying recorders depending on configuration
+ * and operating system. Many recorders do not support all event types;
+ * unsupported event types are siliently dropped. Some recorders do not accept
+ * timestamps as input, instead implicitly using the time the event is recorded.
+ * For maximum compatibility, record events with the Begin and End types as they
+ * occur instead of using the Duration type or buffering.
+ *
  * \param label The name of the event. Its lifetime must extend at least until
  *     Dart_Cleanup.
  * \param timestamp0 The first timestamp of the event.
- * \param timestamp1_or_async_id The second timestamp of the event or
- *     the async id.
+ * \param timestamp1_or_id When reporting an event of type
+ *     |Dart_Timeline_Event_Duration|, the second (end) timestamp of the event
+ *     should be passed through |timestamp1_or_id|. When reporting an event of
+ *     type |Dart_Timeline_Event_Async_Begin|, |Dart_Timeline_Event_Async_End|,
+ *     or |Dart_Timeline_Event_Async_Instant|, the async ID associated with the
+ *     event should be passed through |timestamp1_or_id|. When reporting an
+ *     event of type |Dart_Timeline_Event_Flow_Begin|,
+ *     |Dart_Timeline_Event_Flow_Step|, or |Dart_Timeline_Event_Flow_End|, the
+ *     flow ID associated with the event should be passed through
+ *     |timestamp1_or_id|. When reporting an event of type
+ *     |Dart_Timeline_Event_Begin| or |Dart_Timeline_Event_End|, the event ID
+ *     associated with the event should be passed through |timestamp1_or_id|.
+ *     Note that this event ID will only be used by the MacOS recorder. The
+ *     argument to |timestamp1_or_id| will not be used when reporting events of
+ *     other types.
+ * \param flow_id_count The number of flow IDs associated with this event.
+ * \param flow_ids An array of flow IDs associated with this event. The array
+ *     may be reclaimed when this call returns.
  * \param argument_count The number of argument names and values.
  * \param argument_names An array of names of the arguments. The lifetime of the
  *     names must extend at least until Dart_Cleanup. The array may be reclaimed
@@ -426,13 +403,15 @@ typedef enum {
  * \param argument_values An array of values of the arguments. The values and
  *     the array may be reclaimed when this call returns.
  */
-DART_EXPORT void Dart_TimelineEvent(const char* label,
-                                    int64_t timestamp0,
-                                    int64_t timestamp1_or_async_id,
-                                    Dart_Timeline_Event_Type type,
-                                    intptr_t argument_count,
-                                    const char** argument_names,
-                                    const char** argument_values);
+DART_EXPORT void Dart_RecordTimelineEvent(const char* label,
+                                          int64_t timestamp0,
+                                          int64_t timestamp1_or_id,
+                                          intptr_t flow_id_count,
+                                          const int64_t* flow_ids,
+                                          Dart_Timeline_Event_Type type,
+                                          intptr_t argument_count,
+                                          const char** argument_names,
+                                          const char** argument_values);
 
 /**
  * Associates a name with the current thread. This name will be used to name
@@ -442,6 +421,91 @@ DART_EXPORT void Dart_TimelineEvent(const char* label,
  */
 DART_EXPORT void Dart_SetThreadName(const char* name);
 
+typedef struct {
+  const char* name;
+  const char* value;
+} Dart_TimelineRecorderEvent_Argument;
+
+#define DART_TIMELINE_RECORDER_CURRENT_VERSION (0x00000002)
+
+typedef struct {
+  /* Set to DART_TIMELINE_RECORDER_CURRENT_VERSION */
+  int32_t version;
+
+  /* The event's type / phase. */
+  Dart_Timeline_Event_Type type;
+
+  /* The event's timestamp according to the same clock as
+   * Dart_TimelineGetMicros. For a duration event, this is the beginning time.
+   */
+  int64_t timestamp0;
+
+  /**
+   * For a duration event, this is the end time. For an async event, this is the
+   * async ID. For a flow event, this is the flow ID. For a begin or end event,
+   * this is the event ID (which is only referenced by the MacOS recorder).
+   */
+  int64_t timestamp1_or_id;
+
+  /* The current isolate of the event, as if by Dart_GetMainPortId, or
+   * ILLEGAL_PORT if the event had no current isolate. */
+  Dart_Port isolate;
+
+  /* The current isolate group of the event, as if by
+   * Dart_CurrentIsolateGroupId, or ILLEGAL_PORT if the event had no current
+   * isolate group. */
+  Dart_IsolateGroupId isolate_group;
+
+  /* The callback data associated with the isolate if any. */
+  void* isolate_data;
+
+  /* The callback data associated with the isolate group if any. */
+  void* isolate_group_data;
+
+  /* The name / label of the event. */
+  const char* label;
+
+  /* The stream / category of the event. */
+  const char* stream;
+
+  intptr_t argument_count;
+  Dart_TimelineRecorderEvent_Argument* arguments;
+} Dart_TimelineRecorderEvent;
+
+/**
+ * Callback provided by the embedder to handle the completion of timeline
+ * events.
+ *
+ * \param event A timeline event that has just been completed. The VM keeps
+ * ownership of the event and any field in it (i.e., the embedder should copy
+ * any values it needs after the callback returns).
+ */
+typedef void (*Dart_TimelineRecorderCallback)(
+    Dart_TimelineRecorderEvent* event);
+
+/**
+ * Register a `Dart_TimelineRecorderCallback` to be called as timeline events
+ * are completed.
+ *
+ * The callback will be invoked without a current isolate.
+ *
+ * The callback will be invoked on the thread completing the event. Because
+ * `Dart_RecordTimelineEvent` may be called by any thread, the callback may be
+ * called on any thread.
+ *
+ * The callback may be invoked at any time after `Dart_Initialize` is called and
+ * before `Dart_Cleanup` returns.
+ *
+ * If multiple callbacks are registered, only the last callback registered
+ * will be remembered. Providing a NULL callback will clear the registration
+ * (i.e., a NULL callback produced a no-op instead of a crash).
+ *
+ * Setting a callback is insufficient to receive events through the callback. The
+ * VM flag `timeline_recorder` must also be set to `callback`.
+ */
+DART_EXPORT void Dart_SetTimelineRecorderCallback(
+    Dart_TimelineRecorderCallback callback);
+
 /*
  * =======
  * Metrics
@@ -450,41 +514,19 @@ DART_EXPORT void Dart_SetThreadName(const char* name);
 
 /**
  * Return metrics gathered for the VM and individual isolates.
- *
- * NOTE: Non-heap metrics are not available in PRODUCT builds of Dart.
- * Calling the non-heap metric functions on a PRODUCT build might return invalid metrics.
  */
-DART_EXPORT int64_t Dart_VMIsolateCountMetric();  // Counter
-DART_EXPORT int64_t Dart_VMCurrentRSSMetric();    // Byte
-DART_EXPORT int64_t Dart_VMPeakRSSMetric();       // Byte
 DART_EXPORT int64_t
-Dart_IsolateHeapOldUsedMetric(Dart_Isolate isolate);  // Byte
+Dart_IsolateGroupHeapOldUsedMetric(Dart_IsolateGroup group);  // Byte
 DART_EXPORT int64_t
-Dart_IsolateHeapOldUsedMaxMetric(Dart_Isolate isolate);  // Byte
+Dart_IsolateGroupHeapOldCapacityMetric(Dart_IsolateGroup group);  // Byte
 DART_EXPORT int64_t
-Dart_IsolateHeapOldCapacityMetric(Dart_Isolate isolate);  // Byte
+Dart_IsolateGroupHeapOldExternalMetric(Dart_IsolateGroup group);  // Byte
 DART_EXPORT int64_t
-Dart_IsolateHeapOldCapacityMaxMetric(Dart_Isolate isolate);  // Byte
+Dart_IsolateGroupHeapNewUsedMetric(Dart_IsolateGroup group);  // Byte
 DART_EXPORT int64_t
-Dart_IsolateHeapOldExternalMetric(Dart_Isolate isolate);  // Byte
+Dart_IsolateGroupHeapNewCapacityMetric(Dart_IsolateGroup group);  // Byte
 DART_EXPORT int64_t
-Dart_IsolateHeapNewUsedMetric(Dart_Isolate isolate);  // Byte
-DART_EXPORT int64_t
-Dart_IsolateHeapNewUsedMaxMetric(Dart_Isolate isolate);  // Byte
-DART_EXPORT int64_t
-Dart_IsolateHeapNewCapacityMetric(Dart_Isolate isolate);  // Byte
-DART_EXPORT int64_t
-Dart_IsolateHeapNewCapacityMaxMetric(Dart_Isolate isolate);  // Byte
-DART_EXPORT int64_t
-Dart_IsolateHeapNewExternalMetric(Dart_Isolate isolate);  // Byte
-DART_EXPORT int64_t
-Dart_IsolateHeapGlobalUsedMetric(Dart_Isolate isolate);  // Byte
-DART_EXPORT int64_t
-Dart_IsolateHeapGlobalUsedMaxMetric(Dart_Isolate isolate);  // Byte
-DART_EXPORT int64_t
-Dart_IsolateRunnableLatencyMetric(Dart_Isolate isolate);  // Microsecond
-DART_EXPORT int64_t
-Dart_IsolateRunnableHeapSizeMetric(Dart_Isolate isolate);  // Byte
+Dart_IsolateGroupHeapNewExternalMetric(Dart_IsolateGroup group);  // Byte
 
 /*
  * ========
@@ -493,14 +535,14 @@ Dart_IsolateRunnableHeapSizeMetric(Dart_Isolate isolate);  // Byte
  */
 
 /*
- * Gets the current isolate's currently set UserTag instance.
+ * Gets the current Dart thread's currently set UserTag instance.
  *
  * \return The currently set UserTag instance.
  */
 DART_EXPORT Dart_Handle Dart_GetCurrentUserTag();
 
 /*
- * Gets the current isolate's default UserTag instance.
+ * Gets the current Dart thread's default UserTag instance.
  *
  * \return The default UserTag with label 'Default'
  */
@@ -516,7 +558,7 @@ DART_EXPORT Dart_Handle Dart_GetDefaultUserTag();
 DART_EXPORT Dart_Handle Dart_NewUserTag(const char* label);
 
 /*
- * Updates the current isolate's UserTag to a new value.
+ * Updates the current Dart thread's UserTag to a new value.
  *
  * \param user_tag The UserTag to be set as the current UserTag.
  *
@@ -532,7 +574,55 @@ DART_EXPORT Dart_Handle Dart_SetCurrentUserTag(Dart_Handle user_tag);
  * \return The UserTag's label. NULL if the user_tag is invalid. The caller is
  *   responsible for freeing the returned label.
  */
-DART_EXPORT DART_WARN_UNUSED_RESULT char* Dart_GetUserTagLabel(
+DART_EXPORT DART_API_WARN_UNUSED_RESULT char* Dart_GetUserTagLabel(
     Dart_Handle user_tag);
+
+/*
+ * =======
+ * Heap Snapshot
+ * =======
+ */
+
+/**
+ * Callback provided by the caller of `Dart_WriteHeapSnapshot` which is
+ * used to write out chunks of the requested heap snapshot.
+ *
+ * \param context An opaque context which was passed to `Dart_WriteHeapSnapshot`
+ *   together with this callback.
+ *
+ * \param buffer Pointer to the buffer containing a chunk of the snapshot.
+ *   The callback owns the buffer and needs to `free` it.
+ *
+ * \param size Number of bytes in the `buffer` to be written.
+ *
+ * \param is_last Set to `true` for the last chunk. The callback will not
+ *   be invoked again after it was invoked once with `is_last` set to `true`.
+ */
+typedef void (*Dart_HeapSnapshotWriteChunkCallback)(void* context,
+                                                    uint8_t* buffer,
+                                                    intptr_t size,
+                                                    bool is_last);
+
+/**
+ * Generate heap snapshot of the current isolate group and stream it into the
+ * given `callback`. VM would produce snapshot in chunks and send these chunks
+ * one by one back to the embedder by invoking the provided `callback`.
+ *
+ * This API enables embedder to stream snapshot into a file or socket without
+ * allocating a buffer to hold the whole snapshot in memory.
+ *
+ * The isolate group will be paused for the duration of this operation.
+ *
+ * \param write Callback used to write chunks of the heap snapshot.
+ *
+ * \param context Opaque context which would be passed on each invocation of
+ *   `write` callback.
+ *
+ * \returns `nullptr` if the operation is successful otherwise error message.
+ *   Caller owns error message string and needs to `free` it.
+ */
+DART_EXPORT char* Dart_WriteHeapSnapshot(
+    Dart_HeapSnapshotWriteChunkCallback write,
+    void* context);
 
 #endif  // RUNTIME_INCLUDE_DART_TOOLS_API_H_
