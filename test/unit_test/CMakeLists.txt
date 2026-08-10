@@ -155,6 +155,9 @@ add_subdirectory(utils-test)
 # (Display::Display calls wl_display_connect / App::BuildDisplays).  They have
 # been moved to test/integration/ and are not run by the unit-test-coverage job.
 add_subdirectory(configuration-test-case)
+if (ENABLE_OSGI)
+    add_subdirectory(osgi_config-test)
+endif ()
 add_subdirectory(output_resolver-test)
 add_subdirectory(ihs_pv-test)
 # T1 — drives the real LeaseClient against a mock drm-lease-v1 compositor.

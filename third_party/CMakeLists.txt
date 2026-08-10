@@ -45,6 +45,36 @@ target_compile_options(tomlplusplus_tomlplusplus INTERFACE
 )
 
 #
+# Dart dynamically-linked embedding API (dart_api_dl)
+#
+# Only built for ENABLE_OSGI: the OSGi bridge hands each bundle isolate its
+# framework SendPort with Dart_PostCObject_DL, which requires the DL symbol
+# table that dart_api_dl.c defines and Dart_InitializeApiDL() populates.
+#
+# A separate target rather than a source on the shell: the file is C (the shell
+# target is a C++ source list), and test/unit_test harvests the shell target's
+# SOURCES property and PREPENDs shell/ to every entry, which an absolute path
+# into third_party/ would corrupt. Linking keeps it out of that harvest while
+# LINK_LIBRARIES carries it into the test targets unchanged.
+if (ENABLE_OSGI)
+    add_library(dart_api_dl STATIC
+            flutter/third_party/dart/runtime/include/dart_api_dl.c)
+    target_include_directories(dart_api_dl PUBLIC
+            flutter/third_party/dart/runtime/include)
+    set_target_properties(dart_api_dl PROPERTIES
+            C_STANDARD 11
+            POSITION_INDEPENDENT_CODE ON)
+    # Vendored upstream source we do not edit: quiet its own build (it trips
+    # -Wunused-parameter), and re-publish the include dir as SYSTEM so the Dart
+    # headers are -isystem for consumers. Mirrors the sdbus-c++ handling in the
+    # root CMakeLists.
+    target_compile_options(dart_api_dl PRIVATE -w)
+    set_target_properties(dart_api_dl PROPERTIES
+            INTERFACE_SYSTEM_INCLUDE_DIRECTORIES
+            "${CMAKE_CURRENT_SOURCE_DIR}/flutter/third_party/dart/runtime/include")
+endif ()
+
+#
 # Vulkan-Headers
 #
 # Expose the top-level include dir (not include/vulkan) so the canonical
