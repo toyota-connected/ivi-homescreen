@@ -500,10 +500,12 @@ endif ()
 if (ENABLE_OSGI)
     target_sources(${PROJECT_NAME} PRIVATE
             osgi/bridge_registry.cc
+            osgi/bundle_state.cc
             osgi/cpu_affinity.cc
             osgi/osgi_bridge_plugin.cc
             osgi/osgi_config.cc
             osgi/priority.cc
+            osgi/startup_plan.cc
             osgi/vsync_coordinator.cc
     )
     target_link_libraries(${PROJECT_NAME} PRIVATE dart_api_dl)
