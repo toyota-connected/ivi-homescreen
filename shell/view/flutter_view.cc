@@ -486,6 +486,10 @@ PlatformViewRegistry* FlutterView::GetPlatformViewRegistry() const {
   return state == nullptr ? nullptr : state->platform_view_registry.get();
 }
 
+TaskRunner* FlutterView::GetPlatformTaskRunner() const {
+  return m_flutter_engine ? m_flutter_engine->GetPlatformTaskRunner() : nullptr;
+}
+
 void FlutterView::Initialize() {
   // Engine / Dart VM switches -> command_line_argv. argv[0] is the app id.
   std::vector<const char*> m_command_line_args_c;
