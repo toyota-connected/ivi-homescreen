@@ -26,6 +26,9 @@
 
 #include "backend/backend.h"
 #include "text_input_plugin.h"
+#if ENABLE_OSGI
+#include "osgi/osgi_bridge_plugin.h"
+#endif
 #include "view/flutter_view.h"
 
 #include "libflutter_engine.h"
@@ -116,6 +119,15 @@ void SetUpCommonEngineState(FlutterDesktopEngineState* state,
 #if BUILD_WATCHDOG
   // Watchdog plugin.
   state->watchdog_handler = std::make_unique<WatchdogPlugin>(
+      state->internal_plugin_registrar->messenger());
+#endif
+
+#if ENABLE_OSGI
+  // OSGi bridge. Registered on every engine, including the one serving a
+  // non-OSGi view: which engine hosts a bundle is decided by the Dart side
+  // calling init, not by the shell, so the channel has to exist wherever a
+  // bundle might be loaded.
+  state->osgi_bridge_handler = std::make_unique<ihs::osgi::OsgiBridgePlugin>(
       state->internal_plugin_registrar->messenger());
 #endif
 }
