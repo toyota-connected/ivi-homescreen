@@ -18,34 +18,11 @@
 
 #include <cstdint>
 #include <string>
-#include <string_view>
 
 #include "configuration/configuration.h"
+#include "priority.h"
 
 namespace ihs::osgi {
-
-// When a bundle is brought up relative to the asio reactor.
-//
-//   kCritical   started (and waited on) before the reactor runs. A cluster or
-//               an alarm surface must be ACTIVE before anything else competes
-//               for the GPU, so the orchestrator blocks on each one up to
-//               startup_timeout_ms.
-//   kNormal     started after the reactor is running, staggered, so several
-//               bundles do not contend for the same first-frame resources.
-//   kBackground services with no view (CAN decoders, telemetry); started last
-//               and never waited on.
-enum class Priority : uint8_t {
-  kCritical,
-  kNormal,
-  kBackground,
-};
-
-// Parses "critical" | "normal" | "background". Returns false (leaving @out
-// untouched) for anything else, so callers can report the offending spelling.
-bool ParsePriority(std::string_view text, Priority& out);
-
-// The canonical spelling, for logs and round-tripping.
-std::string_view PriorityName(Priority priority);
 
 // One [[osgi.bundles]] entry.
 //

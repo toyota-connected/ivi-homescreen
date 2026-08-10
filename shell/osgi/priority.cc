@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "bundle_manifest.h"
+#include "priority.h"
 
 namespace ihs::osgi {
 
