@@ -72,6 +72,8 @@ class Backend;
 class CompositorSurface;
 #endif
 
+class TaskRunner;
+
 class FlutterView {
  public:
   FlutterView(Configuration::Config config,
@@ -246,6 +248,12 @@ class FlutterView {
 
  public:
   [[nodiscard]] bool IsSuspended() const { return m_suspended; }
+
+  /// This view's platform task runner, or nullptr before Initialize(). Exposed
+  /// for the OSGi host, which pins a critical bundle's engine thread to the
+  /// core its manifest names -- the thread belongs to the runner, and nothing
+  /// else outside the view can reach it.
+  [[nodiscard]] TaskRunner* GetPlatformTaskRunner() const;
 
   /**
    * @brief Get pointer to Display object

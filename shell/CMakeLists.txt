@@ -499,6 +499,7 @@ endif ()
 # target (third_party/CMakeLists.txt), which also carries its include dir.
 if (ENABLE_OSGI)
     target_sources(${PROJECT_NAME} PRIVATE
+            osgi/app_bundle_host.cc
             osgi/bridge_registry.cc
             osgi/bundle_state.cc
             osgi/cpu_affinity.cc
