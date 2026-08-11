@@ -366,7 +366,8 @@ int main(const int argc, char** argv) {
       if (!ihs::osgi::LoadOsgiConfig(osgi_config_path, osgi_config)) {
         // A malformed [osgi] table is a configuration error the operator has to
         // see, not something to start half of.
-        ihs::log::critical("[osgi] configuration rejected; not starting bundles");
+        ihs::log::critical(
+            "[osgi] configuration rejected; not starting bundles");
         return EXIT_FAILURE;
       }
     }
