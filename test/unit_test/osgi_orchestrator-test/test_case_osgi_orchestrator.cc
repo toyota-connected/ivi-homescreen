@@ -23,6 +23,7 @@
 #include <thread>
 #include <vector>
 
+#include "osgi/bridge_registry.h"
 #include "osgi/startup_orchestrator.h"
 
 namespace {
@@ -163,6 +164,103 @@ ihs::osgi::StartupPolicy NoStagger() {
 }
 
 }  // namespace
+
+// --- The bridge/orchestrator join -------------------------------------------
+//
+// Every other test here calls NotifyActive directly, and every test in the
+// bridge suite drives the registry directly. Both pass whether or not anything
+// connects them -- which is exactly how the two shipped fully built and fully
+// disconnected. These cases wire the real BridgeRegistry to the real
+// orchestrator and let a bundle report ACTIVE the way production does.
+
+namespace {
+
+// A host whose spawned bundle behaves like a real Dart activator: it registers
+// over the bridge and then reports ACTIVE, rather than calling the orchestrator
+// directly the way FakeHost does.
+class BridgeReportingHost final : public ihs::osgi::IBundleHost {
+ public:
+  BridgeReportingHost(ihs::osgi::BridgeRegistry* registry, bool report_active)
+      : registry_(registry), report_active_(report_active) {}
+
+  BundleHandle Spawn(const ihs::osgi::BundleManifest& manifest) override {
+    const BundleHandle handle = ++next_handle_;
+    // What the Dart side does over dev.osgi/bridge: init, then active.
+    registry_->RegisterBundle(manifest.symbolic_name,
+                              static_cast<int64_t>(handle));
+    if (report_active_) {
+      registry_->ReportActive(manifest.symbolic_name);
+    }
+    return handle;
+  }
+  bool PinThread(BundleHandle, int) override { return true; }
+  void Shutdown(BundleHandle) override {}
+
+ private:
+  ihs::osgi::BridgeRegistry* registry_;
+  bool report_active_;
+  BundleHandle next_handle_{0};
+};
+
+ihs::osgi::DartPortApi NoopDartApi() {
+  return {[](void*) -> intptr_t { return 0; },
+          [](int64_t, int64_t) { return true; }};
+}
+
+}  // namespace
+
+// The join, end to end: a bundle reports ACTIVE over the bridge and the
+// critical wait is released by it. Before the observer existed this timed out.
+TEST(OrchestratorBridgeJoin, ActiveOverTheBridgeReleasesTheCriticalWait) {
+  auto api = NoopDartApi();
+  ihs::osgi::BridgeRegistry registry(api);
+  ASSERT_TRUE(registry.InitializeDartApi(0xDEADBEEF));
+
+  BridgeReportingHost host(&registry, /*report_active=*/true);
+  BundleStartupOrchestrator orchestrator(
+      host, {Manifest("com.ivi.cluster", Priority::kCritical)}, NoStagger());
+  registry.SetLifecycleObserver(&orchestrator);
+
+  const auto outcomes = orchestrator.StartCriticalPhase();
+  ASSERT_EQ(outcomes.size(), 1u);
+  EXPECT_EQ(outcomes[0].failure, StartupFailure::kNone)
+      << "ACTIVE reported over the bridge did not reach the orchestrator";
+  EXPECT_EQ(outcomes[0].state, BundleState::kActive);
+}
+
+// The control: same wiring, but the bundle never reports. Confirms the pass
+// above comes from the report and not from something else releasing the wait.
+TEST(OrchestratorBridgeJoin, WithoutTheReportTheCriticalWaitStillTimesOut) {
+  auto api = NoopDartApi();
+  ihs::osgi::BridgeRegistry registry(api);
+  ASSERT_TRUE(registry.InitializeDartApi(0xDEADBEEF));
+
+  BridgeReportingHost host(&registry, /*report_active=*/false);
+  BundleStartupOrchestrator orchestrator(
+      host, {Manifest("com.ivi.cluster", Priority::kCritical)}, NoStagger());
+  registry.SetLifecycleObserver(&orchestrator);
+
+  const auto outcomes = orchestrator.StartCriticalPhase();
+  ASSERT_EQ(outcomes.size(), 1u);
+  EXPECT_EQ(outcomes[0].failure, StartupFailure::kTimedOut);
+}
+
+// Detaching the observer must reopen the gap rather than leave a stale pointer
+// delivering into a destroyed orchestrator.
+TEST(OrchestratorBridgeJoin, DetachedObserverStopsReleasingTheWait) {
+  auto api = NoopDartApi();
+  ihs::osgi::BridgeRegistry registry(api);
+  ASSERT_TRUE(registry.InitializeDartApi(0xDEADBEEF));
+
+  BridgeReportingHost host(&registry, /*report_active=*/true);
+  BundleStartupOrchestrator orchestrator(
+      host, {Manifest("com.ivi.cluster", Priority::kCritical)}, NoStagger());
+  registry.SetLifecycleObserver(&orchestrator);
+  registry.SetLifecycleObserver(nullptr);
+
+  const auto outcomes = orchestrator.StartCriticalPhase();
+  EXPECT_EQ(outcomes[0].failure, StartupFailure::kTimedOut);
+}
 
 // --- Critical phase ---------------------------------------------------------
 
