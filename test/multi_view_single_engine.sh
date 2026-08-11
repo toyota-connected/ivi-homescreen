@@ -141,22 +141,55 @@ wait "$HS_PID" 2>/dev/null
 fail=0
 
 # 1. The single engine must have brought up BOTH connectors.
+#
+# The two outputs announce themselves differently, and only the primary matched
+# the patterns this used to look for:
+#
+#   primary      [DrmBackend] picked connector DSI-1 via user pin (--drm-connector)
+#                [OutputManager] view bound to output 'DSI-1'
+#   additional   [DrmBackend] additional output 'HDMI-A-1': connector=35 crtc=104 ...
+#
+# The additional form puts the connector name before "connector=", so
+# "connector=.*$c" cannot match it, and it never gets a "bound to output" line.
+# The check therefore failed for the second output -- the one this harness
+# exists to verify -- however well it came up.
 for c in "$CONNECTOR_A" "$CONNECTOR_B"; do
-  if grep -aq "\[DrmBackend\] .*connector.*$c" "$LOG" || grep -aq "connector=.*$c" "$LOG" \
-     || grep -aq "bound to output '$c'" "$LOG"; then
+  if grep -aq "\[DrmBackend\] .*connector.*$c" "$LOG" \
+     || grep -aq "connector=.*$c" "$LOG" \
+     || grep -aq "bound to output '$c'" "$LOG" \
+     || grep -aq "additional output '$c'" "$LOG"; then
     note "output up: $c"
   else
     echo "FAIL: no startup line for connector $c" >&2; fail=1
   fi
 done
 
-# 2. Exactly one engine: expect a single 'Engine running' / '(0) Engine'
-#    and NOT a second discrete engine index.
-if grep -aqE "\(1\) Engine running" "$LOG"; then
-  echo "FAIL: a second engine (index 1) started" >&2
+# 2. Exactly one engine drives both outputs.
+#
+# This used to look for "(1) Engine running", which is IHS_DEBUG -- and
+# IHS_DEBUG compiles to ((void)0) under NDEBUG. In a release build the string
+# does not exist, the grep never matches, and the check reports "single engine"
+# no matter how many engines started. It could only ever fail in a Debug build,
+# which is not the binary that ships.
+#
+# Count distinct engine indices instead, from markers that survive release.
+# Engine::Engine logs exactly one of these at info level per engine: "Loading
+# AOT" for an AOT bundle, "Runtime=debug" for a JIT one.
+engine_indices=$(grep -aoE "\([0-9]+\) (Loading AOT|Runtime=debug)" "$LOG" \
+                 | grep -oE "^\(?[0-9]+" | tr -d '(' | sort -un)
+engine_count=$(printf '%s' "$engine_indices" | grep -c . || true)
+
+if [ "$engine_count" -eq 0 ]; then
+  # Neither marker appeared, so no engine got as far as choosing a runtime.
+  # Reporting "single engine" here is what the old check did, and it is the
+  # failure mode worth avoiding: absence of evidence read as evidence.
+  echo "FAIL: no engine start markers in the log; the run proves nothing" >&2
+  fail=1
+elif [ "$engine_count" -gt 1 ]; then
+  echo "FAIL: $engine_count engines started (indices: $(echo $engine_indices | tr '\n' ' ')); expected exactly one" >&2
   fail=1
 else
-  note "single engine (no discrete second engine)"
+  note "single engine (one index, both outputs)"
 fi
 
 # 3. No fatal/error spdlog lines.
