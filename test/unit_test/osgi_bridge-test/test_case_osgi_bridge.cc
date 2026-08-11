@@ -239,6 +239,85 @@ TEST_F(BridgeRegistryTest, FailedPostLeavesBundlePending) {
   EXPECT_TRUE(registry_->PendingBundles().empty());
 }
 
+// --- Lifecycle observer ---------------------------------------------------
+//
+// The seam between the bridge (which knows channels) and the orchestrator
+// (which knows startup sequencing). Without it a bundle can register, run its
+// activator and report ACTIVE while the critical wait times out anyway.
+
+namespace {
+class RecordingObserver final : public ihs::osgi::IBundleLifecycleObserver {
+ public:
+  void OnBundleActive(const std::string& name) override {
+    active.push_back(name);
+  }
+  void OnBundleStopped(const std::string& name) override {
+    stopped.push_back(name);
+  }
+  std::vector<std::string> active;
+  std::vector<std::string> stopped;
+};
+}  // namespace
+
+TEST_F(BridgeRegistryTest, ForwardsActiveAndStoppedToTheObserver) {
+  RecordingObserver observer;
+  registry_->SetLifecycleObserver(&observer);
+  ASSERT_TRUE(registry_->RegisterBundle("com.ivi.cluster", 7));
+
+  EXPECT_TRUE(registry_->ReportActive("com.ivi.cluster"));
+  EXPECT_EQ(observer.active, std::vector<std::string>{"com.ivi.cluster"});
+
+  EXPECT_TRUE(registry_->ReportStopped("com.ivi.cluster"));
+  EXPECT_EQ(observer.stopped, std::vector<std::string>{"com.ivi.cluster"});
+}
+
+// A report from a bundle that never called init cannot advance anything, and
+// silently accepting it would hide a symbolic_name that does not match config.
+TEST_F(BridgeRegistryTest, RejectsActiveFromAnUnregisteredBundle) {
+  RecordingObserver observer;
+  registry_->SetLifecycleObserver(&observer);
+  EXPECT_FALSE(registry_->ReportActive("com.ivi.ghost"));
+  EXPECT_TRUE(observer.active.empty());
+}
+
+// With no observer attached the registry must not crash -- the shell may run
+// bundles with no orchestrator (every bundle deferred, nothing awaited).
+TEST_F(BridgeRegistryTest, ActiveWithoutAnObserverIsHarmless) {
+  ASSERT_TRUE(registry_->RegisterBundle("com.ivi.cluster", 7));
+  EXPECT_TRUE(registry_->ReportActive("com.ivi.cluster"));
+}
+
+TEST_F(BridgeRegistryTest, DetachingTheObserverStopsDelivery) {
+  RecordingObserver observer;
+  registry_->SetLifecycleObserver(&observer);
+  ASSERT_TRUE(registry_->RegisterBundle("com.ivi.cluster", 7));
+  registry_->SetLifecycleObserver(nullptr);
+  EXPECT_TRUE(registry_->ReportActive("com.ivi.cluster"));
+  EXPECT_TRUE(observer.active.empty());
+}
+
+// The observer is dispatched outside the registry lock, so an observer that
+// calls back into the registry must not deadlock. The orchestrator does
+// exactly this shape of thing under its own lock.
+TEST_F(BridgeRegistryTest, ObserverMayCallBackIntoTheRegistry) {
+  class Reentrant final : public ihs::osgi::IBundleLifecycleObserver {
+   public:
+    explicit Reentrant(ihs::osgi::BridgeRegistry* r) : registry_(r) {}
+    void OnBundleActive(const std::string&) override {
+      (void)registry_->PendingBundles();
+      (void)registry_->framework_port();
+    }
+    void OnBundleStopped(const std::string&) override {}
+
+   private:
+    ihs::osgi::BridgeRegistry* registry_;
+  };
+  Reentrant observer(registry_.get());
+  registry_->SetLifecycleObserver(&observer);
+  ASSERT_TRUE(registry_->RegisterBundle("com.ivi.cluster", 7));
+  EXPECT_TRUE(registry_->ReportActive("com.ivi.cluster"));
+}
+
 // --- Concurrency ------------------------------------------------------------
 
 // Bundle engines register from their own threads while the framework may land

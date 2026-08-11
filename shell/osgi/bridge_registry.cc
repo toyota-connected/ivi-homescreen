@@ -202,10 +202,52 @@ std::vector<std::string> BridgeRegistry::PendingBundles() const {
   return pending;
 }
 
+void BridgeRegistry::SetLifecycleObserver(IBundleLifecycleObserver* observer) {
+  std::lock_guard lock(mutex_);
+  observer_ = observer;
+}
+
+bool BridgeRegistry::ReportActive(const std::string& symbolic_name) {
+  IBundleLifecycleObserver* observer = nullptr;
+  {
+    std::lock_guard lock(mutex_);
+    if (bundles_.find(symbolic_name) == bundles_.end()) {
+      // A report from a bundle that never called init: either a stale message
+      // from a previous incarnation, or a symbolic_name that does not match the
+      // config. Either way there is nothing to advance.
+      ihs::log::warn("[osgi] bridge: ACTIVE from unregistered bundle '{}'",
+                     symbolic_name);
+      return false;
+    }
+    observer = observer_;
+  }
+  // Dispatched outside the lock: the observer is the orchestrator, whose
+  // NotifyActive takes its own lock and signals a condition variable. Holding
+  // this one across that call would couple two unrelated locks on the startup
+  // path for no reason.
+  if (observer != nullptr) {
+    observer->OnBundleActive(symbolic_name);
+  }
+  return true;
+}
+
+bool BridgeRegistry::ReportStopped(const std::string& symbolic_name) {
+  IBundleLifecycleObserver* observer = nullptr;
+  {
+    std::lock_guard lock(mutex_);
+    observer = observer_;
+  }
+  if (observer != nullptr) {
+    observer->OnBundleStopped(symbolic_name);
+  }
+  return true;
+}
+
 void BridgeRegistry::ResetForTesting() {
   std::lock_guard lock(mutex_);
   bundles_.clear();
   framework_port_.reset();
+  observer_ = nullptr;
 }
 
 }  // namespace ihs::osgi

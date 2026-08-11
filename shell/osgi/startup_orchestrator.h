@@ -22,6 +22,7 @@
 #include <string>
 #include <vector>
 
+#include "bridge_registry.h"
 #include "bundle_host.h"
 #include "bundle_state.h"
 #include "startup_plan.h"
@@ -61,7 +62,7 @@ struct BundleOutcome {
 // Dart activator reports it over the bridge, which calls NotifyActive. The wait
 // is therefore a condition variable with a deadline rather than a poll, and the
 // deadline is per bundle from its manifest.
-class BundleStartupOrchestrator {
+class BundleStartupOrchestrator final : public IBundleLifecycleObserver {
  public:
   BundleStartupOrchestrator(IBundleHost& host,
                             std::vector<BundleManifest> manifests,
@@ -92,6 +93,15 @@ class BundleStartupOrchestrator {
   // The bundle stopped or died. Moves it out of the live states so the same
   // symbolic name can be started again.
   void NotifyStopped(const std::string& symbolic_name);
+
+  // IBundleLifecycleObserver. The bridge reports in these terms; the
+  // orchestrator already had the operations, so they simply forward.
+  void OnBundleActive(const std::string& symbolic_name) override {
+    NotifyActive(symbolic_name);
+  }
+  void OnBundleStopped(const std::string& symbolic_name) override {
+    NotifyStopped(symbolic_name);
+  }
 
   [[nodiscard]] BundleState StateOf(const std::string& symbolic_name) const;
 

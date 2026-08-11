@@ -44,6 +44,26 @@ struct DartPortApi {
 // The real Dart DL calls.
 const DartPortApi& RealDartPortApi();
 
+// Receives bundle lifecycle reports that arrive from Dart over the bridge.
+//
+// The bridge is per-engine and knows nothing about startup sequencing; the
+// orchestrator owns the sequencing and knows nothing about channels. This is
+// the seam between them -- without it a bundle can register its port and still
+// never be seen to reach ACTIVE, so every critical bundle times out no matter
+// how correctly its activator behaves.
+class IBundleLifecycleObserver {
+ public:
+  virtual ~IBundleLifecycleObserver() = default;
+
+  // The bundle's activator finished start(). This is what ACTIVE means in the
+  // OSGi lifecycle -- not that the engine is up, which the shell already knows,
+  // but that the bundle's own code declared itself ready.
+  virtual void OnBundleActive(const std::string& symbolic_name) = 0;
+
+  // The bundle's activator finished stop(), or it is going away.
+  virtual void OnBundleStopped(const std::string& symbolic_name) = 0;
+};
+
 // Tracks which isolate ports the OSGi bridge knows about and hands each bundle
 // the framework isolate's port.
 //
@@ -99,6 +119,18 @@ class BridgeRegistry {
   // order. Empty once the framework port is known.
   [[nodiscard]] std::vector<std::string> PendingBundles() const;
 
+  // Route lifecycle reports to @observer. Null detaches. The observer must
+  // outlive the registry's use of it; in practice it is the orchestrator, which
+  // lives for the whole run.
+  void SetLifecycleObserver(IBundleLifecycleObserver* observer);
+
+  // A bundle reported that its activator completed. Returns false when the
+  // bundle is unknown to the bridge, which means it never called init.
+  bool ReportActive(const std::string& symbolic_name);
+
+  // A bundle reported that it stopped.
+  bool ReportStopped(const std::string& symbolic_name);
+
   // Test seam: drop all state (not the DL binding, which is a VM-global).
   void ResetForTesting();
 
@@ -111,6 +143,7 @@ class BridgeRegistry {
   mutable std::mutex mutex_;
   bool dart_api_ready_{false};
   std::optional<int64_t> framework_port_;
+  IBundleLifecycleObserver* observer_{nullptr};
 
   struct Bundle {
     int64_t port{0};
