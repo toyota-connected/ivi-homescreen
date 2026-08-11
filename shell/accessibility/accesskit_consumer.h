@@ -38,6 +38,17 @@ accesskit_role ToAccessKitRole(IhsSemanticsRole role);
 // rather than dispatching a guess.
 uint64_t ToIhsAction(accesskit_action action);
 
+// Translates one hub node into an AccessKit node. Exposed for testing: several
+// of the rules here are invisible without an assistive technology attached and
+// fail silently when wrong -- a Label's accessible name comes from its value
+// rather than its label, and the focus action must be offered only where the
+// node can actually hold the accessibility cursor.
+//
+// `snapshot` resolves the node's children and custom-action declarations, so
+// it must be the snapshot the node came from. Caller owns the result.
+accesskit_node* BuildNode(const IhsSemanticsNode* node,
+                          const IhsSemanticsSnapshot* snapshot);
+
 // Bridges the semantics hub to a platform screen reader through AccessKit.
 //
 // This is a hub consumer like any other: it registers, waits on the hub's

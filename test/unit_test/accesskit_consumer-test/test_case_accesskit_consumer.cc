@@ -16,11 +16,13 @@
 
 #include <cstdint>
 #include <set>
+#include <string>
 #include <vector>
 
 #include "gtest/gtest.h"
 
 #include "ihs/ihs_semantics.h"
+#include "ihs/ihs_semantics_host.h"
 
 #include "accessibility/accesskit_consumer.h"
 
@@ -153,4 +155,210 @@ TEST(AccessKitConsumer, EveryMappedActionIsWithinTheAllowMask) {
         << "mapped action 0x" << std::hex << mapped
         << " is not a bit this ABI defines";
   }
+}
+
+namespace {
+
+// Publishes a one-node tree and hands back the built AccessKit node. The
+// snapshot is real rather than a stub, since BuildNode resolves children and
+// custom-action declarations through it.
+class BuiltNode {
+ public:
+  BuiltNode(const IhsSemanticsPublishNode& node,
+            std::vector<IhsSemanticsPublishCustomAction> customs = {}) {
+    IhsSemanticsPublishInfo info{};
+    info.struct_size = sizeof(info);
+    info.nodes = &node;
+    info.node_count = 1;
+    info.custom_actions = customs.empty() ? nullptr : customs.data();
+    info.custom_action_count = customs.size();
+    ihs_semantics_publish(&info);
+    snapshot_ = ihs_semantics_acquire_snapshot();
+    built_ = accessibility::BuildNode(
+        ihs_semantics_snapshot_node_at(snapshot_, 0), snapshot_);
+  }
+  ~BuiltNode() {
+    accesskit_node_free(built_);
+    ihs_semantics_release_snapshot(snapshot_);
+    ihs_semantics_clear();
+  }
+  BuiltNode(const BuiltNode&) = delete;
+  BuiltNode& operator=(const BuiltNode&) = delete;
+
+  accesskit_node* get() const { return built_; }
+
+ private:
+  const IhsSemanticsSnapshot* snapshot_ = nullptr;
+  accesskit_node* built_ = nullptr;
+};
+
+// Reads a string getter that hands back an owned copy.
+std::string Owned(char* value) {
+  if (value == nullptr) {
+    return {};
+  }
+  std::string out(value);
+  accesskit_string_free(value);
+  return out;
+}
+
+IhsSemanticsPublishNode PlainNode(const char* label, IhsSemanticsRole role) {
+  IhsSemanticsPublishNode node{};
+  node.id = 0;
+  node.label = label;
+  node.hint = "";
+  node.value = "";
+  node.tooltip = "";
+  node.identifier = "";
+  node.role = role;
+  return node;
+}
+
+}  // namespace
+
+// AccessKit derives a Label node's accessible name from its value, not its
+// label. Flutter puts the text in the label, so without the fixup every piece
+// of static text in the UI reaches a screen reader nameless -- and since a
+// live region's announcement is built from that same name, an unnamed toast is
+// never announced at all.
+TEST(AccessKitConsumer, LabelNodeCarriesItsTextInTheValue) {
+  const IhsSemanticsPublishNode node =
+      PlainNode("Now playing", IHS_SEMANTICS_ROLE_LABEL);
+  const BuiltNode built(node);
+  EXPECT_EQ(Owned(accesskit_node_value(built.get())), "Now playing");
+}
+
+// Only a Label takes its name from the value; anything else keeps whatever
+// value it was given, so a slider reading "21.5" is not overwritten.
+TEST(AccessKitConsumer, NonLabelRolesKeepTheirOwnValue) {
+  IhsSemanticsPublishNode node =
+      PlainNode("Driver temperature", IHS_SEMANTICS_ROLE_SLIDER);
+  node.value = "21.5";
+  const BuiltNode built(node);
+  EXPECT_EQ(Owned(accesskit_node_value(built.get())), "21.5");
+
+  // And a Label that already has a value keeps it rather than being clobbered.
+  IhsSemanticsPublishNode labelled =
+      PlainNode("ignored", IHS_SEMANTICS_ROLE_LABEL);
+  labelled.value = "explicit";
+  const BuiltNode built_label(labelled);
+  EXPECT_EQ(Owned(accesskit_node_value(built_label.get())), "explicit");
+}
+
+// Focus is what a screen reader uses to place its cursor. Offering it on every
+// node -- as this did before -- makes static text and layout containers look
+// like focus targets, which reads as a tree full of nothing.
+TEST(AccessKitConsumer, FocusIsOfferedOnlyWhereTheNodeCanHoldTheCursor) {
+  IhsSemanticsPublishNode focusable =
+      PlainNode("Play", IHS_SEMANTICS_ROLE_BUTTON);
+  focusable.focusable = true;
+  const BuiltNode built_focusable(focusable);
+  EXPECT_TRUE(accesskit_node_supports_action(built_focusable.get(),
+                                             ACCESSKIT_ACTION_FOCUS));
+
+  const IhsSemanticsPublishNode plain =
+      PlainNode("Now playing", IHS_SEMANTICS_ROLE_LABEL);
+  const BuiltNode built_plain(plain);
+  EXPECT_FALSE(accesskit_node_supports_action(built_plain.get(),
+                                              ACCESSKIT_ACTION_FOCUS));
+}
+
+// The framework can mark a node as unable to take the accessibility cursor
+// even though it is otherwise focusable -- content behind a modal barrier.
+// Offering focus anyway would walk a screen reader into sealed-off content.
+TEST(AccessKitConsumer, BlockedNodesDoNotOfferFocus) {
+  IhsSemanticsPublishNode blocked =
+      PlainNode("Behind a dialog", IHS_SEMANTICS_ROLE_BUTTON);
+  blocked.focusable = true;
+  blocked.a11y_focus_blocked = true;
+  const BuiltNode built(blocked);
+  EXPECT_FALSE(
+      accesskit_node_supports_action(built.get(), ACCESSKIT_ACTION_FOCUS));
+}
+
+// A live region is announced without the cursor moving to it, which is the
+// only way a toast reaches a screen reader before it disappears.
+TEST(AccessKitConsumer, LiveRegionsArePolite) {
+  IhsSemanticsPublishNode toast =
+      PlainNode("Bluetooth connected", IHS_SEMANTICS_ROLE_LABEL);
+  toast.live_region = true;
+  const BuiltNode built(toast);
+  const accesskit_opt_live live = accesskit_node_live(built.get());
+  ASSERT_TRUE(live.has_value);
+  EXPECT_EQ(live.value, ACCESSKIT_LIVE_POLITE);
+
+  // An ordinary node says nothing about liveness at all, which is distinct
+  // from saying "off": AccessKit inherits liveness from an ancestor when the
+  // node itself is silent, and asserting off would suppress that.
+  const IhsSemanticsPublishNode quiet =
+      PlainNode("Now playing", IHS_SEMANTICS_ROLE_LABEL);
+  const BuiltNode built_quiet(quiet);
+  EXPECT_FALSE(accesskit_node_live(built_quiet.get()).has_value);
+}
+
+// The app's stable id is what an automation client keys on when a label is
+// localized or ambiguous. Empty at the 3.38.3 deployment floor, so this pins
+// the wiring rather than anything observable on a shipping target today.
+TEST(AccessKitConsumer, IdentifierAndTooltipAreForwarded) {
+  IhsSemanticsPublishNode node = PlainNode("Play", IHS_SEMANTICS_ROLE_BUTTON);
+  node.identifier = "media.play";
+  node.tooltip = "Start playback";
+  const BuiltNode built(node);
+  EXPECT_EQ(Owned(accesskit_node_author_id(built.get())), "media.play");
+  EXPECT_EQ(Owned(accesskit_node_tooltip(built.get())), "Start playback");
+}
+
+// An unannotated node must not claim an empty identifier: an author id of ""
+// is a different statement from having none, and automation clients key on it.
+TEST(AccessKitConsumer, UnannotatedNodesCarryNoIdentifier) {
+  const IhsSemanticsPublishNode node =
+      PlainNode("Play", IHS_SEMANTICS_ROLE_BUTTON);
+  const BuiltNode built(node);
+  EXPECT_EQ(accesskit_node_author_id(built.get()), nullptr);
+  EXPECT_EQ(accesskit_node_tooltip(built.get()), nullptr);
+}
+
+// Custom actions are the application's own verbs. A node referencing an
+// undeclared id is skipped rather than announced with no name.
+TEST(AccessKitConsumer, CustomActionsResolveTheirDeclaredLabels) {
+  std::vector<int32_t> ids = {100, 999};  // 999 is never declared
+  IhsSemanticsPublishNode node = PlainNode("Play", IHS_SEMANTICS_ROLE_BUTTON);
+  node.custom_action_ids = ids.data();
+  node.custom_action_count = ids.size();
+
+  std::vector<IhsSemanticsPublishCustomAction> customs(1);
+  customs[0].id = 100;
+  customs[0].label = "Add to favorites";
+  customs[0].hint = "";
+
+  const BuiltNode built(node, customs);
+  accesskit_custom_actions* actions =
+      accesskit_node_custom_actions(built.get());
+  ASSERT_NE(actions, nullptr);
+  EXPECT_EQ(actions->length, 1u);
+  EXPECT_EQ(accesskit_custom_action_id(actions->values[0]), 100);
+  EXPECT_EQ(Owned(accesskit_custom_action_description(actions->values[0])),
+            "Add to favorites");
+  accesskit_custom_actions_free(actions);
+}
+
+// The hub normalizes an absent string to "" so its consumers need no null
+// checks. AccessKit's model is optional, where Some("") is not None, so that
+// normalization has to be undone at this boundary: an empty label would be
+// counted as a label the node does not have, and a live region whose name is
+// empty emits an announcement of nothing.
+TEST(AccessKitConsumer, EmptyStringsAreNotForwardedAsContent) {
+  const IhsSemanticsPublishNode node =
+      PlainNode("", IHS_SEMANTICS_ROLE_BUTTON);  // no label, hint, or value
+  const BuiltNode built(node);
+  EXPECT_EQ(accesskit_node_label(built.get()), nullptr);
+  EXPECT_EQ(accesskit_node_description(built.get()), nullptr);
+  EXPECT_EQ(accesskit_node_value(built.get()), nullptr);
+}
+
+// The Label fixup must not manufacture a value out of an absent label either.
+TEST(AccessKitConsumer, LabelNodeWithNoTextCarriesNoValue) {
+  const IhsSemanticsPublishNode node = PlainNode("", IHS_SEMANTICS_ROLE_LABEL);
+  const BuiltNode built(node);
+  EXPECT_EQ(accesskit_node_value(built.get()), nullptr);
 }
