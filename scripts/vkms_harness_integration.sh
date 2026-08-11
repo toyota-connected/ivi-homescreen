@@ -82,5 +82,21 @@ run_harness "present census" \
 run_harness "event-driven input harness" \
     env IDLE_CTXT_MAX=150 "${IVI_SRC}/test/input_event_driven.sh"
 
+# ---------------------------------------------------------------------------
+# OSGi multi-bundle: two bundles -> two engines -> two connectors, critical
+# first. Needs two connectors on one card and a binary built with
+# ENABLE_OSGI=ON; the harness reports an honest skip when either is missing
+# rather than failing, so it is wired in here from the start and goes live by
+# flipping ENABLE_OSGI in the build step above it.
+# ---------------------------------------------------------------------------
+# DRM_DEVICE and the connector names are deliberately NOT passed: card
+# numbering is not stable (vkms lands wherever it lands relative to any real
+# GPU) and connector names are card-specific (Virtual-N on vkms, HDMI-A-1/DP-1
+# on a real GPU). The harness auto-detects vkms by its connector signature and
+# reads the connectors off that card, so nothing here has to guess. It skips
+# honestly when there is no vkms card or the binary lacks ENABLE_OSGI.
+run_harness "osgi multi-bundle" \
+    env SOFTWARE_RENDER=1 "${IVI_SRC}/test/osgi_multi_bundle.sh"
+
 echo "vkms harness integration: overall rc=${rc}"
 exit "${rc}"
