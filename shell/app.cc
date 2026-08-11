@@ -187,6 +187,13 @@ std::vector<std::shared_ptr<IDisplay>> App::BuildDisplays(
       std::exit(EXIT_FAILURE);
     }
     auto display = descriptor->make_display(group_configs);
+    if (display == nullptr) {
+      // Still fatal here: this runs before anything is up, so there is nothing
+      // to keep alive by continuing. AddView's copy of this recovers instead.
+      ihs::log::critical("[App] could not create a display for context '{}'",
+                         ck);
+      std::exit(EXIT_FAILURE);
+    }
     m_displays.push_back(display);
     // Remember which context this display serves so a view added later joins
     // it instead of creating a second display on the same device.
@@ -223,6 +230,10 @@ std::shared_ptr<IDisplay> App::DisplayForContext(
     return nullptr;
   }
   auto display = descriptor->make_display({config});
+  if (display == nullptr) {
+    ihs::log::error("[App] could not create a display for context '{}'", ck);
+    return nullptr;
+  }
   m_displays.push_back(display);
   m_display_by_context.emplace(ck, display);
   return display;
@@ -246,19 +257,13 @@ FlutterView* App::AddView(const Configuration::Config& config) {
   if (display == nullptr) {
     return nullptr;
   }
-  const bool display_is_new = m_displays.size() != display_count_before;
-
-  // Index continues the constructor's sequence: it is the engine index that
-  // shows up in the logs, and a duplicate would make two engines
-  // indistinguishable there.
-  auto view = std::make_unique<FlutterView>(config, m_views.size(), display);
-  // Initialize() runs the engine. Doing it here, one view at a time, is the
-  // whole point of this entry point.
-  view->Initialize();
-  FlutterView* raw = view.get();
-  m_views.emplace_back(std::move(view));
-
-  if (display_is_new) {
+  // Wire a newly created display up before building the view on it, not after.
+  // The view may fail to initialize, and the display outlives that failure --
+  // it stays in m_display_by_context for the next view on the same
+  // device-context. Watching and starting it only on the success path would
+  // leave it registered but never pumping, and the next view would reuse it
+  // seeing display_is_new == false and never start it either.
+  if (m_displays.size() != display_count_before) {
     WatchDisplayOutputs(display);
     // The constructor's StartEvents pass has already run by the time anything
     // calls AddView after Run(); a display created now has to be started here
@@ -267,7 +272,23 @@ FlutterView* App::AddView(const Configuration::Config& config) {
       display->StartEvents();
     }
   }
-  return raw;
+
+  // Index continues the constructor's sequence: it is the engine index that
+  // shows up in the logs, and a duplicate would make two engines
+  // indistinguishable there.
+  auto view = std::make_unique<FlutterView>(config, m_views.size(), display);
+  // Initialize() runs the engine. Doing it here, one view at a time, is the
+  // whole point of this entry point.
+  //
+  // A failure is this view's alone. Dropping the unique_ptr tears it back down
+  // and leaves every other view untouched -- which is what lets a bundle name a
+  // connector that is not plugged in without taking the cluster beside it down.
+  if (!view->Initialize()) {
+    ihs::log::error("[App] view {} failed to initialize", m_views.size());
+    return nullptr;
+  }
+  m_views.emplace_back(std::move(view));
+  return m_views.back().get();
 }
 
 bool App::RemoveView(FlutterView* view) {
@@ -303,7 +324,12 @@ App::App(const std::vector<Configuration::Config>& configs) {
   m_views.reserve(configs.size());
   for (auto const& cfg : configs) {
     auto view = std::make_unique<FlutterView>(cfg, index, view_display[index]);
-    view->Initialize();
+    if (!view->Initialize()) {
+      // Fatal on this path only: the constructor runs before anything is up, so
+      // there is no running system for a failed view to spare.
+      ihs::log::critical("[App] view {} failed to initialize; aborting", index);
+      std::exit(EXIT_FAILURE);
+    }
     m_views.emplace_back(std::move(view));
     index++;
 
