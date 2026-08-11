@@ -58,7 +58,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/drm_card.sh"
 # Auto-detection resolves vkms and nothing else, so it can never pick a real
 # GPU by accident; naming a node explicitly is how you ask for one.
 if [ -z "$DRM_DEVICE" ]; then
-  DRM_DEVICE="$(ihs_find_vkms_card)" \
+  DRM_DEVICE="$(ihs_find_vkms_card 2)" \
     || die "no vkms card found; set DRM_DEVICE explicitly to target real hardware"
 fi
 [ -c "$DRM_DEVICE" ] || die "DRM_DEVICE not a device node: $DRM_DEVICE"
