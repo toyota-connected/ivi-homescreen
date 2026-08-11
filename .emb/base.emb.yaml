@@ -53,6 +53,40 @@ cross:
         SENTRY_BUILD_SHARED_LIBS: 'OFF'
         SENTRY_BUILD_TESTS: 'OFF'
         SENTRY_BUILD_EXAMPLES: 'OFF'
+    # AccessKit C bindings, for the platform accessibility adapter. Off by
+    # default; enable with `--define BUILD_ACCESSKIT=ON` (which also requires
+    # BUILD_ACCESSIBILITY, since the adapter reads the semantics tree).
+    #
+    # Built from source rather than unpacked: the release ships prebuilt
+    # libraries for linux/x86_64 and linux/x86 only, and accesskit.cmake maps
+    # aarch64 to a lib/linux/arm64 directory the archive does not contain, so a
+    # board build would configure and then fail to find the library. Building
+    # the crate gives every target a library for its own architecture, at the
+    # cost of a Rust toolchain -- the package pulls Corrosion and compiles with
+    # cargo, and the target's Rust std must be installed
+    # (`rustup target add aarch64-unknown-linux-gnu` for the boards here).
+    #
+    # The patch is what makes the package usable as an augment at all. Upstream
+    # installs back into its own source tree and never installs its CMake
+    # config, so an overlay build would leave the sysroot empty; the patch adds
+    # an opt-in conventional layout and a config find_package can resolve. It
+    # also gives Corrosion the cross triple, without which cargo builds host
+    # objects while the toolchain points at the cross compiler.
+    - pkg: accesskit-c
+      requires_define: BUILD_ACCESSKIT
+      min: "0.22.3"
+      url: https://github.com/AccessKit/accesskit-c/releases/download/0.22.3/accesskit-c-0.22.3.zip
+      build: cmake
+      static: true
+      patches:
+        - patches/accesskit-c-0001-prefix-install-and-cross-target.patch
+      defines:
+        ACCESSKIT_INSTALL_PREFIX_LAYOUT: 'ON'
+        # The archive carries pre-generated headers; regenerating them needs a
+        # pinned nightly Rust plus cbindgen and clang-format, which is not a
+        # dependency worth taking on for a header that is already correct.
+        ACCESSKIT_BUILD_HEADERS: 'OFF'
+        ACCESSKIT_BUILD_LIBRARIES: 'ON'
   defines:
     DISABLE_PLUGINS: 'ON'              # shared by the native build and the boards
   # Native host backend matrix: `emb cross . --build` (no --target) compiles
