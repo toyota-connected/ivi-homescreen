@@ -28,6 +28,11 @@
 #include "backend/wayland_leased_drm/lease_client.h"
 #endif
 #include "configuration/configuration.h"
+#if ENABLE_OSGI
+#include "osgi/app_bundle_host.h"
+#include "osgi/osgi_config.h"
+#include "osgi/startup_orchestrator.h"
+#endif
 #include "ihs/config.h"
 #include "logging/logger.hpp"
 #include "logging/logging.h"
@@ -177,7 +182,14 @@ int main(const int argc, char** argv) {
 #endif
 
   const auto configs = Configuration::ParseArgcArgv(argc, argv);
+#if ENABLE_OSGI
+  // A pure-OSGi config has no [[view]]: the bundles become the views, and they
+  // are added below once App exists. ParseArgcArgv has already rejected an
+  // empty list that had no bundles behind it either, so reaching here with none
+  // means bundles are coming.
+#else
   assert(!configs.empty());
+#endif
 
   // Make the resolved configuration readable by FFI plugins via ihs_shared.
   PublishIhsConfig(configs);
@@ -325,6 +337,60 @@ int main(const int argc, char** argv) {
     // has a valid fd to write to.
     (void)MainLoopWaker::instance();
     InstallShutdownHandlers();
+
+#if ENABLE_OSGI
+    // OSGi bundles are added one at a time rather than being folded into
+    // `configs` above, and that is the whole point: App's constructor runs
+    // every view's engine back to back, so a bundle in that vector would
+    // already be competing for the GPU before anything could wait on it.
+    // Critical bundles are therefore brought up here -- after App exists, so
+    // there are displays to join, but before Run() -- and each is awaited
+    // before the next starts.
+    std::unique_ptr<ihs::osgi::BundleStartupOrchestrator> orchestrator;
+    ihs::osgi::OsgiConfig osgi_config;
+    ihs::osgi::AppBundleHost bundle_host(app, nullptr);
+    // Read from argv rather than configs.front(): a pure-OSGi deployment has no
+    // views, so there is no config to carry the path.
+    std::string osgi_config_path;
+    for (int i = 1; i + 1 < argc; ++i) {
+      if (std::string_view(argv[i]) == "--config") {
+        osgi_config_path = argv[i + 1];
+        break;
+      }
+    }
+    if (osgi_config_path.empty() && !configs.empty() &&
+        configs.front().config_file) {
+      osgi_config_path = *configs.front().config_file;
+    }
+    if (!osgi_config_path.empty()) {
+      if (!ihs::osgi::LoadOsgiConfig(osgi_config_path, osgi_config)) {
+        // A malformed [osgi] table is a configuration error the operator has to
+        // see, not something to start half of.
+        ihs::log::critical(
+            "[osgi] configuration rejected; not starting bundles");
+        return EXIT_FAILURE;
+      }
+    }
+    if (!osgi_config.empty()) {
+      orchestrator = std::make_unique<ihs::osgi::BundleStartupOrchestrator>(
+          bundle_host, osgi_config.bundles);
+      for (const auto& outcome : orchestrator->StartCriticalPhase()) {
+        if (!outcome.ok()) {
+          // Reported, not fatal: one broken cluster must not stop the rest of
+          // the system from coming up. Which is the right call for a given
+          // product is a deployment decision, and it is visible here.
+          ihs::log::error("[osgi] critical bundle '{}' failed: {}",
+                          outcome.symbolic_name,
+                          ihs::osgi::StartupFailureName(outcome.failure));
+        }
+      }
+      // The deferred phases run before Run() rather than from inside the
+      // reactor: they do not block on ACTIVE, so the only cost is their
+      // staggered launches, and doing it here keeps the startup sequence in
+      // one readable place.
+      orchestrator->StartDeferredPhases();
+    }
+#endif
 
     // Run the application: the shared reactor drives every backend on this
     // (main) thread and blocks until the shutdown signal stops the io_context.
