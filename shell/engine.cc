@@ -31,6 +31,11 @@
 
 #include "config/common.h"
 #include "engine.h"
+#if BUILD_ACCESSIBILITY && BUILD_MCP
+#include "ihs/ihs_mcp_host.h"
+#include "ihs/ihs_mcp_semantics.h"
+#endif
+
 #if BUILD_ACCESSIBILITY
 #include "ihs/ihs_semantics_host.h"
 #include "shell/accessibility/semantics_publisher.h"
@@ -125,7 +130,8 @@ Engine::Engine(FlutterView* view,
                const std::vector<const char*>& dart_entrypoint_args_c,
                const std::string& bundle_path,
                const int32_t accessibility_features,
-               const bool merge_render_platform)
+               const bool merge_render_platform,
+               const bool enable_mcp)
     : m_index(index),
       m_running(false),
       m_backend(view->GetBackend()),
@@ -135,6 +141,7 @@ Engine::Engine(FlutterView* view,
       m_prev_width(0),
       m_prev_pixel_ratio(1.0),
       m_accessibility_features(accessibility_features),
+      m_enable_mcp(enable_mcp),
       m_flutter_engine(nullptr) {
   IHS_TRACE("({}) +Engine::Engine", m_index);
 
@@ -314,6 +321,15 @@ void Engine::Shutdown() {
     return;  // never started, or already stopped — idempotent
   }
   m_running = false;
+
+#if BUILD_ACCESSIBILITY && BUILD_MCP
+  // Before the engine threads go: stop() guarantees no provider callback is in
+  // flight when it returns, and releases the hub registration that was keeping
+  // semantics on. Safe when start never ran.
+  if (m_enable_mcp) {
+    ihs_mcp_semantics_provider_stop();
+  }
+#endif
   // Deinitialize stops new frame work; Shutdown joins the platform, UI and
   // rasterizer threads. After this returns nothing in the engine touches the
   // backend (no more VsyncTrampoline / PresentLayers), so the caller may
@@ -381,6 +397,23 @@ FlutterEngineResult Engine::Run(FlutterDesktopEngineState* state) {
   // Registering is what asks the hub to turn semantics on, so the bridge is
   // created after the host is installed and not before.
   m_accesskit = std::make_unique<accessibility::AccessKitConsumer>();
+#endif
+#if BUILD_MCP
+  // The second half of the double opt-in: the surface is compiled in, and the
+  // image asked for it. Starting registers a hub consumer, which is what turns
+  // semantics on, so leaving it off really does cost nothing rather than
+  // merely hiding the tools.
+  if (m_enable_mcp) {
+    const int status = ihs_mcp_semantics_provider_start();
+    if (status == IHS_MCP_OK) {
+      ihs::log::info("({}) MCP semantics provider started", m_index);
+    } else {
+      // Not fatal: the UI is the product and it runs without an agent
+      // attached. Loud, though, because the image explicitly asked for this.
+      ihs::log::error("({}) MCP semantics provider failed to start: {}",
+                      m_index, status);
+    }
+  }
 #endif
 #endif
 
