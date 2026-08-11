@@ -114,7 +114,7 @@ fi
 # on a developer's desktop. Targeting real hardware requires saying so.
 DEVICE_SOURCE="explicit"
 if [ "$DRM_DEVICE_EXPLICIT" -eq 0 ]; then
-    if DRM_DEVICE="$(ihs_find_vkms_card)"; then
+    if DRM_DEVICE="$(ihs_find_vkms_card 2)"; then
         DEVICE_SOURCE="auto-detected vkms"
     else
         DRM_DEVICE=""
