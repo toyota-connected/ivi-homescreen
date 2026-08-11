@@ -108,6 +108,12 @@ static constexpr char kCrashpadBinaryPath[] = "@CRASHPAD_RUNTIME_PATH@";
 
 #cmakedefine01 BUILD_ACCESSIBILITY
 
+/* The MCP surface. ihs_shared also exports IHS_WITH_MCP from its own PUBLIC
+ * interface, but that is the library telling its consumers what it contains;
+ * shell code guards on this, alongside BUILD_ACCESSIBILITY, so the build's
+ * own answer does not depend on what a linked target happens to leak. */
+#cmakedefine01 BUILD_MCP
+
 #cmakedefine01 DEBUG_PLATFORM_MESSAGES
 
 #cmakedefine01 ENABLE_LTO

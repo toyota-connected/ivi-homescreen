@@ -70,6 +70,10 @@ void Configuration::get_global_parameters(toml::table* root, Config& instance) {
     instance.debug_backend =
         root->at_path("global.debug_backend").value<bool>().value();
   }
+  if (root->at_path("global.enable_mcp").is_boolean()) {
+    instance.enable_mcp =
+        root->at_path("global.enable_mcp").value<bool>().value();
+  }
 }
 
 namespace {
@@ -416,6 +420,9 @@ void Configuration::get_cli_override(const std::string& bundle_path,
   if (cli.debug_backend.has_value()) {
     instance.debug_backend = cli.debug_backend.value();
   }
+  if (cli.enable_mcp.has_value()) {
+    instance.enable_mcp = cli.enable_mcp.value();
+  }
   if (!cli.view.engine_args.empty()) {
     for (auto const& arg : cli.view.engine_args) {
       instance.view.engine_args.emplace_back(arg);
@@ -639,6 +646,8 @@ void Configuration::PrintConfig(const Config& config) {
   }
   ihs::log::info("Debug Shell: ........... {}",
                  (config.debug_backend.value_or(false) ? "true" : "false"));
+  ihs::log::info("MCP Surface: ........... {}",
+                 (config.enable_mcp.value_or(false) ? "true" : "false"));
   ihs::log::info("********");
   ihs::log::info("* View *");
   ihs::log::info("********");
@@ -741,7 +750,11 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
         cxxopts::value<bool>()->implicit_value("true"))(
         "wayland-event-mask",
         "Wayland input events to mask (e.g. pointer-axis,keyboard)",
-        cxxopts::value<std::string>(config.wayland_event_mask));
+        cxxopts::value<std::string>(config.wayland_event_mask))(
+        "enable-mcp",
+        "Serve the MCP surface, letting an external agent read and drive the "
+        "UI (requires a build configured with BUILD_MCP)",
+        cxxopts::value<bool>()->implicit_value("true"));
 
     // [[view]] (geometry / Flutter)
     allocated->add_options("View")("w,width", "View width in px",
@@ -976,6 +989,9 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
     }
     if (result.count("debug-backend")) {
       config.debug_backend = result["debug-backend"].as<bool>();
+    }
+    if (result.count("enable-mcp")) {
+      config.enable_mcp = result["enable-mcp"].as<bool>();
     }
     if (result.count("fullscreen")) {
       config.view.fullscreen = result["fullscreen"].as<bool>();

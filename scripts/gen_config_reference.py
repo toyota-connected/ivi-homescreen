@@ -51,6 +51,7 @@ META = {
     "global.disable_cursor": ("false", "true|false", "all", "Hide the pointer cursor."),
     "global.wayland_event_mask": ("—", "comma/space list", "wayland", "Wayland input events to mask (e.g. 'keyboard pointer')."),
     "global.debug_backend": ("false", "true|false", "all", "Enable backend debug logging."),
+    "global.enable_mcp": ("false", "true|false", "all", "Serve the MCP surface, letting an external agent read and drive the UI. Requires a build configured with BUILD_MCP; off unless both the build and this key ask for it."),
     # [sentry] — process-level (optional; DSN from $SENTRY_DSN)
     "sentry.release": ("—", "string", "all", "Sentry release tag."),
     "sentry.env": ("(built-in)", "string", "all", "Sentry environment."),
