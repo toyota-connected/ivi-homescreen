@@ -614,6 +614,54 @@ MESSAGE(STATUS "Generate Golden Images.. ${UNIT_TEST_SAVE_GOLDENS}")
 #
 find_package(Sanitizers)
 
+# Fail when a sanitizer was asked for and cannot be delivered.
+#
+# sanitizers-cmake probes each sanitizer's flags and, when the probe fails,
+# emits a *warning* and leaves the flags empty -- so the build proceeds and
+# every target compiles with no instrumentation at all. A run then passes
+# clean, and nothing about it says the sanitizer was never there. That is the
+# worst outcome available: a green result that means nothing, for a check
+# somebody enabled precisely because they did not trust the code.
+#
+# The probe's own message compounds it by blaming the compiler ("not available
+# for GNU compiler"), which reads as "GCC cannot do this". Usually GCC can, and
+# the real cause is a missing runtime: on Fedora the ThreadSanitizer devel
+# symlink ships with gcc while libtsan.so.N lives in libtsan, so the flag
+# compiles and only the link fails.
+#
+# So: if the option is ON and the probe produced no flags for this compiler,
+# stop. Turning the option off, or installing the runtime, are both fine
+# answers -- silently getting nothing is not.
+function(_ihs_require_sanitizer option_name prefix pretty runtime_hint)
+    if (NOT ${option_name})
+        return()
+    endif ()
+    # The module keys its flags cache on the CMake compiler id (GNU, Clang).
+    if (NOT ${prefix}_${CMAKE_CXX_COMPILER_ID}_FLAGS)
+        message(FATAL_ERROR
+                "${option_name}=ON but no working ${pretty} flags were found "
+                "for ${CMAKE_CXX_COMPILER_ID} "
+                "${CMAKE_CXX_COMPILER_VERSION}.\n"
+                "The build would otherwise continue with NO instrumentation, "
+                "and the resulting clean run would prove nothing.\n"
+                "${runtime_hint}\n"
+                "Otherwise configure with -D${option_name}=OFF, or use a "
+                "toolchain that has the runtime (clang ships its own).")
+    endif ()
+endfunction()
+
+# Each hint says what is actually wrong for that sanitizer: three of them are
+# normally a missing runtime package, and MemorySanitizer simply does not exist
+# for GCC. A generic "probably a missing runtime" would be wrong for MSan.
+_ihs_require_sanitizer(SANITIZE_THREAD TSan "ThreadSanitizer"
+        "Usually a missing runtime rather than a compiler that cannot do it: the flag compiles and only the link fails. Install it (Fedora: libtsan; Debian/Ubuntu: libtsan0).")
+_ihs_require_sanitizer(SANITIZE_ADDRESS ASan "AddressSanitizer"
+        "Usually a missing runtime rather than a compiler that cannot do it: the flag compiles and only the link fails. Install it (Fedora: libasan; Debian/Ubuntu: libasan8).")
+_ihs_require_sanitizer(SANITIZE_MEMORY MSan "MemorySanitizer"
+        "MemorySanitizer is clang-only; GCC does not implement it, so no runtime will help.")
+_ihs_require_sanitizer(SANITIZE_UNDEFINED UBSan "UndefinedBehaviorSanitizer"
+        "Usually a missing runtime rather than a compiler that cannot do it: the flag compiles and only the link fails. Install it (Fedora: libubsan; Debian/Ubuntu: libubsan1).")
+
 #
 # Executable Name
 #
