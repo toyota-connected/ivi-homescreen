@@ -53,6 +53,23 @@ laid out as `(major << 16) | minor`:
   older minor keeps working against a newer library by construction.
 - **Breaking** changes bump the **major** version and the library `SOVERSION`.
 
+Not every published struct carries a leading `struct_size`. `IhsSemanticsNode`
+does not: consumers read it by dereference through a pointer the library
+returns, so the library — never the consumer — decides the stride, and a
+consumer built against an older header simply reads the prefix it knows. That
+makes appending a trailing field safe in the older-plugin-against-newer-library
+direction, which is the one the minor version promises.
+
+The reverse direction has no such guarantee, because there is no `struct_size`
+to check: a consumer built against a newer header that dereferenced a new
+trailing field on a node an older library allocated would read past the end.
+So a field appended to a struct like this is paired with an accessor entry
+point — `ihs_semantics_node_numeric_value()` for the ABI 1.1 numeric-value
+fields — and the accessor, not the field, is the documented read path. A plugin
+using it against a library too old to provide it fails to resolve the symbol at
+load, which is the clean failure the `struct_size` convention would otherwise
+have given.
+
 The entry point is `ihs_get_api(uint32_t requested_abi)`. It returns a table
 valid for the process lifetime, or `NULL` if the requested **major** version is
 not the one this library provides — so a plugin newer than the shell fails
