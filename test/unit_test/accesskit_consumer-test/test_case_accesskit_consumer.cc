@@ -341,3 +341,24 @@ TEST(AccessKitConsumer, CustomActionsResolveTheirDeclaredLabels) {
             "Add to favorites");
   accesskit_custom_actions_free(actions);
 }
+
+// The hub normalizes an absent string to "" so its consumers need no null
+// checks. AccessKit's model is optional, where Some("") is not None, so that
+// normalization has to be undone at this boundary: an empty label would be
+// counted as a label the node does not have, and a live region whose name is
+// empty emits an announcement of nothing.
+TEST(AccessKitConsumer, EmptyStringsAreNotForwardedAsContent) {
+  const IhsSemanticsPublishNode node =
+      PlainNode("", IHS_SEMANTICS_ROLE_BUTTON);  // no label, hint, or value
+  const BuiltNode built(node);
+  EXPECT_EQ(accesskit_node_label(built.get()), nullptr);
+  EXPECT_EQ(accesskit_node_description(built.get()), nullptr);
+  EXPECT_EQ(accesskit_node_value(built.get()), nullptr);
+}
+
+// The Label fixup must not manufacture a value out of an absent label either.
+TEST(AccessKitConsumer, LabelNodeWithNoTextCarriesNoValue) {
+  const IhsSemanticsPublishNode node = PlainNode("", IHS_SEMANTICS_ROLE_LABEL);
+  const BuiltNode built(node);
+  EXPECT_EQ(accesskit_node_value(built.get()), nullptr);
+}

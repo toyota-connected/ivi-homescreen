@@ -179,18 +179,30 @@ accesskit_node* BuildNode(const IhsSemanticsNode* node,
     }
   }
 
-  accesskit_node_set_label(out, node->label);
-  accesskit_node_set_description(out, node->hint);
-  accesskit_node_set_value(out, node->value);
+  // Every string is set only when it has content. The hub normalizes an absent
+  // string to "" so its own consumers need no null checks, but AccessKit's
+  // model is optional -- Some("") is not None -- so that normalization has to
+  // be undone here rather than carried across. Forwarding "" would give a node
+  // an empty label that AccessKit counts as having one, and a live region with
+  // an empty name emits an announcement of nothing at all.
+  if (node->label[0] != '\0') {
+    accesskit_node_set_label(out, node->label);
+  }
+  if (node->hint[0] != '\0') {
+    accesskit_node_set_description(out, node->hint);
+  }
 
   // AccessKit derives a Label node's accessible name from its *value*, not its
   // label -- label_comes_from_value() is exactly role == Label. Flutter puts
   // the text in label, so without this every piece of static text in the UI
   // reaches a screen reader with no name at all, which is most of what there
-  // is to read. Only fill an empty value, so a node carrying both keeps its
-  // own.
-  if (role == ACCESSKIT_ROLE_LABEL && node->value[0] == '\0') {
-    accesskit_node_set_value(out, node->label);
+  // is to read. A Label carrying its own value keeps it.
+  const char* value = node->value;
+  if (role == ACCESSKIT_ROLE_LABEL && value[0] == '\0') {
+    value = node->label;
+  }
+  if (value[0] != '\0') {
+    accesskit_node_set_value(out, value);
   }
 
   // The application's own stable id, which is what an automation client keys
