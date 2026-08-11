@@ -1,0 +1,164 @@
+Subject: [PATCH] install into CMAKE_INSTALL_PREFIX and honor the CMake cross target
+
+accesskit-c is built to be consumed in place: accesskit.cmake resolves
+ACCESSKIT_INCLUDE_DIR and ACCESSKIT_LIBRARIES_DIR relative to the source
+directory, the install() rules copy the freshly built libraries back into that
+same tree, and accesskit-config.cmake sits at the archive root and is never
+installed at all. Pointing CMAKE_PREFIX_PATH at an unpacked release therefore
+works, but installing into a prefix produces nothing a consumer can find.
+
+An emb augment builds into a sysroot overlay and expects the package to install
+there, so add an opt-in conventional layout: header into <prefix>/include,
+static library into <prefix>/lib, and a generated ACCESSKITConfig.cmake that
+find_package(ACCESSKIT) resolves from the overlay. Off by default, so the
+upstream in-place flow is untouched.
+
+Separately, tell Corrosion which Rust target to build. Without Rust_CARGO_TARGET
+it builds for the host while the CMake toolchain still points every compiler at
+the cross gcc, so cargo links host artifacts with a compiler that rejects -m64.
+Deriving the triple from CMAKE_SYSTEM_PROCESSOR when CMAKE_CROSSCOMPILING is set
+makes a cross build produce objects for the architecture the rest of the build
+is targeting.
+
+Finally, forward the C compiler's flags to rustc as link arguments. rustc drives
+the final link through that compiler, and a Debian multiarch sysroot keeps
+crti.o and libc under lib/<triple>/ where plain --sysroot does not reach them, so
+without the -B/-L set the toolchain already passes in CMAKE_C_FLAGS the cdylib
+link fails with `cannot find crti.o`.
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 930e626..2732ce1 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -5,8 +5,35 @@ project(accesskit-c)
+ option(ACCESSKIT_BUILD_HEADERS "Whether to build header files" OFF)
+ option(ACCESSKIT_BUILD_LIBRARIES "Whether to build libraries" ON)
+ option(ACCESSKIT_ANDROID_EMBEDDED_DEX "Whether to embed the classes.dex file in the library (Android only)" OFF)
++option(ACCESSKIT_INSTALL_PREFIX_LAYOUT "Install into CMAKE_INSTALL_PREFIX (include/, lib/, lib/cmake/) instead of back into the source tree" OFF)
+ 
+ if (ACCESSKIT_BUILD_LIBRARIES)
++    # Corrosion defaults to the host triple. Under a CMake cross build that
++    # leaves cargo producing host objects while every compiler variable points
++    # at the cross toolchain, so host artifacts get linked with a compiler that
++    # rejects their flags. Derive the triple from what the toolchain file
++    # already declares.
++    if (CMAKE_CROSSCOMPILING AND NOT Rust_CARGO_TARGET)
++        if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
++            if (CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$")
++                set(Rust_CARGO_TARGET "aarch64-unknown-linux-gnu" CACHE STRING "")
++            elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
++                set(Rust_CARGO_TARGET "x86_64-unknown-linux-gnu" CACHE STRING "")
++            elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm|armv7|armv7l)$")
++                set(Rust_CARGO_TARGET "armv7-unknown-linux-gnueabihf" CACHE STRING "")
++            elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "^(riscv64)$")
++                set(Rust_CARGO_TARGET "riscv64gc-unknown-linux-gnu" CACHE STRING "")
++            endif()
++        endif()
++        if (Rust_CARGO_TARGET)
++            message(STATUS "accesskit-c: cross target ${Rust_CARGO_TARGET}")
++        else()
++            message(WARNING
++                "accesskit-c: cross-compiling for ${CMAKE_SYSTEM_NAME}/${CMAKE_SYSTEM_PROCESSOR} "
++                "but no Rust triple is known for it; set Rust_CARGO_TARGET explicitly.")
++        endif()
++    endif()
++
+     include(FetchContent)
+ 
+     FetchContent_Declare(
+@@ -20,6 +47,29 @@ if (ACCESSKIT_BUILD_LIBRARIES)
+     set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+     set(CMAKE_PDB_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+     corrosion_import_crate(MANIFEST_PATH Cargo.toml)
++
++    # rustc drives the final link through the C compiler, so it needs the same
++    # search paths that compiler is given for everything else. A Debian
++    # multiarch sysroot keeps crti.o and libc under lib/<triple>/, which plain
++    # --sysroot does not reach; the toolchain file passes the -B/-L/-rpath-link
++    # set in CMAKE_C_FLAGS, and without forwarding them the cdylib link fails
++    # with `cannot find crti.o`. Forward the C flags as link arguments.
++    if (CMAKE_CROSSCOMPILING AND Rust_CARGO_TARGET)
++        set(_accesskit_link_args "")
++        if (CMAKE_SYSROOT)
++            list(APPEND _accesskit_link_args "--sysroot=${CMAKE_SYSROOT}")
++        endif()
++        separate_arguments(_accesskit_cflags NATIVE_COMMAND "${CMAKE_C_FLAGS}")
++        list(APPEND _accesskit_link_args ${_accesskit_cflags})
++
++        set(_accesskit_rustflags "")
++        foreach (_accesskit_arg IN LISTS _accesskit_link_args)
++            list(APPEND _accesskit_rustflags "-Clink-arg=${_accesskit_arg}")
++        endforeach()
++        if (_accesskit_rustflags)
++            corrosion_add_target_local_rustflags(accesskit ${_accesskit_rustflags})
++        endif()
++    endif()
+     if (ACCESSKIT_ANDROID_EMBEDDED_DEX)
+         corrosion_set_features(accesskit FEATURES android-embedded-dex)
+     endif()
+@@ -44,14 +94,17 @@ endif()
+ 
+ include("accesskit.cmake")
+ 
+-if (ACCESSKIT_BUILD_HEADERS)
++# The upstream destinations are absolute paths back into the source tree. Under
++# a DESTDIR install that produces a nested copy of the whole path inside the
++# staging root, so skip them when the prefix layout below is what was asked for.
++if (ACCESSKIT_BUILD_HEADERS AND NOT ACCESSKIT_INSTALL_PREFIX_LAYOUT)
+     install(FILES
+         "${CMAKE_CURRENT_BINARY_DIR}/accesskit.h"
+         DESTINATION "${ACCESSKIT_INCLUDE_DIR}"
+     )
+ endif()
+ 
+-if (ACCESSKIT_BUILD_LIBRARIES)
++if (ACCESSKIT_BUILD_LIBRARIES AND NOT ACCESSKIT_INSTALL_PREFIX_LAYOUT)
+     install(FILES
+         "$<TARGET_PROPERTY:accesskit-static,IMPORTED_LOCATION>"
+         DESTINATION "${ACCESSKIT_LIBRARIES_DIR}/static"
+@@ -68,3 +121,45 @@ if (ACCESSKIT_BUILD_LIBRARIES)
+         DESTINATION "${ACCESSKIT_LIBRARIES_DIR}/shared"
+     )
+ endif()
++
++# Conventional prefix layout, for consumers that install rather than point at an
++# unpacked release. The upstream rules above stay in place; this only adds a
++# second set of destinations plus the package config that makes them findable,
++# since upstream ships its config in the archive rather than installing one.
++if (ACCESSKIT_INSTALL_PREFIX_LAYOUT AND ACCESSKIT_BUILD_LIBRARIES)
++    include(GNUInstallDirs)
++
++    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/include/accesskit.h"
++            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
++
++    install(FILES "$<TARGET_PROPERTY:accesskit-static,IMPORTED_LOCATION>"
++            DESTINATION "${CMAKE_INSTALL_LIBDIR}")
++
++    # Written out rather than configure_file'd so the installed config carries
++    # no build-machine paths: it resolves everything from its own location,
++    # which is what lets the overlay be consumed from a different prefix.
++    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ACCESSKITConfig.cmake"
++"get_filename_component(_accesskit_prefix \"\${CMAKE_CURRENT_LIST_DIR}/../../..\" ABSOLUTE)
++set(ACCESSKIT_INCLUDE_DIR \"\${_accesskit_prefix}/${CMAKE_INSTALL_INCLUDEDIR}\")
++set(ACCESSKIT_INCLUDE_DIRS \"\${ACCESSKIT_INCLUDE_DIR}\")
++set(ACCESSKIT_LIBRARY \"\${_accesskit_prefix}/${CMAKE_INSTALL_LIBDIR}/libaccesskit.a\")
++set(ACCESSKIT_LIBRARIES \"\${ACCESSKIT_LIBRARY}\")
++
++if (NOT TARGET accesskit)
++  add_library(accesskit STATIC IMPORTED GLOBAL)
++  set_target_properties(accesskit PROPERTIES
++      IMPORTED_LOCATION \"\${ACCESSKIT_LIBRARY}\"
++      INTERFACE_INCLUDE_DIRECTORIES \"\${ACCESSKIT_INCLUDE_DIR}\")
++  # Mirrors what the upstream config links on linux -- the Rust staticlib needs
++  # libm, and -static-libgcc keeps the unwinder out of the shared dependency
++  # set. dl/pthread/rt are what the Rust standard library itself pulls in.
++  set_property(TARGET accesskit PROPERTY INTERFACE_LINK_LIBRARIES
++      -static-libgcc m dl pthread rt)
++endif()
++
++set(ACCESSKIT_FOUND TRUE)
++")
++
++    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/ACCESSKITConfig.cmake"
++            DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/ACCESSKIT")
++endif()
