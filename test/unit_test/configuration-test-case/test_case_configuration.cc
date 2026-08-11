@@ -25,12 +25,14 @@ TEST(HomescreenConfigurationParseConfig, Lv1Normal001) {
       Configuration::parse_config(config);
 
   const auto& [app_id, cursor_theme, disable_cursor, wayland_event_mask,
-               debug_backend, bundle_paths, view, hud, config_file] =
-      configs.back();
+               debug_backend, bundle_paths, enable_mcp, view, hud,
+               config_file] = configs.back();
 
   EXPECT_EQ("com.toyotaconnected.homescreen", app_id);
   EXPECT_EQ(false, disable_cursor.value_or(false));
   EXPECT_EQ(false, debug_backend.value_or(false));
+  // The MCP surface is opt-in: absent from config means off, never inherited.
+  EXPECT_EQ(false, enable_mcp.value_or(false));
   EXPECT_EQ(kBundlePath, view.bundle_path);
   EXPECT_EQ("NORMAL", view.window_type);
   EXPECT_EQ(0, view.wl_output_index.value_or(0));
@@ -85,8 +87,8 @@ TEST(HomescreenConfigurationParseArgcArgv, Lv1Normal001) {
   const auto configs = Configuration::ParseArgcArgv(argc, argv_p);
 
   const auto& [app_id, cursor_theme, disable_cursor, wayland_event_mask,
-               debug_backend, bundle_paths, view, hud, config_file] =
-      configs.back();
+               debug_backend, bundle_paths, enable_mcp, view, hud,
+               config_file] = configs.back();
   // check result
 
   EXPECT_EQ(kSourceRoot, view.bundle_path);

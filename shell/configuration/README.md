@@ -283,6 +283,7 @@ file see
 | `[global]` | `cursor_theme` | `string` | `—` | `string` | all |
 | `[global]` | `debug_backend` | `bool` | `false` | `true\|false` | all |
 | `[global]` | `disable_cursor` | `bool` | `false` | `true\|false` | all |
+| `[global]` | `enable_mcp` | `bool` | `false` | `true\|false` | all |
 | `[global]` | `wayland_event_mask` | `string` | `—` | `comma/space list` | wayland |
 | `[sentry]` | `attachments` | `string` | `[]` | `array<path>` | all |
 | `[sentry]` | `env` | `string` | `(built-in)` | `string` | all |
