@@ -153,6 +153,27 @@ void OsgiBridgePlugin::HandleMethodCall(
     return;
   }
 
+  if (method_call.method_name() == kMethodActive ||
+      method_call.method_name() == kMethodStopped) {
+    std::string symbolic_name;
+    if (const auto* v = Find(*args, "symbolic_name");
+        v == nullptr || !ReadString(*v, symbolic_name)) {
+      result->Error(kErrorBadArgs, "'symbolic_name' must be a string");
+      return;
+    }
+    const bool is_active = method_call.method_name() == kMethodActive;
+    const bool ok = is_active ? registry.ReportActive(symbolic_name)
+                              : registry.ReportStopped(symbolic_name);
+    if (!ok) {
+      result->Error(kErrorRejected, "bundle is not registered");
+      return;
+    }
+    ihs::log::debug("[osgi] bridge: bundle '{}' reported {}", symbolic_name,
+                    is_active ? "ACTIVE" : "STOPPED");
+    result->Success(flutter::EncodableValue(true));
+    return;
+  }
+
   if (method_call.method_name() == kMethodShutdown) {
     std::string symbolic_name;
     if (const auto* v = Find(*args, "symbolic_name");

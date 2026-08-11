@@ -30,6 +30,7 @@
 #include "configuration/configuration.h"
 #if ENABLE_OSGI
 #include "osgi/app_bundle_host.h"
+#include "osgi/bridge_registry.h"
 #include "osgi/osgi_config.h"
 #include "osgi/startup_orchestrator.h"
 #endif
@@ -374,6 +375,13 @@ int main(const int argc, char** argv) {
     if (!osgi_config.empty()) {
       orchestrator = std::make_unique<ihs::osgi::BundleStartupOrchestrator>(
           bundle_host, osgi_config.bundles);
+      // Connect the bridge to the orchestrator. Without this a bundle can call
+      // init, register its port, run its activator to completion and report
+      // ACTIVE -- and the critical wait would still time out, because nothing
+      // would be listening. Set before any bundle starts so a fast activator
+      // cannot report into a null observer.
+      ihs::osgi::BridgeRegistry::Instance().SetLifecycleObserver(
+          orchestrator.get());
       for (const auto& outcome : orchestrator->StartCriticalPhase()) {
         if (!outcome.ok()) {
           // Reported, not fatal: one broken cluster must not stop the rest of
