@@ -140,6 +140,14 @@ std::vector<std::shared_ptr<IDisplay>> App::BuildDisplays(
   // use, or respecting one main() set explicitly) before creating any display.
   // The active backend backs the first bundle and process-level queries; each
   // view independently resolves its own backend (ResolveKeyForConfig) below.
+  if (configs.empty()) {
+    // Legitimate under ENABLE_OSGI: a pure-bundle deployment starts with no
+    // views and gains them through AddView. Resolving the active backend needs
+    // a config to resolve from, so it is deferred to the first AddView rather
+    // than guessed from an empty set.
+    return {};
+  }
+
   auto& reg = backend::BackendRegistry::Instance();
   if (!EnsureActiveBackend(reg, configs)) {
     ihs::log::critical("[App] no usable backend available; aborting");
@@ -193,6 +201,12 @@ std::vector<std::shared_ptr<IDisplay>> App::BuildDisplays(
 std::shared_ptr<IDisplay> App::DisplayForContext(
     const Configuration::Config& config) {
   auto& reg = backend::BackendRegistry::Instance();
+  // When the App was constructed with no views, nothing has resolved the active
+  // backend yet; this config is the first one that can.
+  if (!EnsureActiveBackend(reg, {config})) {
+    ihs::log::error("[App] no usable backend for this config");
+    return nullptr;
+  }
   const std::string ck = ContextKey(reg, config);
   if (const auto it = m_display_by_context.find(ck);
       it != m_display_by_context.end()) {
