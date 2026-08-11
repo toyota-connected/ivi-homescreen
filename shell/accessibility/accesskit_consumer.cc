@@ -116,7 +116,9 @@ namespace {
 
 // Advertises to the screen reader what the node actually accepts, so it does
 // not offer a gesture the framework will silently drop.
-void AddActions(accesskit_node* node, const uint64_t actions) {
+void AddActions(accesskit_node* node,
+                const uint64_t actions,
+                const bool focusable) {
   if ((actions & IHS_SEMANTICS_ACTION_TAP) != 0) {
     accesskit_node_add_action(node, ACCESSKIT_ACTION_CLICK);
   }
@@ -147,10 +149,18 @@ void AddActions(accesskit_node* node, const uint64_t actions) {
   if ((actions & IHS_SEMANTICS_ACTION_COLLAPSE) != 0) {
     accesskit_node_add_action(node, ACCESSKIT_ACTION_COLLAPSE);
   }
-  // Focus is offered whenever the node can hold the accessibility cursor,
-  // which is what the screen reader uses to walk the tree.
-  accesskit_node_add_action(node, ACCESSKIT_ACTION_FOCUS);
+  // Focus is offered only where the node can actually hold the accessibility
+  // cursor. Advertising it everywhere -- as this did -- makes every static
+  // label and layout container look like a focus target, which is what a
+  // screen reader user experiences as a tree full of nothing. Walking the
+  // tree does not depend on this: traversal follows children, and only an
+  // explicit grabFocus needs the action.
+  if (focusable) {
+    accesskit_node_add_action(node, ACCESSKIT_ACTION_FOCUS);
+  }
 }
+
+}  // namespace
 
 // Translates one snapshot node. The tristates are carried across rather than
 // flattened: a screen reader announces "unchecked" and "not checkable" very
@@ -158,7 +168,8 @@ void AddActions(accesskit_node* node, const uint64_t actions) {
 // unchecked checkbox.
 accesskit_node* BuildNode(const IhsSemanticsNode* node,
                           const IhsSemanticsSnapshot* snapshot) {
-  accesskit_node* out = accesskit_node_new(ToAccessKitRole(node->role));
+  const accesskit_role role = ToAccessKitRole(node->role);
+  accesskit_node* out = accesskit_node_new(role);
 
   for (size_t i = 0; i < node->child_count; i++) {
     const IhsSemanticsNode* child =
@@ -171,6 +182,28 @@ accesskit_node* BuildNode(const IhsSemanticsNode* node,
   accesskit_node_set_label(out, node->label);
   accesskit_node_set_description(out, node->hint);
   accesskit_node_set_value(out, node->value);
+
+  // AccessKit derives a Label node's accessible name from its *value*, not its
+  // label -- label_comes_from_value() is exactly role == Label. Flutter puts
+  // the text in label, so without this every piece of static text in the UI
+  // reaches a screen reader with no name at all, which is most of what there
+  // is to read. Only fill an empty value, so a node carrying both keeps its
+  // own.
+  if (role == ACCESSKIT_ROLE_LABEL && node->value[0] == '\0') {
+    accesskit_node_set_value(out, node->label);
+  }
+
+  // The application's own stable id, which is what an automation client keys
+  // on when a label is localized or ambiguous. Empty on every node at the
+  // 3.38.3 deployment floor, since that engine never writes identifier -- so
+  // this does nothing today and starts working on an engine bump, rather than
+  // being quietly forgotten at the point where it would matter.
+  if (node->identifier[0] != '\0') {
+    accesskit_node_set_author_id(out, node->identifier);
+  }
+  if (node->tooltip[0] != '\0') {
+    accesskit_node_set_tooltip(out, node->tooltip);
+  }
 
   // A numeric value is what makes AccessKit expose the AT-SPI Value interface
   // for this node, which is how a screen reader reports a scroll position
@@ -234,9 +267,45 @@ accesskit_node* BuildNode(const IhsSemanticsNode* node,
     accesskit_node_set_read_only(out);
   }
 
-  AddActions(out, node->actions);
+  // A live region is announced without the accessibility cursor moving to it,
+  // which is the only way a toast or a snackbar reaches a screen reader at
+  // all: by the time a user could navigate to one it has usually gone. Flutter
+  // carries a single liveRegion boolean with no urgency distinction, so this
+  // maps to polite -- assertive interrupts whatever is being spoken, and
+  // claiming that for every transient message would make the UI hostile.
+  if (node->live_region) {
+    accesskit_node_set_live(out, ACCESSKIT_LIVE_POLITE);
+  }
+
+  // An application's own verbs -- "Add to favorites", "Dismiss route" -- exist
+  // only as custom actions, so without these a screen reader user can reach
+  // every control the app declares and still not invoke anything specific to
+  // it. The label lives once in the snapshot's declaration table rather than
+  // on each referencing node, so resolve it here; a node referencing an
+  // undeclared id is skipped, since an action announced with no name is worse
+  // than one that is absent.
+  for (size_t i = 0; i < node->custom_action_count; i++) {
+    const int32_t action_id = node->custom_action_ids[i];
+    const IhsSemanticsCustomAction* declared =
+        ihs_semantics_find_custom_action(snapshot, action_id);
+    if (declared == nullptr || declared->label[0] == '\0') {
+      continue;
+    }
+    accesskit_custom_action* custom = accesskit_custom_action_new(action_id);
+    accesskit_custom_action_set_description(custom, declared->label);
+    // Takes ownership, so there is nothing to free here.
+    accesskit_node_push_custom_action(out, custom);
+  }
+
+  // a11y_focus_blocked is the framework saying this node must not take the
+  // accessibility cursor even though it otherwise could -- a node behind a
+  // modal barrier, typically. Offering focus anyway would let a screen reader
+  // move onto content the app has deliberately sealed off.
+  AddActions(out, node->actions, node->focusable && !node->a11y_focus_blocked);
   return out;
 }
+
+namespace {
 
 // Builds a full tree update from a snapshot. The caller owns the result.
 accesskit_tree_update* BuildTreeUpdate(const IhsSemanticsSnapshot* snapshot) {
