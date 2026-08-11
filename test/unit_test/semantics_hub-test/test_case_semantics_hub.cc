@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <thread>
 #include <vector>
@@ -584,4 +585,102 @@ TEST_F(SemanticsHubTest, ConcurrentAcquireDuringPublish) {
   for (auto& reader : readers) {
     reader.join();
   }
+}
+
+// The numeric value a publisher supplies reaches consumers intact, and the
+// accessor is the read path a plugin built against a newer header uses.
+TEST_F(SemanticsHubTest, NumericValueReachesConsumers) {
+  TreeBuilder tree;
+  IhsSemanticsPublishNode& node = tree.Add(0, "Media list");
+  node.has_numeric_value = true;
+  node.numeric_value = 120.0;
+  node.numeric_value_min = 0.0;
+  node.numeric_value_max = 400.0;
+  ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
+
+  const IhsSemanticsSnapshot* snapshot = ihs_semantics_acquire_snapshot();
+  ASSERT_NE(snapshot, nullptr);
+  const IhsSemanticsNode* out = ihs_semantics_snapshot_node_at(snapshot, 0);
+  ASSERT_NE(out, nullptr);
+
+  double value = -1.0;
+  double min = -1.0;
+  double max = -1.0;
+  EXPECT_TRUE(ihs_semantics_node_numeric_value(out, &value, &min, &max));
+  EXPECT_DOUBLE_EQ(value, 120.0);
+  EXPECT_DOUBLE_EQ(min, 0.0);
+  EXPECT_DOUBLE_EQ(max, 400.0);
+  ihs_semantics_release_snapshot(snapshot);
+}
+
+// Consumers are told the bounds are finite and ordered and may pass them
+// straight to a platform accessibility API, so the hub refuses a range it
+// cannot stand behind rather than forwarding it and trusting every consumer to
+// re-check. A NaN or an inverted range reaching AT-SPI is a crash in someone
+// else's process.
+TEST_F(SemanticsHubTest, ImplausibleNumericValueIsDropped) {
+  const double nan_value = std::numeric_limits<double>::quiet_NaN();
+  const double infinity = std::numeric_limits<double>::infinity();
+
+  struct Case {
+    const char* name;
+    double value;
+    double min;
+    double max;
+  };
+  const Case cases[] = {
+      {"inverted range", 5.0, 10.0, 0.0},
+      {"value below min", -1.0, 0.0, 10.0},
+      {"value above max", 11.0, 0.0, 10.0},
+      {"nan value", nan_value, 0.0, 10.0},
+      {"nan bound", 5.0, nan_value, 10.0},
+      {"infinite bound", 5.0, 0.0, infinity},
+  };
+
+  for (const Case& c : cases) {
+    TreeBuilder tree;
+    IhsSemanticsPublishNode& node = tree.Add(0, c.name);
+    node.has_numeric_value = true;
+    node.numeric_value = c.value;
+    node.numeric_value_min = c.min;
+    node.numeric_value_max = c.max;
+    ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK) << c.name;
+
+    const IhsSemanticsSnapshot* snapshot = ihs_semantics_acquire_snapshot();
+    ASSERT_NE(snapshot, nullptr) << c.name;
+    const IhsSemanticsNode* out = ihs_semantics_snapshot_node_at(snapshot, 0);
+    ASSERT_NE(out, nullptr) << c.name;
+    EXPECT_FALSE(out->has_numeric_value) << c.name;
+    EXPECT_DOUBLE_EQ(out->numeric_value, 0.0) << c.name;
+    ihs_semantics_release_snapshot(snapshot);
+  }
+}
+
+// The accessor leaves the caller's variables alone when there is no value, so
+// a caller that ignores the return does not read an uninitialized position as
+// if it were real.
+TEST_F(SemanticsHubTest, NumericValueAccessorLeavesOutputsAloneWhenAbsent) {
+  TreeBuilder tree;
+  tree.Add(0, "plain");
+  ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
+
+  const IhsSemanticsSnapshot* snapshot = ihs_semantics_acquire_snapshot();
+  ASSERT_NE(snapshot, nullptr);
+  const IhsSemanticsNode* out = ihs_semantics_snapshot_node_at(snapshot, 0);
+  ASSERT_NE(out, nullptr);
+
+  double value = 42.0;
+  double min = 43.0;
+  double max = 44.0;
+  EXPECT_FALSE(ihs_semantics_node_numeric_value(out, &value, &min, &max));
+  EXPECT_DOUBLE_EQ(value, 42.0);
+  EXPECT_DOUBLE_EQ(min, 43.0);
+  EXPECT_DOUBLE_EQ(max, 44.0);
+
+  // Null outputs are legal for a caller that only wants the presence test,
+  // and a null node is not a crash.
+  EXPECT_FALSE(
+      ihs_semantics_node_numeric_value(out, nullptr, nullptr, nullptr));
+  EXPECT_FALSE(ihs_semantics_node_numeric_value(nullptr, &value, &min, &max));
+  ihs_semantics_release_snapshot(snapshot);
 }

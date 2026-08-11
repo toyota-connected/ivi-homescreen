@@ -23,6 +23,7 @@
 
 #include <atomic>
 #include <cerrno>
+#include <cmath>
 #include <cstring>
 #include <memory>
 #include <mutex>
@@ -224,6 +225,19 @@ Snapshot* BuildSnapshot(const IhsSemanticsPublishInfo* info,
     out.a11y_focus_blocked = in.a11y_focus_blocked;
     out.actions = in.actions;
 
+    // Consumers are promised finite, ordered bounds, so a publisher that got
+    // it wrong drops to "no numeric value" rather than propagating a NaN or an
+    // inverted range into a platform accessibility API.
+    out.has_numeric_value = in.has_numeric_value &&
+                            std::isfinite(in.numeric_value) &&
+                            std::isfinite(in.numeric_value_min) &&
+                            std::isfinite(in.numeric_value_max) &&
+                            in.numeric_value_min <= in.numeric_value &&
+                            in.numeric_value <= in.numeric_value_max;
+    out.numeric_value = out.has_numeric_value ? in.numeric_value : 0.0;
+    out.numeric_value_min = out.has_numeric_value ? in.numeric_value_min : 0.0;
+    out.numeric_value_max = out.has_numeric_value ? in.numeric_value_max : 0.0;
+
     const size_t child_begin = snapshot->child_pool.size();
     if (in.child_ids != nullptr) {
       for (size_t c = 0; c < in.child_count; c++) {
@@ -312,6 +326,25 @@ const IhsSemanticsNode* ihs_semantics_snapshot_node_by_id(
   const auto* s = reinterpret_cast<const Snapshot*>(snapshot);
   const auto it = s->id_to_index.find(node_id);
   return it != s->id_to_index.end() ? &s->nodes[it->second] : nullptr;
+}
+
+bool ihs_semantics_node_numeric_value(const IhsSemanticsNode* node,
+                                      double* out_value,
+                                      double* out_min,
+                                      double* out_max) {
+  if (node == nullptr || !node->has_numeric_value) {
+    return false;
+  }
+  if (out_value != nullptr) {
+    *out_value = node->numeric_value;
+  }
+  if (out_min != nullptr) {
+    *out_min = node->numeric_value_min;
+  }
+  if (out_max != nullptr) {
+    *out_max = node->numeric_value_max;
+  }
+  return true;
 }
 
 const IhsSemanticsCustomAction* ihs_semantics_find_custom_action(

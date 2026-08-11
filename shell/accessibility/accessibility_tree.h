@@ -23,10 +23,6 @@
 #include <unordered_map>
 #include <vector>
 
-#if ENABLE_ACCESSKIT
-#include <accesskit.h>
-#endif
-
 #include <shell/platform/embedder/embedder.h>
 
 #include "semantics_translator.h"
@@ -114,6 +110,19 @@ class AccessibilityNode {
     return m_transform;
   };
 
+  // Returns the scroll offset of a scrollable node, and the range that offset
+  // moves within. Only meaningful when the node declares a scroll action;
+  // Flutter leaves all three at zero otherwise. An unbounded scrollable (an
+  // infinite list, say) reports an infinite extent, so check for a finite
+  // range before handing these to anything that cannot express one.
+  [[nodiscard]] double GetScrollPosition() const { return m_scroll_position; };
+  [[nodiscard]] double GetScrollExtentMin() const {
+    return m_scroll_extent_min;
+  };
+  [[nodiscard]] double GetScrollExtentMax() const {
+    return m_scroll_extent_max;
+  };
+
   // Returns the flags associated with the node.
   [[nodiscard]] FlutterSemanticsFlag GetFlags() const { return m_flags; };
 
@@ -167,6 +176,9 @@ class AccessibilityNode {
   std::string m_identifier;  // App-assigned stable ID (owned copy); may be "".
   FlutterRect m_bounds{};    // Bounds of the node.
   FlutterTransformation m_transform{};  // Node-to-parent transform.
+  double m_scroll_position = 0.0;       // Scroll offset; see the getter.
+  double m_scroll_extent_min = 0.0;     // Lower bound of the scroll range.
+  double m_scroll_extent_max = 0.0;     // Upper bound; may be infinite.
   FlutterSemanticsFlag m_flags =
       static_cast<FlutterSemanticsFlag>(0);  // Flags associated with the node.
   FlutterSemanticsAction m_actions =
@@ -253,17 +265,6 @@ class AccessibilityTree {
     }
   }
 
-#if ENABLE_ACCESSKIT
-  // Initializes AccessKit support.
-  void Init_AccessKit();
-
-  // Sets the window focus state for AccessKit.
-  void AccessKit_SetWindowFocus(bool focused);
-
-  // Sets the focused node for AccessKit.
-  void AccessKit_SetFocusedNode(accesskit_node_id focused_node);
-#endif
-
  private:
   // Drops nodes no longer reachable from the root (id 0), keeping `nodes` and
   // `node_index` consistent after a subtree is detached in an update.
@@ -285,10 +286,6 @@ class AccessibilityTree {
   // application declares, not by tree size or update count.
   std::unordered_map<int32_t, AccessibilityCustomAction> custom_actions;
   int32_t focused_node;  // ID of the currently focused node.
-
-#if ENABLE_ACCESSKIT
-  accesskit_unix_adapter* adapter{};  // AccessKit adapter for Unix systems.
-#endif
 };
 
 #endif  // SHELL_ACCESSIBILITY_ACCESSIBILITY_TREE_H_

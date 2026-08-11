@@ -377,6 +377,11 @@ FlutterEngineResult Engine::Run(FlutterDesktopEngineState* state) {
   // counts its consumers and asks for it through this host, so a build with
   // the subsystem compiled in but nobody listening costs the engine nothing.
   InstallSemanticsHost();
+#if ENABLE_ACCESSKIT
+  // Registering is what asks the hub to turn semantics on, so the bridge is
+  // created after the host is installed and not before.
+  m_accesskit = std::make_unique<accessibility::AccessKitConsumer>();
+#endif
 #endif
 
   IHS_TRACE("({}) -Engine::Run", m_index);

@@ -85,6 +85,12 @@ void AccessibilityNode::Update(const FlutterSemanticsNode2& fl_node) {
   // Parent-local bounds are only meaningful alongside the node-to-parent
   // transform, so retain it here rather than composing at read time.
   m_transform = fl_node.transform;
+  // Scroll geometry. These predate the oldest engine this shell deploys
+  // against, so unlike `identifier` and `flags2` they need no struct_size
+  // gate -- they sit well ahead of the fields that were appended later.
+  m_scroll_position = fl_node.scroll_position;
+  m_scroll_extent_min = fl_node.scroll_extent_min;
+  m_scroll_extent_max = fl_node.scroll_extent_max;
   m_flags = fl_node.flags__deprecated__;
   m_actions = fl_node.actions;
 
@@ -204,9 +210,6 @@ void AccessibilityTree::HandleFlutterUpdate(
     } else {
       DumpTree(target.c_str());
     }
-#if ENABLE_ACCESSKIT
-    Init_AccessKit();
-#endif
   }
 
   // Drop any node no longer reachable from the root: a subtree Flutter
@@ -393,84 +396,3 @@ void AccessibilityTree::DumpTree(const char* target_file) const {
     ihs::log::error("Failed to open {} for writing", target_file);
   }
 }
-
-#if ENABLE_ACCESSKIT
-accesskit_tree_update* build_tree_update_with_focus_update(void* userdata) {
-  const auto* tree = static_cast<AccessibilityTree*>(userdata);
-  accesskit_tree_update* update =
-      accesskit_tree_update_with_focus(tree->GetFocusedNode());
-  return update;
-}
-
-accesskit_tree_update* activation_handler_cbk(void* userdata) {
-  auto* tree = static_cast<AccessibilityTree*>(userdata);
-
-  accesskit_tree_update* result =
-      accesskit_tree_update_with_capacity_and_focus(tree->NumberOfNodes(), 0);
-  accesskit_tree* ak_tree = accesskit_tree_new(0);
-  accesskit_tree_update_set_tree(result, ak_tree);
-
-  for (auto node_idx = 0; node_idx < tree->NumberOfNodes(); node_idx++) {
-    const AccessibilityNode* accessibility_node = tree->GetNodeByIdx(node_idx);
-    accesskit_node* ak_node =
-        accesskit_node_new((accesskit_role)accessibility_node->GetRole());
-    for (uint32_t i = 0; i < accessibility_node->NumberOfChildren(); i++) {
-      accesskit_node_push_child(ak_node, accessibility_node->GetChild(i));
-    }
-    accesskit_node_set_label(ak_node, accessibility_node->GetLabel());
-    accesskit_node_set_description(ak_node, accessibility_node->GetHint());
-    accesskit_node_set_value(ak_node, accessibility_node->GetValue());
-
-    accesskit_rect bounds = {accessibility_node->GetBounds().left,
-                             accessibility_node->GetBounds().top,
-                             accessibility_node->GetBounds().right,
-                             accessibility_node->GetBounds().bottom};
-    accesskit_node_set_bounds(ak_node, bounds);
-
-    if (accessibility_node->GetFlags() & kFlutterSemanticsFlagIsFocusable) {
-      accesskit_node_add_action(ak_node, ACCESSKIT_ACTION_FOCUS);
-    }
-
-    if (accessibility_node->GetFlags() &
-        (kFlutterSemanticsFlagHasCheckedState |
-         kFlutterSemanticsFlagHasToggledState)) {
-      accesskit_node_add_action(ak_node, ACCESSKIT_ACTION_CLICK);
-    }
-    // Todo: Handle more flags
-
-    accesskit_tree_update_push_node(result, accessibility_node->GetId(),
-                                    ak_node);
-  }
-
-  tree->AccessKit_SetWindowFocus(true);
-
-  return result;
-}
-
-void action_handler_cbk(accesskit_action_request* /* request */,
-                        void* /* userdata */) {
-  ihs::log::debug("accesskit_wrapper: action_handler++");
-}
-
-void deactivation_handler_cbk(void* /* userdata */) {
-  ihs::log::debug("accesskit_wrapper: deactivation_handler++");
-}
-
-void AccessibilityTree::Init_AccessKit() {
-  adapter = accesskit_unix_adapter_new(activation_handler_cbk, this,
-                                       action_handler_cbk, this,
-                                       deactivation_handler_cbk, this);
-  assert(adapter != nullptr);
-}
-
-void AccessibilityTree::AccessKit_SetWindowFocus(bool focused) {
-  accesskit_unix_adapter_update_window_focus_state(adapter, focused);
-}
-
-void AccessibilityTree::AccessKit_SetFocusedNode(
-    accesskit_node_id focused_node) {
-  SetFocusedNode(focused_node);
-  accesskit_unix_adapter_update_if_active(
-      adapter, build_tree_update_with_focus_update, this);
-}
-#endif
