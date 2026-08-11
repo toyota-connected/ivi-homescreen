@@ -31,6 +31,9 @@
 #include "logging/logging.h"
 #if BUILD_ACCESSIBILITY
 #include "shell/accessibility/accessibility_tree.h"
+#if ENABLE_ACCESSKIT
+#include "shell/accessibility/accesskit_consumer.h"
+#endif
 #endif
 #include "task_runner.h"
 #include "view/flutter_view.h"
@@ -477,6 +480,13 @@ class Engine {
   // retains a pointer to it via m_args.compositor.
   FlutterCompositor m_compositor{};
   std::string m_clipboard_data;
+
+#if BUILD_ACCESSIBILITY && ENABLE_ACCESSKIT
+  // Bridges published snapshots to a screen reader. Owned here because its
+  // lifetime is the engine's: constructing it registers with the hub, which is
+  // what turns engine semantics on, and destroying it unregisters.
+  std::unique_ptr<accessibility::AccessKitConsumer> m_accesskit;
+#endif
 
   std::shared_ptr<TaskRunner> m_platform_task_runner;
   FlutterTaskRunnerDescription m_platform_task_runner_description{};
