@@ -84,23 +84,9 @@ log() {
     echo "==> $*"
 }
 
-find_vkms_card() {
-    # Identify the vkms card by its connector signature. vkms always
-    # advertises connectors named "cardN-Virtual-M"; real GPUs don't.
-    # This is more reliable than matching the driver symlink, whose name
-    # has changed over kernel versions (platform → faux_driver).
-    local c card
-    for c in /sys/class/drm/card[0-9]*; do
-        # Skip the connector/encoder child nodes themselves.
-        [[ -d "$c/device" ]] || continue
-        card="$(basename "$c")"
-        if compgen -G "/sys/class/drm/${card}-Virtual-*" >/dev/null; then
-            echo "/dev/dri/${card}"
-            return 0
-        fi
-    done
-    return 1
-}
+# Card/connector discovery is shared with the other KMS harnesses.
+# shellcheck source=test/lib/drm_card.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/drm_card.sh"
 
 ensure_vkms_loaded() {
     if lsmod | awk '{print $1}' | grep -qx vkms; then
@@ -161,7 +147,7 @@ fi
 ensure_vkms_loaded
 
 if [[ -z "$VKMS_CARD" ]]; then
-    VKMS_CARD="$(find_vkms_card)" || die "no /dev/dri/cardN with driver=vkms found"
+    VKMS_CARD="$(ihs_find_vkms_card)" || die "no /dev/dri/cardN with driver=vkms found"
 fi
 [[ -e "$VKMS_CARD" ]] || die "$VKMS_CARD does not exist"
 
