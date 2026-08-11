@@ -490,7 +490,15 @@ TaskRunner* FlutterView::GetPlatformTaskRunner() const {
   return m_flutter_engine ? m_flutter_engine->GetPlatformTaskRunner() : nullptr;
 }
 
-void FlutterView::Initialize() {
+bool FlutterView::Initialize() {
+  // Backend::Create returns null when the backend could not be built at all
+  // (no descriptor for the key) or its factory failed to initialize the device.
+  // Everything below dereferences it.
+  if (!m_backend) {
+    ihs::log::error("({}) no usable backend; view cannot start", m_index);
+    return false;
+  }
+
   // Engine / Dart VM switches -> command_line_argv. argv[0] is the app id.
   std::vector<const char*> m_command_line_args_c;
   m_command_line_args_c.reserve(m_config.view.engine_args.size() + 2);
@@ -555,8 +563,8 @@ void FlutterView::Initialize() {
   m_flutter_engine->Run(m_state->engine_state);
 
   if (!m_flutter_engine->IsRunning()) {
-    ihs::log::critical("Failed to Run Engine");
-    exit(EXIT_FAILURE);
+    ihs::log::error("({}) failed to run engine", m_index);
+    return false;
   }
 
   // Hand the engine handle + platform task runner to the backend so
@@ -709,6 +717,7 @@ void FlutterView::Initialize() {
 #endif
 
   IHS_DEBUG("({}) Engine running...", m_index);
+  return true;
 }
 
 void FlutterView::UpdateDisplayMetadata() const {

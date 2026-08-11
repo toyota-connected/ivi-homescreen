@@ -107,7 +107,14 @@ class FlutterView {
    * @relation
    * wayland, flutter
    */
-  void Initialize();
+  /// Bring the engine up. Returns false when the view cannot run -- its backend
+  /// failed to initialize, or the engine refused to start.
+  ///
+  /// A failure here used to exit the process. With several views in one process
+  /// that is the wrong call: one bundle naming a connector that is not plugged
+  /// in would take the cluster down with it. The caller decides, because only
+  /// it knows whether anything else is already running.
+  [[nodiscard]] bool Initialize();
 
   /**
    * @brief Get the WaylandWindow associated with this view.

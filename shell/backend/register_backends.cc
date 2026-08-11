@@ -133,7 +133,12 @@ std::shared_ptr<IDisplay> MakeDrmDisplay(
   // reason it could not pick one.
   auto device = homescreen::ResolveDrmDevice(configs[0].view.drm_device);
   if (!device) {
-    std::exit(EXIT_FAILURE);
+    // Propagated, not fatal, for the same reason as the backend factories: a
+    // view naming a card that cannot be resolved must not take down the views
+    // already running beside it. App::DisplayForContext turns this into a
+    // failed view; App's constructor still treats it as fatal, because at that
+    // point there is nothing else to keep alive.
+    return nullptr;
   }
   return std::make_shared<DrmDisplay>(static_cast<int32_t>(w),
                                       static_cast<int32_t>(h), 60.0,
@@ -465,12 +470,18 @@ std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
                                  drm_display->SharedDevice(), drm_display);
 
   // DrmBackend::Create returns nullptr on any init failure (libseat
-  // take_device, drmSetMaster, no usable connector, GBM/EGL setup,
-  // …). Continuing would dereference a null backend in Engine::Run
-  // and SEGV; fail-fast with the same exit path as a missing bundle.
+  // take_device, drmSetMaster, no usable connector, GBM/EGL setup, …).
+  //
+  // Propagated rather than fatal. Continuing with a null backend would
+  // dereference it in Engine::Run and SEGV, so the caller has to handle it --
+  // but killing the process here makes one view's failure everyone's. With
+  // several views in a process that is wrong: a bundle naming a connector that
+  // is not plugged in takes down the cluster next to it.
+  // FlutterView::Initialize reports the failure and App decides, which is the
+  // only place that knows whether anything else is running.
   if (!m_backend) {
-    ihs::log::critical("[FlutterView] DRM backend init failed; aborting");
-    exit(EXIT_FAILURE);
+    ihs::log::error("[FlutterView] DRM backend init failed");
+    return nullptr;
   }
 
   // Start the card's single PAGE_FLIP_EVENT reader (owned by the device-context
@@ -578,13 +589,11 @@ std::shared_ptr<Backend> MakeDrmVulkanBackend(
                 ParseTriState(config.view.drm_explicit_sync));
 
   // Create returns nullptr on any init failure (unsupported device, no
-  // zero-copy scanout path). Continuing would dereference a null backend in
-  // Engine::Run and SEGV; fail-fast with the same exit path the EGL DRM
-  // backend uses.
+  // zero-copy scanout path). Propagated rather than fatal, for the same reason
+  // as the EGL DRM backend above.
   if (!vk_backend) {
-    ihs::log::critical(
-        "[FlutterView] DRM Vulkan backend init failed; aborting");
-    exit(EXIT_FAILURE);
+    ihs::log::error("[FlutterView] DRM Vulkan backend init failed");
+    return nullptr;
   }
 
   // Wire the self-committing HW cursor (if Create opened one) to the seat
