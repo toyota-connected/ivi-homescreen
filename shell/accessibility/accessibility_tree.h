@@ -23,10 +23,6 @@
 #include <unordered_map>
 #include <vector>
 
-#if ENABLE_ACCESSKIT
-#include <accesskit.h>
-#endif
-
 #include <shell/platform/embedder/embedder.h>
 
 #include "semantics_translator.h"
@@ -253,17 +249,6 @@ class AccessibilityTree {
     }
   }
 
-#if ENABLE_ACCESSKIT
-  // Initializes AccessKit support.
-  void Init_AccessKit();
-
-  // Sets the window focus state for AccessKit.
-  void AccessKit_SetWindowFocus(bool focused);
-
-  // Sets the focused node for AccessKit.
-  void AccessKit_SetFocusedNode(accesskit_node_id focused_node);
-#endif
-
  private:
   // Drops nodes no longer reachable from the root (id 0), keeping `nodes` and
   // `node_index` consistent after a subtree is detached in an update.
@@ -285,10 +270,6 @@ class AccessibilityTree {
   // application declares, not by tree size or update count.
   std::unordered_map<int32_t, AccessibilityCustomAction> custom_actions;
   int32_t focused_node;  // ID of the currently focused node.
-
-#if ENABLE_ACCESSKIT
-  accesskit_unix_adapter* adapter{};  // AccessKit adapter for Unix systems.
-#endif
 };
 
 #endif  // SHELL_ACCESSIBILITY_ACCESSIBILITY_TREE_H_
