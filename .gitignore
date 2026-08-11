@@ -20,6 +20,20 @@ lcovHtml/
 
 coverage.info
 
+# Toolchain and workspace that `emb flutter` / `emb cross` install into the
+# tree. The documented workflow creates all three -- CI itself runs
+# `emb flutter --flutter-version ...` and then `source ./setup_env.sh` -- so
+# without these a developer who follows the README ends up with a 1.4 GB SDK
+# and a 164 MB workspace staged one `git add -A` away from being committed.
+/flutter/
+/.config/
+/setup_env.sh
+
+# AOT snapshot that `emb bundle` drops beside an app (and outside its build/
+# directory, so a per-app build/ ignore does not catch it). A build output, not
+# source; no integration app commits one.
+libapp.so*
+
 # emb cross resolve state. Records the host tools a resolve ran with (rustc,
 # Flutter and engine commits) and one entry per target the developer happens to
 # have built, so it differs per machine and dirties the tree on every

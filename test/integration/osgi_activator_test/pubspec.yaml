@@ -1,0 +1,21 @@
+name: osgi_activator_test
+description: >
+  Minimal OSGi bundle activator for ivi-homescreen. Registers with the shell
+  over dev.osgi/bridge and reports ACTIVE, which is what releases a critical
+  bundle's startup wait. Exists so the multi-bundle harness can assert the
+  critical-first ordering guarantee.
+publish_to: none
+version: 1.0.0
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: false

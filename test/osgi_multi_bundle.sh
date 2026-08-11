@@ -218,6 +218,12 @@ symbolic_name = "com.ivi.navigation"
 bundle = "$WORK/navigation"
 priority = "normal"
 
+  # The activator bundle reads its symbolic name from here: one build can stand
+  # in for any bundle, and the name must match this entry or the shell refuses
+  # the ACTIVE report.
+  [osgi.bundles.args]
+  dart = ["com.ivi.navigation"]
+
   [osgi.bundles.backend]
   type = "drm-kms-egl"
 
@@ -230,6 +236,9 @@ symbolic_name = "com.ivi.cluster"
 bundle = "$WORK/cluster"
 priority = "$CLUSTER_PRIORITY"
 startup_timeout_ms = $STARTUP_TIMEOUT
+
+  [osgi.bundles.args]
+  dart = ["com.ivi.cluster"]
 
   [osgi.bundles.backend]
   type = "drm-kms-egl"
@@ -330,7 +339,11 @@ fi
 # B5: both CRTCs actually presenting. Construction without presentation would
 # satisfy B1 and B2 while showing nothing on either panel.
 if [ "$COUNT_FLIPS" = "1" ]; then
-    flips=$(grep -c "DRM_IOCTL_MODE_PAGE_FLIP\|DRM_IOCTL_MODE_ATOMIC" "$FLIP_LOG" 2>/dev/null || echo 0)
+    # grep -c prints 0 *and* exits non-zero when there are no matches, so a
+    # `|| echo 0` fallback appends a second line and the comparison below then
+    # fails with "integer expression expected" instead of reporting no flips.
+    flips=$(grep -c "DRM_IOCTL_MODE_PAGE_FLIP\|DRM_IOCTL_MODE_ATOMIC" "$FLIP_LOG" 2>/dev/null)
+    flips=${flips:-0}
     if [ "$flips" -gt 0 ]; then
         record "B5-page-flips" pass "$flips flip/atomic ioctls observed"
     else
