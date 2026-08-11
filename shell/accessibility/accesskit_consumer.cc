@@ -342,6 +342,13 @@ AccessKitConsumer::AccessKitConsumer() {
     return;
   }
 
+  // Mark the window focused. The tree is reachable either way, but without
+  // this the root frame is published without the active and focused states,
+  // and that is what a screen reader keys on to decide which window it should
+  // be reading. The shell owns a single fullscreen surface, so it holds focus
+  // whenever it is up; revisit if the shell ever grows real focus tracking.
+  accesskit_unix_adapter_update_window_focus_state(g_adapter, true);
+
   running_ = true;
   poll_thread_ = std::thread(&AccessKitConsumer::PollLoop, this);
   ihs::log::info("accesskit: registered as a semantics consumer");
