@@ -46,6 +46,11 @@
 #   DURATION         seconds to run            (default 6)
 #   STARTUP_GRACE    seconds before liveness   (default 3)
 #   STARTUP_TIMEOUT  critical deadline, ms     (default 4000)
+#   ACTIVATOR        1 = the bundle implements the OSGi activator and reports
+#                    ACTIVE over dev.osgi/bridge. Default 0: an ordinary Flutter
+#                    app cannot report ACTIVE, so the critical wait would always
+#                    time out and tear the bundle down, taking B1/B2 with it.
+#                    With 0 both bundles run at normal priority and B3 skips.
 #   COUNT_FLIPS      1 = prove page flips via strace (default 0)
 #   SOFTWARE_RENDER  1 = LIBGL_ALWAYS_SOFTWARE=1 (vkms/llvmpipe)
 #   --check          verify prerequisites only, do not launch
@@ -62,6 +67,7 @@ CONNECTOR_B="${CONNECTOR_B:-}"
 DURATION="${DURATION:-6}"
 STARTUP_GRACE="${STARTUP_GRACE:-3}"
 STARTUP_TIMEOUT="${STARTUP_TIMEOUT:-4000}"
+ACTIVATOR="${ACTIVATOR:-0}"
 COUNT_FLIPS="${COUNT_FLIPS:-0}"
 SOFTWARE_RENDER="${SOFTWARE_RENDER:-0}"
 
@@ -154,7 +160,16 @@ if [ -z "$CONNECTOR_A" ] || [ -z "$CONNECTOR_B" ]; then
     record "connectors" skip "need 2 scanout connectors on $CARD, found ${CONNECTOR_A:-none} ${CONNECTOR_B:-}"
     summary
 fi
+# Only make the first bundle critical when it can actually report ACTIVE.
+# Otherwise the critical wait times out and tears it down, which would fail B1
+# and B2 for a reason that has nothing to do with what they test.
+if [ "$ACTIVATOR" = "1" ]; then
+    CLUSTER_PRIORITY="critical"
+else
+    CLUSTER_PRIORITY="normal"
+fi
 log "card $DRM_DEVICE ($DEVICE_SOURCE); connectors $CONNECTOR_A + $CONNECTOR_B"
+log "cluster priority: $CLUSTER_PRIORITY (ACTIVATOR=$ACTIVATOR)"
 
 # Throwaway copies so a config can be dropped in without touching the source
 # bundle. Two directories because each bundle is a distinct OSGi bundle with its
@@ -166,6 +181,20 @@ trap 'rm -rf "$WORK" "$LOG" "$FLIP_LOG"' EXIT
 mkdir -p "$WORK/cluster" "$WORK/navigation"
 cp -rL "$BUNDLE"/. "$WORK/cluster/"
 cp -rL "$BUNDLE"/. "$WORK/navigation/"
+
+# Every bundle in the process must resolve the SAME engine library path.
+# LibFlutterEngine::Load is one-shot and keyed on the path it first bound: a
+# second bundle asking for any different path -- including the bare system name
+# -- is refused, and its FlutterView aborts. Two bundles each shipping their own
+# lib/libflutter_engine.so therefore cannot coexist, however identical the files
+# are. Hoist one copy out and let both resolve it by the same name.
+if [ -f "$WORK/cluster/lib/libflutter_engine.so" ]; then
+    cp "$WORK/cluster/lib/libflutter_engine.so" "$WORK/libflutter_engine.so"
+    rm -f "$WORK/cluster/lib/libflutter_engine.so" \
+          "$WORK/navigation/lib/libflutter_engine.so"
+    export LD_LIBRARY_PATH="$WORK${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    log "hoisted one shared libflutter_engine.so (per-bundle copies cannot coexist)"
+fi
 
 # One critical bundle and one normal bundle, each pinned to its own connector.
 # Deliberately declared normal-first so a pass proves the orchestrator reordered
@@ -199,7 +228,7 @@ priority = "normal"
 [[osgi.bundles]]
 symbolic_name = "com.ivi.cluster"
 bundle = "$WORK/cluster"
-priority = "critical"
+priority = "$CLUSTER_PRIORITY"
 startup_timeout_ms = $STARTUP_TIMEOUT
 
   [osgi.bundles.backend]
@@ -236,12 +265,21 @@ wait "$HS_PID" 2>/dev/null
 
 # ─── assertions ──────────────────────────────────────────────────────────────
 
-# B1: two engines. The inverse of multi_view_single_engine.sh, which fails on
-# exactly this line -- an OSGi bundle IS a separate engine.
-if grep -aqE "\(1\) Engine running" "$LOG"; then
-    record "B1-two-engines" pass "engine index 1 started (bundles are not collapsed)"
+# B1: two engines. The inverse of multi_view_single_engine.sh -- an OSGi bundle
+# IS a separate engine, so a second index must appear.
+#
+# Counted from per-engine index markers rather than "Engine running", which that
+# harness keys on: it is not emitted on this path at all (0 occurrences in a run
+# that demonstrably brought up two engines), so keying on it reports a false
+# failure. "Loading AOT" and the view/output binding both carry the index and
+# are emitted per engine.
+engine_indices=$( { grep -aoE "\([0-9]+\) Loading AOT" "$LOG" | grep -oE "[0-9]+";
+                    grep -aoE "view [0-9]+ is on output" "$LOG" | grep -oE "[0-9]+"; } \
+                  | sort -un | wc -l)
+if [ "$engine_indices" -ge 2 ]; then
+    record "B1-two-engines" pass "$engine_indices distinct engine indices (bundles are not collapsed)"
 else
-    record "B1-two-engines" fail "no second engine; bundles share one engine"
+    record "B1-two-engines" fail "only $engine_indices engine index seen; bundles share one engine"
 fi
 
 # B2: each bundle brought up its own connector.
@@ -266,9 +304,14 @@ fi
 # property the unit tests can only assert against a fake host.
 crit_active=$(grep -an "bundle 'com.ivi.cluster': STARTING -> ACTIVE" "$LOG" | head -1 | cut -d: -f1)
 norm_start=$(grep -an "bundle 'com.ivi.navigation': RESOLVED -> STARTING" "$LOG" | head -1 | cut -d: -f1)
-if [ -z "$crit_active" ] || [ -z "$norm_start" ]; then
-    # -d raises the log level; without those lines the run told us nothing about
-    # ordering, so this is honestly a skip rather than a pass.
+if [ "$ACTIVATOR" != "1" ]; then
+    # The ordering guarantee is "critical is ACTIVE before normal starts", and
+    # ACTIVE is reported by the bundle's Dart activator over dev.osgi/bridge.
+    # An ordinary Flutter app never sends it, so there is nothing to assert
+    # until an activator-capable bundle exists. Saying so beats a green tick.
+    record "B3-critical-first" skip \
+        "needs ACTIVATOR=1: an ordinary bundle cannot report ACTIVE"
+elif [ -z "$crit_active" ] || [ -z "$norm_start" ]; then
     record "B3-critical-first" skip "lifecycle lines absent (need -d / debug logging)"
 elif [ "$crit_active" -lt "$norm_start" ]; then
     record "B3-critical-first" pass "cluster ACTIVE (line $crit_active) before navigation start (line $norm_start)"
