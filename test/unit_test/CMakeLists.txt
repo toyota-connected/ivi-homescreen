@@ -198,6 +198,8 @@ add_subdirectory(mutation_stack-test)
 # its tests would have nothing to link against otherwise.
 if (BUILD_MCP)
     add_subdirectory(mcp_provider-test)
+    # The transport routes onto the registry and needs nothing else.
+    add_subdirectory(mcp_transport-test)
     # The semantics provider needs the hub as well as the registry.
     if (BUILD_ACCESSIBILITY)
         add_subdirectory(mcp_semantics_provider-test)
