@@ -34,6 +34,17 @@ class Configuration {
     std::optional<bool> debug_backend;
     std::vector<std::string> bundle_paths;
 
+    // [global] enable_mcp: serve the MCP surface, which lets an external agent
+    // read the UI and drive it. Off unless asked for, and asking takes both a
+    // build that included the surface (BUILD_MCP) and this key -- the double
+    // opt-in cmake/options.cmake describes, so neither a stray config on a
+    // stock image nor an MCP-capable build on its own exposes anything.
+    //
+    // It also decides whether the engine produces semantics at all: starting
+    // the provider registers a hub consumer, and the hub reference-counts
+    // those to switch semantics on. Left off, the surface costs nothing.
+    std::optional<bool> enable_mcp;
+
     struct {
       std::string bundle_path;
       // Engine / Dart VM switches -> FlutterProjectArgs.command_line_argv

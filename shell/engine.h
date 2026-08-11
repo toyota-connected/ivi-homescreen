@@ -66,7 +66,8 @@ class Engine {
          const std::vector<const char*>& dart_entrypoint_args_c,
          const std::string& bundle_path,
          int32_t accessibility_features,
-         bool merge_render_platform);
+         bool merge_render_platform,
+         bool enable_mcp);
 
   ~Engine();
 
@@ -480,6 +481,10 @@ class Engine {
   // retains a pointer to it via m_args.compositor.
   FlutterCompositor m_compositor{};
   std::string m_clipboard_data;
+
+  // [global] enable_mcp. Held rather than read at teardown so stop pairs with
+  // exactly the start that ran, whatever config does afterwards.
+  bool m_enable_mcp = false;
 
 #if BUILD_ACCESSIBILITY && ENABLE_ACCESSKIT
   // Bridges published snapshots to a screen reader. Owned here because its

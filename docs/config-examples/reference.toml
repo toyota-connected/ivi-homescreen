@@ -22,6 +22,10 @@
   # type=bool default=false values=true|false applies=all
   disable_cursor =
 
+  # Serve the MCP surface, letting an external agent read and drive the UI. Requires a build configured with BUILD_MCP; off unless both the build and this key ask for it.
+  # type=bool default=false values=true|false applies=all
+  enable_mcp =
+
   # Wayland input events to mask (e.g. 'keyboard pointer').
   # type=string default=— values=comma/space list applies=wayland
   wayland_event_mask =
