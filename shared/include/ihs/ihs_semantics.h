@@ -301,6 +301,25 @@ typedef struct IhsSemanticsNode {
    * ihs_semantics_find_custom_action. */
   const int32_t* custom_action_ids;
   size_t custom_action_count;
+
+  /*
+   * Numeric position, for a control whose value is a number rather than a
+   * label -- a scrollable's offset, for instance. When has_numeric_value is
+   * false the other three are 0 and mean nothing; the flag exists because a
+   * genuine position of 0 is otherwise indistinguishable from an absent one.
+   *
+   * When present, all three are finite and min <= value <= max, so a consumer
+   * can hand them to a platform accessibility API without revalidating.
+   *
+   * Added in ihs_shared ABI 1.1. These fields lie past the end of a node as an
+   * ABI 1.0 library allocated it, so read them through
+   * ihs_semantics_node_numeric_value() rather than by dereference unless the
+   * running library is known to be at least 1.1. See docs/PLUGIN_ABI.md.
+   */
+  bool has_numeric_value;
+  double numeric_value;
+  double numeric_value_min;
+  double numeric_value_max;
 } IhsSemanticsNode;
 
 /*
@@ -328,6 +347,21 @@ IHS_EXPORT const IhsSemanticsNode* ihs_semantics_snapshot_node_at(
 IHS_EXPORT const IhsSemanticsNode* ihs_semantics_snapshot_node_by_id(
     const IhsSemanticsSnapshot* snapshot,
     int32_t node_id);
+
+/*
+ * Reads a node's numeric position. Returns true and fills the outputs when the
+ * node carries one, false otherwise, leaving the outputs untouched. Any output
+ * pointer may be null to skip that value.
+ *
+ * This is the compatibility-safe way to reach the fields added in ABI 1.1. A
+ * consumer built against this header but running against an ABI 1.0 library
+ * fails to resolve this symbol at load, rather than silently reading past the
+ * end of a node that library allocated.
+ */
+IHS_EXPORT bool ihs_semantics_node_numeric_value(const IhsSemanticsNode* node,
+                                                 double* out_value,
+                                                 double* out_min,
+                                                 double* out_max);
 
 /* Custom action declaration by id, or null when never declared. */
 IHS_EXPORT const IhsSemanticsCustomAction* ihs_semantics_find_custom_action(

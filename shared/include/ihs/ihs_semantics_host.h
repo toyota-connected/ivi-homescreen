@@ -151,6 +151,15 @@ typedef struct IhsSemanticsPublishNode {
 
   const int32_t* custom_action_ids;
   size_t custom_action_count;
+
+  /* Numeric position; see IhsSemanticsNode for the contract consumers are
+   * promised. The hub does not sanitize these: publish has_numeric_value only
+   * with finite values satisfying min <= value <= max, since a consumer is
+   * told it may pass them straight to a platform accessibility API. */
+  bool has_numeric_value;
+  double numeric_value;
+  double numeric_value_min;
+  double numeric_value_max;
 } IhsSemanticsPublishNode;
 
 /* A custom action declaration. Strings may be NULL and become "". */

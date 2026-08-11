@@ -214,4 +214,8 @@ if (BUILD_ACCESSIBILITY)
     add_subdirectory(semantics_publisher-test)
     # The hub itself is only in ihs_shared when BUILD_ACCESSIBILITY is on.
     add_subdirectory(semantics_hub-test)
+    # Needs the AccessKit bindings, so it follows the source it covers.
+    if (BUILD_ACCESSKIT)
+        add_subdirectory(accesskit_consumer-test)
+    endif ()
 endif ()
