@@ -36,9 +36,9 @@ class TaskRunner {
 
   static pthread_t GetThreadId() { return pthread_self(); };
 
-  /// The pthread this runner's thread is running on, for pthread_setaffinity_np.
-  /// Distinct from GetThreadId(), which answers for the *calling* thread and so
-  /// cannot be used to pin someone else's.
+  /// The pthread this runner's thread is running on, for
+  /// pthread_setaffinity_np. Distinct from GetThreadId(), which answers for the
+  /// *calling* thread and so cannot be used to pin someone else's.
   [[nodiscard]] pthread_t NativeHandle() const { return pthread_self_; }
 
   [[nodiscard]] bool IsThreadEqual(const pthread_t threadid) const {

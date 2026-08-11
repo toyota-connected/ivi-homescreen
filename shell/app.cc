@@ -271,9 +271,10 @@ FlutterView* App::AddView(const Configuration::Config& config) {
 }
 
 bool App::RemoveView(FlutterView* view) {
-  const auto it = std::find_if(
-      m_views.begin(), m_views.end(),
-      [view](const std::unique_ptr<FlutterView>& v) { return v.get() == view; });
+  const auto it = std::find_if(m_views.begin(), m_views.end(),
+                               [view](const std::unique_ptr<FlutterView>& v) {
+                                 return v.get() == view;
+                               });
   if (it == m_views.end()) {
     return false;
   }

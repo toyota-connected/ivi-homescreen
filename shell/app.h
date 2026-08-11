@@ -21,8 +21,8 @@
 #include <memory>
 #include <string_view>
 
-#include "config/common.h"  // ENABLE_DLT — keep before logger.hpp / member decl
 #include <unordered_map>
+#include "config/common.h"  // ENABLE_DLT — keep before logger.hpp / member decl
 
 #include "configuration/configuration.h"
 #include "display/output.h"
@@ -153,7 +153,8 @@ class App final {
   std::vector<std::shared_ptr<IDisplay>> m_displays;
   // Context key -> display, so AddView can join a view to the display its
   // device-context already has instead of creating a second one.
-  std::unordered_map<std::string, std::shared_ptr<IDisplay>> m_display_by_context;
+  std::unordered_map<std::string, std::shared_ptr<IDisplay>>
+      m_display_by_context;
   // True once Run() has started the displays, so a view added later knows to
   // start its display itself rather than waiting for a StartEvents pass that
   // has already happened.
