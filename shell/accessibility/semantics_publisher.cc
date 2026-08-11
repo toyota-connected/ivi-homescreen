@@ -17,6 +17,7 @@
 #include "semantics_publisher.h"
 
 #include <algorithm>
+#include <cmath>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -147,6 +148,44 @@ IhsSemanticsRole ToIhsRole(const Role role) {
       break;
   }
   return IHS_SEMANTICS_ROLE_UNKNOWN;
+}
+
+// Fills in the node's numeric position, or clears it when there is none.
+//
+// Scroll offset is the only numeric value the framework hands us: a slider's
+// position arrives as a label like "22 degrees", with no number behind it, so
+// a slider legitimately has no numeric value here. That is a limitation of the
+// embedder API rather than a gap in the translation.
+//
+// Consumers are promised finite, ordered bounds, so anything that cannot be
+// stated honestly is dropped rather than approximated. An unbounded scrollable
+// reports an infinite extent, which no accessibility API can render as a
+// position, so it publishes no numeric value at all. Overscroll is different:
+// it puts the offset briefly outside its own range, which is transient and
+// real, so clamp it -- a scroll view that dropped out of the value API every
+// time it bounced would be worse than one reading its own limit.
+void SetNumericValue(const AccessibilityNode& node,
+                     const NodeSpec& spec,
+                     IhsSemanticsPublishNode& out) {
+  const bool scrollable = spec.action_scroll_up || spec.action_scroll_down ||
+                          spec.action_scroll_left || spec.action_scroll_right;
+  const double position = node.GetScrollPosition();
+  const double min = node.GetScrollExtentMin();
+  const double max = node.GetScrollExtentMax();
+
+  if (!scrollable || !std::isfinite(position) || !std::isfinite(min) ||
+      !std::isfinite(max) || min > max) {
+    out.has_numeric_value = false;
+    out.numeric_value = 0.0;
+    out.numeric_value_min = 0.0;
+    out.numeric_value_max = 0.0;
+    return;
+  }
+
+  out.has_numeric_value = true;
+  out.numeric_value = std::clamp(position, min, max);
+  out.numeric_value_min = min;
+  out.numeric_value_max = max;
 }
 
 uint64_t ToIhsActions(const NodeSpec& spec) {
@@ -342,6 +381,7 @@ int PublishTree(const AccessibilityTree& tree) {
     out.focusable = spec.focusable;
     out.a11y_focus_blocked = spec.a11y_focus_blocked;
     out.actions = ToIhsActions(spec);
+    SetNumericValue(*node, spec, out);
 
     // Only children that made it into the walk: a child dropped as a cycle or
     // a dangling id must not be referenced from the published tree either.

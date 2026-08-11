@@ -15,6 +15,7 @@
  */
 
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -310,6 +311,108 @@ TEST_F(SemanticsPublisherTest, ObscuredIsReportedForPasswordFields) {
   ASSERT_NE(out, nullptr);
   EXPECT_EQ(out->role, IHS_SEMANTICS_ROLE_PASSWORD_INPUT);
   EXPECT_TRUE(out->obscured);
+  ihs_semantics_release_snapshot(snapshot);
+}
+
+// A scrollable's offset is the one numeric value the embedder API gives us,
+// and it is what lets a screen reader report a position rather than only
+// naming the control.
+TEST_F(SemanticsPublisherTest, ScrollableCarriesANumericValue) {
+  AccessibilityTree tree;
+  NodeBuilder root(0, {1}, "root");
+  NodeBuilder list(1, {}, "Media list");
+  list.node.actions = static_cast<FlutterSemanticsAction>(
+      kFlutterSemanticsActionScrollUp | kFlutterSemanticsActionScrollDown);
+  list.node.scroll_position = 120.0;
+  list.node.scroll_extent_min = 0.0;
+  list.node.scroll_extent_max = 400.0;
+  Apply(tree, {&root.node, &list.node});
+
+  ASSERT_EQ(PublishTree(tree), IHS_SEMANTICS_OK);
+  const IhsSemanticsSnapshot* snapshot = ihs_semantics_acquire_snapshot();
+  ASSERT_NE(snapshot, nullptr);
+  const IhsSemanticsNode* out = ihs_semantics_snapshot_node_by_id(snapshot, 1);
+  ASSERT_NE(out, nullptr);
+
+  double value = -1.0;
+  double min = -1.0;
+  double max = -1.0;
+  EXPECT_TRUE(ihs_semantics_node_numeric_value(out, &value, &min, &max));
+  EXPECT_DOUBLE_EQ(value, 120.0);
+  EXPECT_DOUBLE_EQ(min, 0.0);
+  EXPECT_DOUBLE_EQ(max, 400.0);
+  ihs_semantics_release_snapshot(snapshot);
+}
+
+// A node that does not scroll has no numeric position, and Flutter leaves the
+// scroll fields at zero on every such node. Reporting that as "value 0 of 0"
+// would put a bogus position on every button in the tree.
+TEST_F(SemanticsPublisherTest, NonScrollableHasNoNumericValue) {
+  AccessibilityTree tree;
+  NodeBuilder root(0, {1}, "root");
+  NodeBuilder button(1, {}, "Play");
+  button.node.flags__deprecated__ = kFlutterSemanticsFlagIsButton;
+  button.node.actions = kFlutterSemanticsActionTap;
+  Apply(tree, {&root.node, &button.node});
+
+  ASSERT_EQ(PublishTree(tree), IHS_SEMANTICS_OK);
+  const IhsSemanticsSnapshot* snapshot = ihs_semantics_acquire_snapshot();
+  ASSERT_NE(snapshot, nullptr);
+  const IhsSemanticsNode* out = ihs_semantics_snapshot_node_by_id(snapshot, 1);
+  ASSERT_NE(out, nullptr);
+  EXPECT_FALSE(out->has_numeric_value);
+  EXPECT_FALSE(
+      ihs_semantics_node_numeric_value(out, nullptr, nullptr, nullptr));
+  ihs_semantics_release_snapshot(snapshot);
+}
+
+// An unbounded scrollable -- an infinite list -- reports an infinite extent.
+// There is no honest way to state that as a position within a range, so the
+// node publishes no numeric value rather than an infinite bound that would
+// reach a platform accessibility API.
+TEST_F(SemanticsPublisherTest, UnboundedScrollableReportsNoNumericValue) {
+  AccessibilityTree tree;
+  NodeBuilder root(0, {1}, "root");
+  NodeBuilder infinite(1, {}, "Infinite list");
+  infinite.node.actions = static_cast<FlutterSemanticsAction>(
+      kFlutterSemanticsActionScrollUp | kFlutterSemanticsActionScrollDown);
+  infinite.node.scroll_position = 50.0;
+  infinite.node.scroll_extent_min = 0.0;
+  infinite.node.scroll_extent_max = std::numeric_limits<double>::infinity();
+  Apply(tree, {&root.node, &infinite.node});
+
+  ASSERT_EQ(PublishTree(tree), IHS_SEMANTICS_OK);
+  const IhsSemanticsSnapshot* snapshot = ihs_semantics_acquire_snapshot();
+  ASSERT_NE(snapshot, nullptr);
+  const IhsSemanticsNode* out = ihs_semantics_snapshot_node_by_id(snapshot, 1);
+  ASSERT_NE(out, nullptr);
+  EXPECT_FALSE(out->has_numeric_value);
+  ihs_semantics_release_snapshot(snapshot);
+}
+
+// Overscroll puts the offset outside its own range while the list bounces.
+// That is transient and real, so it clamps: consumers are promised
+// min <= value <= max and may pass the three straight to a platform API.
+TEST_F(SemanticsPublisherTest, OverscrollClampsIntoRange) {
+  AccessibilityTree tree;
+  NodeBuilder root(0, {1}, "root");
+  NodeBuilder list(1, {}, "Bouncing list");
+  list.node.actions = static_cast<FlutterSemanticsAction>(
+      kFlutterSemanticsActionScrollUp | kFlutterSemanticsActionScrollDown);
+  list.node.scroll_position = -30.0;  // pulled past the top
+  list.node.scroll_extent_min = 0.0;
+  list.node.scroll_extent_max = 400.0;
+  Apply(tree, {&root.node, &list.node});
+
+  ASSERT_EQ(PublishTree(tree), IHS_SEMANTICS_OK);
+  const IhsSemanticsSnapshot* snapshot = ihs_semantics_acquire_snapshot();
+  ASSERT_NE(snapshot, nullptr);
+  const IhsSemanticsNode* out = ihs_semantics_snapshot_node_by_id(snapshot, 1);
+  ASSERT_NE(out, nullptr);
+
+  double value = -1.0;
+  ASSERT_TRUE(ihs_semantics_node_numeric_value(out, &value, nullptr, nullptr));
+  EXPECT_DOUBLE_EQ(value, 0.0);
   ihs_semantics_release_snapshot(snapshot);
 }
 

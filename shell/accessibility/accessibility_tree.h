@@ -110,6 +110,19 @@ class AccessibilityNode {
     return m_transform;
   };
 
+  // Returns the scroll offset of a scrollable node, and the range that offset
+  // moves within. Only meaningful when the node declares a scroll action;
+  // Flutter leaves all three at zero otherwise. An unbounded scrollable (an
+  // infinite list, say) reports an infinite extent, so check for a finite
+  // range before handing these to anything that cannot express one.
+  [[nodiscard]] double GetScrollPosition() const { return m_scroll_position; };
+  [[nodiscard]] double GetScrollExtentMin() const {
+    return m_scroll_extent_min;
+  };
+  [[nodiscard]] double GetScrollExtentMax() const {
+    return m_scroll_extent_max;
+  };
+
   // Returns the flags associated with the node.
   [[nodiscard]] FlutterSemanticsFlag GetFlags() const { return m_flags; };
 
@@ -163,6 +176,9 @@ class AccessibilityNode {
   std::string m_identifier;  // App-assigned stable ID (owned copy); may be "".
   FlutterRect m_bounds{};    // Bounds of the node.
   FlutterTransformation m_transform{};  // Node-to-parent transform.
+  double m_scroll_position = 0.0;       // Scroll offset; see the getter.
+  double m_scroll_extent_min = 0.0;     // Lower bound of the scroll range.
+  double m_scroll_extent_max = 0.0;     // Upper bound; may be infinite.
   FlutterSemanticsFlag m_flags =
       static_cast<FlutterSemanticsFlag>(0);  // Flags associated with the node.
   FlutterSemanticsAction m_actions =

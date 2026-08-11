@@ -85,6 +85,12 @@ void AccessibilityNode::Update(const FlutterSemanticsNode2& fl_node) {
   // Parent-local bounds are only meaningful alongside the node-to-parent
   // transform, so retain it here rather than composing at read time.
   m_transform = fl_node.transform;
+  // Scroll geometry. These predate the oldest engine this shell deploys
+  // against, so unlike `identifier` and `flags2` they need no struct_size
+  // gate -- they sit well ahead of the fields that were appended later.
+  m_scroll_position = fl_node.scroll_position;
+  m_scroll_extent_min = fl_node.scroll_extent_min;
+  m_scroll_extent_max = fl_node.scroll_extent_max;
   m_flags = fl_node.flags__deprecated__;
   m_actions = fl_node.actions;
 
