@@ -190,6 +190,16 @@ endif ()
 if (BUILD_MCP)
     target_sources(ihs_shared PRIVATE src/mcp_provider.cc)
     target_compile_definitions(ihs_shared PUBLIC IHS_WITH_MCP=1)
+    # The semantics provider bridges the two: it needs the hub as well as the
+    # registry, so it is only built when both are.
+    if (BUILD_ACCESSIBILITY)
+        target_sources(ihs_shared PRIVATE src/mcp_semantics_provider.cc)
+        # rapidjson is header-only, so this adds an include path and no link
+        # dependency -- the provider serializes snapshots and parses nothing
+        # beyond two scalar arguments.
+        target_include_directories(ihs_shared PRIVATE
+                "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/rapidjson/include")
+    endif ()
     message(STATUS "MCP provider registry . Enabled")
 else ()
     message(STATUS "MCP provider registry . Disabled")
