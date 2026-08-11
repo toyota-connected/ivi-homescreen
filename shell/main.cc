@@ -182,7 +182,14 @@ int main(const int argc, char** argv) {
 #endif
 
   const auto configs = Configuration::ParseArgcArgv(argc, argv);
+#if ENABLE_OSGI
+  // A pure-OSGi config has no [[view]]: the bundles become the views, and they
+  // are added below once App exists. ParseArgcArgv has already rejected an
+  // empty list that had no bundles behind it either, so reaching here with none
+  // means bundles are coming.
+#else
   assert(!configs.empty());
+#endif
 
   // Make the resolved configuration readable by FFI plugins via ihs_shared.
   PublishIhsConfig(configs);
@@ -342,10 +349,21 @@ int main(const int argc, char** argv) {
     std::unique_ptr<ihs::osgi::BundleStartupOrchestrator> orchestrator;
     ihs::osgi::OsgiConfig osgi_config;
     ihs::osgi::AppBundleHost bundle_host(app, nullptr);
-    if (!configs.empty() && configs.front().config_file &&
-        !configs.front().config_file->empty()) {
-      if (!ihs::osgi::LoadOsgiConfig(*configs.front().config_file,
-                                     osgi_config)) {
+    // Read from argv rather than configs.front(): a pure-OSGi deployment has no
+    // views, so there is no config to carry the path.
+    std::string osgi_config_path;
+    for (int i = 1; i + 1 < argc; ++i) {
+      if (std::string_view(argv[i]) == "--config") {
+        osgi_config_path = argv[i + 1];
+        break;
+      }
+    }
+    if (osgi_config_path.empty() && !configs.empty() &&
+        configs.front().config_file) {
+      osgi_config_path = *configs.front().config_file;
+    }
+    if (!osgi_config_path.empty()) {
+      if (!ihs::osgi::LoadOsgiConfig(osgi_config_path, osgi_config)) {
         // A malformed [osgi] table is a configuration error the operator has to
         // see, not something to start half of.
         ihs::log::critical("[osgi] configuration rejected; not starting bundles");

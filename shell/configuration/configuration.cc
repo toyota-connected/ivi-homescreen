@@ -1132,6 +1132,25 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
   // be an existing directory (paths may originate from -b or from a --config
   // file's [[view]] entries).
   if (configs.empty()) {
+#if ENABLE_OSGI
+    // A pure-OSGi deployment has no [[view]] at all: every surface belongs to a
+    // bundle, and the bundles become views once the orchestrator adds them. An
+    // empty view list is therefore only fatal when the file does not declare
+    // any either. Checked by re-reading the document rather than by calling
+    // into the OSGi parser, so this stays a question about the file's shape and
+    // configuration.cc keeps knowing nothing about bundles.
+    if (config.config_file && !config.config_file->empty()) {
+      if (auto doc = toml::parse_file(*config.config_file)) {
+        if (const auto node = doc.table().at_path("osgi.bundles");
+            node.is_array() && !node.as_array()->empty()) {
+          ihs::log::debug(
+              "[osgi] no [[view]] entries; the configured bundles supply the "
+              "views");
+          return configs;
+        }
+      }
+    }
+#endif
     ihs::log::critical(
         "No views configured: provide -b <bundle> or --config <file>");
     exit(EXIT_FAILURE);
