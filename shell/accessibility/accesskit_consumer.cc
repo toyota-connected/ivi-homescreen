@@ -172,6 +172,20 @@ accesskit_node* BuildNode(const IhsSemanticsNode* node,
   accesskit_node_set_description(out, node->hint);
   accesskit_node_set_value(out, node->value);
 
+  // A numeric value is what makes AccessKit expose the AT-SPI Value interface
+  // for this node, which is how a screen reader reports a scroll position
+  // rather than just naming the control. The hub guarantees a finite, ordered
+  // range, so these go straight across.
+  double numeric = 0.0;
+  double numeric_min = 0.0;
+  double numeric_max = 0.0;
+  if (ihs_semantics_node_numeric_value(node, &numeric, &numeric_min,
+                                       &numeric_max)) {
+    accesskit_node_set_numeric_value(out, numeric);
+    accesskit_node_set_min_numeric_value(out, numeric_min);
+    accesskit_node_set_max_numeric_value(out, numeric_max);
+  }
+
   const accesskit_rect bounds = {node->rect.left, node->rect.top,
                                  node->rect.right, node->rect.bottom};
   accesskit_node_set_bounds(out, bounds);
