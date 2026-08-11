@@ -48,6 +48,14 @@ class OsgiBridgePlugin {
   // Replies true, or an error code below.
   static constexpr char kMethodInit[] = "init";
 
+  // The bundle's activator finished start(). This -- not the engine coming up,
+  // which the shell already knows -- is what ACTIVE means, and it is what
+  // releases a critical bundle's startup wait. Args: symbolic_name (string).
+  static constexpr char kMethodActive[] = "active";
+
+  // The bundle's activator finished stop(). Args: symbolic_name (string).
+  static constexpr char kMethodStopped[] = "stopped";
+
   // Release a bundle's registration so the same symbolic name can re-register
   // after a restart. Args: symbolic_name (string). Replies true if it was
   // known.
