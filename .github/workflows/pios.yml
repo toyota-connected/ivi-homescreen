@@ -269,6 +269,32 @@ jobs:
             i=$(( i + 1 ))
           done
 
+      # ...and rebuilding them means fetching their sources, which is the one
+      # network dependency left in this job. emb keeps the archive beside the
+      # extracted tree and skips the download when it is already there, so
+      # caching the archives alone turns the fetch into a no-op -- the
+      # extracted trees are not cached, since they are rebuilt against this
+      # image's toolchain regardless.
+      #
+      # This is not a hypothetical: github.com closed the connection mid-fetch
+      # for wayland-cxx-scanner and failed the build, and emb's own four
+      # retries had already been spent. Keyed on the augment definitions, so a
+      # new or bumped source misses and refetches; every other run stays off
+      # the network entirely. Not keyed on the OS -- the sources are the same
+      # archives for every target, so one entry serves the whole matrix.
+      - name: Cache augment sources
+        uses: actions/cache@v6
+        with:
+          path: |
+            /emb/.config/flutter_workspace/overlay-src/*.tar.gz
+            /emb/.config/flutter_workspace/overlay-src/*.tar.xz
+            /emb/.config/flutter_workspace/overlay-src/*.tar.bz2
+            /emb/.config/flutter_workspace/overlay-src/*.tgz
+            /emb/.config/flutter_workspace/overlay-src/*.zip
+          key: emb-augment-src-${{ hashFiles('ivi-homescreen/.emb/base.emb.yaml', 'ivi-homescreen/.emb/raspberry-pi.emb.yaml') }}
+          restore-keys: |
+            emb-augment-src-
+
       # The image bakes the toolchain + sysroot at /emb, so -w /emb resolves as
       # a pure cache hit (no download/extract). Host build tools (cmake, ninja,
       # meson, wayland-scanner) are baked too; only the augment libs rebuild.
