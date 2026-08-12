@@ -56,7 +56,8 @@ if (BUILD_ACCESSIBILITY)
     target_sources(${PROJECT_NAME} PRIVATE
             accessibility/accessibility_tree.cc
             accessibility/semantics_translator.cc
-            accessibility/semantics_publisher.cc)
+            accessibility/semantics_publisher.cc
+            accessibility/semantics_action_args.cc)
     # The AccessKit bridge is a hub consumer; it only exists when the bindings
     # are present, which BUILD_ACCESSKIT arranges (see cmake/options.cmake).
     if (BUILD_ACCESSKIT)
