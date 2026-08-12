@@ -36,6 +36,9 @@ struct MockHost {
   int dispatch_calls = 0;
   int32_t last_node_id = 0;
   uint64_t last_action = 0;
+  // The argument as the hub carried it, so a test can check the plain layout
+  // the shell will encode from.
+  std::vector<uint8_t> last_data;
   bool semantics_enabled = false;
 };
 
@@ -49,11 +52,12 @@ int OnDispatch(void* /*user_data*/,
                int64_t /*view_id*/,
                int32_t node_id,
                uint64_t action,
-               const uint8_t* /*data*/,
-               size_t /*data_length*/) {
+               const uint8_t* data,
+               size_t data_length) {
   g_host->dispatch_calls++;
   g_host->last_node_id = node_id;
   g_host->last_action = action;
+  g_host->last_data.assign(data, data + (data == nullptr ? 0 : data_length));
   return IHS_SEMANTICS_OK;
 }
 
@@ -359,4 +363,109 @@ TEST_F(McpSemanticsProviderTest, StoppingReleasesTheHubRegistration) {
   EXPECT_FALSE(host_.semantics_enabled);
   EXPECT_FALSE(ihs_mcp_semantics_provider_running());
   EXPECT_EQ(ihs_semantics_consumer_count(), 0u);
+}
+
+// set_text carries the replacement text in the hub's plain layout: the bytes
+// are the text, and the length is its size.
+TEST_F(McpSemanticsProviderTest, SetTextCarriesTheTextAsBytes) {
+  TreeBuilder tree;
+  tree.Add(0, "root", IHS_SEMANTICS_ROLE_WINDOW);
+  IhsSemanticsPublishNode& field =
+      tree.Add(1, "Destination", IHS_SEMANTICS_ROLE_TEXT_INPUT);
+  field.actions = IHS_SEMANTICS_ACTION_SET_TEXT;
+  ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
+
+  int status = 0;
+  CallTool("ui_set_text", R"({"node_id":1,"text":"Fahrertur"})", &status);
+  EXPECT_EQ(status, IHS_MCP_OK);
+  EXPECT_EQ(g_host->last_action, IHS_SEMANTICS_ACTION_SET_TEXT);
+  EXPECT_EQ(std::string(g_host->last_data.begin(), g_host->last_data.end()),
+            "Fahrertur");
+}
+
+// Text is parsed as JSON rather than scanned for, so an escaped quote inside
+// the value does not truncate it. Scanning for the next quoted run -- which is
+// how the identifier extractor works -- would stop at the backslash-quote.
+TEST_F(McpSemanticsProviderTest, SetTextSurvivesEscapesInTheValue) {
+  TreeBuilder tree;
+  tree.Add(0, "root", IHS_SEMANTICS_ROLE_WINDOW);
+  IhsSemanticsPublishNode& field =
+      tree.Add(1, "Destination", IHS_SEMANTICS_ROLE_TEXT_INPUT);
+  field.actions = IHS_SEMANTICS_ACTION_SET_TEXT;
+  ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
+
+  CallTool("ui_set_text", R"({"node_id":1,"text":"He said \"go\" now"})",
+           nullptr);
+  EXPECT_EQ(std::string(g_host->last_data.begin(), g_host->last_data.end()),
+            "He said \"go\" now");
+}
+
+// An agent that can type into a password field can also read back what it
+// wrote through the application's own behaviour, so the field is refused.
+TEST_F(McpSemanticsProviderTest, SetTextIsRefusedOnAnObscuredField) {
+  TreeBuilder tree;
+  tree.Add(0, "root", IHS_SEMANTICS_ROLE_WINDOW);
+  IhsSemanticsPublishNode& field =
+      tree.Add(1, "Password", IHS_SEMANTICS_ROLE_PASSWORD_INPUT);
+  field.actions = IHS_SEMANTICS_ACTION_SET_TEXT;
+  field.obscured = true;
+  ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
+
+  int status = 0;
+  const std::string body =
+      CallTool("ui_set_text", R"({"node_id":1,"text":"hunter2"})", &status);
+  EXPECT_EQ(status, IHS_MCP_ERR_REFUSED);
+  EXPECT_EQ(g_host->dispatch_calls, 0);
+  EXPECT_NE(body.find("obscured"), std::string::npos) << body;
+}
+
+TEST_F(McpSemanticsProviderTest, SetTextWithoutTextIsRefused) {
+  TreeBuilder tree;
+  tree.Add(0, "root", IHS_SEMANTICS_ROLE_WINDOW);
+  IhsSemanticsPublishNode& field =
+      tree.Add(1, "Destination", IHS_SEMANTICS_ROLE_TEXT_INPUT);
+  field.actions = IHS_SEMANTICS_ACTION_SET_TEXT;
+  ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
+
+  int status = 0;
+  CallTool("ui_set_text", R"({"node_id":1})", &status);
+  EXPECT_EQ(status, IHS_MCP_ERR_INVALID);
+  EXPECT_EQ(g_host->dispatch_calls, 0);
+}
+
+// scroll_to carries two doubles, dx then dy. An axis the caller did not name
+// is zero, so scrolling a vertical list needs only dy.
+TEST_F(McpSemanticsProviderTest, ScrollToCarriesBothAxesAndDefaultsTheAbsent) {
+  TreeBuilder tree;
+  tree.Add(0, "root", IHS_SEMANTICS_ROLE_WINDOW);
+  IhsSemanticsPublishNode& list =
+      tree.Add(1, "Media list", IHS_SEMANTICS_ROLE_SCROLL_VIEW);
+  list.actions = IHS_SEMANTICS_ACTION_SCROLL_TO_OFFSET;
+  ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
+
+  int status = 0;
+  CallTool("ui_scroll_to", R"({"node_id":1,"dy":240.5})", &status);
+  EXPECT_EQ(status, IHS_MCP_OK);
+  EXPECT_EQ(g_host->last_action, IHS_SEMANTICS_ACTION_SCROLL_TO_OFFSET);
+  ASSERT_EQ(g_host->last_data.size(), sizeof(double) * 2);
+  double offset[2] = {-1.0, -1.0};
+  std::memcpy(offset, g_host->last_data.data(), sizeof(offset));
+  EXPECT_DOUBLE_EQ(offset[0], 0.0);
+  EXPECT_DOUBLE_EQ(offset[1], 240.5);
+}
+
+// A node that does not offer the action is refused before dispatch, as with
+// every other action tool.
+TEST_F(McpSemanticsProviderTest, ParameterizedToolsRespectTheNodeActions) {
+  TreeBuilder tree;
+  tree.Add(0, "root", IHS_SEMANTICS_ROLE_WINDOW);
+  tree.Add(1, "Label", IHS_SEMANTICS_ROLE_LABEL);  // offers nothing
+  ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
+
+  int status = 0;
+  CallTool("ui_set_text", R"({"node_id":1,"text":"x"})", &status);
+  EXPECT_EQ(status, IHS_MCP_ERR_REFUSED);
+  CallTool("ui_scroll_to", R"({"node_id":1,"dy":1})", &status);
+  EXPECT_EQ(status, IHS_MCP_ERR_REFUSED);
+  EXPECT_EQ(g_host->dispatch_calls, 0);
 }

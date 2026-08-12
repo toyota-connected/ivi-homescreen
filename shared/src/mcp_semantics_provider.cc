@@ -19,6 +19,7 @@
 
 #include "ihs/ihs_mcp_semantics.h"
 
+#include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 
@@ -65,6 +66,21 @@ constexpr char kQuerySchema[] =
     R"("role":{"type":"string","description":"Role name, e.g. button or slider."})"
     R"(}})";
 
+constexpr char kSetTextSchema[] =
+    R"({"type":"object","properties":{)"
+    R"("node_id":{"type":"integer"},)"
+    R"("identifier":{"type":"string"},)"
+    R"("text":{"type":"string","description":"Replacement text for the field."})"
+    R"(},"required":["text"]})";
+
+constexpr char kScrollToSchema[] =
+    R"({"type":"object","properties":{)"
+    R"("node_id":{"type":"integer"},)"
+    R"("identifier":{"type":"string"},)"
+    R"("dx":{"type":"number","description":"Horizontal offset in logical pixels."},)"
+    R"("dy":{"type":"number","description":"Vertical offset in logical pixels."})"
+    R"(}})";
+
 const ToolEntry kTools[] = {
     {"snapshot", "The whole semantics tree as JSON.", kEmptySchema, 0,
      IHS_MCP_CAP_INSPECT},
@@ -86,6 +102,10 @@ const ToolEntry kTools[] = {
      IHS_MCP_CAP_INTERACT},
     {"collapse", "Collapse a node.", kNodeSchema, IHS_SEMANTICS_ACTION_COLLAPSE,
      IHS_MCP_CAP_INTERACT},
+    {"set_text", "Replace the text in a text field.", kSetTextSchema,
+     IHS_SEMANTICS_ACTION_SET_TEXT, IHS_MCP_CAP_INTERACT},
+    {"scroll_to", "Scroll a container to a given offset.", kScrollToSchema,
+     IHS_SEMANTICS_ACTION_SCROLL_TO_OFFSET, IHS_MCP_CAP_INTERACT},
 };
 
 // The accessibility-focus actions are deliberately absent from the table
@@ -372,6 +392,40 @@ bool ExtractString(const char* json, const char* key, std::string* out) {
   return true;
 }
 
+// The extractors above scan for a key and take the next quoted run, which
+// cannot survive an escaped quote or a key-like substring inside a value.
+// That is tolerable for an identifier, which the application chooses, and not
+// for arbitrary text a client sends, so the parameterized arguments are parsed
+// properly instead.
+bool ReadStringArgument(const char* json, const char* key, std::string* out) {
+  rapidjson::Document doc;
+  if (json == nullptr || doc.Parse(json).HasParseError() || !doc.IsObject()) {
+    return false;
+  }
+  const auto member = doc.FindMember(key);
+  if (member == doc.MemberEnd() || !member->value.IsString()) {
+    return false;
+  }
+  out->assign(member->value.GetString(), member->value.GetStringLength());
+  return true;
+}
+
+// Absent or non-numeric yields the fallback: an axis a caller did not name is
+// zero rather than an error, so scrolling a vertical list needs only dy.
+double ReadNumberArgument(const char* json,
+                          const char* key,
+                          const double fallback) {
+  rapidjson::Document doc;
+  if (json == nullptr || doc.Parse(json).HasParseError() || !doc.IsObject()) {
+    return fallback;
+  }
+  const auto member = doc.FindMember(key);
+  if (member == doc.MemberEnd() || !member->value.IsNumber()) {
+    return fallback;
+  }
+  return member->value.GetDouble();
+}
+
 // Resolves the node a tool call names, by id or by identifier.
 const IhsSemanticsNode* ResolveNode(const IhsSemanticsSnapshot* snapshot,
                                     const char* arguments) {
@@ -546,11 +600,43 @@ int CallTool(void* /* user_data */,
   }
 
   const int32_t node_id = node->id;
+  const bool obscured = node->obscured;
   ihs_semantics_release_snapshot(snapshot);
 
+  // Arguments travel in the hub's plain layout; the shell encodes them for the
+  // framework (see ihs_semantics_dispatch). Building them here rather than in
+  // the caller keeps the byte layout in one place.
+  std::vector<uint8_t> argument;
+  if (tool->action == IHS_SEMANTICS_ACTION_SET_TEXT) {
+    // Refusing to type into a password field is a deliberate limit, not an
+    // oversight: an agent that can set text into an obscured field can also
+    // read back what it wrote through the app's own behaviour.
+    if (obscured) {
+      FillPayload(
+          out_result,
+          ErrorJson("refusing to set text on an obscured field", generation));
+      return IHS_MCP_ERR_REFUSED;
+    }
+    std::string text;
+    if (!ReadStringArgument(arguments_json, "text", &text)) {
+      FillPayload(out_result, ErrorJson("set_text requires text", generation));
+      return IHS_MCP_ERR_INVALID;
+    }
+    argument.assign(text.begin(), text.end());
+  } else if (tool->action == IHS_SEMANTICS_ACTION_SCROLL_TO_OFFSET) {
+    // Absent axes are zero rather than an error: scrolling a vertical list
+    // means naming dy, and demanding dx as well would be noise.
+    const double offset[2] = {ReadNumberArgument(arguments_json, "dx", 0.0),
+                              ReadNumberArgument(arguments_json, "dy", 0.0)};
+    const auto* bytes = reinterpret_cast<const uint8_t*>(offset);
+    argument.assign(bytes, bytes + sizeof(offset));
+  }
+
   Provider& p = TheProvider();
-  const int status = ihs_semantics_dispatch(
-      p.consumer, 0, node_id, tool->action, nullptr, 0, nullptr, nullptr);
+  const int status =
+      ihs_semantics_dispatch(p.consumer, 0, node_id, tool->action,
+                             argument.empty() ? nullptr : argument.data(),
+                             argument.size(), nullptr, nullptr);
   if (status != IHS_SEMANTICS_OK) {
     FillPayload(out_result, ErrorJson("dispatch refused", generation));
     return IHS_MCP_ERR_REFUSED;
