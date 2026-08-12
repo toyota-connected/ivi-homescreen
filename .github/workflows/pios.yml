@@ -314,8 +314,14 @@ jobs:
       # new or bumped source misses and refetches; every other run stays off
       # the network entirely. Not keyed on the OS -- the sources are the same
       # archives for every target, so one entry serves the whole matrix.
-      - name: Cache augment sources
-        uses: actions/cache@v6
+      # Restore and save are separate so the save can run after a failed
+      # build. actions/cache skips saving when the job fails, which for a
+      # cache whose whole purpose is to stop a flaky download would be a
+      # deadlock: the archives only land after a green build, and the build
+      # cannot go green while the download keeps failing. Saving whatever did
+      # arrive means each attempt leaves the next one better off.
+      - name: Restore augment sources
+        uses: actions/cache/restore@v6
         with:
           path: |
             /emb/.config/flutter_workspace/overlay-src/*.tar.gz
@@ -356,6 +362,21 @@ jobs:
             grep -aE "Resolved|augment +:|build +:" /tmp/emb-build.log \
               | sed -E 's/^[[:space:]]*[^A-Za-z]*/- /' || true
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # always(): the point is to keep what a failed run managed to fetch.
+      # The key carries a run id so a partial set never claims to be the
+      # complete one; restore-keys above picks up the newest either way.
+      - name: Save augment sources
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            /emb/.config/flutter_workspace/overlay-src/*.tar.gz
+            /emb/.config/flutter_workspace/overlay-src/*.tar.xz
+            /emb/.config/flutter_workspace/overlay-src/*.tar.bz2
+            /emb/.config/flutter_workspace/overlay-src/*.tgz
+            /emb/.config/flutter_workspace/overlay-src/*.zip
+          key: emb-augment-src-${{ hashFiles('ivi-homescreen/.emb/base.emb.yaml', 'ivi-homescreen/.emb/raspberry-pi.emb.yaml') }}-${{ github.run_id }}-${{ matrix.board }}-${{ matrix.pios }}-${{ matrix.backend }}
 
       - name: Upload homescreen binary
         uses: actions/upload-artifact@v7
