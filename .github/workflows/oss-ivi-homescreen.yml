@@ -219,11 +219,17 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "${{github.workspace}}/.deps"
-          # Retried: this is a release download from github.com, which has
-          # returned 503 here, and the surrounding CI already sees transient
-          # network failures often enough that one attempt is not enough.
-          curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors \
-            --connect-timeout 15 --max-time 300 \
+          # Retried patiently, not quickly. github.com returns 503 for this
+          # release often enough that it has failed the job twice; the first
+          # attempt at hardening gave up after about fifteen seconds, which is
+          # shorter than the outages actually last. --retry-max-time bounds
+          # the whole attempt instead, and omitting --retry-delay lets curl
+          # back off exponentially rather than hammering at a fixed interval.
+          #
+          # Matches what the oras fetch already does. The two are the same
+          # problem and should not drift apart again.
+          curl -fsSL --retry 8 --retry-all-errors --retry-max-time 300 \
+            --connect-timeout 15 \
             -o "${RUNNER_TEMP}/accesskit-c.zip" \
             "https://github.com/AccessKit/accesskit-c/releases/download/${ACCESSKIT_VERSION}/accesskit-c-${ACCESSKIT_VERSION}.zip"
           unzip -q "${RUNNER_TEMP}/accesskit-c.zip" -d "${{github.workspace}}/.deps"
