@@ -18,6 +18,11 @@
 #include <string>
 #include <vector>
 
+#include <sys/eventfd.h>
+#include <unistd.h>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
 #include "gtest/gtest.h"
 
 #include "ihs/ihs_mcp_host.h"
@@ -501,4 +506,108 @@ TEST_F(McpProviderTest, VisitorsRejectANullCallback) {
   EXPECT_EQ(ihs_mcp_host_for_each_tool(nullptr, nullptr), IHS_MCP_ERR_INVALID);
   EXPECT_EQ(ihs_mcp_host_for_each_resource(nullptr, nullptr),
             IHS_MCP_ERR_INVALID);
+}
+
+namespace {
+
+struct SinkRecord {
+  std::mutex mutex;
+  std::condition_variable arrived;
+  int tools_changed = 0;
+  int resources_updated = 0;
+  std::string last_uri;
+
+  bool WaitFor(const int resource_count) {
+    std::unique_lock<std::mutex> lock(mutex);
+    return arrived.wait_for(lock, std::chrono::seconds(5), [&] {
+      return resources_updated >= resource_count;
+    });
+  }
+};
+
+SinkRecord* g_sink = nullptr;
+
+void OnNotify(IhsMcpNotification kind, const char* uri, void* /*user_data*/) {
+  const std::lock_guard<std::mutex> lock(g_sink->mutex);
+  if (kind == IHS_MCP_NOTIFY_TOOLS_CHANGED) {
+    g_sink->tools_changed++;
+  } else {
+    g_sink->resources_updated++;
+    g_sink->last_uri = uri != nullptr ? uri : "";
+  }
+  g_sink->arrived.notify_all();
+}
+
+}  // namespace
+
+// A provider signalling its notify_fd must reach the sink, which is the only
+// route a server has to tell clients anything changed.
+TEST_F(McpProviderTest, SignallingTheNotifyFdReachesTheSink) {
+  SinkRecord record;
+  g_sink = &record;
+  ASSERT_EQ(ihs_mcp_host_set_notification_sink(OnNotify, nullptr), IHS_MCP_OK);
+
+  MockProvider mock;
+  const int fd = ::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(fd, 0);
+  IhsMcpProviderDesc desc = mock.Desc("sema", "ui_", "ui", IHS_MCP_CAP_ALL);
+  desc.notify_fd = fd;
+  IhsMcpProvider* provider = nullptr;
+  ASSERT_EQ(ihs_mcp_provider_register(&desc, &provider), IHS_MCP_OK);
+
+  const uint64_t one = 1;
+  ASSERT_EQ(::write(fd, &one, sizeof(one)), static_cast<ssize_t>(sizeof(one)));
+  EXPECT_TRUE(record.WaitFor(1)) << "sink never saw the signal";
+  {
+    const std::lock_guard<std::mutex> lock(record.mutex);
+    // A provider does not say which changed, so both go out: re-reading an
+    // unchanged tool list costs a client nothing, missing a change costs it
+    // correctness.
+    EXPECT_GE(record.tools_changed, 1);
+    EXPECT_EQ(record.last_uri, "ui://");
+  }
+
+  ihs_mcp_provider_unregister(provider);
+  ASSERT_EQ(ihs_mcp_host_set_notification_sink(nullptr, nullptr), IHS_MCP_OK);
+  ::close(fd);
+  g_sink = nullptr;
+}
+
+// Unregister must not return while the watcher still polls the provider's fd:
+// the caller closes it next, and the descriptor number is immediately
+// reusable, so the watcher would end up waiting on something unrelated.
+TEST_F(McpProviderTest, UnregisterDoesNotLeaveTheWatcherOnAClosedFd) {
+  SinkRecord record;
+  g_sink = &record;
+  ASSERT_EQ(ihs_mcp_host_set_notification_sink(OnNotify, nullptr), IHS_MCP_OK);
+
+  for (int i = 0; i < 20; i++) {
+    MockProvider mock;
+    const int fd = ::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+    ASSERT_GE(fd, 0);
+    IhsMcpProviderDesc desc = mock.Desc("sema", "ui_", "ui", IHS_MCP_CAP_ALL);
+    desc.notify_fd = fd;
+    IhsMcpProvider* provider = nullptr;
+    ASSERT_EQ(ihs_mcp_provider_register(&desc, &provider), IHS_MCP_OK) << i;
+    ihs_mcp_provider_unregister(provider);
+    // Safe only because unregister waited for the watcher to drop it.
+    ::close(fd);
+  }
+
+  ASSERT_EQ(ihs_mcp_host_set_notification_sink(nullptr, nullptr), IHS_MCP_OK);
+  g_sink = nullptr;
+}
+
+// One server per registry: a second sink would mean two things delivering the
+// same notifications to different clients.
+TEST_F(McpProviderTest, OnlyOneSinkMayBeInstalled) {
+  SinkRecord record;
+  g_sink = &record;
+  ASSERT_EQ(ihs_mcp_host_set_notification_sink(OnNotify, nullptr), IHS_MCP_OK);
+  EXPECT_EQ(ihs_mcp_host_set_notification_sink(OnNotify, nullptr),
+            IHS_MCP_ERR_REFUSED);
+  ASSERT_EQ(ihs_mcp_host_set_notification_sink(nullptr, nullptr), IHS_MCP_OK);
+  // Uninstalling twice is harmless, so teardown paths need no bookkeeping.
+  EXPECT_EQ(ihs_mcp_host_set_notification_sink(nullptr, nullptr), IHS_MCP_OK);
+  g_sink = nullptr;
 }
