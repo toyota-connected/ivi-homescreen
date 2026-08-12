@@ -468,6 +468,35 @@ typedef void (*IhsSemanticsDoneCallback)(int status, void* user_data);
  * Returns immediately; `done` fires on the platform thread and may be null.
  * Callable from any thread.
  */
+/*
+ * Synthesize a tap at a point, in the same logical coordinates as a node's
+ * published rect.
+ *
+ * This is the fallback for what semantics cannot reach: a custom canvas hit
+ * region, a platform view, a widget nobody annotated. It is deliberately a
+ * separate call rather than a mode of dispatch, because the contract differs
+ * in ways a caller must choose knowingly:
+ *
+ *   - it is hit-tested, so whatever is drawn on top receives it instead, and
+ *     an obscured target is correctly unreachable
+ *   - it is coordinate-based, so it races animation and reflow
+ *   - it invokes no particular node, so nothing verifies it landed anywhere
+ *
+ * Dispatch has the opposite properties, and choosing between them is the
+ * caller's job. Nothing falls back automatically.
+ *
+ * Requires the consumer to hold IHS_SEMANTICS_ACTION_TAP: a synthesized tap
+ * is a tap, and a consumer denied that must not obtain it by another name.
+ * Returns IHS_SEMANTICS_ERR_MASKED otherwise, and
+ * IHS_SEMANTICS_ERR_UNSUPPORTED_ACTION on a shell with no input path.
+ *
+ * Returns immediately; the tap is delivered on the platform thread.
+ */
+IHS_EXPORT int ihs_semantics_send_pointer_tap(IhsSemanticsConsumer* consumer,
+                                              int64_t view_id,
+                                              double x,
+                                              double y);
+
 IHS_EXPORT int ihs_semantics_dispatch(IhsSemanticsConsumer* consumer,
                                       int64_t view_id,
                                       int32_t node_id,

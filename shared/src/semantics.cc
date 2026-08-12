@@ -520,6 +520,66 @@ void ihs_semantics_unregister(IhsSemanticsConsumer* consumer) {
   }
 }
 
+int ihs_semantics_send_pointer_tap(IhsSemanticsConsumer* consumer,
+                                   const int64_t view_id,
+                                   const double x,
+                                   const double y) {
+  int status = IHS_SEMANTICS_OK;
+  std::string name;
+
+  if (consumer == nullptr || !std::isfinite(x) || !std::isfinite(y)) {
+    status = IHS_SEMANTICS_ERR_INVALID;
+  }
+
+  IhsSemanticsHost host{};
+  uint64_t allow_mask = 0;
+  if (status == IHS_SEMANTICS_OK) {
+    auto* raw = reinterpret_cast<Consumer*>(consumer);
+    Hub& hub = TheHub();
+    std::lock_guard<std::mutex> lock(hub.mutex);
+    bool found = false;
+    for (const auto& registered : hub.consumers) {
+      if (registered.get() == raw) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      status = IHS_SEMANTICS_ERR_INVALID;
+    } else {
+      name = raw->name;
+      allow_mask = raw->action_allow_mask;
+      host = hub.host;
+    }
+  }
+
+  // A synthesized tap is a tap. A consumer denied the action must not be able
+  // to perform it by coordinate instead, or the mask would arbitrate nothing.
+  if (status == IHS_SEMANTICS_OK &&
+      (IHS_SEMANTICS_ACTION_TAP & ~allow_mask) != 0) {
+    status = IHS_SEMANTICS_ERR_DENIED;
+  }
+
+  // No node is consulted deliberately: the point of this path is to reach
+  // what the tree does not describe, so there is nothing to validate against
+  // and nothing that can confirm the tap landed anywhere.
+  if (status == IHS_SEMANTICS_OK) {
+    if (host.send_pointer_tap == nullptr) {
+      status = IHS_SEMANTICS_ERR_UNSUPPORTED_ACTION;
+    } else {
+      status = host.send_pointer_tap(host.user_data, view_id, x, y);
+    }
+  }
+
+  // Traced like a dispatch, and with the coordinates: an action that names no
+  // node is exactly the one an audit needs the target of.
+  LogInfo("pointer tap consumer='" +
+          (name.empty() ? std::string("<unregistered>") : name) +
+          "' at=" + std::to_string(x) + "," + std::to_string(y) +
+          " status=" + std::to_string(status));
+  return status;
+}
+
 int ihs_semantics_dispatch(IhsSemanticsConsumer* consumer,
                            int64_t view_id,
                            int32_t node_id,
