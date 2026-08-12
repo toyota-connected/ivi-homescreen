@@ -444,9 +444,26 @@ typedef void (*IhsSemanticsDoneCallback)(int status, void* user_data);
  * directly, so the hub can serialize onto the platform thread, enforce the
  * consumer's allow mask, and attribute every dispatch to a named actor.
  *
- * `data`/`data_length` carry arguments for the actions that take them (set
- * text, set selection, scroll to offset); pass NULL/0 otherwise. The buffer is
- * copied before this returns.
+ * `data`/`data_length` carry arguments for the actions that take them; pass
+ * NULL/0 otherwise. The buffer is copied before this returns.
+ *
+ * Arguments are plain, not framework-encoded. The shell encodes them for the
+ * framework, so a consumer needs no codec and this ABI stays free of a wire
+ * format it does not own:
+ *
+ *   IHS_SEMANTICS_ACTION_SET_TEXT          the replacement text, UTF-8, with
+ *                                          data_length as its size -- no
+ *                                          terminator, since the text may
+ *                                          legitimately contain a NUL
+ *   IHS_SEMANTICS_ACTION_SET_SELECTION     two int32 in native byte order:
+ *                                          base, then extent
+ *   IHS_SEMANTICS_ACTION_SCROLL_TO_OFFSET  two doubles in native byte order:
+ *                                          dx, then dy
+ *
+ * A buffer that does not match the action's layout, or one supplied for an
+ * action that takes no argument, fails with IHS_SEMANTICS_ERR_INVALID. The
+ * framework drops a malformed argument in silence, so refusing here is what
+ * keeps a caller from seeing a successful dispatch that did nothing.
  *
  * Returns immediately; `done` fires on the platform thread and may be null.
  * Callable from any thread.

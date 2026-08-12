@@ -39,6 +39,7 @@
 
 #if BUILD_ACCESSIBILITY
 #include "ihs/ihs_semantics_host.h"
+#include "shell/accessibility/semantics_action_args.h"
 #include "shell/accessibility/semantics_publisher.h"
 #endif
 #include "hexdump.h"
@@ -1032,13 +1033,22 @@ int Engine::DispatchSemanticsAction(const int64_t view_id,
     return IHS_SEMANTICS_ERR_UNSUPPORTED_ACTION;
   }
 
-  // The hub does not thread-hop -- deliberately, since the task runner is
-  // ours. Copy the payload and post: `data` is only valid for this call, and
-  // the engine reads it on the platform thread afterwards.
-  std::vector<uint8_t> payload;
-  if (data != nullptr && data_length > 0) {
-    payload.assign(data, data + data_length);
+  // Encode here rather than in the hub: `data` arrives in the hub's own plain
+  // layout, and this is the only side that links Flutter, so consumers need no
+  // codec and the hub ABI keeps Flutter's wire format out of it.
+  auto encoded =
+      accessibility::EncodeActionArguments(action, data, data_length);
+  if (!encoded.has_value()) {
+    // The argument did not match what the action takes. Refusing beats
+    // forwarding: a malformed payload is dropped framework-side in silence,
+    // so the caller would see a successful dispatch that did nothing.
+    return IHS_SEMANTICS_ERR_INVALID;
   }
+
+  // The hub does not thread-hop -- deliberately, since the task runner is
+  // ours. The encoded buffer moves with the post: `data` is only valid for
+  // this call, and the engine reads the bytes on the platform thread after.
+  std::vector<uint8_t> payload = std::move(encoded.value());
 
   // The strand is serviced by the same thread that runs Flutter tasks, so
   // posting here lands the call on the platform thread with no extra
