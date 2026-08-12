@@ -345,12 +345,42 @@ jobs:
           eval "$(../emb_cli/bootstrap.sh --shellenv)"
           emb --version
           start=$SECONDS
-          # -v streams the toolchain/compile output line-prefixed into the log
-          # (tee'd below) so every build leaves a full record, not just spinners.
-          emb -v cross . \
-            --target "${{ matrix.board }}-${{ matrix.pios }}" \
-            --build --backend "${{ matrix.backend }}" \
-            --no-verify -w /emb | tee /tmp/emb-build.log
+          # Retried only when the failure was an augment source download.
+          #
+          # emb retries those itself, four times with backoff, and github.com
+          # has been out for longer than that window -- a 503 and a mid-header
+          # disconnect have each failed this job. Retrying the whole step gives
+          # the origin minutes rather than seconds, and costs nothing when it
+          # succeeds because emb keeps each archive and skips what it already
+          # has, so an attempt resumes rather than restarting.
+          #
+          # Scoped to that one message on purpose: a compile error must still
+          # fail on the first attempt rather than being rebuilt three times.
+          attempt=1
+          while :; do
+            # -v streams the toolchain/compile output line-prefixed into the
+            # log (tee'd) so every build leaves a full record, not just
+            # spinners.
+            if emb -v cross . \
+                 --target "${{ matrix.board }}-${{ matrix.pios }}" \
+                 --build --backend "${{ matrix.backend }}" \
+                 --no-verify -w /emb | tee /tmp/emb-build.log; then
+              break
+            fi
+            if ! grep -q "augment: download failed" /tmp/emb-build.log; then
+              echo "::error::build failed for a reason other than a source download"
+              exit 1
+            fi
+            if [ "$attempt" -ge 3 ]; then
+              echo "::error::augment source download still failing after $attempt attempts"
+              exit 1
+            fi
+            # Surfaced rather than swallowed: a rising count is the signal
+            # that the origin is degrading rather than blipping.
+            echo "::warning::augment source download failed (attempt $attempt/3); retrying"
+            sleep $(( attempt * 30 ))
+            attempt=$(( attempt + 1 ))
+          done
           dur=$(( SECONDS - start ))
           # Per-job timing summary: the cache-hit consume should resolve in
           # seconds (no toolchain/sysroot fetch). emb prints resolve/augment/
