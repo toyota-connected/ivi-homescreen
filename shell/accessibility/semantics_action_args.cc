@@ -18,6 +18,7 @@
 
 #include <cstring>
 #include <string>
+#include <utility>
 
 #include "flutter/standard_message_codec.h"
 
@@ -34,7 +35,9 @@ constexpr size_t kOffsetBytes = sizeof(double) * 2;
 std::vector<uint8_t> Encode(const flutter::EncodableValue& value) {
   const auto& codec = flutter::StandardMessageCodec::GetInstance();
   auto encoded = codec.EncodeMessage(value);
-  return encoded != nullptr ? *encoded : std::vector<uint8_t>{};
+  // Moved rather than copied: the codec hands back an owning pointer, and the
+  // buffer is ours to take.
+  return encoded != nullptr ? std::move(*encoded) : std::vector<uint8_t>{};
 }
 
 }  // namespace
