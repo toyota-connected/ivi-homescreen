@@ -149,9 +149,14 @@ jobs:
           # eviction); the cache restores ~/oras-bin/oras otherwise.
           if [ ! -x "$HOME/oras-bin/oras" ]; then
             mkdir -p "$HOME/oras-bin"
-            curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
-              "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_amd64.tar.gz" \
-              | tar -xzf - -C "$HOME/oras-bin" oras
+            # To a file, not a pipe: see the build job's copy -- a curl retry
+            # restarts the stream and a pipe hands tar the truncated attempt
+            # followed by a whole one.
+            curl -fsSL --retry 8 --retry-all-errors --retry-max-time 300 \
+              --connect-timeout 15 -o /tmp/oras.tar.gz \
+              "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_amd64.tar.gz"
+            tar -xzf /tmp/oras.tar.gz -C "$HOME/oras-bin" oras
+            rm -f /tmp/oras.tar.gz
           fi
           sudo install -m 0755 "$HOME/oras-bin/oras" /usr/local/bin/oras
           # Retried for the same reason as the docker login above: the download
@@ -250,12 +255,32 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USER: ${{ github.actor }}
         run: |
-          # Only fetch from GitHub releases on a cache miss (version bump); the
-          # cache restores /usr/local/bin/oras otherwise.
+          # Only fetch from GitHub releases on a cache miss (version bump or
+          # a key change); the cache restores /usr/local/bin/oras otherwise.
+          #
+          # A miss here is a miss in every matrix leg at once -- around 25 jobs
+          # asking GitHub for the same file in the same second, which is the
+          # concentration that provokes the failure rather than a symptom of
+          # it. So the fetch is staggered by a short per-job delay before it
+          # starts, and retried far more patiently than a warm path would
+          # need: the point is to outlast a bad window, not to fail fast.
+          #
+          # No --retry-delay: curl backs off exponentially without it, which
+          # spreads the retries too. PID-derived jitter because the container
+          # shell is dash and has no $RANDOM.
+          #
+          # Downloaded to a file rather than piped into tar: on a retry curl
+          # restarts the transfer from the beginning, so a pipe hands tar the
+          # truncated first attempt followed by a second full stream. That is
+          # why a flaky fetch here surfaced as "tar: exit 2" rather than a
+          # curl error -- the retries were making the input corrupt.
           if [ ! -x /usr/local/bin/oras ]; then
-            curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
-              "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_amd64.tar.gz" \
-              | tar -xzf - -C /usr/local/bin oras
+            sleep $(( $$ % 20 ))
+            curl -fsSL --retry 8 --retry-all-errors --retry-max-time 300 \
+              --connect-timeout 15 -o /tmp/oras.tar.gz \
+              "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_amd64.tar.gz"
+            tar -xzf /tmp/oras.tar.gz -C /usr/local/bin oras
+            rm -f /tmp/oras.tar.gz
           fi
           # This is the login that has actually failed in CI: ~25 matrix jobs
           # authenticate to ghcr.io at once, which is exactly the concentration
