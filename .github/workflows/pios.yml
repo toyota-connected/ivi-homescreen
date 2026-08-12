@@ -314,8 +314,14 @@ jobs:
       # new or bumped source misses and refetches; every other run stays off
       # the network entirely. Not keyed on the OS -- the sources are the same
       # archives for every target, so one entry serves the whole matrix.
-      - name: Cache augment sources
-        uses: actions/cache@v6
+      # Restore and save are separate so the save can run after a failed
+      # build. actions/cache skips saving when the job fails, which for a
+      # cache whose whole purpose is to stop a flaky download would be a
+      # deadlock: the archives only land after a green build, and the build
+      # cannot go green while the download keeps failing. Saving whatever did
+      # arrive means each attempt leaves the next one better off.
+      - name: Restore augment sources
+        uses: actions/cache/restore@v6
         with:
           path: |
             /emb/.config/flutter_workspace/overlay-src/*.tar.gz
@@ -339,12 +345,42 @@ jobs:
           eval "$(../emb_cli/bootstrap.sh --shellenv)"
           emb --version
           start=$SECONDS
-          # -v streams the toolchain/compile output line-prefixed into the log
-          # (tee'd below) so every build leaves a full record, not just spinners.
-          emb -v cross . \
-            --target "${{ matrix.board }}-${{ matrix.pios }}" \
-            --build --backend "${{ matrix.backend }}" \
-            --no-verify -w /emb | tee /tmp/emb-build.log
+          # Retried only when the failure was an augment source download.
+          #
+          # emb retries those itself, four times with backoff, and github.com
+          # has been out for longer than that window -- a 503 and a mid-header
+          # disconnect have each failed this job. Retrying the whole step gives
+          # the origin minutes rather than seconds, and costs nothing when it
+          # succeeds because emb keeps each archive and skips what it already
+          # has, so an attempt resumes rather than restarting.
+          #
+          # Scoped to that one message on purpose: a compile error must still
+          # fail on the first attempt rather than being rebuilt three times.
+          attempt=1
+          while :; do
+            # -v streams the toolchain/compile output line-prefixed into the
+            # log (tee'd) so every build leaves a full record, not just
+            # spinners.
+            if emb -v cross . \
+                 --target "${{ matrix.board }}-${{ matrix.pios }}" \
+                 --build --backend "${{ matrix.backend }}" \
+                 --no-verify -w /emb | tee /tmp/emb-build.log; then
+              break
+            fi
+            if ! grep -q "augment: download failed" /tmp/emb-build.log; then
+              echo "::error::build failed for a reason other than a source download"
+              exit 1
+            fi
+            if [ "$attempt" -ge 3 ]; then
+              echo "::error::augment source download still failing after $attempt attempts"
+              exit 1
+            fi
+            # Surfaced rather than swallowed: a rising count is the signal
+            # that the origin is degrading rather than blipping.
+            echo "::warning::augment source download failed (attempt $attempt/3); retrying"
+            sleep $(( attempt * 30 ))
+            attempt=$(( attempt + 1 ))
+          done
           dur=$(( SECONDS - start ))
           # Per-job timing summary: the cache-hit consume should resolve in
           # seconds (no toolchain/sysroot fetch). emb prints resolve/augment/
@@ -356,6 +392,21 @@ jobs:
             grep -aE "Resolved|augment +:|build +:" /tmp/emb-build.log \
               | sed -E 's/^[[:space:]]*[^A-Za-z]*/- /' || true
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # always(): the point is to keep what a failed run managed to fetch.
+      # The key carries a run id so a partial set never claims to be the
+      # complete one; restore-keys above picks up the newest either way.
+      - name: Save augment sources
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            /emb/.config/flutter_workspace/overlay-src/*.tar.gz
+            /emb/.config/flutter_workspace/overlay-src/*.tar.xz
+            /emb/.config/flutter_workspace/overlay-src/*.tar.bz2
+            /emb/.config/flutter_workspace/overlay-src/*.tgz
+            /emb/.config/flutter_workspace/overlay-src/*.zip
+          key: emb-augment-src-${{ hashFiles('ivi-homescreen/.emb/base.emb.yaml', 'ivi-homescreen/.emb/raspberry-pi.emb.yaml') }}-${{ github.run_id }}-${{ matrix.board }}-${{ matrix.pios }}-${{ matrix.backend }}
 
       - name: Upload homescreen binary
         uses: actions/upload-artifact@v7

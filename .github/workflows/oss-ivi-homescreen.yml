@@ -344,12 +344,27 @@ jobs:
             libpugixml-dev libcurl4-openssl-dev
       - name: Fetch emb
         run: git clone --depth 1 https://github.com/toyota-connected/emb_cli.git emb_cli
+      # Same reasoning as the watchdog job: the engine is a download, and an
+      # uncached one fails the build as "Bundle failed" with no engine in it.
+      - name: Restore emb engine artifacts
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/emb/store/engine
+          key: emb-engine-x86_64
+          restore-keys: |
+            emb-engine-x86_64-
       - name: Build crash handler (emb local, software backend)
         run: |
           eval "$(./emb_cli/bootstrap.sh --shellenv)"
           emb --version
           emb -v cross . --backend software \
             -D BUILD_CRASH_HANDLER=ON --build
+      - name: Save emb engine artifacts
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/emb/store/engine
+          key: emb-engine-x86_64-${{ github.run_id }}
 
   # Aggregate gate so crash-handler can be a required status check even though
   # it is path-gated (skipped on docs/asset-only PRs). This job always runs and
@@ -402,6 +417,22 @@ jobs:
             libpugixml-dev libcurl4-openssl-dev
       - name: Fetch emb
         run: git clone --depth 1 https://github.com/toyota-connected/emb_cli.git emb_cli
+      # The engine artifacts are a download like any other, and this job had
+      # no cache for them at all -- so every run refetched them, and a run
+      # where that fetch failed produced a bundle with no libflutter_engine.so
+      # and a "Bundle failed" that reads like a build error.
+      #
+      # Restore and save are split, and the save runs on failure, because a
+      # cache that exists to make a fetch survivable has to be written on the
+      # path where the fetch went wrong -- otherwise it only ever helps runs
+      # that did not need it.
+      - name: Restore emb engine artifacts
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/emb/store/engine
+          key: emb-engine-x86_64
+          restore-keys: |
+            emb-engine-x86_64-
       - name: Build watchdog
         run: |
           eval "$(./emb_cli/bootstrap.sh --shellenv)"
@@ -409,6 +440,12 @@ jobs:
           emb -v cross . --backend software \
             -D BUILD_WATCHDOG=ON \
             --build
+      - name: Save emb engine artifacts
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/emb/store/engine
+          key: emb-engine-x86_64-${{ github.run_id }}
       - name: Install build deps
         uses: awalsh128/cache-apt-pkgs-action@v1
         with:
