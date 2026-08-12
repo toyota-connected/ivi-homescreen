@@ -362,3 +362,49 @@ TEST(AccessKitConsumer, LabelNodeWithNoTextCarriesNoValue) {
   const BuiltNode built(node);
   EXPECT_EQ(accesskit_node_value(built.get()), nullptr);
 }
+
+// The two parameterized actions must be advertised, or an assistive
+// technology has no way to ask for them in the first place.
+TEST(AccessKitConsumer, ParameterizedActionsAreAdvertised) {
+  IhsSemanticsPublishNode field =
+      PlainNode("Destination", IHS_SEMANTICS_ROLE_TEXT_INPUT);
+  field.actions = IHS_SEMANTICS_ACTION_SET_TEXT;
+  const BuiltNode built_field(field);
+  // AccessKit spells "replace the text" SetValue.
+  EXPECT_TRUE(accesskit_node_supports_action(built_field.get(),
+                                             ACCESSKIT_ACTION_SET_VALUE));
+
+  IhsSemanticsPublishNode list =
+      PlainNode("Media list", IHS_SEMANTICS_ROLE_SCROLL_VIEW);
+  list.actions = IHS_SEMANTICS_ACTION_SCROLL_TO_OFFSET;
+  const BuiltNode built_list(list);
+  EXPECT_TRUE(accesskit_node_supports_action(
+      built_list.get(), ACCESSKIT_ACTION_SET_SCROLL_OFFSET));
+}
+
+// A node that cannot take them must not claim them: an action offered and
+// then refused at the funnel is a worse answer than one never advertised.
+TEST(AccessKitConsumer, ParameterizedActionsAreNotClaimedWithoutSupport) {
+  const IhsSemanticsPublishNode plain =
+      PlainNode("Now playing", IHS_SEMANTICS_ROLE_LABEL);
+  const BuiltNode built(plain);
+  EXPECT_FALSE(
+      accesskit_node_supports_action(built.get(), ACCESSKIT_ACTION_SET_VALUE));
+  EXPECT_FALSE(accesskit_node_supports_action(
+      built.get(), ACCESSKIT_ACTION_SET_SCROLL_OFFSET));
+}
+
+// SetScrollOffset carries a point, so it needs no inference and maps straight
+// through. AccessKit's AT-SPI backend does not emit it today -- the numeric
+// SetValue path does the work on this platform -- but the mapping is exact
+// where it is produced.
+TEST(AccessKitConsumer, ScrollOffsetActionMapsToScrollToOffset) {
+  EXPECT_EQ(ToIhsAction(ACCESSKIT_ACTION_SET_SCROLL_OFFSET),
+            IHS_SEMANTICS_ACTION_SCROLL_TO_OFFSET);
+}
+
+// SetValue is not mapped by tag: its meaning depends on whether a string or a
+// number arrived, so the handler decides and this table must not guess.
+TEST(AccessKitConsumer, SetValueIsNotMappedByTagAlone) {
+  EXPECT_EQ(ToIhsAction(ACCESSKIT_ACTION_SET_VALUE), 0u);
+}
