@@ -156,10 +156,9 @@ TEST_F(McpTransportTest, InitializeReportsProtocolAndCapabilities) {
   const std::string body = Body(response);
   EXPECT_NE(body.find(R"("id":1)"), std::string::npos);
   EXPECT_NE(body.find("protocolVersion"), std::string::npos);
-  // Only what is actually served is advertised: nothing pushes notifications
-  // yet, so claiming listChanged would leave clients waiting for messages
-  // that never come.
-  EXPECT_EQ(body.find("listChanged"), std::string::npos);
+  // What is advertised has to be deliverable; the stream now carries
+  // notifications, so InitializeAdvertisesWhatTheStreamCanDeliver asserts the
+  // positive case that used to be asserted absent here.
 }
 
 // With no provider registered the list is empty rather than absent, so a
@@ -209,12 +208,15 @@ TEST_F(McpTransportTest, NotificationsGetNoJsonRpcReply) {
   EXPECT_TRUE(Body(response).empty()) << Body(response);
 }
 
-// Only POST carries a request. A probe or a browser gets a clear answer
-// rather than a hang.
-TEST_F(McpTransportTest, NonPostIsRefused) {
-  const std::string response =
-      Send(path_, "GET / HTTP/1.1\r\nContent-Length: 0\r\n\r\n");
-  EXPECT_EQ(StatusLine(response), "HTTP/1.1 405 Method Not Allowed");
+// POST carries a request and GET opens a stream; anything else gets a clear
+// answer rather than a hang. GET is covered by PlainGetIsNotAcceptable, which
+// distinguishes "wrong verb" from "right verb, wrong media type".
+TEST_F(McpTransportTest, UnsupportedMethodsAreRefused) {
+  for (const char* verb : {"PUT", "DELETE", "HEAD"}) {
+    const std::string response = Send(
+        path_, std::string(verb) + " / HTTP/1.1\r\nContent-Length: 0\r\n\r\n");
+    EXPECT_EQ(StatusLine(response), "HTTP/1.1 405 Method Not Allowed") << verb;
+  }
 }
 
 TEST_F(McpTransportTest, MissingContentLengthIsRefused) {
@@ -307,4 +309,117 @@ TEST(McpTransportLifecycle, StaleSocketIsReplacedButALiveOneIsNot) {
 
   ihs_mcp_transport_stop();
   ::unlink(path.c_str());
+}
+
+namespace {
+
+// Opens an event stream and returns the connected descriptor, or -1. The
+// caller owns it: an SSE connection outlives the request that opened it,
+// which is the whole point.
+int OpenStream(const std::string& path, std::string* out_headers) {
+  const int fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  if (fd < 0) {
+    return -1;
+  }
+  sockaddr_un address{};
+  address.sun_family = AF_UNIX;
+  std::strncpy(address.sun_path, path.c_str(), sizeof(address.sun_path) - 1);
+  if (::connect(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) !=
+      0) {
+    ::close(fd);
+    return -1;
+  }
+  const std::string request =
+      "GET /mcp HTTP/1.1\r\nAccept: text/event-stream\r\n\r\n";
+  if (::write(fd, request.data(), request.size()) < 0) {
+    ::close(fd);
+    return -1;
+  }
+  char chunk[1024];
+  const ssize_t n = ::read(fd, chunk, sizeof(chunk));
+  if (n <= 0) {
+    ::close(fd);
+    return -1;
+  }
+  out_headers->assign(chunk, static_cast<size_t>(n));
+  return fd;
+}
+
+}  // namespace
+
+// A GET asking for the event-stream type opens the server-to-client half of
+// the transport, and must not be answered with a length or a close -- the
+// body is the stream.
+TEST_F(McpTransportTest, EventStreamHandshakeIsAccepted) {
+  std::string headers;
+  const int fd = OpenStream(path_, &headers);
+  ASSERT_GE(fd, 0) << "stream did not open";
+  EXPECT_NE(headers.find("200 OK"), std::string::npos) << headers;
+  EXPECT_NE(headers.find("text/event-stream"), std::string::npos) << headers;
+  EXPECT_EQ(headers.find("Content-Length"), std::string::npos) << headers;
+  ::close(fd);
+}
+
+// A GET that did not ask for a stream is told so, rather than being handed
+// one it will not read or left hanging.
+TEST_F(McpTransportTest, PlainGetIsNotAcceptable) {
+  const std::string response =
+      Send(path_, "GET /mcp HTTP/1.1\r\nAccept: application/json\r\n\r\n");
+  EXPECT_EQ(StatusLine(response), "HTTP/1.1 406 Not Acceptable");
+}
+
+// The capabilities are advertised now that a stream can carry them. They were
+// absent while it could not: a client told to expect notifications that never
+// arrive waits instead of polling.
+TEST_F(McpTransportTest, InitializeAdvertisesWhatTheStreamCanDeliver) {
+  const std::string body =
+      Body(Post(path_, R"({"jsonrpc":"2.0","id":1,"method":"initialize"})"));
+  EXPECT_NE(body.find("listChanged"), std::string::npos) << body;
+  EXPECT_NE(body.find("subscribe"), std::string::npos) << body;
+}
+
+// Requests keep working while a stream is open: the stream must not occupy
+// the accept loop, which it would if it were served inline like a request.
+TEST_F(McpTransportTest, RequestsAreStillServedWhileAStreamIsOpen) {
+  std::string headers;
+  const int stream = OpenStream(path_, &headers);
+  ASSERT_GE(stream, 0);
+
+  const std::string body =
+      Body(Post(path_, R"({"jsonrpc":"2.0","id":7,"method":"ping"})"));
+  EXPECT_NE(body.find(R"("id":7)"), std::string::npos) << body;
+  ::close(stream);
+}
+
+// Several clients may watch at once, and each has to be served.
+TEST_F(McpTransportTest, MoreThanOneStreamMayBeOpen) {
+  std::string first_headers;
+  std::string second_headers;
+  const int first = OpenStream(path_, &first_headers);
+  const int second = OpenStream(path_, &second_headers);
+  EXPECT_GE(first, 0);
+  EXPECT_GE(second, 0);
+  EXPECT_NE(first_headers.find("text/event-stream"), std::string::npos);
+  EXPECT_NE(second_headers.find("text/event-stream"), std::string::npos);
+  if (first >= 0) {
+    ::close(first);
+  }
+  if (second >= 0) {
+    ::close(second);
+  }
+}
+
+// Stopping closes the streams: there is no goodbye event, so the end of the
+// connection is how a client learns the server is gone.
+TEST_F(McpTransportTest, StopClosesOpenStreams) {
+  std::string headers;
+  const int fd = OpenStream(path_, &headers);
+  ASSERT_GE(fd, 0);
+
+  ihs_mcp_transport_stop();
+
+  char chunk[64];
+  const ssize_t n = ::read(fd, chunk, sizeof(chunk));
+  EXPECT_EQ(n, 0) << "expected end of stream, got " << n;
+  ::close(fd);
 }
