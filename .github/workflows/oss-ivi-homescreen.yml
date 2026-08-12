@@ -169,6 +169,84 @@ jobs:
         working-directory: ${{github.workspace}}/build/accessibility
         run: ninja -C . homescreen
 
+  # The AccessKit bridge is off by default and needs bindings that are not a
+  # system package, so nothing else here compiles it. Every defect found in
+  # that adapter so far has been a silent one -- a tree of nameless static
+  # text, a live region that never announced, a write path that dropped every
+  # request -- which is exactly the class a build-and-test leg catches and a
+  # reviewer does not.
+  #
+  # Uses the upstream release rather than the .emb augment: the augment builds
+  # the crate from source to give board targets an aarch64 library, which
+  # needs a Rust toolchain, while the release ships a prebuilt x86_64 static
+  # library that this runner can use directly.
+  accesskit:
+    name: accesskit (BUILD_ACCESSKIT=ON)
+    if: ${{ github.server_url == 'https://github.com' && github.ref != 'refs/heads/agl' && always() }}
+    runs-on: ubuntu-22.04
+    env:
+      ACCESSKIT_VERSION: "0.22.3"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Update apt package index
+        # See the accessibility job: the cache action pins versions from the
+        # runner's stale index, which 404s once a revision is superseded.
+        run: sudo apt-get update
+      - name: Install build deps
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: >-
+            ninja-build
+            libwayland-dev wayland-protocols libxkbcommon-dev libpugixml-dev
+            mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils
+
+      - name: Fetch the AccessKit C bindings
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "${RUNNER_TEMP}/accesskit-c.zip" \
+            "https://github.com/AccessKit/accesskit-c/releases/download/${ACCESSKIT_VERSION}/accesskit-c-${ACCESSKIT_VERSION}.zip"
+          unzip -q "${RUNNER_TEMP}/accesskit-c.zip" -d "${RUNNER_TEMP}"
+          # accesskit-config.cmake sits at the top of the archive, so this is
+          # what find_package(ACCESSKIT) resolves against.
+          test -f "${RUNNER_TEMP}/accesskit-c-${ACCESSKIT_VERSION}/accesskit-config.cmake"
+
+      - name: Configure (AccessKit enabled)
+        run: |
+          cmake -GNinja \
+            -B ${{github.workspace}}/build/accesskit \
+            -D CMAKE_BUILD_TYPE=Debug \
+            -D BUILD_ACCESSIBILITY=ON \
+            -D BUILD_ACCESSKIT=ON \
+            -D BUILD_UNIT_TESTS=ON \
+            -D CMAKE_PREFIX_PATH="${RUNNER_TEMP}/accesskit-c-${ACCESSKIT_VERSION}" \
+            -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging/usr/local \
+            -D BUILD_NUMBER=${GITHUB_RUN_ID}
+
+      - name: Generate Wayland protocol headers
+        # The unit-test targets compile the Wayland sources without depending
+        # on the scanner targets, so ninja will otherwise compile them before
+        # the headers exist.
+        working-directory: ${{github.workspace}}/build/accesskit
+        run: |
+          ninja $(ninja -t targets all \
+            | grep -oE "^shell/wayland-protocols/[a-z0-9_]+\.hpp" \
+            | sort -u | tr '\n' ' ')
+
+      - name: Build
+        working-directory: ${{github.workspace}}/build/accesskit
+        run: ninja
+
+      - name: Test
+        working-directory: ${{github.workspace}}/build/accesskit
+        # The whole suite, not just the AccessKit cases: enabling the bridge
+        # changes what the shell links and registers, so a regression it
+        # causes may well surface somewhere else.
+        run: ctest --output-on-failure
+
   # Path-gate the (expensive) crash-handler build: it is a full
   # BUILD_CRASH_HANDLER=ON compile, so it only needs to run when build inputs
   # change. Docs/asset-only PRs skip it. Non-PR events (schedule / release /
