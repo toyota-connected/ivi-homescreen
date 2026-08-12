@@ -133,7 +133,13 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/oras-bin
-          key: oras-${{ env.ORAS_VERSION }}-linux-amd64
+          # The location is part of the key. The build job caches oras at a
+          # different path under what was the same key, and a cache entry
+          # restores to the path it was saved from -- so whichever job saved
+          # first owned the entry and the other got a "hit" that put the
+          # binary somewhere it does not look, then downloaded it again on
+          # every run.
+          key: oras-${{ env.ORAS_VERSION }}-linux-amd64-home
       - name: Install + log in oras
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -237,7 +243,8 @@ jobs:
         uses: actions/cache@v6
         with:
           path: /usr/local/bin/oras
-          key: oras-${{ env.ORAS_VERSION }}-linux-amd64
+          # Distinct from the publish job's entry; see the note there.
+          key: oras-${{ env.ORAS_VERSION }}-linux-amd64-usrlocal
       - name: Install + log in oras
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
