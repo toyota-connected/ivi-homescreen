@@ -23,6 +23,8 @@
 
 #include <cerrno>
 #include <cstdint>
+#include <cstring>
+#include <vector>
 
 #include "ihs/ihs_semantics.h"
 
@@ -107,6 +109,8 @@ uint64_t ToIhsAction(const accesskit_action action) {
       return IHS_SEMANTICS_ACTION_EXPAND;
     case ACCESSKIT_ACTION_COLLAPSE:
       return IHS_SEMANTICS_ACTION_COLLAPSE;
+    case ACCESSKIT_ACTION_SET_SCROLL_OFFSET:
+      return IHS_SEMANTICS_ACTION_SCROLL_TO_OFFSET;
     default:
       return 0;
   }
@@ -148,6 +152,18 @@ void AddActions(accesskit_node* node,
   }
   if ((actions & IHS_SEMANTICS_ACTION_COLLAPSE) != 0) {
     accesskit_node_add_action(node, ACCESSKIT_ACTION_COLLAPSE);
+  }
+  // Setting a scrollable's offset. AccessKit carries a point for this, so both
+  // axes arrive and neither has to be inferred from which way the node
+  // scrolls -- which a node scrolling both ways would make unanswerable.
+  if ((actions & IHS_SEMANTICS_ACTION_SCROLL_TO_OFFSET) != 0) {
+    accesskit_node_add_action(node, ACCESSKIT_ACTION_SET_SCROLL_OFFSET);
+  }
+  // Replacing a field's text. AccessKit spells this SetValue, whose payload
+  // may be a string or a number; only the string form means text, and the
+  // handler checks which arrived.
+  if ((actions & IHS_SEMANTICS_ACTION_SET_TEXT) != 0) {
+    accesskit_node_add_action(node, ACCESSKIT_ACTION_SET_VALUE);
   }
   // Focus is offered only where the node can actually hold the accessibility
   // cursor. Advertising it everywhere -- as this did -- makes every static
@@ -376,16 +392,87 @@ void ActionHandler(accesskit_action_request* request, void* user_data) {
     return;
   }
   auto* consumer = static_cast<IhsSemanticsConsumer*>(user_data);
-  const uint64_t action = ToIhsAction(request->action);
-  if (action == 0) {
-    ihs::log::debug("accesskit: no hub equivalent for action {}",
-                    static_cast<int>(request->action));
-    return;
+
+  // Arguments travel in the hub's plain layout and the shell encodes them for
+  // the framework, so this builds bytes rather than a codec message.
+  uint64_t action = 0;
+  std::vector<uint8_t> argument;
+
+  if (request->action == ACCESSKIT_ACTION_SET_VALUE) {
+    // SetValue is two requests wearing one name, told apart by payload.
+    //
+    // A number is the live path on this platform: AT-SPI's Value.currentValue
+    // setter is the only route an assistive technology has to move a value,
+    // and accesskit's AT-SPI backend turns it into exactly this. It never
+    // emits SetScrollOffset, which would have carried both axes and spared
+    // the inference below.
+    if (request->data.has_value &&
+        request->data.value.tag == ACCESSKIT_ACTION_DATA_NUMERIC_VALUE) {
+      // Flutter reports one scroll position per scrollable, so the number is
+      // that scalar coming back and only its axis has to be recovered. Which
+      // way the node scrolls answers it; a node scrolling both ways does not
+      // have an answer, in Flutter's model either, so vertical wins as the
+      // commoner case rather than the request being dropped.
+      const double value = request->data.value.numeric_value;
+      bool horizontal = false;
+      if (const IhsSemanticsSnapshot* snapshot =
+              ihs_semantics_acquire_snapshot();
+          snapshot != nullptr) {
+        if (const IhsSemanticsNode* node = ihs_semantics_snapshot_node_by_id(
+                snapshot, static_cast<int32_t>(request->target_node));
+            node != nullptr) {
+          const bool vertical =
+              (node->actions & (IHS_SEMANTICS_ACTION_SCROLL_UP |
+                                IHS_SEMANTICS_ACTION_SCROLL_DOWN)) != 0;
+          horizontal = !vertical && (node->actions &
+                                     (IHS_SEMANTICS_ACTION_SCROLL_LEFT |
+                                      IHS_SEMANTICS_ACTION_SCROLL_RIGHT)) != 0;
+        }
+        ihs_semantics_release_snapshot(snapshot);
+      }
+      const double offset[2] = {horizontal ? value : 0.0,
+                                horizontal ? 0.0 : value};
+      const auto* bytes = reinterpret_cast<const uint8_t*>(offset);
+      action = IHS_SEMANTICS_ACTION_SCROLL_TO_OFFSET;
+      argument.assign(bytes, bytes + sizeof(offset));
+    } else if (request->data.has_value &&
+               request->data.value.tag == ACCESSKIT_ACTION_DATA_VALUE &&
+               request->data.value.value != nullptr) {
+      // A string means replace the text. Correct, and unreachable through
+      // AT-SPI today: accesskit's backend exposes no EditableText interface,
+      // so nothing on this platform produces it. Kept because it is the right
+      // mapping the moment one does.
+      action = IHS_SEMANTICS_ACTION_SET_TEXT;
+      const char* text = request->data.value.value;
+      argument.assign(text, text + std::strlen(text));
+    } else {
+      ihs::log::debug("accesskit: SetValue carried no usable payload");
+      return;
+    }
+  } else {
+    action = ToIhsAction(request->action);
+    if (action == 0) {
+      ihs::log::debug("accesskit: no hub equivalent for action {}",
+                      static_cast<int>(request->action));
+      return;
+    }
+    if (action == IHS_SEMANTICS_ACTION_SCROLL_TO_OFFSET) {
+      if (!request->data.has_value ||
+          request->data.value.tag != ACCESSKIT_ACTION_DATA_SET_SCROLL_OFFSET) {
+        ihs::log::debug("accesskit: scroll offset request carried no point");
+        return;
+      }
+      const accesskit_point& point = request->data.value.set_scroll_offset;
+      const double offset[2] = {point.x, point.y};
+      const auto* bytes = reinterpret_cast<const uint8_t*>(offset);
+      argument.assign(bytes, bytes + sizeof(offset));
+    }
   }
 
   const int status = ihs_semantics_dispatch(
-      consumer, 0, static_cast<int32_t>(request->target_node), action, nullptr,
-      0, nullptr, nullptr);
+      consumer, 0, static_cast<int32_t>(request->target_node), action,
+      argument.empty() ? nullptr : argument.data(), argument.size(), nullptr,
+      nullptr);
   if (status != IHS_SEMANTICS_OK) {
     // Expected in normal use: a screen reader may offer an action the node
     // does not implement, and the hub refuses rather than letting it vanish.
