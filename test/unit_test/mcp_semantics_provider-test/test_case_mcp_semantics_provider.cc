@@ -19,6 +19,9 @@
 #include <string>
 #include <vector>
 
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
 #include "gtest/gtest.h"
 
 #include "ihs/ihs_mcp_host.h"
@@ -468,4 +471,53 @@ TEST_F(McpSemanticsProviderTest, ParameterizedToolsRespectTheNodeActions) {
   CallTool("ui_scroll_to", R"({"node_id":1,"dy":1})", &status);
   EXPECT_EQ(status, IHS_MCP_ERR_REFUSED);
   EXPECT_EQ(g_host->dispatch_calls, 0);
+}
+
+namespace {
+
+struct NotifyRecord {
+  std::mutex mutex;
+  std::condition_variable arrived;
+  int updates = 0;
+  std::string last_uri;
+};
+
+NotifyRecord* g_notify = nullptr;
+
+void OnProviderNotify(IhsMcpNotification kind, const char* uri, void*) {
+  if (kind != IHS_MCP_NOTIFY_RESOURCE_UPDATED) {
+    return;
+  }
+  const std::lock_guard<std::mutex> lock(g_notify->mutex);
+  g_notify->updates++;
+  g_notify->last_uri = uri != nullptr ? uri : "";
+  g_notify->arrived.notify_all();
+}
+
+}  // namespace
+
+// Publishing a tree must reach a server as a resource notification, or a
+// client has no way to learn the UI changed short of polling ui_snapshot.
+// One descriptor carries this: the hub signals it on publish and the MCP
+// registry is watching the same one.
+TEST_F(McpSemanticsProviderTest, PublishingATreeNotifiesTheServer) {
+  NotifyRecord record;
+  g_notify = &record;
+  ASSERT_EQ(ihs_mcp_host_set_notification_sink(OnProviderNotify, nullptr),
+            IHS_MCP_OK);
+
+  TreeBuilder tree;
+  tree.Add(0, "root", IHS_SEMANTICS_ROLE_WINDOW);
+  ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
+
+  {
+    std::unique_lock<std::mutex> lock(record.mutex);
+    EXPECT_TRUE(record.arrived.wait_for(lock, std::chrono::seconds(5), [&] {
+      return record.updates >= 1;
+    })) << "a publish did not reach the sink";
+    EXPECT_EQ(record.last_uri, "ui://");
+  }
+
+  ASSERT_EQ(ihs_mcp_host_set_notification_sink(nullptr, nullptr), IHS_MCP_OK);
+  g_notify = nullptr;
 }

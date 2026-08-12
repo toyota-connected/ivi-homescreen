@@ -268,6 +268,9 @@ typedef struct IhsMcpProviderDesc {
   IhsMcpProviderCallbacks callbacks;
   void* user_data;
 
+  /* Must be non-blocking (EFD_NONBLOCK / O_NONBLOCK). The host drains it
+   * until empty when it wakes, so a blocking descriptor stops the watcher on
+   * the read after the last byte and silences every other provider with it. */
   int notify_fd;
 } IhsMcpProviderDesc;
 
