@@ -84,6 +84,12 @@ constexpr char kScrollToSchema[] =
     R"("dy":{"type":"number","description":"Vertical offset in logical pixels."})"
     R"(}})";
 
+constexpr char kTapAtSchema[] =
+    R"({"type":"object","properties":{)"
+    R"("x":{"type":"number","description":"Screen x, in the same coordinates as a node rect."},)"
+    R"("y":{"type":"number","description":"Screen y, in the same coordinates as a node rect."})"
+    R"(},"required":["x","y"]})";
+
 const ToolEntry kTools[] = {
     {"snapshot", "The whole semantics tree as JSON.", kEmptySchema, 0,
      IHS_MCP_CAP_INSPECT},
@@ -109,6 +115,16 @@ const ToolEntry kTools[] = {
      IHS_SEMANTICS_ACTION_SET_TEXT, IHS_MCP_CAP_INTERACT},
     {"scroll_to", "Scroll a container to a given offset.", kScrollToSchema,
      IHS_SEMANTICS_ACTION_SCROLL_TO_OFFSET, IHS_MCP_CAP_INTERACT},
+    // Action 0: this one does not dispatch a semantics action at all, and the
+    // call handler routes it separately. Its description says so, because the
+    // difference is the caller's to reason about -- a tap that is hit-tested
+    // reaches what the tree cannot describe, and misses what is covered.
+    {"tap_at",
+     "Tap at a screen coordinate, for targets the semantics tree does not "
+     "describe. Unlike ui_tap this is hit-tested: whatever is drawn on top "
+     "receives it, it races animation, and nothing confirms what it hit. "
+     "Prefer ui_tap wherever a node offers it.",
+     kTapAtSchema, 0, IHS_MCP_CAP_INTERACT},
 };
 
 // The accessibility-focus actions are deliberately absent from the table
@@ -413,6 +429,24 @@ bool ReadStringArgument(const char* json, const char* key, std::string* out) {
   return true;
 }
 
+// Refuses rather than defaulting. A coordinate is not something to guess at:
+// tapping (0, 0) because the caller omitted y would press whatever is in the
+// corner, which is worse than an error.
+bool ReadNumberArgumentRequired(const char* json,
+                                const char* key,
+                                double* out) {
+  rapidjson::Document doc;
+  if (json == nullptr || doc.Parse(json).HasParseError() || !doc.IsObject()) {
+    return false;
+  }
+  const auto member = doc.FindMember(key);
+  if (member == doc.MemberEnd() || !member->value.IsNumber()) {
+    return false;
+  }
+  *out = member->value.GetDouble();
+  return true;
+}
+
 // Absent or non-numeric yields the fallback: an axis a caller did not name is
 // zero rather than an error, so scrolling a vertical list needs only dy.
 double ReadNumberArgument(const char* json,
@@ -579,6 +613,51 @@ int CallTool(void* /* user_data */,
   if (std::strcmp(name, "query") == 0) {
     FillPayload(out_result, RunQuery(snapshot, arguments_json));
     ihs_semantics_release_snapshot(snapshot);
+    return IHS_MCP_OK;
+  }
+
+  // Routed before the node lookup: this tool names no node, which is the
+  // whole point of it -- the target is a coordinate precisely because the
+  // tree does not describe what is there.
+  if (std::strcmp(name, "tap_at") == 0) {
+    const uint64_t generation_now = generation;
+    ihs_semantics_release_snapshot(snapshot);
+
+    double x = 0.0;
+    double y = 0.0;
+    if (!ReadNumberArgumentRequired(arguments_json, "x", &x) ||
+        !ReadNumberArgumentRequired(arguments_json, "y", &y)) {
+      FillPayload(out_result,
+                  ErrorJson("tap_at requires x and y", generation_now));
+      return IHS_MCP_ERR_INVALID;
+    }
+
+    Provider& provider = TheProvider();
+    const int tap_status =
+        ihs_semantics_send_pointer_tap(provider.consumer, 0, x, y);
+    if (tap_status != IHS_SEMANTICS_OK) {
+      FillPayload(out_result, ErrorJson("pointer tap refused", generation_now));
+      return IHS_MCP_ERR_REFUSED;
+    }
+
+    // Deliberately does not claim a target. Nothing here knows what was under
+    // the point, and reporting a node would be inventing the confirmation the
+    // caller chose this tool to go without.
+    rapidjson::StringBuffer tap_buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> tap_writer(tap_buffer);
+    tap_writer.StartObject();
+    tap_writer.Key("dispatched");
+    tap_writer.Bool(true);
+    tap_writer.Key("hit_tested");
+    tap_writer.Bool(true);
+    tap_writer.Key("x");
+    tap_writer.Double(x);
+    tap_writer.Key("y");
+    tap_writer.Double(y);
+    tap_writer.Key("generation_before");
+    tap_writer.Uint64(generation_now);
+    tap_writer.EndObject();
+    FillPayload(out_result, tap_buffer.GetString());
     return IHS_MCP_OK;
   }
 

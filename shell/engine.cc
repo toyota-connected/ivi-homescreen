@@ -1013,7 +1013,44 @@ void Engine::InstallSemanticsHost() {
                                            data_length);
   };
 
+  host.send_pointer_tap = [](void* user_data, const int64_t /* view_id */,
+                             const double x, const double y) -> int {
+    auto* engine = static_cast<Engine*>(user_data);
+    return engine->SendSyntheticTap(x, y);
+  };
+
   ihs_semantics_set_host(&host);
+}
+
+int Engine::SendSyntheticTap(const double x, const double y) {
+  if (m_flutter_engine == nullptr) {
+    return IHS_SEMANTICS_ERR_UNAVAILABLE;
+  }
+
+  // Posted rather than sent here: the coalescing buffer is drained on the
+  // platform thread, and a caller may be on any thread.
+  asio::post(*m_platform_task_runner->GetStrandContext(), [this, x, y]() {
+    if (m_flutter_engine == nullptr) {
+      return;
+    }
+    // Add, then down, then up -- the sequence a real seat produces. Sent
+    // through the ordinary coalescing path rather than around it, so a
+    // synthesized tap is hit-tested, scaled and batched exactly as a physical
+    // one is; anything else would make the fallback behave unlike the input
+    // it stands in for.
+    CoalesceMouseEvent(kFlutterPointerSignalKindNone, kAdd, x, y, 0.0, 0.0, 0,
+                       0);
+    CoalesceMouseEvent(kFlutterPointerSignalKindNone, kDown, x, y, 0.0, 0.0,
+                       kFlutterPointerButtonMousePrimary, 0);
+    CoalesceMouseEvent(kFlutterPointerSignalKindNone, kUp, x, y, 0.0, 0.0, 0,
+                       0);
+    SendPointerEvents();
+  });
+
+  // Accepted for delivery. Whether anything was under the point is not
+  // knowable here, and saying otherwise would be the automatic fallback DR-7
+  // exists to avoid.
+  return IHS_SEMANTICS_OK;
 }
 
 int Engine::DispatchSemanticsAction(const int64_t view_id,
