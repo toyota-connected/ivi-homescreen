@@ -204,15 +204,39 @@ jobs:
             libwayland-dev wayland-protocols libxkbcommon-dev libpugixml-dev
             mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils
 
+      # The bindings are a pinned release, so they are fetched once and then
+      # restored from cache. The key carries the version, so a bump misses and
+      # re-downloads while everything else keeps hitting.
+      - name: Cache the AccessKit C bindings
+        id: accesskit-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{github.workspace}}/.deps/accesskit-c-${{env.ACCESSKIT_VERSION}}
+          key: accesskit-c-${{env.ACCESSKIT_VERSION}}-${{runner.os}}
+
       - name: Fetch the AccessKit C bindings
+        if: steps.accesskit-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
-          curl -fsSL -o "${RUNNER_TEMP}/accesskit-c.zip" \
+          mkdir -p "${{github.workspace}}/.deps"
+          # Retried: this is a release download from github.com, which has
+          # returned 503 here, and the surrounding CI already sees transient
+          # network failures often enough that one attempt is not enough.
+          curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors \
+            --connect-timeout 15 --max-time 300 \
+            -o "${RUNNER_TEMP}/accesskit-c.zip" \
             "https://github.com/AccessKit/accesskit-c/releases/download/${ACCESSKIT_VERSION}/accesskit-c-${ACCESSKIT_VERSION}.zip"
-          unzip -q "${RUNNER_TEMP}/accesskit-c.zip" -d "${RUNNER_TEMP}"
+          unzip -q "${RUNNER_TEMP}/accesskit-c.zip" -d "${{github.workspace}}/.deps"
+
+      - name: Check the bindings are usable
+        run: |
+          set -euo pipefail
           # accesskit-config.cmake sits at the top of the archive, so this is
-          # what find_package(ACCESSKIT) resolves against.
-          test -f "${RUNNER_TEMP}/accesskit-c-${ACCESSKIT_VERSION}/accesskit-config.cmake"
+          # what find_package(ACCESSKIT) resolves against. Checked on the
+          # cached path too, so a truncated or half-written cache entry fails
+          # here rather than as a confusing configure error.
+          test -f "${{github.workspace}}/.deps/accesskit-c-${ACCESSKIT_VERSION}/accesskit-config.cmake"
+          test -f "${{github.workspace}}/.deps/accesskit-c-${ACCESSKIT_VERSION}/lib/linux/x86_64/static/libaccesskit.a"
 
       - name: Configure (AccessKit enabled)
         run: |
@@ -222,7 +246,7 @@ jobs:
             -D BUILD_ACCESSIBILITY=ON \
             -D BUILD_ACCESSKIT=ON \
             -D BUILD_UNIT_TESTS=ON \
-            -D CMAKE_PREFIX_PATH="${RUNNER_TEMP}/accesskit-c-${ACCESSKIT_VERSION}" \
+            -D CMAKE_PREFIX_PATH="${{github.workspace}}/.deps/accesskit-c-${ACCESSKIT_VERSION}" \
             -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging/usr/local \
             -D BUILD_NUMBER=${GITHUB_RUN_ID}
 
