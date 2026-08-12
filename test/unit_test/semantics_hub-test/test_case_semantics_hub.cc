@@ -684,3 +684,103 @@ TEST_F(SemanticsHubTest, NumericValueAccessorLeavesOutputsAloneWhenAbsent) {
   EXPECT_FALSE(ihs_semantics_node_numeric_value(nullptr, &value, &min, &max));
   ihs_semantics_release_snapshot(snapshot);
 }
+
+namespace {
+
+int g_taps = 0;
+double g_tap_x = 0.0;
+double g_tap_y = 0.0;
+
+int RecordTap(void*, int64_t, double x, double y) {
+  g_taps++;
+  g_tap_x = x;
+  g_tap_y = y;
+  return IHS_SEMANTICS_OK;
+}
+
+}  // namespace
+
+// The pointer fallback reaches the shell with the coordinates it was given.
+TEST_F(SemanticsHubTest, PointerTapReachesTheHost) {
+  g_taps = 0;
+  IhsSemanticsHost host{};
+  host.struct_size = sizeof(host);
+  host.send_pointer_tap = RecordTap;
+  ihs_semantics_set_host(&host);
+
+  IhsSemanticsConsumer* consumer = Register("agent", IHS_SEMANTICS_ACTION_TAP);
+  ASSERT_NE(consumer, nullptr);
+  EXPECT_EQ(ihs_semantics_send_pointer_tap(consumer, 0, 120.5, 48.0),
+            IHS_SEMANTICS_OK);
+  EXPECT_EQ(g_taps, 1);
+  EXPECT_DOUBLE_EQ(g_tap_x, 120.5);
+  EXPECT_DOUBLE_EQ(g_tap_y, 48.0);
+  ihs_semantics_unregister(consumer);
+}
+
+// The one that matters: a synthesized tap is a tap, so a consumer denied the
+// action must not obtain it by coordinate instead. Without this the allow
+// mask would arbitrate nothing -- anything it refused could be performed by
+// naming a point rather than a node.
+TEST_F(SemanticsHubTest, PointerTapIsRefusedWithoutTapPermission) {
+  g_taps = 0;
+  IhsSemanticsHost host{};
+  host.struct_size = sizeof(host);
+  host.send_pointer_tap = RecordTap;
+  ihs_semantics_set_host(&host);
+
+  // Everything except tap.
+  IhsSemanticsConsumer* consumer = Register(
+      "observer", IHS_SEMANTICS_ACTION_ALL & ~IHS_SEMANTICS_ACTION_TAP);
+  ASSERT_NE(consumer, nullptr);
+  EXPECT_EQ(ihs_semantics_send_pointer_tap(consumer, 0, 1.0, 1.0),
+            IHS_SEMANTICS_ERR_DENIED);
+  EXPECT_EQ(g_taps, 0) << "a denied tap still reached the shell";
+  ihs_semantics_unregister(consumer);
+}
+
+// A shell with no input path says so rather than reporting a tap it never
+// delivered.
+TEST_F(SemanticsHubTest, PointerTapIsUnsupportedWithoutAHostHook) {
+  IhsSemanticsHost host{};
+  host.struct_size = sizeof(host);
+  host.send_pointer_tap = nullptr;
+  ihs_semantics_set_host(&host);
+
+  IhsSemanticsConsumer* consumer = Register("agent", IHS_SEMANTICS_ACTION_TAP);
+  ASSERT_NE(consumer, nullptr);
+  EXPECT_EQ(ihs_semantics_send_pointer_tap(consumer, 0, 1.0, 1.0),
+            IHS_SEMANTICS_ERR_UNSUPPORTED_ACTION);
+  ihs_semantics_unregister(consumer);
+}
+
+// A coordinate that is not a number would land somewhere unpredictable.
+TEST_F(SemanticsHubTest, NonFinitePointerCoordinatesAreRefused) {
+  g_taps = 0;
+  IhsSemanticsHost host{};
+  host.struct_size = sizeof(host);
+  host.send_pointer_tap = RecordTap;
+  ihs_semantics_set_host(&host);
+
+  IhsSemanticsConsumer* consumer = Register("agent", IHS_SEMANTICS_ACTION_TAP);
+  ASSERT_NE(consumer, nullptr);
+  const double nan_value = std::numeric_limits<double>::quiet_NaN();
+  const double infinity = std::numeric_limits<double>::infinity();
+  EXPECT_EQ(ihs_semantics_send_pointer_tap(consumer, 0, nan_value, 1.0),
+            IHS_SEMANTICS_ERR_INVALID);
+  EXPECT_EQ(ihs_semantics_send_pointer_tap(consumer, 0, 1.0, infinity),
+            IHS_SEMANTICS_ERR_INVALID);
+  EXPECT_EQ(g_taps, 0);
+  ihs_semantics_unregister(consumer);
+}
+
+// An unregistered consumer is refused, as with dispatch: the handle is how
+// the funnel knows who is asking, and attribution is the point of it.
+TEST_F(SemanticsHubTest, PointerTapFromAnUnknownConsumerIsRefused) {
+  IhsSemanticsHost host{};
+  host.struct_size = sizeof(host);
+  host.send_pointer_tap = RecordTap;
+  ihs_semantics_set_host(&host);
+  EXPECT_EQ(ihs_semantics_send_pointer_tap(nullptr, 0, 1.0, 1.0),
+            IHS_SEMANTICS_ERR_INVALID);
+}

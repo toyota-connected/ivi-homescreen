@@ -90,6 +90,18 @@ typedef struct IhsSemanticsHost {
                   uint64_t action,
                   const uint8_t* data,
                   size_t data_length);
+
+  /*
+   * Synthesize a tap at a point, in the logical coordinates the published
+   * rects use. Distinct from dispatch because it is a different contract, not
+   * a different action: this rides the ordinary input path and is therefore
+   * hit-tested, where dispatch invokes a node's handler by id regardless of
+   * what is drawn on top of it.
+   *
+   * May be NULL on a shell that cannot synthesize input, which the hub
+   * reports as IHS_SEMANTICS_ERR_UNSUPPORTED_ACTION rather than pretending.
+   */
+  int (*send_pointer_tap)(void* user_data, int64_t view_id, double x, double y);
 } IhsSemanticsHost;
 
 /*
