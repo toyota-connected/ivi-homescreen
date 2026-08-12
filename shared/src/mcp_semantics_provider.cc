@@ -23,6 +23,9 @@
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 
+#include <sys/eventfd.h>
+#include <unistd.h>
+
 #include <cerrno>
 #include <cstdint>
 #include <cstdlib>
@@ -450,6 +453,9 @@ const IhsSemanticsNode* ResolveNode(const IhsSemanticsSnapshot* snapshot,
 
 struct Provider {
   std::mutex mutex;
+  // Signalled by the hub on publish and watched by the MCP registry; see
+  // where it is created for why one descriptor serves both.
+  int notify_fd = -1;
   IhsMcpProvider* mcp = nullptr;
   IhsSemanticsConsumer* consumer = nullptr;
   std::vector<IhsMcpToolDesc> tools;
@@ -695,12 +701,24 @@ int ihs_mcp_semantics_provider_start(void) {
   // Register with the hub first: an MCP client can call the moment the
   // provider is visible, and answering with "no tree" because we had not
   // subscribed yet would be a self-inflicted race.
+  // One eventfd serves both registrations. The hub signals it when a new tree
+  // is published, and the MCP registry is watching that same descriptor for
+  // "this provider changed" -- so a publish becomes a resources/updated with
+  // nothing in between to forward it. Non-blocking because the registry
+  // drains it until empty.
+  p.notify_fd = ::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  if (p.notify_fd < 0) {
+    return IHS_MCP_ERR_UNAVAILABLE;
+  }
+
   IhsSemanticsConsumerDesc consumer{};
   consumer.struct_size = sizeof(IhsSemanticsConsumerDesc);
   consumer.name = "mcp.semantics";
   consumer.action_allow_mask = kAllowMask;
-  consumer.notify_fd = -1;  // pulls on demand; no push needed
+  consumer.notify_fd = p.notify_fd;
   if (ihs_semantics_register(&consumer, &p.consumer) != IHS_SEMANTICS_OK) {
+    ::close(p.notify_fd);
+    p.notify_fd = -1;
     return IHS_MCP_ERR_UNAVAILABLE;
   }
 
@@ -714,12 +732,14 @@ int ihs_mcp_semantics_provider_start(void) {
   desc.callbacks.call_tool = CallTool;
   desc.callbacks.list_resources = ListResources;
   desc.callbacks.read_resource = ReadResource;
-  desc.notify_fd = -1;
+  desc.notify_fd = p.notify_fd;
 
   const int status = ihs_mcp_provider_register(&desc, &p.mcp);
   if (status != IHS_MCP_OK) {
     ihs_semantics_unregister(p.consumer);
     p.consumer = nullptr;
+    ::close(p.notify_fd);
+    p.notify_fd = -1;
     return status;
   }
   return IHS_MCP_OK;
@@ -735,6 +755,13 @@ void ihs_mcp_semantics_provider_stop(void) {
   if (p.consumer != nullptr) {
     ihs_semantics_unregister(p.consumer);
     p.consumer = nullptr;
+  }
+  // Closed only once both registrations are gone: each of them promises no
+  // callback is in flight when it returns, which is what makes the descriptor
+  // safe to release rather than merely unreferenced.
+  if (p.notify_fd >= 0) {
+    ::close(p.notify_fd);
+    p.notify_fd = -1;
   }
 }
 

@@ -135,6 +135,43 @@ IHS_EXPORT int ihs_mcp_host_read_resource(const char* uri,
 IHS_EXPORT int ihs_mcp_host_subscribe(const char* uri, bool subscribed);
 
 /*
+ * What a provider changing underneath the server looks like from above.
+ *
+ * `kind` says which notification the server should emit; `uri` names the
+ * resource for IHS_MCP_NOTIFY_RESOURCE_UPDATED and is "" otherwise.
+ *
+ * Invoked on the registry's watcher thread, never with the registry lock held,
+ * so a sink may call back in -- reading the tool list on a change is the
+ * obvious thing to want and would otherwise deadlock.
+ */
+typedef enum IhsMcpNotification {
+  /* A provider's tool list changed; re-read it and tell clients. */
+  IHS_MCP_NOTIFY_TOOLS_CHANGED = 0,
+  /* A resource changed; tell clients subscribed to `uri`. */
+  IHS_MCP_NOTIFY_RESOURCE_UPDATED = 1
+} IhsMcpNotification;
+
+typedef void (*IhsMcpNotificationSink)(IhsMcpNotification kind,
+                                       const char* uri,
+                                       void* user_data);
+
+/*
+ * Installs the sink the registry pushes provider changes to, and starts
+ * watching every registered provider's notify_fd. Pass NULL to uninstall and
+ * stop watching; the call does not return until the watcher is joined, so a
+ * caller may then tear down whatever the sink wrote to.
+ *
+ * One sink per process -- the server is the only thing that can deliver a
+ * notification, and a second one would mean two servers on one registry.
+ * Returns IHS_MCP_OK, or IHS_MCP_ERR_REFUSED if a sink is already installed.
+ *
+ * Without a sink the registry never watches an fd, so a build with no server
+ * pays nothing for a provider that signals into one.
+ */
+IHS_EXPORT int ihs_mcp_host_set_notification_sink(IhsMcpNotificationSink sink,
+                                                  void* user_data);
+
+/*
  * Releases a payload a provider produced. Calls the provider's own release
  * hook; safe on a zeroed payload, so a caller can release unconditionally on
  * an error path without checking whether anything was produced.
