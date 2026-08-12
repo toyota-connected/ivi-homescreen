@@ -34,6 +34,7 @@
 #if BUILD_ACCESSIBILITY && BUILD_MCP
 #include "ihs/ihs_mcp_host.h"
 #include "ihs/ihs_mcp_semantics.h"
+#include "ihs/ihs_mcp_transport.h"
 #endif
 
 #if BUILD_ACCESSIBILITY
@@ -327,6 +328,10 @@ void Engine::Shutdown() {
   // flight when it returns, and releases the hub registration that was keeping
   // semantics on. Safe when start never ran.
   if (m_enable_mcp) {
+    // Transport first: it routes into the provider, so stopping the provider
+    // while a request was in flight would tear out what that request is
+    // standing on. Stop guarantees nothing is in flight when it returns.
+    ihs_mcp_transport_stop();
     ihs_mcp_semantics_provider_stop();
   }
 #endif
@@ -407,6 +412,19 @@ FlutterEngineResult Engine::Run(FlutterDesktopEngineState* state) {
     const int status = ihs_mcp_semantics_provider_start();
     if (status == IHS_MCP_OK) {
       ihs::log::info("({}) MCP semantics provider started", m_index);
+      // Only once there is something to serve: the transport routes onto the
+      // registry, so binding a socket before the provider registered would
+      // advertise an empty tool list to whoever connected first.
+      IhsMcpTransportConfig transport{};
+      transport.struct_size = sizeof(transport);
+      const int served = ihs_mcp_transport_start(&transport);
+      if (served == IHS_MCP_OK) {
+        ihs::log::info("({}) MCP serving on {}", m_index,
+                       ihs_mcp_transport_socket_path());
+      } else {
+        ihs::log::error("({}) MCP transport failed to start: {}", m_index,
+                        served);
+      }
     } else {
       // Not fatal: the UI is the product and it runs without an agent
       // attached. Loud, though, because the image explicitly asked for this.
