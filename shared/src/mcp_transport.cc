@@ -23,6 +23,7 @@
 #include "ihs/ihs_mcp_host.h"
 #include "ihs/ihs_mcp_provider.h"
 
+#include <fcntl.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -30,6 +31,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <cstring>
@@ -89,6 +91,17 @@ struct Transport {
   std::string socket_path{};
   size_t max_request_bytes = kDefaultMaxRequestBytes;
   std::thread thread;
+
+  // Open event streams, one per client that asked for one. Raw descriptors
+  // because the only operations are write and close, and both happen under
+  // this mutex: a notification arrives on the registry's watcher thread while
+  // the accept loop may be adding a stream or dropping a dead one.
+  //
+  // Separate from `mutex` so delivering an event never contends with an
+  // accept or a stop -- and, more importantly, so a notification cannot
+  // deadlock against a stop that is waiting to join the accept thread.
+  std::mutex streams_mutex;
+  std::vector<int> streams;
 };
 
 Transport& TheTransport() {
@@ -206,11 +219,13 @@ void AppendResource(const IhsMcpHostResource* resource, void* user_data) {
 }
 
 std::string HandleInitialize() {
-  // Only the capabilities actually served are advertised. listChanged is
-  // absent because nothing pushes notifications yet, and claiming it would
-  // have clients waiting for messages that never arrive.
+  // listChanged and subscribe are advertised now that an event stream can
+  // carry them. They were deliberately absent while it could not: a client
+  // told to expect notifications that never arrive waits instead of polling,
+  // which is worse than being told nothing.
   return std::string(R"({"protocolVersion":")") + kProtocolVersion +
-         R"(","capabilities":{"tools":{},"resources":{}})" +
+         R"(","capabilities":{"tools":{"listChanged":true},)" +
+         R"("resources":{"listChanged":true,"subscribe":true}})" +
          R"(,"serverInfo":{"name":"ivi-homescreen","version":"1"}})";
 }
 
@@ -376,6 +391,29 @@ bool WriteAll(const int fd, const std::string& data) {
   return true;
 }
 
+// Reads until the header terminator and no further, for a request with no
+// body. Bounded like ReadRequest, so a peer cannot stream headers forever.
+bool ReadHeaderBlock(const int fd, std::string* out_headers) {
+  std::string buffer;
+  while (buffer.find("\r\n\r\n") == std::string::npos) {
+    char chunk[1024];
+    const ssize_t n = ::read(fd, chunk, sizeof(chunk));
+    if (n <= 0) {
+      if (n < 0 && errno == EINTR) {
+        continue;
+      }
+      return false;
+    }
+    buffer.append(chunk, static_cast<size_t>(n));
+    if (buffer.size() > kMaxHeaderBytes) {
+      WriteAll(fd, HttpResponse(431, "Request Header Fields Too Large", "{}"));
+      return false;
+    }
+  }
+  *out_headers = std::move(buffer);
+  return true;
+}
+
 // Reads until the header terminator, then exactly Content-Length bytes.
 // Returns false when the peer is malformed or over budget, having already
 // written the refusal.
@@ -488,16 +526,142 @@ bool PeerIsOwner(const int fd) {
   return credentials.uid == ::geteuid();
 }
 
-void ServeConnection(const int fd, const size_t max_body) {
+// One server-sent event. The blank line terminates it; without it a client
+// buffers the payload and delivers nothing.
+std::string EventFrame(const std::string& json) {
+  return "data: " + json + "\n\n";
+}
+
+// Pushes to every open stream, dropping any that will not take it.
+//
+// A stream is non-blocking, so a client that has stopped reading shows up as
+// EAGAIN rather than stalling this thread -- which matters because this runs
+// on the registry's watcher thread, and blocking here would stop every other
+// provider's notifications too. Such a client is dropped: a partial frame
+// would desynchronise the stream, and there is no way to resend.
+void Broadcast(const std::string& json) {
+  Transport& t = TheTransport();
+  const std::string frame = EventFrame(json);
+
+  const std::lock_guard<std::mutex> lock(t.streams_mutex);
+  auto it = t.streams.begin();
+  while (it != t.streams.end()) {
+    size_t sent = 0;
+    bool alive = true;
+    while (sent < frame.size()) {
+      const ssize_t n = ::write(*it, frame.data() + sent, frame.size() - sent);
+      if (n < 0) {
+        if (errno == EINTR) {
+          continue;
+        }
+        alive = false;  // EAGAIN included: a client not reading is gone to us
+        break;
+      }
+      sent += static_cast<size_t>(n);
+    }
+    if (alive) {
+      ++it;
+      continue;
+    }
+    ::close(*it);
+    it = t.streams.erase(it);
+  }
+}
+
+// The registry calls this when a provider changes. Translated into the
+// JSON-RPC notifications the specification names, and pushed to every stream.
+void OnRegistryNotification(const IhsMcpNotification kind,
+                            const char* uri,
+                            void* /* user_data */) {
+  if (kind == IHS_MCP_NOTIFY_TOOLS_CHANGED) {
+    Broadcast(
+        R"({"jsonrpc":"2.0","method":"notifications/tools/list_changed"})");
+    return;
+  }
+  const std::string resource = uri != nullptr ? uri : "";
+  Broadcast(R"({"jsonrpc":"2.0","method":"notifications/resources/updated")"
+            R"(,"params":{"uri":)" +
+            Escape(resource) + "}}");
+}
+
+// Turns an accepted connection into an event stream. Returns false when the
+// client did not ask for one, leaving it to be served as an ordinary request.
+bool TryOpenEventStream(const int fd, const std::string& headers) {
+  // A GET asking for the event-stream media type is how MCP's Streamable HTTP
+  // transport opens the server-to-client direction.
+  if (headers.rfind("GET ", 0) != 0) {
+    return false;
+  }
+  std::string lowered = headers;
+  for (char& c : lowered) {
+    c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+  }
+  if (lowered.find("text/event-stream") == std::string::npos) {
+    WriteAll(fd, HttpResponse(
+                     406, "Not Acceptable",
+                     R"({"error":"GET requires Accept: text/event-stream"})"));
+    return true;  // answered; caller should close
+  }
+
+  std::string response = "HTTP/1.1 200 OK\r\n";
+  response += "Content-Type: text/event-stream\r\n";
+  response += "Cache-Control: no-store\r\n";
+  // No Content-Length and no close: the body is the stream, and it ends when
+  // one side hangs up.
+  response += "Connection: keep-alive\r\n\r\n";
+  if (!WriteAll(fd, response)) {
+    return true;
+  }
+
+  // Non-blocking from here on, so a client that stops reading cannot stall
+  // the thread that delivers notifications.
+  const int flags = ::fcntl(fd, F_GETFL, 0);
+  if (flags >= 0) {
+    ::fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+  }
+
+  Transport& t = TheTransport();
+  const std::lock_guard<std::mutex> lock(t.streams_mutex);
+  t.streams.push_back(fd);
+  return true;
+}
+
+// Serves one connection. Returns true when the descriptor has become an event
+// stream and must stay open; the caller closes it otherwise.
+bool ServeConnection(const int fd, const size_t max_body) {
   if (!PeerIsOwner(fd)) {
     Log(IHS_LEVEL_WARN, "mcp: refused a connection from another user");
     WriteAll(fd, HttpResponse(403, "Forbidden", R"({"error":"forbidden"})"));
-    return;
+    return false;
+  }
+
+  // Peeked rather than read: a GET opens an event stream and a POST carries a
+  // request, and only the latter has a body to consume. Peeking keeps the
+  // request-reading path below exactly as it was.
+  char probe[4] = {0, 0, 0, 0};
+  const ssize_t peeked = ::recv(fd, probe, sizeof(probe), MSG_PEEK);
+  if (peeked <= 0) {
+    return false;
+  }
+  if (std::strncmp(probe, "GET ", 4) == 0) {
+    std::string headers;
+    if (!ReadHeaderBlock(fd, &headers)) {
+      return false;
+    }
+    if (TryOpenEventStream(fd, headers)) {
+      Transport& t = TheTransport();
+      const std::lock_guard<std::mutex> lock(t.streams_mutex);
+      // Kept open only if it actually joined the registry; a refused GET was
+      // answered and is finished with.
+      return std::find(t.streams.begin(), t.streams.end(), fd) !=
+             t.streams.end();
+    }
+    return false;
   }
 
   std::string body;
   if (!ReadRequest(fd, max_body, &body)) {
-    return;  // ReadRequest already answered, or the peer went away
+    return false;  // ReadRequest already answered, or the peer went away
   }
 
   const std::string response = Dispatch(body);
@@ -505,9 +669,10 @@ void ServeConnection(const int fd, const size_t max_body) {
     // A notification. HTTP still needs a reply, and 202 says "taken, nothing
     // to return" without inventing a JSON-RPC response the client must ignore.
     WriteAll(fd, HttpResponse(202, "Accepted", ""));
-    return;
+    return false;
   }
   WriteAll(fd, HttpResponse(200, "OK", response));
+  return false;
 }
 
 }  // namespace
@@ -599,8 +764,11 @@ void AcceptLoop() {
     }
     // Served inline. Requests are short and the host serializes anyway, so a
     // thread per connection would buy concurrency the registry cannot use.
-    ServeConnection(client, max_body);
-    ::close(client);
+    // A connection that became an event stream stays open and is owned by
+    // the stream registry from here.
+    if (!ServeConnection(client, max_body)) {
+      ::close(client);
+    }
   }
 }
 
@@ -683,12 +851,33 @@ int ihs_mcp_transport_start(const IhsMcpTransportConfig* config) {
   t.running = true;
   t.thread = std::thread(AcceptLoop);
 
+  // Installed last: the registry starts watching provider descriptors the
+  // moment this returns, and a notification arriving before there is anywhere
+  // to put it would be dropped rather than queued.
+  //
+  // Not fatal if refused -- something else already owns the sink, which means
+  // requests still work and only pushed notifications are missing. Said out
+  // loud, because a client that saw listChanged advertised will wait for
+  // messages that then never come.
+  if (ihs_mcp_host_set_notification_sink(OnRegistryNotification, nullptr) !=
+      IHS_MCP_OK) {
+    Log(IHS_LEVEL_ERROR,
+        "mcp: another notification sink is installed; serving requests "
+        "without pushed notifications");
+  }
+
   Log(IHS_LEVEL_INFO, "mcp: serving on " + path);
   return IHS_MCP_OK;
 }
 
 void ihs_mcp_transport_stop() {
   Transport& t = TheTransport();
+
+  // Uninstalled first, and this does not return until the registry's watcher
+  // is joined -- so no notification can be in flight into Broadcast while the
+  // streams below are being closed.
+  ihs_mcp_host_set_notification_sink(nullptr, nullptr);
+
   std::thread thread;
   {
     const std::lock_guard<std::mutex> lock(t.mutex);
@@ -717,6 +906,14 @@ void ihs_mcp_transport_stop() {
   t.wake_write_fd = -1;
   ::unlink(t.socket_path.c_str());
   t.socket_path.clear();
+
+  // Closing a stream is how a client learns the server is gone: there is no
+  // "goodbye" event, and the specification expects the transport to end.
+  const std::lock_guard<std::mutex> streams_lock(t.streams_mutex);
+  for (const int stream : t.streams) {
+    ::close(stream);
+  }
+  t.streams.clear();
 }
 
 bool ihs_mcp_transport_running() {
