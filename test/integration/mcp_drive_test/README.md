@@ -50,23 +50,30 @@ layout that breaks the first time a font or a screen size changes.
 ## The app must be composited, or nothing works
 
 This bit is not obvious and cost real time to find. If the surface is not
-being composited -- occluded, on another workspace, or under a compositor
-that stops sending frame callbacks once nothing is damaged -- then no frames
-run, `setState` never rebuilds, and **every check fails in a way that looks
-like the dispatch path is broken**. The action does reach the framework; the
-result simply never lands.
+being composited -- occluded, on another workspace, or behind a lock screen --
+then no frames run, `setState` never rebuilds, and **every check fails in a way
+that looks like the dispatch path is broken**. The action does reach the
+framework; the result simply never lands.
 
-Run it under a compositor you control rather than a desktop session:
+**Check the screen is unlocked first.** A locked desktop session stops
+presenting frames deliberately, so a run started before locking will stall
+partway through with the status frozen at whatever it last managed:
+
+```bash
+loginctl show-session "$(loginctl show-user "$USER" -p Display --value)" -p LockedHint
+# LockedHint=no  -> frames are being presented
+```
+
+Run it under a compositor you control rather than a desktop session, which
+sidesteps the lock policy as well as workspace and occlusion effects:
 
 ```bash
 weston --backend=headless --width=900 --height=700 --socket=wl-mcp-test &
 WAYLAND_DISPLAY=wl-mcp-test <shell> -b <bundle> --enable-mcp
 ```
 
-Even then a headless compositor may stop issuing frame callbacks while the UI
-is idle, which makes runs intermittent: the first interaction lands and later
-ones stall. If a check times out with the status frozen at an earlier value,
-that is this, not the tool it was exercising.
+If a check times out with the status frozen at an earlier value, suspect
+presentation before suspecting the tool it was exercising.
 
 ## Running it
 
