@@ -34,6 +34,8 @@
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <chrono>
+#include <condition_variable>
 #include <cstring>
 #include <map>
 #include <mutex>
@@ -130,6 +132,24 @@ struct Transport {
   // nothing" and "not interested in filtering" are not distinguishable, and
   // the safe reading is the one that keeps delivering.
   std::map<std::string, std::set<std::string>> subscriptions;
+
+  // Notification debounce.
+  //
+  // A provider signals per republished tree, so an animating UI produces one
+  // notification per frame. These carry no state beyond "something changed" --
+  // a client re-reads to find out what -- so collapsing a burst into one loses
+  // nothing, provided the last one still arrives. A client that misses the
+  // trailing edge is left believing a stale tree is current, with nothing to
+  // tell it otherwise, which is the failure this has to avoid rather than the
+  // volume.
+  std::mutex notify_mutex;
+  std::condition_variable notify_cv;
+  bool notify_running = false;
+  std::thread notify_thread;
+  bool tools_pending = false;
+  std::set<std::string> resources_pending;
+  std::chrono::steady_clock::time_point tools_last{};
+  std::map<std::string, std::chrono::steady_clock::time_point> resource_last;
 };
 
 Transport& TheTransport() {
@@ -790,19 +810,117 @@ void Broadcast(const std::string& json, const std::string& uri = {}) {
 
 // The registry calls this when a provider changes. Translated into the
 // JSON-RPC notifications the specification names, and pushed to every stream.
+// How long a burst is collapsed over. Long enough that an animating UI stops
+// waking every client every frame, short enough that a person driving the
+// agent does not perceive the delay -- and only ever delays a notification,
+// never drops the last one.
+constexpr auto kNotifyWindow = std::chrono::milliseconds(50);
+
+void EmitToolsChanged() {
+  Broadcast(R"({"jsonrpc":"2.0","method":"notifications/tools/list_changed"})");
+}
+
+void EmitResourceUpdated(const std::string& uri) {
+  Broadcast(R"({"jsonrpc":"2.0","method":"notifications/resources/updated")"
+            R"(,"params":{"uri":)" +
+                Escape(uri) + "}}",
+            uri);
+}
+
+// Sleeps out the window once something is pending, then flushes it.
+//
+// Idle costs nothing: this blocks until a notification actually arrives rather
+// than waking every window to find nothing to do.
+void NotifyLoop() {
+  Transport& t = TheTransport();
+  while (true) {
+    bool flush_tools = false;
+    std::vector<std::string> flush_resources;
+    {
+      std::unique_lock<std::mutex> lock(t.notify_mutex);
+      t.notify_cv.wait(lock, [&t]() {
+        return !t.notify_running || t.tools_pending ||
+               !t.resources_pending.empty();
+      });
+      if (!t.notify_running) {
+        // Nothing is flushed on the way out: stop() closes every stream, so
+        // there is no one left to tell.
+        return;
+      }
+      // Wait out the window with the lock released, so the burst this is
+      // collapsing can keep arriving while it does.
+      t.notify_cv.wait_for(lock, kNotifyWindow,
+                           [&t]() { return !t.notify_running; });
+      if (!t.notify_running) {
+        return;
+      }
+      const auto now = std::chrono::steady_clock::now();
+      flush_tools = t.tools_pending;
+      t.tools_pending = false;
+      if (flush_tools) {
+        t.tools_last = now;
+      }
+      for (const std::string& uri : t.resources_pending) {
+        flush_resources.push_back(uri);
+        t.resource_last[uri] = now;
+      }
+      t.resources_pending.clear();
+    }
+
+    // Emitted with the lock released: Broadcast takes the streams mutex, and
+    // nesting the two would put a lock order between the notification path and
+    // every other thing that touches streams.
+    if (flush_tools) {
+      EmitToolsChanged();
+    }
+    for (const std::string& uri : flush_resources) {
+      EmitResourceUpdated(uri);
+    }
+  }
+}
+
 void OnRegistryNotification(const IhsMcpNotification kind,
                             const char* uri,
                             void* /* user_data */) {
-  if (kind == IHS_MCP_NOTIFY_TOOLS_CHANGED) {
-    Broadcast(
-        R"({"jsonrpc":"2.0","method":"notifications/tools/list_changed"})");
-    return;
+  const std::string resource = kind == IHS_MCP_NOTIFY_TOOLS_CHANGED
+                                   ? std::string()
+                                   : std::string(uri != nullptr ? uri : "");
+
+  Transport& t = TheTransport();
+  bool emit_now = false;
+  {
+    const std::lock_guard<std::mutex> lock(t.notify_mutex);
+    const auto now = std::chrono::steady_clock::now();
+    // Leading edge: the first change after a quiet period goes out at once, so
+    // an idle UI reacting to a single action is not made to feel laggy by a
+    // mechanism that exists for bursts.
+    if (kind == IHS_MCP_NOTIFY_TOOLS_CHANGED) {
+      if (now - t.tools_last >= kNotifyWindow) {
+        t.tools_last = now;
+        emit_now = true;
+      } else {
+        t.tools_pending = true;
+      }
+    } else {
+      const auto last = t.resource_last.find(resource);
+      if (last == t.resource_last.end() ||
+          now - last->second >= kNotifyWindow) {
+        t.resource_last[resource] = now;
+        emit_now = true;
+      } else {
+        t.resources_pending.insert(resource);
+      }
+    }
   }
-  const std::string resource = uri != nullptr ? uri : "";
-  Broadcast(R"({"jsonrpc":"2.0","method":"notifications/resources/updated")"
-            R"(,"params":{"uri":)" +
-                Escape(resource) + "}}",
-            resource);
+  t.notify_cv.notify_one();
+
+  if (emit_now) {
+    if (kind == IHS_MCP_NOTIFY_TOOLS_CHANGED) {
+      EmitToolsChanged();
+    } else {
+      EmitResourceUpdated(resource);
+    }
+  }
 }
 
 // Turns an accepted connection into an event stream. Returns false when the
@@ -1094,6 +1212,11 @@ int ihs_mcp_transport_start(const IhsMcpTransportConfig* config) {
                             : kDefaultMaxRequestBytes;
   t.running = true;
   t.thread = std::thread(AcceptLoop);
+  {
+    const std::lock_guard<std::mutex> notify_lock(t.notify_mutex);
+    t.notify_running = true;
+  }
+  t.notify_thread = std::thread(NotifyLoop);
 
   // Installed last: the registry starts watching provider descriptors the
   // moment this returns, and a notification arriving before there is anywhere
@@ -1139,6 +1262,23 @@ void ihs_mcp_transport_stop() {
 
   if (thread.joinable()) {
     thread.join();
+  }
+
+  // Joined before the streams close, so no pending flush can write to a
+  // descriptor this is about to shut. The registry sink was uninstalled above,
+  // so nothing new can arrive while this winds down.
+  std::thread notify_thread;
+  {
+    const std::lock_guard<std::mutex> notify_lock(t.notify_mutex);
+    t.notify_running = false;
+    t.tools_pending = false;
+    t.resources_pending.clear();
+    t.resource_last.clear();
+    notify_thread = std::move(t.notify_thread);
+  }
+  t.notify_cv.notify_all();
+  if (notify_thread.joinable()) {
+    notify_thread.join();
   }
 
   const std::lock_guard<std::mutex> lock(t.mutex);
