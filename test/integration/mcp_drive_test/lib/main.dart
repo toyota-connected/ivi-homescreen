@@ -19,6 +19,8 @@
 // checks cannot pass by accident.
 
 import 'package:flutter/material.dart';
+// CustomSemanticsAction is not exported by material.dart.
+import 'package:flutter/semantics.dart';
 
 void main() {
   runApp(const McpDriveTestApp());
@@ -51,6 +53,13 @@ class _DriveTestPageState extends State<DriveTestPage> {
   String _last = 'none';
   int _events = 0;
 
+  // The multi-step flow's state. A slider carries a
+  // value the framework reports on the node itself, so a check can verify from
+  // the action's own node_after rather than reading the status line back --
+  // which is the difference verify-after-act is meant to make.
+  double _temperature = 21.0;
+  String _mode = 'manual';
+
   final TextEditingController _destination =
       TextEditingController(text: 'unset');
 
@@ -59,6 +68,14 @@ class _DriveTestPageState extends State<DriveTestPage> {
   // screen size changes; asking the app where the target is does not.
   final GlobalKey _opaqueKey = GlobalKey();
   Rect? _opaqueRect;
+
+  void _setMode(String mode) {
+    setState(() {
+      _mode = mode;
+      _last = 'mode:$mode';
+      _events++;
+    });
+  }
 
   void _record(String what) {
     setState(() {
@@ -101,7 +118,8 @@ class _DriveTestPageState extends State<DriveTestPage> {
     // chose, and the realistic case for set_text has a space in it. A
     // separator the payload can contain makes the fixture pass only for
     // inputs that avoid it, which is the wrong way round.
-    return 'last=$_last; events=$_events; text=${_destination.text}; $geometry';
+    return 'last=$_last; events=$_events; text=${_destination.text}; '
+        'temp=${_temperature.toStringAsFixed(1)}; mode=$_mode; $geometry';
   }
 
   @override
@@ -124,6 +142,58 @@ class _DriveTestPageState extends State<DriveTestPage> {
                 label: 'status',
                 value: _status,
                 child: ExcludeSemantics(child: Text(_status)),
+              ),
+              const SizedBox(height: 12),
+
+              // A slider, for the multi-step flow. Chosen because the
+              // framework puts increase/decrease on the node and reports the
+              // current setting as the node's own value -- so a driver can
+              // verify from node_after directly, without the status line.
+              //
+              // Wrapped and merged for the same reason as everything else
+              // here: a bare Semantics(label:) would sit above the slider and
+              // leave the actionable node unlabelled.
+              MergeSemantics(
+                child: Semantics(
+                  identifier: 'temperature',
+                  label: 'Temperature',
+                  child: Slider(
+                    value: _temperature,
+                    min: 16,
+                    max: 28,
+                    divisions: 24,
+                    onChanged: (double value) {
+                      setState(() {
+                        _temperature = value;
+                        _last = 'temp';
+                        _events++;
+                      });
+                    },
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // Custom actions: the application's own verbs, which have no
+              // fixed set and are named only by their labels. An agent finds
+              // these through the tree and invokes them by name, since
+              // identifiers are empty at the deployment floor.
+              MergeSemantics(
+                child: Semantics(
+                  identifier: 'climate',
+                  label: 'Climate',
+                  customSemanticsActions: <CustomSemanticsAction, VoidCallback>{
+                    const CustomSemanticsAction(label: 'Set to Auto'):
+                        () => _setMode('auto'),
+                    const CustomSemanticsAction(label: 'Set to Manual'):
+                        () => _setMode('manual'),
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    color: const Color(0xFFE0E0E0),
+                    child: const ExcludeSemantics(child: Text('Climate')),
+                  ),
+                ),
               ),
               const SizedBox(height: 12),
 
