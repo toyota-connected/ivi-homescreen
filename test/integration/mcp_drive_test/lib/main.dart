@@ -113,60 +113,73 @@ class _DriveTestPageState extends State<DriveTestPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              // The report channel. A single node whose value carries the
-              // whole result, so one ui_query reads everything a check needs.
+              // The report channel: one node whose value carries the whole
+              // result, so a single read gets everything a check needs.
+              //
+              // ExcludeSemantics on the child matters. Without it the Text
+              // contributes its own label, the two merge, and the node ends up
+              // labelled "status\nlast=..." -- which no exact match finds.
               Semantics(
                 identifier: 'status',
                 label: 'status',
                 value: _status,
-                child: Text(_status),
+                child: ExcludeSemantics(child: Text(_status)),
               ),
               const SizedBox(height: 12),
 
-              // C2: an ordinary annotated button. ui_tap must invoke this
-              // handler -- the same closure a real tap would.
-              Semantics(
-                identifier: 'save',
-                child: ElevatedButton(
-                  onPressed: () => _record('tap:save'),
-                  child: const Text('Save'),
+              // MergeSemantics on every control below, and this is the part
+              // worth copying into a real app. Semantics(identifier:) used as
+              // a wrapper produces a *parent* node carrying the identifier and
+              // no actions, with the actionable node underneath it -- so an
+              // agent that resolves the identifier and dispatches to it is
+              // refused, because that node offers nothing. Merging puts the
+              // identifier and the action on one node.
+              MergeSemantics(
+                child: Semantics(
+                  identifier: 'save',
+                  child: ElevatedButton(
+                    onPressed: () => _record('tap:save'),
+                    child: const Text('Save'),
+                  ),
                 ),
               ),
               const SizedBox(height: 8),
 
-              // C5: disabled. The framework drops an action on it silently, so
-              // the provider must refuse before dispatching.
-              Semantics(
-                identifier: 'locked',
-                child: const ElevatedButton(
-                  onPressed: null,
-                  child: Text('Locked'),
+              // Disabled: the framework drops an action on it silently, so the
+              // provider must refuse before dispatching.
+              MergeSemantics(
+                child: Semantics(
+                  identifier: 'locked',
+                  child: const ElevatedButton(
+                    onPressed: null,
+                    child: Text('Locked'),
+                  ),
                 ),
               ),
               const SizedBox(height: 8),
 
-              // C3: ui_set_text must replace the contents, and the framework
-              // must route it to this field's editing connection.
               SizedBox(
                 width: 320,
-                child: Semantics(
-                  identifier: 'destination',
-                  child: TextField(
-                    controller: _destination,
-                    decoration: const InputDecoration(
-                      labelText: 'Destination',
+                child: MergeSemantics(
+                  child: Semantics(
+                    identifier: 'destination',
+                    child: TextField(
+                      controller: _destination,
+                      decoration: const InputDecoration(
+                        labelText: 'Destination',
+                      ),
+                      onChanged: (String value) => _record('text:$value'),
                     ),
-                    onChanged: (String value) => _record('text:$value'),
                   ),
                 ),
               ),
               const SizedBox(height: 12),
 
-              // C4: the DR-7 case. ExcludeSemantics removes it from the tree
+              // The DR-7 case. ExcludeSemantics removes it from the tree
               // entirely, so no node describes it and ui_tap has nothing to
-              // address -- exactly the custom-canvas or platform-view target
-              // the pointer fallback exists for. It still hit-tests, so
-              // ui_tap_at at the rect above reaches it.
+              // address -- the custom-canvas or platform-view target the
+              // pointer fallback exists for. It still hit-tests, so ui_tap_at
+              // at the rect the app reports reaches it.
               ExcludeSemantics(
                 child: GestureDetector(
                   key: _opaqueKey,

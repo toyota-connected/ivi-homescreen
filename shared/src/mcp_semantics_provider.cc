@@ -30,6 +30,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -463,6 +464,31 @@ double ReadNumberArgument(const char* json,
   return member->value.GetDouble();
 }
 
+// Waits for a tree newer than `generation`, or gives up. Used where an action
+// only becomes available after the framework has rebuilt -- focusing a field
+// being the case that matters. Polled rather than waited on a condition: the
+// hub signals consumers by fd and this provider shares that descriptor with
+// the MCP registry, so consuming it here would swallow a notification the
+// server is waiting for.
+constexpr int kFocusSettleMs = 400;
+
+const IhsSemanticsSnapshot* WaitForNewerSnapshot(const uint64_t generation,
+                                                 const int timeout_ms) {
+  for (int waited = 0; waited <= timeout_ms; waited += 10) {
+    const IhsSemanticsSnapshot* candidate = ihs_semantics_acquire_snapshot();
+    if (candidate != nullptr &&
+        ihs_semantics_snapshot_generation(candidate) > generation) {
+      return candidate;
+    }
+    if (candidate != nullptr) {
+      ihs_semantics_release_snapshot(candidate);
+    }
+    struct timespec ts = {0, 10 * 1000 * 1000};
+    nanosleep(&ts, nullptr);
+  }
+  return nullptr;
+}
+
 // Resolves the node a tool call names, by id or by identifier.
 const IhsSemanticsNode* ResolveNode(const IhsSemanticsSnapshot* snapshot,
                                     const char* arguments) {
@@ -677,6 +703,48 @@ int CallTool(void* /* user_data */,
     ihs_semantics_release_snapshot(snapshot);
     return IHS_MCP_ERR_REFUSED;
   }
+  // A text field only offers SetText once it holds input focus: until then
+  // the framework has no editing connection to route the text into, so the
+  // action is genuinely absent rather than merely unadvertised. Focus it
+  // first and look again -- one tool from the caller's point of view, which
+  // is the sequencing the design called for.
+  //
+  // Input focus, not accessibility focus: the latter moves a screen reader's
+  // cursor and opens nothing.
+  if (tool->action == IHS_SEMANTICS_ACTION_SET_TEXT &&
+      (node->actions & IHS_SEMANTICS_ACTION_SET_TEXT) == 0 &&
+      (node->actions & IHS_SEMANTICS_ACTION_FOCUS) != 0) {
+    const int32_t focus_id = node->id;
+    ihs_semantics_release_snapshot(snapshot);
+
+    Provider& focus_provider = TheProvider();
+    if (ihs_semantics_dispatch(focus_provider.consumer, 0, focus_id,
+                               IHS_SEMANTICS_ACTION_FOCUS, nullptr, 0, nullptr,
+                               nullptr) != IHS_SEMANTICS_OK) {
+      FillPayload(out_result,
+                  ErrorJson("could not focus the field before setting text",
+                            generation));
+      return IHS_MCP_ERR_REFUSED;
+    }
+
+    // Focusing takes effect on a frame, so the tree that advertises SetText is
+    // the next one. Bounded so a field that never gains focus fails as a
+    // refusal rather than hanging the caller.
+    snapshot = WaitForNewerSnapshot(generation, kFocusSettleMs);
+    if (snapshot == nullptr) {
+      FillPayload(out_result,
+                  ErrorJson("field did not report focus in time", generation));
+      return IHS_MCP_ERR_REFUSED;
+    }
+    node = ihs_semantics_snapshot_node_by_id(snapshot, focus_id);
+    if (node == nullptr) {
+      FillPayload(out_result,
+                  ErrorJson("node vanished while focusing", generation));
+      ihs_semantics_release_snapshot(snapshot);
+      return IHS_MCP_ERR_NOT_FOUND;
+    }
+  }
+
   if ((node->actions & tool->action) == 0) {
     FillPayload(out_result,
                 ErrorJson("node does not offer this action", generation));
