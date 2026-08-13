@@ -162,3 +162,32 @@ TEST(SemanticsActionArgs, DataOnAnArgumentlessActionIsRefused) {
       EncodeActionArguments(IHS_SEMANTICS_ACTION_TAP, stray, sizeof(stray))
           .has_value());
 }
+
+// A custom action's argument is the id naming which of a node's verbs to run.
+// A bare int, not a map: the framework resolves the handler by it directly.
+TEST(SemanticsActionArgs, CustomActionEncodesTheActionId) {
+  const int32_t action_id = 72;
+  const auto* bytes = reinterpret_cast<const uint8_t*>(&action_id);
+  const auto encoded = accessibility::EncodeActionArguments(
+      IHS_SEMANTICS_ACTION_CUSTOM_ACTION, bytes, sizeof(action_id));
+  ASSERT_TRUE(encoded.has_value());
+  const flutter::EncodableValue value = Decode(*encoded);
+  ASSERT_TRUE(std::holds_alternative<int32_t>(value))
+      << "the framework looks the handler up by a bare int";
+  EXPECT_EQ(std::get<int32_t>(value), 72);
+}
+
+// Without an id there is nothing naming which verb to run, so this is refused
+// rather than dispatched as an action the framework would silently drop.
+TEST(SemanticsActionArgs, CustomActionWithoutAnIdIsRefused) {
+  EXPECT_FALSE(accessibility::EncodeActionArguments(
+                   IHS_SEMANTICS_ACTION_CUSTOM_ACTION, nullptr, 0)
+                   .has_value());
+}
+
+TEST(SemanticsActionArgs, CustomActionWithAWrongSizedIdIsRefused) {
+  const uint8_t stub[3] = {1, 2, 3};
+  EXPECT_FALSE(accessibility::EncodeActionArguments(
+                   IHS_SEMANTICS_ACTION_CUSTOM_ACTION, stub, sizeof(stub))
+                   .has_value());
+}
