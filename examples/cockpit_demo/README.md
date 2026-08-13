@@ -27,11 +27,26 @@ ninja -C build/mcp
 cd examples/cockpit_demo && flutter build bundle && cd -
 ```
 
-Assemble a bundle directory (`data/flutter_assets`, `data/icudtl.dat`,
-`lib/libflutter_engine.so`) and start the shell with the surface enabled:
+Assemble a bundle directory. `flutter build bundle` produces a JIT bundle
+(`kernel_blob.bin`), so it needs the **debug** engine -- a release engine will
+refuse to run it:
 
 ```bash
-./build/mcp/shell/homescreen -b <bundle> --enable-mcp
+BUNDLE=/tmp/cockpit-bundle
+ENGINE=$(find ~/.cache/emb/store/engine -path '*x86_64-debug*' \
+              -name libflutter_engine.so | head -1)
+ICU=$(dirname $(which flutter))/cache/artifacts/engine/linux-x64/icudtl.dat
+
+mkdir -p $BUNDLE/data $BUNDLE/lib
+cp -r examples/cockpit_demo/build/flutter_assets $BUNDLE/data/
+cp "$ICU" $BUNDLE/data/
+cp "$ENGINE" $BUNDLE/lib/
+```
+
+Then start the shell with the surface enabled:
+
+```bash
+./build/mcp/shell/homescreen -b $BUNDLE --enable-mcp
 ```
 
 **The app must be composited.** If the surface is occluded, on another
@@ -52,8 +67,13 @@ so `scripts/mcp_stdio_bridge.py` adapts it to stdio.
 **Claude Code:**
 
 ```bash
-claude mcp add cockpit -- python3 /path/to/ivi-homescreen/scripts/mcp_stdio_bridge.py
+claude mcp add cockpit -- python3 "$PWD/scripts/mcp_stdio_bridge.py"
+claude mcp list        # cockpit: ... - OK Connected
 ```
+
+`claude mcp list` runs a real health check, so a green line there means the
+bridge reached the socket and the shell answered -- not merely that the
+command was registered.
 
 **Claude Desktop** — in its MCP configuration:
 
