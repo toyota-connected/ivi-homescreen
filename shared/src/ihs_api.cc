@@ -52,6 +52,11 @@ extern "C" const IhsApi* ihs_get_api(uint32_t requested_abi) {
       /* trace         */ ihs::trace::trace_api(),
       /* platform_view */ ihs::pv::platform_view_api(),
       /* config        */ ihs::config::config_api(),
+#ifdef IHS_WITH_SEMANTICS
+      /* semantics     */ ihs::semantics::semantics_api(),
+#else
+      /* semantics     */ nullptr,
+#endif
   };
   return &api;
 }
