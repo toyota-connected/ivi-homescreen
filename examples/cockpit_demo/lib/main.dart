@@ -69,6 +69,8 @@ class _CockpitPageState extends State<CockpitPage> {
   double _volume = 4;
 
   String _destination = 'none';
+  final TextEditingController _destinationField =
+      TextEditingController(text: 'none');
 
   final List<String> _log = <String>[];
   McpAppTools? _tools;
@@ -86,6 +88,7 @@ class _CockpitPageState extends State<CockpitPage> {
     // handler is gone fails only after the call times out, which reads to an
     // agent as the whole surface being broken.
     _tools?.unregister();
+    _destinationField.dispose();
     super.dispose();
   }
 
@@ -174,7 +177,8 @@ class _CockpitPageState extends State<CockpitPage> {
           ),
           McpTool(
             name: 'media',
-            description: 'Control playback: play, pause, next or previous.',
+            description: 'Control playback. next and previous also start '
+                'playback if it was paused.',
             inputSchema: <String, Object?>{
               'type': 'object',
               'properties': <String, Object?>{
@@ -192,11 +196,19 @@ class _CockpitPageState extends State<CockpitPage> {
                   setState(() => _playing = true);
                 case 'pause':
                   setState(() => _playing = false);
+                // Skipping starts playback, as a head unit does. Advancing to
+                // a track and leaving it silent is the literal reading of
+                // "next" and not what anyone means by it.
                 case 'next':
-                  setState(() => _track = (_track + 1) % _tracks.length);
+                  setState(() {
+                    _track = (_track + 1) % _tracks.length;
+                    _playing = true;
+                  });
                 case 'previous':
-                  setState(() =>
-                      _track = (_track - 1 + _tracks.length) % _tracks.length);
+                  setState(() {
+                    _track = (_track - 1 + _tracks.length) % _tracks.length;
+                    _playing = true;
+                  });
                 default:
                   throw ArgumentError('unknown action: $action');
               }
@@ -222,7 +234,16 @@ class _CockpitPageState extends State<CockpitPage> {
               if (place.isEmpty) {
                 throw ArgumentError('place must not be empty');
               }
-              setState(() => _destination = place);
+              setState(() {
+                _destination = place;
+                // Kept in step with the field: setting one and not the other
+                // leaves the UI showing something the state does not agree
+                // with, which is the failure a person notices last.
+                _destinationField.value = TextEditingValue(
+                  text: place,
+                  selection: TextSelection.collapsed(offset: place.length),
+                );
+              });
               _note('set_destination($place)');
               return <String, Object?>{'destination': place};
             },
@@ -430,7 +451,10 @@ class _CockpitPageState extends State<CockpitPage> {
                   identifier: 'next_track',
                   child: OutlinedButton(
                     onPressed: () {
-                      setState(() => _track = (_track + 1) % _tracks.length);
+                      setState(() {
+                        _track = (_track + 1) % _tracks.length;
+                        _playing = true;
+                      });
                       _note('next track');
                     },
                     child: const Text('Next track'),
@@ -458,16 +482,22 @@ class _CockpitPageState extends State<CockpitPage> {
         _card('Navigation', <Widget>[
           MergeSemantics(
             child: Semantics(
+              // No label here: the field's own labelText already provides one,
+              // and MergeSemantics concatenates the two into
+              // "Destination\nDestination" -- which no exact match finds and
+              // which reads as two controls to anything summarising the tree.
               identifier: 'destination',
-              label: 'Destination',
               child: TextField(
                 decoration: const InputDecoration(
                   labelText: 'Destination',
                   border: OutlineInputBorder(),
                 ),
-                controller: TextEditingController(text: _destination)
-                  ..selection = TextSelection.collapsed(
-                      offset: _destination.length),
+                // Held rather than built per frame. A controller constructed in
+                // build() is replaced on the next rebuild, so text an agent set
+                // through ui_set_text would be reverted by the following frame
+                // -- the write reaches the field and then quietly disappears.
+                controller: _destinationField,
+                onChanged: (String value) => _destination = value,
                 onSubmitted: (String value) {
                   setState(() => _destination = value);
                   _note('destination -> $value');
