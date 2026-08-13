@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#include <poll.h>
+#include <sys/eventfd.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -467,4 +469,256 @@ TEST_F(McpTransportTest, StopClosesOpenStreams) {
   const ssize_t n = ::read(fd, chunk, sizeof(chunk));
   EXPECT_EQ(n, 0) << "expected end of stream, got " << n;
   ::close(fd);
+}
+
+namespace {
+
+// Opens a stream that identifies a session, so notifications to it can be
+// filtered by what that session subscribed to.
+int OpenStreamAs(const std::string& path,
+                 const std::string& session,
+                 std::string* out_headers) {
+  const int fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  if (fd < 0) {
+    return -1;
+  }
+  sockaddr_un address{};
+  address.sun_family = AF_UNIX;
+  std::strncpy(address.sun_path, path.c_str(), sizeof(address.sun_path) - 1);
+  if (::connect(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) !=
+      0) {
+    ::close(fd);
+    return -1;
+  }
+  const std::string request =
+      "GET /mcp HTTP/1.1\r\nAccept: text/event-stream\r\n"
+      "Mcp-Session-Id: " +
+      session + "\r\n\r\n";
+  if (::write(fd, request.data(), request.size()) < 0) {
+    ::close(fd);
+    return -1;
+  }
+  char chunk[1024];
+  const ssize_t n = ::read(fd, chunk, sizeof(chunk));
+  if (n <= 0) {
+    ::close(fd);
+    return -1;
+  }
+  out_headers->assign(chunk, static_cast<size_t>(n));
+  return fd;
+}
+
+std::string SessionFrom(const std::string& response) {
+  const size_t at = response.find("Mcp-Session-Id: ");
+  if (at == std::string::npos) {
+    return {};
+  }
+  const size_t start = at + std::strlen("Mcp-Session-Id: ");
+  return response.substr(start, response.find("\r\n", start) - start);
+}
+
+std::string Subscribe(const std::string& path,
+                      const std::string& session,
+                      const std::string& uri,
+                      const char* method = "resources/subscribe") {
+  const std::string body =
+      std::string(R"({"jsonrpc":"2.0","id":90,"method":")") + method +
+      R"(","params":{"uri":")" + uri + R"("}})";
+  return Send(path, "POST / HTTP/1.1\r\nMcp-Session-Id: " + session +
+                        "\r\nContent-Length: " + std::to_string(body.size()) +
+                        "\r\n\r\n" + body);
+}
+
+// Reads whatever the stream has, without blocking past a short grace period.
+std::string DrainStream(const int fd, const int millis = 400) {
+  std::string out;
+  pollfd p{fd, POLLIN, 0};
+  while (::poll(&p, 1, millis) > 0 && (p.revents & POLLIN) != 0) {
+    char chunk[2048];
+    const ssize_t n = ::read(fd, chunk, sizeof(chunk));
+    if (n <= 0) {
+      break;
+    }
+    out.append(chunk, static_cast<size_t>(n));
+  }
+  return out;
+}
+
+}  // namespace
+
+// initialize is where a session comes from: every request is Connection:
+// close, so a connection cannot be one.
+TEST_F(McpTransportTest, InitializeMintsASession) {
+  const std::string response =
+      Post(path_, R"({"jsonrpc":"2.0","id":1,"method":"initialize"})");
+  const std::string session = SessionFrom(response);
+  EXPECT_EQ(session.size(), 32u) << response;
+  // Two clients must not be handed the same one.
+  const std::string other = SessionFrom(
+      Post(path_, R"({"jsonrpc":"2.0","id":1,"method":"initialize"})"));
+  EXPECT_NE(session, other);
+}
+
+// The capability was advertised in initialize before any method implemented
+// it, so a client that took the advertisement at its word got
+// "method not found".
+TEST_F(McpTransportTest, SubscribeIsImplementedNotJustAdvertised) {
+  const std::string session = SessionFrom(
+      Post(path_, R"({"jsonrpc":"2.0","id":1,"method":"initialize"})"));
+  ASSERT_FALSE(session.empty());
+  const std::string body = Body(Subscribe(path_, session, "ui://"));
+  EXPECT_EQ(body.find("-32601"), std::string::npos) << body;
+  EXPECT_NE(body.find(R"("result")"), std::string::npos) << body;
+}
+
+// The filter belongs to a session, and the session comes from the header. A
+// body-supplied one would let a client redirect another client's stream.
+TEST_F(McpTransportTest, SubscribeWithoutASessionIsRefused) {
+  const std::string body = Body(Post(path_, R"({"jsonrpc":"2.0","id":91,)"
+                                            R"("method":"resources/subscribe",)"
+                                            R"("params":{"uri":"ui://"}})"));
+  EXPECT_NE(body.find("-32602"), std::string::npos) << body;
+}
+
+TEST_F(McpTransportTest, SubscribeWithoutAUriIsRefused) {
+  const std::string session = SessionFrom(
+      Post(path_, R"({"jsonrpc":"2.0","id":1,"method":"initialize"})"));
+  const std::string request =
+      R"({"jsonrpc":"2.0","id":92,"method":"resources/subscribe"})";
+  const std::string body = Body(
+      Send(path_, "POST / HTTP/1.1\r\nMcp-Session-Id: " + session +
+                      "\r\nContent-Length: " + std::to_string(request.size()) +
+                      "\r\n\r\n" + request));
+  EXPECT_NE(body.find("-32602"), std::string::npos) << body;
+}
+
+namespace {
+
+// The smallest provider that can be registered and signalled. Notifications
+// originate in the registry's watcher, so a real provider is the only way to
+// exercise delivery end to end.
+struct SignallingProvider {
+  static int ListTools(void*, const IhsMcpToolDesc** out, size_t* count) {
+    *out = nullptr;
+    *count = 0;
+    return IHS_MCP_OK;
+  }
+  static int ListResources(void*,
+                           const IhsMcpResourceDesc** out,
+                           size_t* count) {
+    *out = nullptr;
+    *count = 0;
+    return IHS_MCP_OK;
+  }
+  static int CallTool(void*, const char*, const char*, size_t, IhsMcpPayload*) {
+    return IHS_MCP_ERR_NOT_FOUND;
+  }
+  static int ReadResource(void*, const char*, IhsMcpPayload*) {
+    return IHS_MCP_ERR_NOT_FOUND;
+  }
+};
+
+}  // namespace
+
+// The point of the whole thing: a stream subscribed to one scheme must not be
+// woken by another's traffic. Driven through a real provider signal rather
+// than by calling the sink, because the URI the registry reports is decided
+// there and is the thing being filtered on.
+TEST_F(McpTransportTest, NotificationsGoOnlyToStreamsThatSubscribed) {
+  const std::string a = SessionFrom(
+      Post(path_, R"({"jsonrpc":"2.0","id":1,"method":"initialize"})"));
+  const std::string b = SessionFrom(
+      Post(path_, R"({"jsonrpc":"2.0","id":1,"method":"initialize"})"));
+  ASSERT_FALSE(a.empty());
+  ASSERT_FALSE(b.empty());
+
+  // Subscribed to the concrete resource, not the scheme the registry will
+  // report -- which is exactly the mismatch a naive equality check drops.
+  ASSERT_NE(
+      Body(Subscribe(path_, a, "ui://semantics/tree")).find(R"("result")"),
+      std::string::npos);
+  ASSERT_NE(Body(Subscribe(path_, b, "other://elsewhere")).find(R"("result")"),
+            std::string::npos);
+
+  std::string headers;
+  const int subscribed = OpenStreamAs(path_, a, &headers);
+  const int uninterested = OpenStreamAs(path_, b, &headers);
+  const int unfiltered = OpenStream(path_, &headers);  // never subscribed
+  ASSERT_GE(subscribed, 0);
+  ASSERT_GE(uninterested, 0);
+  ASSERT_GE(unfiltered, 0);
+
+  SignallingProvider mock;
+  const int notify = ::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(notify, 0);
+  IhsMcpProviderDesc desc{};
+  desc.struct_size = sizeof(desc);
+  desc.name = "ui-test";
+  desc.tool_prefix = "ui_";
+  desc.resource_scheme = "ui";
+  desc.capability_mask = IHS_MCP_CAP_ALL;
+  desc.notify_fd = notify;
+  desc.user_data = &mock;
+  desc.callbacks.list_tools = &SignallingProvider::ListTools;
+  desc.callbacks.list_resources = &SignallingProvider::ListResources;
+  desc.callbacks.call_tool = &SignallingProvider::CallTool;
+  desc.callbacks.read_resource = &SignallingProvider::ReadResource;
+  IhsMcpProvider* provider = nullptr;
+  ASSERT_EQ(ihs_mcp_provider_register(&desc, &provider), IHS_MCP_OK);
+
+  const uint64_t one = 1;
+  ASSERT_EQ(::write(notify, &one, sizeof(one)),
+            static_cast<ssize_t>(sizeof(one)));
+
+  const std::string got_subscribed = DrainStream(subscribed);
+  const std::string got_uninterested = DrainStream(uninterested);
+  const std::string got_unfiltered = DrainStream(unfiltered);
+
+  EXPECT_NE(got_subscribed.find("resources/updated"), std::string::npos)
+      << "a subscription to the concrete URI must still match the scheme the "
+         "registry reports: ["
+      << got_subscribed << "]";
+  EXPECT_EQ(got_uninterested.find("resources/updated"), std::string::npos)
+      << "subscribed elsewhere, so this update was not its business: ["
+      << got_uninterested << "]";
+  EXPECT_NE(got_unfiltered.find("resources/updated"), std::string::npos)
+      << "a stream that never subscribed kept the old firehose: ["
+      << got_unfiltered << "]";
+
+  // tools/list_changed is not resource-scoped, so it is not filtered: every
+  // stream needs it, including the one subscribed to another scheme.
+  EXPECT_NE(got_uninterested.find("tools/list_changed"), std::string::npos)
+      << got_uninterested;
+
+  ihs_mcp_provider_unregister(provider);
+  ::close(notify);
+  ::close(subscribed);
+  ::close(uninterested);
+  ::close(unfiltered);
+}
+
+// Providers register at any point in a session, so a subscribe that arrives
+// before the provider owning the scheme is not a failure. Refusing it would
+// make the result depend on a startup race the client cannot see.
+TEST_F(McpTransportTest, SubscribeBeforeAnyProviderIsAccepted) {
+  const std::string session = SessionFrom(
+      Post(path_, R"({"jsonrpc":"2.0","id":1,"method":"initialize"})"));
+  ASSERT_FALSE(session.empty());
+  const std::string body =
+      Body(Subscribe(path_, session, "nobody-claims-this://x"));
+  EXPECT_NE(body.find(R"("result")"), std::string::npos) << body;
+}
+
+// Unsubscribing from the last URI restores the unfiltered stream rather than
+// leaving an empty set, which the filter would otherwise read as "everything"
+// anyway -- the two must not disagree.
+TEST_F(McpTransportTest, UnsubscribingFromTheLastUriRestoresEverything) {
+  const std::string session = SessionFrom(
+      Post(path_, R"({"jsonrpc":"2.0","id":1,"method":"initialize"})"));
+  ASSERT_FALSE(session.empty());
+  ASSERT_NE(Body(Subscribe(path_, session, "ui://")).find(R"("result")"),
+            std::string::npos);
+  const std::string body =
+      Body(Subscribe(path_, session, "ui://", "resources/unsubscribe"));
+  EXPECT_NE(body.find(R"("result")"), std::string::npos) << body;
 }
