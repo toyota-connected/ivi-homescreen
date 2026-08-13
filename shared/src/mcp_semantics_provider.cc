@@ -489,6 +489,67 @@ const IhsSemanticsSnapshot* WaitForNewerSnapshot(const uint64_t generation,
   return nullptr;
 }
 
+// How long an action waits for the tree to settle before reporting what it
+// sees (DR-8).
+//
+// A bound on waiting, not an expectation: an action that changes nothing pays
+// this in full, which is the cost of answering "did anything happen" in the
+// same round trip as the act. Longer than a frame because the framework has
+// to run the handler, rebuild, lay out and republish before the change is
+// visible here, and a bound tight enough to miss that would report "no
+// change" for actions that did change something -- the one wrong answer that
+// looks like a real result.
+constexpr int kVerifySettleMs = 150;
+
+// Appends the verify-after-act fields to a tool result (DR-8, plan 4.1).
+//
+// generation_after equal to generation_before is a real answer rather than a
+// failure: the action was accepted and the tree did not change, which is what
+// firing a network call or toggling something the semantics do not describe
+// looks like. Reporting it as an error would make a client retry an action
+// that already happened.
+void WriteOutcome(rapidjson::Writer<rapidjson::StringBuffer>& w,
+                  const char* mode,
+                  const uint64_t generation_before,
+                  const int32_t node_id,
+                  const bool report_node) {
+  const IhsSemanticsSnapshot* after =
+      WaitForNewerSnapshot(generation_before, kVerifySettleMs);
+  if (after == nullptr) {
+    // Nothing newer arrived. Read the current tree anyway rather than assuming
+    // it still matches: the wait can only end early on a newer generation, so
+    // this is the same tree, and looking is cheaper than reasoning about it.
+    after = ihs_semantics_acquire_snapshot();
+  }
+
+  w.Key("mode");
+  w.String(mode);
+  w.Key("generation_before");
+  w.Uint64(generation_before);
+  w.Key("generation_after");
+  w.Uint64(after != nullptr ? ihs_semantics_snapshot_generation(after)
+                            : generation_before);
+
+  if (report_node) {
+    const IhsSemanticsNode* node =
+        after != nullptr ? ihs_semantics_snapshot_node_by_id(after, node_id)
+                         : nullptr;
+    w.Key("node_after");
+    if (node == nullptr) {
+      // The node left the tree. A route change does exactly this, and it is
+      // the normal outcome of tapping something that navigates -- null says
+      // "gone" without dressing a successful action as a failure.
+      w.Null();
+    } else {
+      WriteNode(w, node, after);
+    }
+  }
+
+  if (after != nullptr) {
+    ihs_semantics_release_snapshot(after);
+  }
+}
+
 // Resolves the node a tool call names, by id or by identifier.
 const IhsSemanticsNode* ResolveNode(const IhsSemanticsSnapshot* snapshot,
                                     const char* arguments) {
@@ -666,9 +727,11 @@ int CallTool(void* /* user_data */,
       return IHS_MCP_ERR_REFUSED;
     }
 
-    // Deliberately does not claim a target. Nothing here knows what was under
-    // the point, and reporting a node would be inventing the confirmation the
-    // caller chose this tool to go without.
+    // Still claims no target: nothing here knows what was under the point, and
+    // naming a node would invent the confirmation the caller chose this tool
+    // to go without. The generations are reported regardless -- "the tree
+    // changed" is exactly the evidence a coordinate tap otherwise lacks, and
+    // it is the only thing this tool can honestly say about its effect.
     rapidjson::StringBuffer tap_buffer;
     rapidjson::Writer<rapidjson::StringBuffer> tap_writer(tap_buffer);
     tap_writer.StartObject();
@@ -680,8 +743,8 @@ int CallTool(void* /* user_data */,
     tap_writer.Double(x);
     tap_writer.Key("y");
     tap_writer.Double(y);
-    tap_writer.Key("generation_before");
-    tap_writer.Uint64(generation_now);
+    WriteOutcome(tap_writer, "pointer", generation_now, 0,
+                 /*report_node=*/false);
     tap_writer.EndObject();
     FillPayload(out_result, tap_buffer.GetString());
     return IHS_MCP_OK;
@@ -795,10 +858,6 @@ int CallTool(void* /* user_data */,
     return IHS_MCP_ERR_REFUSED;
   }
 
-  // Report the generation the decision was made against. A client that wants
-  // to know what changed re-reads the tree and compares; the hub cannot say
-  // here whether the widget did anything, and pretending otherwise would be
-  // worse than saying nothing.
   rapidjson::StringBuffer buffer;
   rapidjson::Writer<rapidjson::StringBuffer> w(buffer);
   w.StartObject();
@@ -806,8 +865,7 @@ int CallTool(void* /* user_data */,
   w.Bool(true);
   w.Key("node_id");
   w.Int(node_id);
-  w.Key("generation_before");
-  w.Uint64(generation);
+  WriteOutcome(w, "semantics", generation, node_id, /*report_node=*/true);
   w.EndObject();
   FillPayload(out_result, buffer.GetString());
   return IHS_MCP_OK;
