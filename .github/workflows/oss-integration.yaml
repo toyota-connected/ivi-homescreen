@@ -51,6 +51,25 @@ jobs:
       - name: Fetch emb
         run: git clone --depth 1 https://github.com/toyota-connected/emb_cli.git emb_cli
 
+      # The engine is a download, and this job had no cache for it, so every
+      # run refetched it -- and a run where that fetch failed produced a
+      # bundle with no libflutter_engine.so and a "Bundle failed" that reads
+      # like a build error rather than a download that did not happen.
+      #
+      # Restore and save are split with the save under always(), because a
+      # cache that exists to make a fetch survivable has to be written on the
+      # path where the fetch went wrong; otherwise it only helps the runs that
+      # did not need it.
+      #
+      # The same-named jobs in oss-ivi-homescreen.yml carry this too. They
+      # share names but not definitions, which is how this pair was missed.
+      - name: Restore emb engine artifacts
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/emb/store/engine
+          key: emb-engine-x86_64
+          restore-keys: |
+            emb-engine-x86_64-
       - name: Crash-handler integration test (emb local)
         run: |
           eval "$(./emb_cli/bootstrap.sh --shellenv)"
@@ -61,6 +80,13 @@ jobs:
   # - Builds a homescreen binary with the watchdog enabled (software backend for CI)
   # - Runs test/integration/watchdog-test
   # - Checks if exited with code 0 (PASS) or 1 (FAIL)
+      - name: Save emb engine artifacts
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/emb/store/engine
+          key: emb-engine-x86_64-${{ github.run_id }}
+
   watchdog:
     if: ${{ github.server_url == 'https://github.com' && github.ref != 'refs/heads/agl' }}
     runs-on: ubuntu-22.04
@@ -92,6 +118,25 @@ jobs:
       - name: Fetch emb
         run: git clone --depth 1 https://github.com/toyota-connected/emb_cli.git emb_cli
 
+      # The engine is a download, and this job had no cache for it, so every
+      # run refetched it -- and a run where that fetch failed produced a
+      # bundle with no libflutter_engine.so and a "Bundle failed" that reads
+      # like a build error rather than a download that did not happen.
+      #
+      # Restore and save are split with the save under always(), because a
+      # cache that exists to make a fetch survivable has to be written on the
+      # path where the fetch went wrong; otherwise it only helps the runs that
+      # did not need it.
+      #
+      # The same-named jobs in oss-ivi-homescreen.yml carry this too. They
+      # share names but not definitions, which is how this pair was missed.
+      - name: Restore emb engine artifacts
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/emb/store/engine
+          key: emb-engine-x86_64
+          restore-keys: |
+            emb-engine-x86_64-
       - name: Watchdog integration test (emb local)
         run: |
           eval "$(./emb_cli/bootstrap.sh --shellenv)"
@@ -111,3 +156,10 @@ jobs:
         shell: bash
         run: |
           ./scripts/systemd_watchdog_integration.sh
+
+      - name: Save emb engine artifacts
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/emb/store/engine
+          key: emb-engine-x86_64-${{ github.run_id }}
