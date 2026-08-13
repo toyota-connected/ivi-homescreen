@@ -58,6 +58,14 @@ std::string Send(const std::string& path, const std::string& request) {
     return {};
   }
 
+  // This helper reads to EOF, so anything the transport leaves open would
+  // block it forever. A regression should fail the suite, not hang CI until
+  // something kills it -- on timeout the loop below just returns what arrived,
+  // which is enough for the caller to assert against.
+  const timeval receive_timeout{5, 0};
+  ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &receive_timeout,
+               sizeof(receive_timeout));
+
   size_t sent = 0;
   while (sent < request.size()) {
     const ssize_t n = ::write(fd, request.data() + sent, request.size() - sent);
@@ -246,6 +254,43 @@ TEST_F(McpTransportTest, HeaderNamesAreCaseInsensitive) {
       Send(path_, "POST / HTTP/1.1\r\ncontent-length: " +
                       std::to_string(body.size()) + "\r\n\r\n" + body);
   EXPECT_EQ(StatusLine(response), "HTTP/1.1 200 OK");
+}
+
+// DNS rebinding: a page resolves a name it controls to a local address and
+// posts here, and the browser attaches its origin. Nothing that legitimately
+// speaks to this surface is a browser, so the header's presence is enough to
+// refuse on. Unreachable over a Unix socket -- the point is that the check is
+// above the listener, so it already covers a port before one exists.
+TEST_F(McpTransportTest, RequestWithAnOriginHeaderIsRefused) {
+  const std::string body = R"({"jsonrpc":"2.0","id":7,"method":"ping"})";
+  const std::string response =
+      Send(path_,
+           "POST / HTTP/1.1\r\nOrigin: http://evil.example\r\n"
+           "Content-Length: " +
+               std::to_string(body.size()) + "\r\n\r\n" + body);
+  EXPECT_EQ(StatusLine(response), "HTTP/1.1 403 Forbidden");
+}
+
+// Matched case-insensitively, or the check is trivially evaded.
+TEST_F(McpTransportTest, OriginIsMatchedWhateverItsCase) {
+  const std::string body = R"({"jsonrpc":"2.0","id":8,"method":"ping"})";
+  const std::string response =
+      Send(path_,
+           "POST / HTTP/1.1\r\noRiGiN: http://evil.example\r\n"
+           "Content-Length: " +
+               std::to_string(body.size()) + "\r\n\r\n" + body);
+  EXPECT_EQ(StatusLine(response), "HTTP/1.1 403 Forbidden");
+}
+
+// The stream handshake is a GET and takes a different path through the
+// transport, so it needs the check of its own -- a rebound page opening an
+// event stream reads the UI just as effectively as one calling a tool.
+TEST_F(McpTransportTest, EventStreamWithAnOriginHeaderIsRefused) {
+  const std::string response =
+      Send(path_,
+           "GET / HTTP/1.1\r\nAccept: text/event-stream\r\n"
+           "Origin: http://evil.example\r\n\r\n");
+  EXPECT_EQ(StatusLine(response), "HTTP/1.1 403 Forbidden");
 }
 
 // A header section with no terminator must not let a peer stream forever.

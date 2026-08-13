@@ -414,6 +414,28 @@ bool ReadHeaderBlock(const int fd, std::string* out_headers) {
   return true;
 }
 
+// True when the request carries an Origin header.
+//
+// Only a browser sets Origin, and no browser is a legitimate client of this
+// surface, so the header's presence is a reliable signal of DNS rebinding: a
+// page the user happens to visit resolves a name it controls to a local
+// address, posts to this endpoint, and the browser attaches the page's origin.
+// The MCP specification requires HTTP transports to validate Origin for
+// exactly this reason.
+//
+// A browser cannot open a Unix socket, so nothing can reach this today. It is
+// here because the check belongs with the protocol rather than with the
+// socket: anything that terminates a network transport in front of this one
+// forwards plain HTTP into it, and this is what keeps a rebound request from
+// arriving as an ordinary local one.
+bool CarriesOrigin(const std::string& raw_headers) {
+  std::string lowered = raw_headers;
+  for (char& c : lowered) {
+    c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+  }
+  return lowered.find("\r\norigin:") != std::string::npos;
+}
+
 // Reads until the header terminator, then exactly Content-Length bytes.
 // Returns false when the peer is malformed or over budget, having already
 // written the refusal.
@@ -450,6 +472,13 @@ bool ReadRequest(const int fd, const size_t max_body, std::string* out_body) {
   if (buffer.rfind("POST ", 0) != 0) {
     WriteAll(
         fd, HttpResponse(405, "Method Not Allowed", R"({"error":"use POST"})"));
+    return false;
+  }
+
+  if (CarriesOrigin(buffer.substr(0, header_end))) {
+    Log(IHS_LEVEL_WARN, "mcp: refused a request carrying an Origin header");
+    WriteAll(fd, HttpResponse(403, "Forbidden",
+                              R"({"error":"origin not allowed"})"));
     return false;
   }
 
@@ -646,6 +675,14 @@ bool ServeConnection(const int fd, const size_t max_body) {
   if (std::strncmp(probe, "GET ", 4) == 0) {
     std::string headers;
     if (!ReadHeaderBlock(fd, &headers)) {
+      return false;
+    }
+    // The stream is the more valuable target of the two: it is a live feed of
+    // the UI rather than a single call, and it takes this separate path.
+    if (CarriesOrigin(headers)) {
+      Log(IHS_LEVEL_WARN, "mcp: refused a stream carrying an Origin header");
+      WriteAll(fd, HttpResponse(403, "Forbidden",
+                                R"({"error":"origin not allowed"})"));
       return false;
     }
     if (TryOpenEventStream(fd, headers)) {
