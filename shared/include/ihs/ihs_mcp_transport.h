@@ -17,8 +17,8 @@
 /*
  * The MCP transport: a Unix domain socket carrying JSON-RPC 2.0 over HTTP,
  * which is what the MCP Streamable HTTP transport is once the network is taken
- * out of it. Everything it serves comes from ihs_mcp_host.h; it adds framing
- * and a socket, and knows nothing about tools or the semantics tree.
+ * out of it. Everything it serves comes from ihs_mcp_registry.h; it adds
+ * framing and a socket, and knows nothing about tools or the semantics tree.
  *
  * Unix domain only, deliberately. A TCP listener would make the UI drivable
  * from off-box, which is a product-security decision rather than a transport

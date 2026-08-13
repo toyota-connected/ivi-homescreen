@@ -15,11 +15,20 @@
  */
 
 /*
- * SHELL-ONLY routing surface for the MCP provider registry. This is NOT part
- * of the plugin ABI (docs/PLUGIN_ABI.md) -- a provider sees only
- * ihs/ihs_mcp_provider.h.
+ * SHELL-ONLY routing surface for the MCP provider registry.
  *
- *   provider --ihs_mcp_provider_*--> registry <--ihs_mcp_host_*-- MCP server
+ * Named "registry", not "host", deliberately. In MCP's own vocabulary a host
+ * is the application that owns clients and drives a model; a server is what
+ * exposes tools and resources. What this port ships is a **server**, and this
+ * header is the layer beneath it -- so calling it a host would name it after
+ * the one role in the protocol it is not. `ihs_semantics_host.h` keeps the
+ * word, where it means the embedding application and collides with nothing.
+ *
+ * This is NOT part of the plugin ABI (docs/PLUGIN_ABI.md) -- a provider sees
+ * only ihs/ihs_mcp_provider.h.
+ *
+ *   provider --ihs_mcp_provider_*--> registry <--ihs_mcp_registry_*-- MCP
+ * server
  *
  * The registry sits between them so neither has to know about the other. It
  * owns namespacing, capability masking, and the lifetime rules; the server
@@ -36,12 +45,12 @@
  *
  * Threading: callable from any thread; the registry serializes internally.
  * Provider callbacks are invoked on the calling thread, which for the real
- * server is the host thread -- matching what ihs_mcp_provider.h promises
- * providers.
+ * server is its own serving thread -- matching what ihs_mcp_provider.h
+ * promises providers.
  */
 
-#ifndef IHS_MCP_HOST_H_
-#define IHS_MCP_HOST_H_
+#ifndef IHS_MCP_REGISTRY_H_
+#define IHS_MCP_REGISTRY_H_
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -61,22 +70,22 @@ extern "C" {
  * `provider` is the owning provider's name, for logs and for attribution when
  * something has to be traced back to who offered it.
  */
-typedef struct IhsMcpHostTool {
+typedef struct IhsMcpRegistryTool {
   const char* name; /* prefixed */
   const char* description;
   const char* input_schema_json;
   const char* provider;
   uint64_t capability;
-} IhsMcpHostTool;
+} IhsMcpRegistryTool;
 
 /* One resource as clients see it. */
-typedef struct IhsMcpHostResource {
+typedef struct IhsMcpRegistryResource {
   const char* uri;
   const char* name;
   const char* description;
   const char* mime_type;
   const char* provider;
-} IhsMcpHostResource;
+} IhsMcpRegistryResource;
 
 /*
  * Visits every advertised tool across all providers, in registration order.
@@ -89,15 +98,16 @@ typedef struct IhsMcpHostResource {
  * registry's own lock held, and the pointers it receives are valid only for
  * the duration of the call.
  */
-typedef void (*IhsMcpToolVisitor)(const IhsMcpHostTool* tool, void* user_data);
-IHS_EXPORT int ihs_mcp_host_for_each_tool(IhsMcpToolVisitor fn,
-                                          void* user_data);
+typedef void (*IhsMcpToolVisitor)(const IhsMcpRegistryTool* tool,
+                                  void* user_data);
+IHS_EXPORT int ihs_mcp_registry_for_each_tool(IhsMcpToolVisitor fn,
+                                              void* user_data);
 
 /* The same, for resources. */
-typedef void (*IhsMcpResourceVisitor)(const IhsMcpHostResource* resource,
+typedef void (*IhsMcpResourceVisitor)(const IhsMcpRegistryResource* resource,
                                       void* user_data);
-IHS_EXPORT int ihs_mcp_host_for_each_resource(IhsMcpResourceVisitor fn,
-                                              void* user_data);
+IHS_EXPORT int ihs_mcp_registry_for_each_resource(IhsMcpResourceVisitor fn,
+                                                  void* user_data);
 
 /*
  * Routes a tool call by prefix to its provider and strips the prefix before
@@ -112,27 +122,27 @@ IHS_EXPORT int ihs_mcp_host_for_each_resource(IhsMcpResourceVisitor fn,
  *
  * `arguments_json` may be NULL, which is passed to the provider as "{}".
  * On IHS_MCP_OK the caller owns the payload and must release it with
- * ihs_mcp_host_release_payload.
+ * ihs_mcp_registry_release_payload.
  */
-IHS_EXPORT int ihs_mcp_host_call_tool(const char* name,
-                                      const char* arguments_json,
-                                      size_t arguments_length,
-                                      IhsMcpPayload* out_result);
+IHS_EXPORT int ihs_mcp_registry_call_tool(const char* name,
+                                          const char* arguments_json,
+                                          size_t arguments_length,
+                                          IhsMcpPayload* out_result);
 
 /*
  * Reads a resource, routed by URI scheme. Returns IHS_MCP_ERR_NOT_FOUND when
  * no provider claims the scheme or the provider does not serve the URI. On
  * IHS_MCP_OK the caller owns the payload.
  */
-IHS_EXPORT int ihs_mcp_host_read_resource(const char* uri,
-                                          IhsMcpPayload* out_content);
+IHS_EXPORT int ihs_mcp_registry_read_resource(const char* uri,
+                                              IhsMcpPayload* out_content);
 
 /*
  * Notes client interest in a URI, routed by scheme. Providers that left
- * `subscribe` NULL are a no-op success: the host tracks subscriptions itself
- * and the callback exists only so a provider can start or stop work.
+ * `subscribe` NULL are a no-op success: the registry tracks subscriptions
+ * itself and the callback exists only so a provider can start or stop work.
  */
-IHS_EXPORT int ihs_mcp_host_subscribe(const char* uri, bool subscribed);
+IHS_EXPORT int ihs_mcp_registry_subscribe(const char* uri, bool subscribed);
 
 /*
  * What a provider changing underneath the server looks like from above.
@@ -168,18 +178,19 @@ typedef void (*IhsMcpNotificationSink)(IhsMcpNotification kind,
  * Without a sink the registry never watches an fd, so a build with no server
  * pays nothing for a provider that signals into one.
  */
-IHS_EXPORT int ihs_mcp_host_set_notification_sink(IhsMcpNotificationSink sink,
-                                                  void* user_data);
+IHS_EXPORT int ihs_mcp_registry_set_notification_sink(
+    IhsMcpNotificationSink sink,
+    void* user_data);
 
 /*
  * Releases a payload a provider produced. Calls the provider's own release
  * hook; safe on a zeroed payload, so a caller can release unconditionally on
  * an error path without checking whether anything was produced.
  */
-IHS_EXPORT void ihs_mcp_host_release_payload(IhsMcpPayload* payload);
+IHS_EXPORT void ihs_mcp_registry_release_payload(IhsMcpPayload* payload);
 
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
 
-#endif /* IHS_MCP_HOST_H_ */
+#endif /* IHS_MCP_REGISTRY_H_ */

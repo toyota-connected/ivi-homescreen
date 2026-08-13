@@ -16,12 +16,12 @@
 
 // MCP transport: JSON-RPC 2.0 over HTTP on a Unix domain socket. Framing and
 // dispatch only -- every method here is a thin translation onto
-// ihs_mcp_host.h, which is where tools and resources actually live.
+// ihs_mcp_registry.h, which is where tools and resources actually live.
 
 #include "ihs/ihs_mcp_transport.h"
 
-#include "ihs/ihs_mcp_host.h"
 #include "ihs/ihs_mcp_provider.h"
+#include "ihs/ihs_mcp_registry.h"
 
 #include <fcntl.h>
 #include <poll.h>
@@ -179,7 +179,7 @@ struct ListAccumulator {
   bool first = true;
 };
 
-void AppendTool(const IhsMcpHostTool* tool, void* user_data) {
+void AppendTool(const IhsMcpRegistryTool* tool, void* user_data) {
   auto* acc = static_cast<ListAccumulator*>(user_data);
   if (!acc->first) {
     acc->out += ",";
@@ -199,7 +199,7 @@ void AppendTool(const IhsMcpHostTool* tool, void* user_data) {
   acc->out += "}";
 }
 
-void AppendResource(const IhsMcpHostResource* resource, void* user_data) {
+void AppendResource(const IhsMcpRegistryResource* resource, void* user_data) {
   auto* acc = static_cast<ListAccumulator*>(user_data);
   if (!acc->first) {
     acc->out += ",";
@@ -232,7 +232,7 @@ std::string HandleInitialize() {
 std::string HandleToolsList() {
   ListAccumulator acc;
   acc.out = R"({"tools":[)";
-  ihs_mcp_host_for_each_tool(AppendTool, &acc);
+  ihs_mcp_registry_for_each_tool(AppendTool, &acc);
   acc.out += "]}";
   return acc.out;
 }
@@ -240,7 +240,7 @@ std::string HandleToolsList() {
 std::string HandleResourcesList() {
   ListAccumulator acc;
   acc.out = R"({"resources":[)";
-  ihs_mcp_host_for_each_resource(AppendResource, &acc);
+  ihs_mcp_registry_for_each_resource(AppendResource, &acc);
   acc.out += "]}";
   return acc.out;
 }
@@ -268,16 +268,16 @@ std::string HandleToolsCall(const rapidjson::Value& params,
   }
 
   IhsMcpPayload payload{};
-  const int status = ihs_mcp_host_call_tool(name.c_str(), arguments.c_str(),
-                                            arguments.size(), &payload);
+  const int status = ihs_mcp_registry_call_tool(name.c_str(), arguments.c_str(),
+                                                arguments.size(), &payload);
   if (status != IHS_MCP_OK) {
-    ihs_mcp_host_release_payload(&payload);
+    ihs_mcp_registry_release_payload(&payload);
     return ErrorEnvelope(id, JsonRpcCodeFor(status), StatusText(status));
   }
 
   const std::string content(payload.data != nullptr ? payload.data : "",
                             payload.length);
-  ihs_mcp_host_release_payload(&payload);
+  ihs_mcp_registry_release_payload(&payload);
 
   // The tool's own JSON is carried as MCP text content: providers return a
   // result document, and the specification's content array is the envelope a
@@ -295,15 +295,15 @@ std::string HandleResourcesRead(const rapidjson::Value& params,
   const std::string uri = params["uri"].GetString();
 
   IhsMcpPayload payload{};
-  const int status = ihs_mcp_host_read_resource(uri.c_str(), &payload);
+  const int status = ihs_mcp_registry_read_resource(uri.c_str(), &payload);
   if (status != IHS_MCP_OK) {
-    ihs_mcp_host_release_payload(&payload);
+    ihs_mcp_registry_release_payload(&payload);
     return ErrorEnvelope(id, JsonRpcCodeFor(status), StatusText(status));
   }
 
   const std::string content(payload.data != nullptr ? payload.data : "",
                             payload.length);
-  ihs_mcp_host_release_payload(&payload);
+  ihs_mcp_registry_release_payload(&payload);
 
   return ResultEnvelope(id, R"({"contents":[{"uri":)" + Escape(uri) +
                                 R"(,"mimeType":"application/json","text":)" +
@@ -859,7 +859,7 @@ int ihs_mcp_transport_start(const IhsMcpTransportConfig* config) {
   // requests still work and only pushed notifications are missing. Said out
   // loud, because a client that saw listChanged advertised will wait for
   // messages that then never come.
-  if (ihs_mcp_host_set_notification_sink(OnRegistryNotification, nullptr) !=
+  if (ihs_mcp_registry_set_notification_sink(OnRegistryNotification, nullptr) !=
       IHS_MCP_OK) {
     Log(IHS_LEVEL_ERROR,
         "mcp: another notification sink is installed; serving requests "
@@ -876,7 +876,7 @@ void ihs_mcp_transport_stop() {
   // Uninstalled first, and this does not return until the registry's watcher
   // is joined -- so no notification can be in flight into Broadcast while the
   // streams below are being closed.
-  ihs_mcp_host_set_notification_sink(nullptr, nullptr);
+  ihs_mcp_registry_set_notification_sink(nullptr, nullptr);
 
   std::thread thread;
   {
