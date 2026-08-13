@@ -1,0 +1,25 @@
+name: cockpit_demo
+description: >-
+  A cockpit demo for driving ivi-homescreen from an LLM, offering both the
+  generic verbs derived from the semantics tree and tools the application
+  declares for itself.
+
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.1.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  ihs_mcp_app_tools:
+    path: ../../packages/ihs_mcp_app_tools
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
