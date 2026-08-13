@@ -232,6 +232,9 @@ uint64_t ToIhsActions(const NodeSpec& spec) {
   if (spec.action_collapse) {
     actions |= IHS_SEMANTICS_ACTION_COLLAPSE;
   }
+  if (spec.action_custom_action) {
+    actions |= IHS_SEMANTICS_ACTION_CUSTOM_ACTION;
+  }
   return actions;
 }
 

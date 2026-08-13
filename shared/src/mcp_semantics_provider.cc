@@ -232,6 +232,13 @@ void WriteActions(rapidjson::Writer<rapidjson::StringBuffer>& w,
       w.String(tool.name);
     }
   }
+  // Named separately because its tool carries no action bit: ui_custom_action
+  // is routed by name and resolves an id before dispatching, so the loop above
+  // cannot reach it. Without this a node able to run the app's own verbs looks
+  // like a node offering nothing.
+  if ((actions & IHS_SEMANTICS_ACTION_CUSTOM_ACTION) != 0) {
+    w.String("custom_action");
+  }
   w.EndArray();
 }
 

@@ -34,6 +34,7 @@ Exits non-zero on the first failed check, listing every result.
 import argparse
 import json
 import os
+import re
 import socket
 import sys
 import time
@@ -155,6 +156,42 @@ def wait_for(path, predicate, timeout, what):
     raise Failure(f"timed out waiting for {what}; status was {last}")
 
 
+def query(path, **selectors):
+    """ui_query with any of its selectors. Returns the decoded result."""
+    ok, doc = call_tool(path, "ui_query", selectors, request_id=7)
+    if not ok:
+        raise Failure(f"ui_query {selectors}: {doc}")
+    return doc
+
+
+def act(path, tool, arguments, what):
+    """Invokes an action tool and returns its verify-after-act result.
+
+    The point of DR-8 is that this is enough on its own: the caller does not
+    re-read the tree to find out what happened, because the response already
+    carries the node as it stands afterwards.
+    """
+    ok, doc = call_tool(path, tool, arguments, request_id=8)
+    if not ok:
+        raise Failure(f"{tool} ({what}) was refused: {doc}")
+    if not doc.get("dispatched"):
+        raise Failure(f"{tool} ({what}) was not dispatched: {doc}")
+    return doc
+
+
+def numeric(value):
+    """The leading number in a slider's reported value, or None.
+
+    The framework formats this itself and the exact spelling is not ours to
+    depend on -- percentages and units both occur -- so this reads the number
+    and ignores the rest rather than matching a string.
+    """
+    if value is None:
+        return None
+    match = re.search(r"-?\d+(?:\.\d+)?", str(value))
+    return float(match.group()) if match else None
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     default_runtime = os.environ.get("XDG_RUNTIME_DIR") or \
@@ -262,12 +299,94 @@ def main():
         if after.get("events") != before.get("events"):
             raise Failure("a refused tap still reached the widget")
 
+    # C6 -- a multi-step flow driven entirely by what
+    # an agent can actually see, with each step verified from the action's own
+    # response rather than by re-reading the tree.
+    #
+    # No node ids are carried in from outside and no identifiers are used:
+    # identifiers are empty at the 3.38.3 deployment floor (plan section 2.2),
+    # so a flow that depended on them would pass here and fail on a target.
+    def c6_multi_step_flow():
+        # Step 1: find the control by role and the action it offers, which is
+        # how an agent picks a target it was not told about.
+        found = query(args.socket, role="slider", action="increase")
+        if found.get("match_count", 0) < 1:
+            raise Failure("no slider offering increase; the app did not "
+                          "publish one, or the selectors did not match it")
+        slider = found["nodes"][0]
+        if slider.get("label") != "Temperature":
+            raise Failure(f"found the wrong slider: {slider.get('label')!r}")
+
+        start = numeric(slider.get("value"))
+        if start is None:
+            raise Failure(f"slider reports no numeric value: {slider!r}")
+        app_start = numeric(status_fields(args.socket).get("temp"))
+        if app_start is None:
+            raise Failure("the app did not report its temperature")
+
+        # Step 2: act, and read the outcome out of the action's own reply.
+        first = act(args.socket, "ui_increase", {"node_id": slider["id"]},
+                    "raise the temperature")
+        if first.get("mode") != "semantics":
+            raise Failure(f"expected a semantics dispatch: {first}")
+        after = first.get("node_after")
+        if after is None:
+            raise Failure("node_after was null; the slider left the tree")
+        raised = numeric(after.get("value"))
+        if raised is None or raised <= start:
+            raise Failure(
+                f"the slider did not move: {start} -> {raised}. The action "
+                f"reached the framework, so either the widget ignored it or "
+                f"node_after is reporting the pre-action tree")
+
+        # Step 3: again, to show the flow accumulates rather than each step
+        # being read against a stale baseline.
+        second = act(args.socket, "ui_increase", {"node_id": slider["id"]},
+                     "raise it again")
+        twice = numeric((second.get("node_after") or {}).get("value"))
+        if twice is None or twice <= raised:
+            raise Failure(f"second step did not advance: {raised} -> {twice}")
+
+        # Step 4: a custom action, found and invoked by its label. These are
+        # the application's own verbs -- there is no fixed set, and the label
+        # is the only handle an agent has on one.
+        climate = query(args.socket, custom_action="Set to Auto")
+        if climate.get("match_count", 0) < 1:
+            raise Failure("no node declares the custom action 'Set to Auto'")
+        node = climate["nodes"][0]
+        act(args.socket, "ui_custom_action",
+            {"node_id": node["id"], "action": "Set to Auto"},
+            "switch the climate mode")
+
+        # The custom action's effect is app state rather than node state, so
+        # this one step is confirmed through the status line -- which is also
+        # the proof the widget's own closure ran, not merely that the dispatch
+        # was accepted.
+        fields = wait_for(args.socket, lambda f: f.get("mode") == "auto",
+                          args.timeout, "the custom action's handler to run")
+
+        # And the slider's movement reached the app's own state, not just the
+        # semantics node.
+        #
+        # Compared as a direction, not a number. The framework reports a
+        # slider's semantic value as a percentage of its range while the app
+        # holds degrees, so the two are the same movement in different units
+        # and equating them would be checking the unit conversion rather than
+        # the dispatch.
+        reported = numeric(fields.get("temp"))
+        if reported is None or reported <= app_start:
+            raise Failure(
+                f"the tree moved but the app did not: app was {app_start}, "
+                f"now {reported}, while node_after went {start} -> {twice}")
+
     check("C1", "the tree describes the app", c1)
     check("C2", "ui_tap invokes the widget's own handler", c2)
     check("C3", "ui_set_text reaches the field (R-9)", c3)
     check("C4a", "the unannotated region is absent from the tree", c4_no_node)
     check("C4b", "ui_tap_at reaches it anyway (DR-7)", c4_pointer_reaches)
     check("C5", "a disabled control is refused before dispatch", c5)
+    check("C6", "a multi-step flow by role, label and custom-action name",
+          c6_multi_step_flow)
 
     width = max(len(d) for _, d, _, _ in results)
     failed = 0
