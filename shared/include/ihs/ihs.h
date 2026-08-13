@@ -41,6 +41,7 @@ typedef struct IhsLoggingApi IhsLoggingApi;
 typedef struct IhsTraceApi IhsTraceApi;
 typedef struct IhsPlatformViewApi IhsPlatformViewApi;
 typedef struct IhsConfigApi IhsConfigApi;
+typedef struct IhsSemanticsApi IhsSemanticsApi;
 
 /*
  * The top-level capability table, valid for the process lifetime. struct_size
@@ -54,6 +55,10 @@ typedef struct IhsApi {
   const IhsTraceApi* trace;
   const IhsPlatformViewApi* platform_view;
   const IhsConfigApi* config;
+  /* ABI 1.2. Null unless the library was built with BUILD_ACCESSIBILITY; a
+   * consumer reading a table from an ABI 1.1 library must not touch this
+   * field, which is what the struct_size above is for. */
+  const IhsSemanticsApi* semantics;
 } IhsApi;
 
 /*

@@ -506,6 +506,66 @@ IHS_EXPORT int ihs_semantics_dispatch(IhsSemanticsConsumer* consumer,
                                       IhsSemanticsDoneCallback done,
                                       void* user_data);
 
+/*
+ * Semantics capability sub-table (IhsApi::semantics), added in ABI 1.2.
+ *
+ * The flat entry points above are the same functions and remain supported.
+ * This exists so a consumer can ask whether the hub is present rather than
+ * find out by failing to link: the hub is compiled only with
+ * BUILD_ACCESSIBILITY, so in a build without it every ihs_semantics_* symbol
+ * is absent and a consumer that referenced one would fail to load at all.
+ * A null IhsApi::semantics is the same question answered at runtime, which is
+ * what every other capability here does.
+ *
+ * Reaching the hub this way costs one indirection per call and nothing else;
+ * a consumer that already knows the capability is present may keep using the
+ * flat symbols.
+ */
+typedef struct IhsSemanticsApi {
+  size_t struct_size;
+
+  /* Snapshot lifetime. Every successful acquire pairs with one release. */
+  const IhsSemanticsSnapshot* (*acquire_snapshot)(void);
+  void (*release_snapshot)(const IhsSemanticsSnapshot* snapshot);
+
+  /* Snapshot reads. */
+  uint64_t (*snapshot_generation)(const IhsSemanticsSnapshot* snapshot);
+  size_t (*snapshot_node_count)(const IhsSemanticsSnapshot* snapshot);
+  const IhsSemanticsNode* (
+      *snapshot_node_at)(const IhsSemanticsSnapshot* snapshot, size_t index);
+  const IhsSemanticsNode* (*snapshot_node_by_id)(
+      const IhsSemanticsSnapshot* snapshot,
+      int32_t node_id);
+  const IhsSemanticsCustomAction* (*find_custom_action)(
+      const IhsSemanticsSnapshot* snapshot,
+      int32_t action_id);
+
+  /* Node fields that are not read by dereference; see the accessor above. */
+  bool (*node_numeric_value)(const IhsSemanticsNode* node,
+                             double* out_value,
+                             double* out_min,
+                             double* out_max);
+
+  /* Consumer lifetime. */
+  int (*register_consumer)(const IhsSemanticsConsumerDesc* desc,
+                           IhsSemanticsConsumer** out_consumer);
+  void (*unregister_consumer)(IhsSemanticsConsumer* consumer);
+
+  /* Acting on the tree. */
+  int (*dispatch)(IhsSemanticsConsumer* consumer,
+                  int64_t view_id,
+                  int32_t node_id,
+                  uint64_t action,
+                  const uint8_t* data,
+                  size_t data_length,
+                  IhsSemanticsDoneCallback done,
+                  void* user_data);
+  int (*send_pointer_tap)(IhsSemanticsConsumer* consumer,
+                          int64_t view_id,
+                          double x,
+                          double y);
+} IhsSemanticsApi;
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

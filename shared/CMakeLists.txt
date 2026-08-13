@@ -168,6 +168,9 @@ endif ()
 # build always has the hub the semantics provider reads from.
 if (BUILD_ACCESSIBILITY)
     target_sources(ihs_shared PRIVATE src/semantics.cc)
+    # Gates IhsApi::semantics: without the hub the sub-table's entry points do
+    # not exist, so the field is null rather than pointing at absent symbols.
+    target_compile_definitions(ihs_shared PUBLIC IHS_WITH_SEMANTICS=1)
     message(STATUS "Semantics hub ......... Enabled")
 else ()
     message(STATUS "Semantics hub ......... Disabled")

@@ -16,6 +16,7 @@
 
 #include <unistd.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -25,6 +26,7 @@
 
 #include "gtest/gtest.h"
 
+#include "ihs/ihs.h"
 #include "ihs/ihs_semantics.h"
 #include "ihs/ihs_semantics_host.h"
 
@@ -782,5 +784,60 @@ TEST_F(SemanticsHubTest, PointerTapFromAnUnknownConsumerIsRefused) {
   host.send_pointer_tap = RecordTap;
   ihs_semantics_set_host(&host);
   EXPECT_EQ(ihs_semantics_send_pointer_tap(nullptr, 0, 1.0, 1.0),
+            IHS_SEMANTICS_ERR_INVALID);
+}
+
+// The sub-table's pointers alias the flat entry points -- there is no second
+// implementation, so a change to one cannot leave the other behind.
+TEST(SemanticsCapabilityTable, SubTableAliasesFlatEntryPoints) {
+  const IhsApi* api = ihs_get_api(IHS_SHARED_ABI_VERSION);
+  ASSERT_NE(api, nullptr);
+  ASSERT_NE(api->semantics, nullptr) << "built with BUILD_ACCESSIBILITY";
+
+  EXPECT_EQ(api->semantics->acquire_snapshot, &ihs_semantics_acquire_snapshot);
+  EXPECT_EQ(api->semantics->release_snapshot, &ihs_semantics_release_snapshot);
+  EXPECT_EQ(api->semantics->snapshot_generation,
+            &ihs_semantics_snapshot_generation);
+  EXPECT_EQ(api->semantics->snapshot_node_count,
+            &ihs_semantics_snapshot_node_count);
+  EXPECT_EQ(api->semantics->snapshot_node_at, &ihs_semantics_snapshot_node_at);
+  EXPECT_EQ(api->semantics->snapshot_node_by_id,
+            &ihs_semantics_snapshot_node_by_id);
+  EXPECT_EQ(api->semantics->find_custom_action,
+            &ihs_semantics_find_custom_action);
+  EXPECT_EQ(api->semantics->node_numeric_value,
+            &ihs_semantics_node_numeric_value);
+  EXPECT_EQ(api->semantics->register_consumer, &ihs_semantics_register);
+  EXPECT_EQ(api->semantics->unregister_consumer, &ihs_semantics_unregister);
+  EXPECT_EQ(api->semantics->dispatch, &ihs_semantics_dispatch);
+  EXPECT_EQ(api->semantics->send_pointer_tap, &ihs_semantics_send_pointer_tap);
+}
+
+// struct_size is what lets a consumer built against an older minor read a
+// prefix of a newer table, so it has to describe the table actually returned.
+TEST(SemanticsCapabilityTable, ReportsItsOwnSize) {
+  const IhsApi* api = ihs_get_api(IHS_SHARED_ABI_VERSION);
+  ASSERT_NE(api, nullptr);
+  ASSERT_NE(api->semantics, nullptr);
+  EXPECT_EQ(api->semantics->struct_size, sizeof(IhsSemanticsApi));
+  EXPECT_GE(api->struct_size,
+            offsetof(IhsApi, semantics) + sizeof(const IhsSemanticsApi*));
+}
+
+// The capability is reachable through the table, which is the whole point:
+// a consumer that never names a flat ihs_semantics_* symbol still works, and
+// against a library without the hub gets a null sub-table instead of failing
+// to load.
+TEST_F(SemanticsHubTest, UsableEntirelyThroughTheTable) {
+  const IhsApi* api = ihs_get_api(IHS_SHARED_ABI_VERSION);
+  ASSERT_NE(api, nullptr);
+  ASSERT_NE(api->semantics, nullptr);
+
+  // No snapshot before anything is published, reported rather than crashing.
+  const IhsSemanticsSnapshot* empty = api->semantics->acquire_snapshot();
+  api->semantics->release_snapshot(empty);
+
+  EXPECT_EQ(api->semantics->dispatch(nullptr, 0, 1, IHS_SEMANTICS_ACTION_TAP,
+                                     nullptr, 0, nullptr, nullptr),
             IHS_SEMANTICS_ERR_INVALID);
 }
