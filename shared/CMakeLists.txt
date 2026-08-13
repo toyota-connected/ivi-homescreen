@@ -192,6 +192,9 @@ endif ()
 # declare against a surface this build does not have.
 if (BUILD_MCP)
     target_sources(ihs_shared PRIVATE src/mcp_provider.cc)
+    # Tools an application declares for itself: a provider whose list comes
+    # from the app rather than from the semantics tree.
+    target_sources(ihs_shared PRIVATE src/mcp_app_tools.cc)
     target_compile_definitions(ihs_shared PUBLIC IHS_WITH_MCP=1)
     # The semantics provider bridges the two: it needs the hub as well as the
     # registry, so it is only built when both are.
@@ -313,7 +316,9 @@ if (NOT BUILD_ACCESSIBILITY)
     list(APPEND _ihs_header_excludes PATTERN "ihs_semantics.h" EXCLUDE)
 endif ()
 if (NOT BUILD_MCP)
-    list(APPEND _ihs_header_excludes PATTERN "ihs_mcp_provider.h" EXCLUDE)
+    list(APPEND _ihs_header_excludes
+            PATTERN "ihs_mcp_provider.h" EXCLUDE
+            PATTERN "ihs_mcp_app_tools.h" EXCLUDE)
 endif ()
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/ihs
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
