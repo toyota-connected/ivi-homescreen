@@ -85,6 +85,14 @@ constexpr char kScrollToSchema[] =
     R"("dy":{"type":"number","description":"Vertical offset in logical pixels."})"
     R"(}})";
 
+constexpr char kCustomActionSchema[] =
+    R"({"type":"object","properties":{)"
+    R"("node_id":{"type":"integer"},)"
+    R"("identifier":{"type":"string"},)"
+    R"("action":{"type":"string","description":"Custom action label, exactly as the tree reports it."},)"
+    R"("action_id":{"type":"integer","description":"Custom action id, as an alternative to the label."})"
+    R"(}})";
+
 constexpr char kTapAtSchema[] =
     R"({"type":"object","properties":{)"
     R"("x":{"type":"number","description":"Screen x, in the same coordinates as a node rect."},)"
@@ -116,6 +124,11 @@ const ToolEntry kTools[] = {
      IHS_SEMANTICS_ACTION_SET_TEXT, IHS_MCP_CAP_INTERACT},
     {"scroll_to", "Scroll a container to a given offset.", kScrollToSchema,
      IHS_SEMANTICS_ACTION_SCROLL_TO_OFFSET, IHS_MCP_CAP_INTERACT},
+    {"custom_action",
+     "Invoke one of a node's application-defined actions, named by the label "
+     "the tree reports in custom_actions. These are the app's own verbs -- "
+     "there is no fixed set, and a node offers only what it declared.",
+     kCustomActionSchema, 0, IHS_MCP_CAP_INTERACT},
     // Action 0: this one does not dispatch a semantics action at all, and the
     // call handler routes it separately. Its description says so, because the
     // difference is the caller's to reason about -- a tap that is hit-tested
@@ -756,6 +769,86 @@ int CallTool(void* /* user_data */,
                 ErrorJson("no node matched node_id or identifier", generation));
     ihs_semantics_release_snapshot(snapshot);
     return IHS_MCP_ERR_NOT_FOUND;
+  }
+
+  // Custom actions are the application's own verbs, so they are invoked by
+  // name against a node rather than surfaced as tools of their own. A tool per
+  // custom action would mean a tool list that changes with every route, and
+  // names that collide the moment two nodes declare the same verb -- the tree
+  // already reports each node's set, which is where an agent looks anyway.
+  if (std::strcmp(name, "custom_action") == 0) {
+    if ((node->actions & IHS_SEMANTICS_ACTION_CUSTOM_ACTION) == 0) {
+      FillPayload(out_result,
+                  ErrorJson("node offers no custom actions", generation));
+      ihs_semantics_release_snapshot(snapshot);
+      return IHS_MCP_ERR_REFUSED;
+    }
+
+    std::string wanted;
+    int32_t action_id = 0;
+    const bool by_id = ExtractInt(arguments_json, "action_id", &action_id);
+    if (!by_id && !ReadStringArgument(arguments_json, "action", &wanted)) {
+      FillPayload(
+          out_result,
+          ErrorJson("custom_action requires action or action_id", generation));
+      ihs_semantics_release_snapshot(snapshot);
+      return IHS_MCP_ERR_INVALID;
+    }
+
+    // Resolved against this node's own declarations, not the snapshot's whole
+    // table: a label another node declared is not this node's to run, and
+    // dispatching it would be answered by whichever handler the framework
+    // found rather than the one the caller named.
+    bool found = false;
+    for (size_t i = 0; i < node->custom_action_count && !found; i++) {
+      const int32_t candidate = node->custom_action_ids[i];
+      if (by_id) {
+        found = candidate == action_id;
+        continue;
+      }
+      const IhsSemanticsCustomAction* declared =
+          ihs_semantics_find_custom_action(snapshot, candidate);
+      if (declared != nullptr && wanted == declared->label) {
+        action_id = candidate;
+        found = true;
+      }
+    }
+    if (!found) {
+      FillPayload(out_result,
+                  ErrorJson("node declares no such custom action", generation));
+      ihs_semantics_release_snapshot(snapshot);
+      return IHS_MCP_ERR_NOT_FOUND;
+    }
+
+    const int32_t target = node->id;
+    ihs_semantics_release_snapshot(snapshot);
+
+    std::vector<uint8_t> payload(sizeof(action_id));
+    std::memcpy(payload.data(), &action_id, sizeof(action_id));
+
+    Provider& provider = TheProvider();
+    const int custom_status = ihs_semantics_dispatch(
+        provider.consumer, 0, target, IHS_SEMANTICS_ACTION_CUSTOM_ACTION,
+        payload.data(), payload.size(), nullptr, nullptr);
+    if (custom_status != IHS_SEMANTICS_OK) {
+      FillPayload(out_result, ErrorJson("dispatch refused", generation));
+      return IHS_MCP_ERR_REFUSED;
+    }
+
+    rapidjson::StringBuffer custom_buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> custom_writer(custom_buffer);
+    custom_writer.StartObject();
+    custom_writer.Key("dispatched");
+    custom_writer.Bool(true);
+    custom_writer.Key("node_id");
+    custom_writer.Int(target);
+    custom_writer.Key("action_id");
+    custom_writer.Int(action_id);
+    WriteOutcome(custom_writer, "semantics", generation, target,
+                 /*report_node=*/true);
+    custom_writer.EndObject();
+    FillPayload(out_result, custom_buffer.GetString());
+    return IHS_MCP_OK;
   }
 
   // A disabled control is refused here rather than dispatched. The framework

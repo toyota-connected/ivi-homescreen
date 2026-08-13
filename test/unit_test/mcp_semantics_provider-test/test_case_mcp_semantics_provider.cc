@@ -88,6 +88,15 @@ int OnPointerTap(void* /*user_data*/,
 struct TreeBuilder {
   std::vector<IhsSemanticsPublishNode> nodes;
   std::vector<std::vector<int32_t>> children;
+  std::vector<IhsSemanticsPublishCustomAction> custom_actions;
+  // Stable storage: a node points at its id list, so it must outlive Publish.
+  std::vector<std::vector<int32_t>> custom_ids;
+
+  // Declares a custom action and attaches it to the node most recently added.
+  void AddCustomAction(int32_t id, const char* label) {
+    custom_actions.push_back(IhsSemanticsPublishCustomAction{id, label, ""});
+    custom_ids.emplace_back();
+  }
 
   IhsSemanticsPublishNode& Add(int32_t id,
                                const char* label,
@@ -107,6 +116,9 @@ struct TreeBuilder {
     info.struct_size = sizeof(IhsSemanticsPublishInfo);
     info.nodes = nodes.data();
     info.node_count = nodes.size();
+    info.custom_actions =
+        custom_actions.empty() ? nullptr : custom_actions.data();
+    info.custom_action_count = custom_actions.size();
     return ihs_semantics_publish(&info);
   }
 };
@@ -645,4 +657,112 @@ TEST_F(McpSemanticsProviderTest, PointerTapReportsModeButNoNode) {
   EXPECT_TRUE(Contains(body, "\"mode\":\"pointer\"")) << body;
   EXPECT_TRUE(Contains(body, "\"generation_after\"")) << body;
   EXPECT_FALSE(Contains(body, "\"node_after\"")) << body;
+}
+
+namespace {
+
+// A node offering two application-defined verbs, which is the shape that
+// makes name resolution worth testing at all.
+void PublishWithCustomActions(TreeBuilder& tree) {
+  tree.Add(0, "root", IHS_SEMANTICS_ROLE_WINDOW);
+  IhsSemanticsPublishNode& card = tree.Add(4, "Trip", IHS_SEMANTICS_ROLE_PANE);
+  card.actions = IHS_SEMANTICS_ACTION_CUSTOM_ACTION;
+  static const int32_t kIds[] = {71, 72};
+  card.custom_action_ids = kIds;
+  card.custom_action_count = 2;
+  tree.AddCustomAction(71, "Share");
+  tree.AddCustomAction(72, "Archive");
+}
+
+}  // namespace
+
+// The app's own verbs are invoked by the label the tree reports, which is what
+// an agent has: identifiers are absent at the deployment floor.
+TEST_F(McpSemanticsProviderTest, CustomActionIsInvokedByLabel) {
+  TreeBuilder tree;
+  PublishWithCustomActions(tree);
+  ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
+
+  int status = 0;
+  const std::string body = CallTool(
+      "ui_custom_action", R"({"node_id":4,"action":"Archive"})", &status);
+  EXPECT_EQ(status, IHS_MCP_OK) << body;
+  EXPECT_EQ(host_.dispatch_calls, 1);
+  EXPECT_EQ(host_.last_action, IHS_SEMANTICS_ACTION_CUSTOM_ACTION);
+
+  // The id travels as the argument: it is the only thing naming which verb to
+  // run, and the framework resolves the handler by it.
+  ASSERT_EQ(host_.last_data.size(), sizeof(int32_t));
+  int32_t sent = 0;
+  std::memcpy(&sent, host_.last_data.data(), sizeof(sent));
+  EXPECT_EQ(sent, 72) << "dispatched the wrong verb";
+}
+
+TEST_F(McpSemanticsProviderTest, CustomActionMayBeNamedById) {
+  TreeBuilder tree;
+  PublishWithCustomActions(tree);
+  ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
+
+  int status = 0;
+  CallTool("ui_custom_action", R"({"node_id":4,"action_id":71})", &status);
+  EXPECT_EQ(status, IHS_MCP_OK);
+  int32_t sent = 0;
+  ASSERT_EQ(host_.last_data.size(), sizeof(sent));
+  std::memcpy(&sent, host_.last_data.data(), sizeof(sent));
+  EXPECT_EQ(sent, 71);
+}
+
+// Resolution is against the node's own declarations. A verb another node
+// declared is not this node's to run, and dispatching it would be answered by
+// whichever handler the framework found rather than the one named.
+TEST_F(McpSemanticsProviderTest, CustomActionDeclaredElsewhereIsRefused) {
+  TreeBuilder tree;
+  tree.Add(0, "root", IHS_SEMANTICS_ROLE_WINDOW);
+  IhsSemanticsPublishNode& first = tree.Add(4, "Trip", IHS_SEMANTICS_ROLE_PANE);
+  first.actions = IHS_SEMANTICS_ACTION_CUSTOM_ACTION;
+  static const int32_t kMine[] = {71};
+  first.custom_action_ids = kMine;
+  first.custom_action_count = 1;
+  IhsSemanticsPublishNode& second =
+      tree.Add(5, "Other", IHS_SEMANTICS_ROLE_PANE);
+  second.actions = IHS_SEMANTICS_ACTION_CUSTOM_ACTION;
+  static const int32_t kTheirs[] = {72};
+  second.custom_action_ids = kTheirs;
+  second.custom_action_count = 1;
+  tree.AddCustomAction(71, "Share");
+  tree.AddCustomAction(72, "Archive");
+  ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
+
+  int status = 0;
+  const std::string body = CallTool(
+      "ui_custom_action", R"({"node_id":4,"action":"Archive"})", &status);
+  EXPECT_EQ(status, IHS_MCP_ERR_NOT_FOUND) << body;
+  EXPECT_EQ(host_.dispatch_calls, 0) << "dispatched another node's verb";
+}
+
+// A node that never declared any is refused before the label is even looked
+// at, like every other action it does not offer.
+TEST_F(McpSemanticsProviderTest, CustomActionOnANodeWithNoneIsRefused) {
+  TreeBuilder tree;
+  tree.Add(0, "root", IHS_SEMANTICS_ROLE_WINDOW);
+  IhsSemanticsPublishNode& plain =
+      tree.Add(8, "Label", IHS_SEMANTICS_ROLE_LABEL);
+  plain.actions = IHS_SEMANTICS_ACTION_TAP;
+  ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
+
+  int status = 0;
+  CallTool("ui_custom_action", R"({"node_id":8,"action":"Share"})", &status);
+  EXPECT_EQ(status, IHS_MCP_ERR_REFUSED);
+  EXPECT_EQ(host_.dispatch_calls, 0);
+}
+
+TEST_F(McpSemanticsProviderTest, CustomActionWithoutANameIsRefused) {
+  TreeBuilder tree;
+  PublishWithCustomActions(tree);
+  ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
+
+  int status = 0;
+  CallTool("ui_custom_action", R"({"node_id":4})", &status);
+  EXPECT_EQ(status, IHS_MCP_ERR_INVALID);
+  EXPECT_EQ(host_.dispatch_calls, 0);
 }

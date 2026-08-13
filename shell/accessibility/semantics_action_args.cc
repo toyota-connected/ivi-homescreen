@@ -86,6 +86,17 @@ std::optional<std::vector<uint8_t>> EncodeActionArguments(
         flutter::EncodableValue(std::vector<double>{offset[0], offset[1]}));
   }
 
+  if (action == IHS_SEMANTICS_ACTION_CUSTOM_ACTION) {
+    if (empty || data_length != sizeof(int32_t)) {
+      return std::nullopt;
+    }
+    int32_t custom_action_id = 0;
+    std::memcpy(&custom_action_id, data, sizeof(custom_action_id));
+    // A bare int, not a map: the framework looks the handler up by this id
+    // directly, so wrapping it would not resolve to anything.
+    return Encode(flutter::EncodableValue(custom_action_id));
+  }
+
   // Every other action takes no argument. Data supplied for one of those is
   // refused rather than dropped: a caller that encoded something expects it to
   // arrive, and an action that ignores it would look like it had worked.
