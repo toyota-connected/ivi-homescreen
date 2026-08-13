@@ -184,21 +184,64 @@ TEST_F(McpProviderTest, RegisterRejectsMalformedDesc) {
   EXPECT_EQ(ihs_mcp_provider_count(), 0u);
 }
 
-// An empty prefix claims the whole namespace and would collide with every
+// An empty tool prefix claims the whole namespace and would collide with every
 // provider registered after it, so it is refused rather than becoming a
 // first-come land grab.
-TEST_F(McpProviderTest, EmptyPrefixIsRejected) {
+TEST_F(McpProviderTest, EmptyToolPrefixIsRejected) {
   MockProvider mock;
   IhsMcpProvider* provider = nullptr;
 
   IhsMcpProviderDesc no_tool = mock.Desc("m", "", "ui", IHS_MCP_CAP_ALL);
   EXPECT_EQ(ihs_mcp_provider_register(&no_tool, &provider),
             IHS_MCP_ERR_INVALID);
-
-  IhsMcpProviderDesc no_scheme = mock.Desc("m", "ui_", "", IHS_MCP_CAP_ALL);
-  EXPECT_EQ(ihs_mcp_provider_register(&no_scheme, &provider),
-            IHS_MCP_ERR_INVALID);
   EXPECT_EQ(ihs_mcp_provider_count(), 0u);
+}
+
+// A resource scheme is optional, unlike the tool prefix: a provider may serve
+// tools only. Requiring one would make such a provider claim a namespace it
+// never answers for -- reads would return "not found" indistinguishably from
+// an absent resource, and no other provider could claim the scheme.
+TEST_F(McpProviderTest, AProviderMayServeToolsOnly) {
+  MockProvider mock;
+  IhsMcpProvider* provider = nullptr;
+  IhsMcpProviderDesc desc = mock.Desc("m", "app_", "", IHS_MCP_CAP_ALL);
+  ASSERT_EQ(ihs_mcp_provider_register(&desc, &provider), IHS_MCP_OK);
+  EXPECT_EQ(ihs_mcp_provider_count(), 1u);
+  ihs_mcp_provider_unregister(provider);
+}
+
+// An empty scheme is a prefix of every string, so treating it as a claim would
+// make the first tools-only provider collide with everything after it.
+TEST_F(McpProviderTest, ToolsOnlyProvidersDoNotCollideOverTheEmptyScheme) {
+  MockProvider first;
+  MockProvider second;
+  IhsMcpProvider* a = nullptr;
+  IhsMcpProvider* b = nullptr;
+  IhsMcpProviderDesc first_desc = first.Desc("a", "hvac_", "", IHS_MCP_CAP_ALL);
+  IhsMcpProviderDesc second_desc =
+      second.Desc("b", "media_", "", IHS_MCP_CAP_ALL);
+  ASSERT_EQ(ihs_mcp_provider_register(&first_desc, &a), IHS_MCP_OK);
+  ASSERT_EQ(ihs_mcp_provider_register(&second_desc, &b), IHS_MCP_OK);
+  EXPECT_EQ(ihs_mcp_provider_count(), 2u);
+  ihs_mcp_provider_unregister(a);
+  ihs_mcp_provider_unregister(b);
+}
+
+// An empty resource prefix matches every URI, so a tools-only provider must
+// not capture reads meant for one that actually serves resources.
+TEST_F(McpProviderTest, AToolsOnlyProviderIsNotRoutedResourceReads) {
+  MockProvider tools_only;
+  IhsMcpProvider* provider = nullptr;
+  IhsMcpProviderDesc desc = tools_only.Desc("app", "app_", "", IHS_MCP_CAP_ALL);
+  ASSERT_EQ(ihs_mcp_provider_register(&desc, &provider), IHS_MCP_OK);
+
+  IhsMcpPayload payload{};
+  EXPECT_EQ(ihs_mcp_registry_read_resource("ui://semantics/tree", &payload),
+            IHS_MCP_ERR_NOT_FOUND);
+  EXPECT_EQ(tools_only.last_uri_read, "")
+      << "a tools-only provider was handed a resource read";
+  ihs_mcp_registry_release_payload(&payload);
+  ihs_mcp_provider_unregister(provider);
 }
 
 TEST_F(McpProviderTest, DuplicatePrefixIsRejected) {

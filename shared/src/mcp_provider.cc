@@ -174,8 +174,13 @@ void WatchProviders() {
       // notifications go out. A client that re-reads a tool list which did
       // not change loses nothing; one that never hears about a change does.
       sink(IHS_MCP_NOTIFY_TOOLS_CHANGED, "", sink_user_data);
-      sink(IHS_MCP_NOTIFY_RESOURCE_UPDATED, resource_uris[i - 1].c_str(),
-           sink_user_data);
+      // A provider serving no resources has no URI to name, and an update for
+      // "" would reach every subscriber as a change to something they cannot
+      // read.
+      if (!resource_uris[i - 1].empty()) {
+        sink(IHS_MCP_NOTIFY_RESOURCE_UPDATED, resource_uris[i - 1].c_str(),
+             sink_user_data);
+      }
     }
   }
 }
@@ -204,6 +209,11 @@ Provider* FindByToolName(Registry& registry, const char* name) {
 
 Provider* FindByUri(Registry& registry, const char* uri) {
   for (const auto& provider : registry.providers) {
+    // An empty prefix matches every URI, so a tools-only provider would
+    // otherwise capture reads meant for a real one.
+    if (provider->resource_prefix.empty()) {
+      continue;
+    }
     if (StartsWith(uri, provider->resource_prefix)) {
       return provider.get();
     }
@@ -226,21 +236,30 @@ int ihs_mcp_provider_register(const IhsMcpProviderDesc* desc,
                               IhsMcpProvider** out_provider) {
   if (desc == nullptr || out_provider == nullptr ||
       desc->struct_size < sizeof(IhsMcpProviderDesc) || desc->name == nullptr ||
-      desc->tool_prefix == nullptr || desc->resource_scheme == nullptr) {
+      desc->tool_prefix == nullptr) {
     return IHS_MCP_ERR_INVALID;
   }
   // An empty prefix would claim the entire namespace and collide with every
   // provider that follows, so it is rejected rather than being allowed to
   // become a first-registration-wins land grab.
-  if (desc->tool_prefix[0] == '\0' || desc->resource_scheme[0] == '\0') {
+  if (desc->tool_prefix[0] == '\0') {
     return IHS_MCP_ERR_INVALID;
   }
+  // A null or empty resource_scheme means the provider serves tools only.
+  // Requiring one would make such a provider claim a URI namespace it never
+  // answers for: reads against it would return "not found" indistinguishably
+  // from a resource that is merely absent, and no other provider could claim
+  // the scheme afterwards.
+  const bool serves_resources =
+      desc->resource_scheme != nullptr && desc->resource_scheme[0] != '\0';
 
   auto provider = std::make_unique<Provider>();
   provider->name = desc->name;
   provider->tool_prefix = desc->tool_prefix;
-  provider->resource_scheme = desc->resource_scheme;
-  provider->resource_prefix = provider->resource_scheme + "://";
+  if (serves_resources) {
+    provider->resource_scheme = desc->resource_scheme;
+    provider->resource_prefix = provider->resource_scheme + "://";
+  }
   provider->capability_mask = desc->capability_mask;
   provider->callbacks = desc->callbacks;
   provider->user_data = desc->user_data;
@@ -251,9 +270,15 @@ int ihs_mcp_provider_register(const IhsMcpProviderDesc* desc,
     Registry& registry = TheRegistry();
     std::lock_guard<std::mutex> lock(registry.mutex);
     for (const auto& existing : registry.providers) {
+      // Schemes are compared only when both providers have one: an empty
+      // scheme is a prefix of everything, so including it here would make the
+      // first tools-only provider collide with every provider after it.
+      const bool schemes_collide =
+          !existing->resource_scheme.empty() &&
+          !provider->resource_scheme.empty() &&
+          PrefixesOverlap(existing->resource_scheme, provider->resource_scheme);
       if (PrefixesOverlap(existing->tool_prefix, provider->tool_prefix) ||
-          PrefixesOverlap(existing->resource_scheme,
-                          provider->resource_scheme)) {
+          schemes_collide) {
         // Rejected whole: a provider is never half-registered, so a caller
         // that ignores the status does not end up with resources served and
         // tools missing.
