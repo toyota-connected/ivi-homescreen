@@ -1,0 +1,15 @@
+name: ihs_mcp_app_tools
+description: >-
+  Declare typed MCP tools from a Flutter application running on
+  ivi-homescreen, so an agent can call a named operation with a schema rather
+  than driving the UI through generic taps.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.1.0 <4.0.0"
+
+dependencies:
+  # NativeCallable.listener, which is how a call arriving on a shell thread
+  # reaches the isolate, needs 3.1.
+  ffi: ^2.1.0

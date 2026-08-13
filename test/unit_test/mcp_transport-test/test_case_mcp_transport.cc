@@ -29,6 +29,7 @@
 
 #include "gtest/gtest.h"
 
+#include "ihs/ihs_mcp_app_tools.h"
 #include "ihs/ihs_mcp_provider.h"
 #include "ihs/ihs_mcp_transport.h"
 
@@ -826,4 +827,131 @@ TEST_F(McpTransportTest, ABurstIsCollapsedRatherThanForwardedWhole) {
   ihs_mcp_provider_unregister(provider);
   ::close(notify);
   ::close(stream);
+}
+
+namespace {
+
+void NoopInvoke(void*, uint64_t, const char*, const char*, size_t) {}
+
+}  // namespace
+
+// An application registers its tools when a route appears, which can be long
+// after an agent listed them. Without this the agent would have to poll to
+// notice, and a tool it never learned about may as well not exist.
+TEST_F(McpTransportTest, RegisteringApplicationToolsTellsOpenStreams) {
+  std::string headers;
+  const int stream = OpenStream(path_, &headers);
+  ASSERT_GE(stream, 0);
+
+  IhsMcpAppTool tool{};
+  tool.name = "set_temp";
+  tool.description = "Set the cabin temperature.";
+  tool.input_schema_json = R"({"type":"object","properties":{}})";
+
+  IhsMcpAppToolsDesc desc{};
+  desc.struct_size = sizeof(desc);
+  desc.tool_prefix = "hvac_";
+  desc.tools = &tool;
+  desc.tool_count = 1;
+  desc.invoke = NoopInvoke;
+
+  IhsMcpAppTools* handle = nullptr;
+  ASSERT_EQ(ihs_mcp_app_tools_register(&desc, &handle), IHS_MCP_OK);
+
+  const std::string got = DrainStream(stream, 600);
+  EXPECT_NE(got.find("tools/list_changed"), std::string::npos)
+      << "registering told no one: [" << got << "]";
+
+  ihs_mcp_app_tools_unregister(handle);
+  ::close(stream);
+}
+
+namespace {
+
+// A provider whose tool runs and declines, with a reason. The distinction
+// between this and a tool that does not exist is the thing under test.
+struct FailingProvider {
+  static int ListTools(void*, const IhsMcpToolDesc** out, size_t* count) {
+    static const IhsMcpToolDesc kTool = {"fail", "always declines",
+                                         R"({"type":"object"})",
+                                         IHS_MCP_CAP_INTERACT};
+    *out = &kTool;
+    *count = 1;
+    return IHS_MCP_OK;
+  }
+  static int ListResources(void*,
+                           const IhsMcpResourceDesc** out,
+                           size_t* count) {
+    *out = nullptr;
+    *count = 0;
+    return IHS_MCP_OK;
+  }
+  static int CallTool(void*,
+                      const char*,
+                      const char*,
+                      size_t,
+                      IhsMcpPayload* out) {
+    static const char kWhy[] = R"({"error":"the zone is closed"})";
+    out->struct_size = sizeof(IhsMcpPayload);
+    out->data = kWhy;
+    out->length = sizeof(kWhy) - 1;
+    out->release = nullptr;
+    out->release_ctx = nullptr;
+    return IHS_MCP_ERR_REFUSED;
+  }
+  static int ReadResource(void*, const char*, IhsMcpPayload*) {
+    return IHS_MCP_ERR_NOT_FOUND;
+  }
+};
+
+IhsMcpProvider* RegisterFailing(FailingProvider* mock) {
+  IhsMcpProviderDesc desc{};
+  desc.struct_size = sizeof(desc);
+  desc.name = "failing";
+  desc.tool_prefix = "fx_";
+  desc.resource_scheme = nullptr;
+  desc.capability_mask = IHS_MCP_CAP_ALL;
+  desc.notify_fd = -1;
+  desc.user_data = mock;
+  desc.callbacks.list_tools = &FailingProvider::ListTools;
+  desc.callbacks.list_resources = &FailingProvider::ListResources;
+  desc.callbacks.call_tool = &FailingProvider::CallTool;
+  desc.callbacks.read_resource = &FailingProvider::ReadResource;
+  IhsMcpProvider* provider = nullptr;
+  return ihs_mcp_provider_register(&desc, &provider) == IHS_MCP_OK ? provider
+                                                                   : nullptr;
+}
+
+}  // namespace
+
+// A tool that ran and failed is a result with isError, not a JSON-RPC error --
+// and its own explanation has to survive. For a tool an application declared
+// that explanation is the only thing saying what went wrong, since the host
+// knows nothing about what the tool does.
+TEST_F(McpTransportTest, AToolThatRanAndFailedKeepsItsReason) {
+  FailingProvider mock;
+  IhsMcpProvider* provider = RegisterFailing(&mock);
+  ASSERT_NE(provider, nullptr);
+
+  const std::string body =
+      Body(Post(path_, R"({"jsonrpc":"2.0","id":30,"method":"tools/call",)"
+                       R"("params":{"name":"fx_fail","arguments":{}}})"));
+
+  EXPECT_EQ(body.find(R"("error":{"code")"), std::string::npos)
+      << "reported as a protocol error: " << body;
+  EXPECT_NE(body.find(R"("isError":true)"), std::string::npos) << body;
+  EXPECT_NE(body.find("the zone is closed"), std::string::npos)
+      << "the tool's reason was discarded: " << body;
+
+  ihs_mcp_provider_unregister(provider);
+}
+
+// A tool that does not exist never ran, so it stays a protocol error. A client
+// that cannot tell these apart retries the wrong one.
+TEST_F(McpTransportTest, AnUnknownToolRemainsAProtocolError) {
+  const std::string body = Body(Post(
+      path_, R"({"jsonrpc":"2.0","id":31,"method":"tools/call",)"
+             R"("params":{"name":"nothing_claims_this","arguments":{}}})"));
+  EXPECT_NE(body.find("-32601"), std::string::npos) << body;
+  EXPECT_EQ(body.find(R"("isError")"), std::string::npos) << body;
 }

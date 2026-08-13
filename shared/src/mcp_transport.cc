@@ -201,6 +201,19 @@ int JsonRpcCodeFor(const int status) {
   return kInternalError;
 }
 
+// Whether the tool ran and reported a failure, as opposed to the call never
+// reaching one.
+//
+// The dividing line is whether the tool's own code had a say. An unknown tool,
+// a malformed call and a capability the consumer does not hold are all decided
+// before anything executes, so they are protocol errors. A refusal or an
+// unavailable provider is the tool answering -- including an application that
+// did not answer in time, which is a fact about running it rather than about
+// the request.
+bool ToolExecuted(const int status) {
+  return status == IHS_MCP_ERR_REFUSED || status == IHS_MCP_ERR_UNAVAILABLE;
+}
+
 const char* StatusText(const int status) {
   switch (status) {
     case IHS_MCP_ERR_NOT_FOUND:
@@ -318,20 +331,33 @@ std::string HandleToolsCall(const rapidjson::Value& params,
   IhsMcpPayload payload{};
   const int status = ihs_mcp_registry_call_tool(name.c_str(), arguments.c_str(),
                                                 arguments.size(), &payload);
-  if (status != IHS_MCP_OK) {
-    ihs_mcp_registry_release_payload(&payload);
+  std::string content(payload.data != nullptr ? payload.data : "",
+                      payload.length);
+  ihs_mcp_registry_release_payload(&payload);
+
+  // A tool that ran and failed is not a protocol error, and the specification
+  // separates the two deliberately: an unknown tool or a malformed call is a
+  // JSON-RPC error, while a tool that executed and could not do the thing is a
+  // result with isError set. Collapsing them loses the failure's own
+  // explanation -- which for a tool the application declared is the only thing
+  // saying what went wrong, since the host knows nothing about what it does.
+  if (status != IHS_MCP_OK && !ToolExecuted(status)) {
     return ErrorEnvelope(id, JsonRpcCodeFor(status), StatusText(status));
   }
 
-  const std::string content(payload.data != nullptr ? payload.data : "",
-                            payload.length);
-  ihs_mcp_registry_release_payload(&payload);
+  const bool failed = status != IHS_MCP_OK;
+  if (failed && content.empty()) {
+    // Nothing said why, so say what is known rather than returning an empty
+    // failure a client cannot act on.
+    content = std::string(R"({"error":)") + Escape(StatusText(status)) + "}";
+  }
 
   // The tool's own JSON is carried as MCP text content: providers return a
   // result document, and the specification's content array is the envelope a
   // client expects to unwrap.
   return ResultEnvelope(id, R"({"content":[{"type":"text","text":)" +
-                                Escape(content) + R"(}],"isError":false})");
+                                Escape(content) + R"(}],"isError":)" +
+                                (failed ? "true" : "false") + "}");
 }
 
 std::string HandleResourcesRead(const rapidjson::Value& params,
