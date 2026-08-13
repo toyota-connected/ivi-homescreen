@@ -35,7 +35,10 @@
 #include <atomic>
 #include <cerrno>
 #include <cstring>
+#include <map>
 #include <mutex>
+#include <random>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -82,6 +85,14 @@ constexpr int kMethodNotFound = -32601;
 constexpr int kInvalidParams = -32602;
 constexpr int kInternalError = -32603;
 
+// One open event stream. The session is empty when the client opened the
+// stream without identifying one, which is legal and means "send me
+// everything" -- see Transport::subscriptions.
+struct Stream {
+  int fd = -1;
+  std::string session{};
+};
+
 struct Transport {
   std::mutex mutex;
   bool running = false;
@@ -92,16 +103,33 @@ struct Transport {
   size_t max_request_bytes = kDefaultMaxRequestBytes;
   std::thread thread;
 
-  // Open event streams, one per client that asked for one. Raw descriptors
-  // because the only operations are write and close, and both happen under
-  // this mutex: a notification arrives on the registry's watcher thread while
-  // the accept loop may be adding a stream or dropping a dead one.
+  // Open event streams, one per client that asked for one.
   //
   // Separate from `mutex` so delivering an event never contends with an
   // accept or a stop -- and, more importantly, so a notification cannot
   // deadlock against a stop that is waiting to join the accept thread.
+  //
+  // This mutex also covers `subscriptions`: a subscribe arrives on the accept
+  // thread while a notification is being filtered on the registry's watcher
+  // thread, so the set a stream is matched against must not change underneath
+  // that match.
   std::mutex streams_mutex;
-  std::vector<int> streams;
+  std::vector<Stream> streams;
+
+  // Session id -> the resource URIs that session asked for.
+  //
+  // Keyed by session rather than by stream because a subscribe arrives on its
+  // own connection: every request here is Connection: close, so the POST that
+  // subscribes is never the connection the stream is on, and the session id is
+  // the only thing tying them together.
+  //
+  // A session absent from this map, or present with an empty set, receives
+  // every resource update. That is what a client which never subscribed got
+  // before subscriptions existed, and keeping it means adding this could not
+  // silently stop an existing client's notifications -- "subscribed to
+  // nothing" and "not interested in filtering" are not distinguishable, and
+  // the safe reading is the one that keeps delivering.
+  std::map<std::string, std::set<std::string>> subscriptions;
 };
 
 Transport& TheTransport() {
@@ -313,7 +341,126 @@ std::string HandleResourcesRead(const rapidjson::Value& params,
 // Routes one JSON-RPC request. Returns the response text, or empty for a
 // notification -- a request with no id expects no reply, and answering one
 // would be a protocol error rather than merely noise.
-std::string Dispatch(const std::string& body) {
+// A session identifier: 128 bits of randomness, hex.
+//
+// Random rather than a counter because the id is what authorizes a subscribe
+// to alter a session's filter. The socket's uid check is the real boundary and
+// this sits behind it, but a guessable id would let anything that got through
+// that boundary reshape another client's stream, and the cost of not being
+// guessable is one read.
+std::string NewSessionId() {
+  std::random_device source;
+  std::string out;
+  out.reserve(32);
+  for (int i = 0; i < 4; ++i) {
+    const uint32_t word = source();
+    for (int shift = 28; shift >= 0; shift -= 4) {
+      out.push_back("0123456789abcdef"[(word >> shift) & 0xfu]);
+    }
+  }
+  return out;
+}
+
+// resources/subscribe and resources/unsubscribe.
+//
+// The session comes from the Mcp-Session-Id header rather than the params: it
+// identifies the caller, and a client that could name any session in the body
+// could redirect another client's stream.
+std::string HandleSubscribe(const rapidjson::Value& params,
+                            const std::string& id,
+                            const std::string& session,
+                            const bool subscribing) {
+  if (!params.IsObject() || !params.HasMember("uri") ||
+      !params["uri"].IsString()) {
+    return ErrorEnvelope(id, kInvalidParams, "uri is required");
+  }
+  if (session.empty()) {
+    // Without a session there is nothing to attach the filter to: the stream
+    // this would govern is a different connection, and only the session id
+    // links them.
+    return ErrorEnvelope(id, kInvalidParams,
+                         "Mcp-Session-Id is required; call initialize first");
+  }
+
+  const std::string uri = params["uri"].GetString();
+
+  // Pass it to the registry so the provider owning the scheme can start or
+  // stop work on the strength of it.
+  //
+  // A scheme no provider claims is deliberately not an error. Providers
+  // register at any point in a session -- that is an explicit property of the
+  // registry, not an accident -- so refusing here would turn "subscribed
+  // before the provider came up" into a failure, and make the result depend on
+  // a race the client cannot see. The subscription is recorded either way and
+  // starts matching when the provider appears. Anything other than a missing
+  // provider is a real failure and is reported.
+  const int status = ihs_mcp_registry_subscribe(uri.c_str(), subscribing);
+  if (status != IHS_MCP_OK && status != IHS_MCP_ERR_NOT_FOUND) {
+    return ErrorEnvelope(id, JsonRpcCodeFor(status), StatusText(status));
+  }
+
+  Transport& t = TheTransport();
+  const std::lock_guard<std::mutex> lock(t.streams_mutex);
+  if (subscribing) {
+    t.subscriptions[session].insert(uri);
+  } else {
+    const auto it = t.subscriptions.find(session);
+    if (it != t.subscriptions.end()) {
+      it->second.erase(uri);
+      // An empty set would mean "send everything" rather than "send nothing",
+      // so unsubscribing from the last URI has to drop the session's filter
+      // entirely rather than leave one that reads as the opposite.
+      if (it->second.empty()) {
+        t.subscriptions.erase(it);
+      }
+    }
+  }
+  return ResultEnvelope(id, "{}");
+}
+
+// Whether a notification for `notified` concerns a subscription to
+// `subscribed`, which is true when either contains the other.
+//
+// Both directions are needed because the two names are not at the same
+// granularity. A provider signals that something under its scheme changed and
+// the registry reports the provider's prefix -- "ui://" -- while a client
+// subscribes to what resources/list advertises, which is the concrete
+// "ui://semantics/tree". Comparing those for equality would match nothing and
+// filter out every real subscriber's notifications.
+//
+// So the coarser name governs: a notification for "ui://" reaches a
+// subscription to "ui://semantics/tree", and a notification for a concrete URI
+// reaches a subscription to the scheme. The practical resolution is therefore
+// per-provider, not per-resource, and it sharpens on its own if providers
+// start reporting the resource that actually changed.
+bool UriConcerns(const std::string& notified, const std::string& subscribed) {
+  const std::string& shorter =
+      notified.size() <= subscribed.size() ? notified : subscribed;
+  const std::string& longer =
+      notified.size() <= subscribed.size() ? subscribed : notified;
+  return longer.compare(0, shorter.size(), shorter) == 0;
+}
+
+// Whether a stream should receive an update for `uri`. Caller holds
+// streams_mutex.
+bool StreamWantsLocked(const Transport& t,
+                       const Stream& stream,
+                       const std::string& uri) {
+  if (stream.session.empty()) {
+    return true;  // never identified a session, so never asked to filter
+  }
+  const auto it = t.subscriptions.find(stream.session);
+  if (it == t.subscriptions.end() || it->second.empty()) {
+    return true;  // identified, but subscribed to nothing: unfiltered
+  }
+  return std::any_of(
+      it->second.begin(), it->second.end(),
+      [&uri](const std::string& want) { return UriConcerns(uri, want); });
+}
+
+std::string Dispatch(const std::string& body,
+                     const std::string& session,
+                     std::string* out_new_session) {
   rapidjson::Document doc;
   if (doc.Parse(body.c_str(), body.size()).HasParseError() || !doc.IsObject()) {
     return ErrorEnvelope("null", kParseError, "invalid JSON");
@@ -339,6 +486,10 @@ std::string Dispatch(const std::string& body) {
 
   std::string response;
   if (method == "initialize") {
+    // A session is minted here rather than on connect: every request is
+    // Connection: close, so connections are not sessions, and initialize is
+    // the one point the protocol defines for establishing one.
+    *out_new_session = NewSessionId();
     response = ResultEnvelope(id, HandleInitialize());
   } else if (method == "tools/list") {
     response = ResultEnvelope(id, HandleToolsList());
@@ -346,6 +497,10 @@ std::string Dispatch(const std::string& body) {
     response = ResultEnvelope(id, HandleResourcesList());
   } else if (method == "tools/call") {
     response = HandleToolsCall(params, id);
+  } else if (method == "resources/subscribe") {
+    response = HandleSubscribe(params, id, session, /*subscribing=*/true);
+  } else if (method == "resources/unsubscribe") {
+    response = HandleSubscribe(params, id, session, /*subscribing=*/false);
   } else if (method == "resources/read") {
     response = HandleResourcesRead(params, id);
   } else if (method == "ping") {
@@ -365,12 +520,14 @@ std::string Dispatch(const std::string& body) {
 
 std::string HttpResponse(const int code,
                          const char* reason,
-                         const std::string& body) {
+                         const std::string& body,
+                         const std::string& extra_headers = {}) {
   std::string out = "HTTP/1.1 " + std::to_string(code) + " " + reason + "\r\n";
   out += "Content-Type: application/json\r\n";
   out += "Content-Length: " + std::to_string(body.size()) + "\r\n";
   // Nothing here is cacheable and every response is a live view of the UI.
   out += "Cache-Control: no-store\r\n";
+  out += extra_headers;
   out += "Connection: close\r\n\r\n";
   out += body;
   return out;
@@ -414,6 +571,28 @@ bool ReadHeaderBlock(const int fd, std::string* out_headers) {
   return true;
 }
 
+// The value of a header, or "" when absent. `name` must be lowercase and end
+// with ':'. Matches on a lowered copy because header names are
+// case-insensitive, and trims the optional leading space and the trailing CR.
+std::string HeaderValue(const std::string& raw_headers, const char* name) {
+  std::string lowered = raw_headers;
+  for (char& c : lowered) {
+    c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+  }
+  const std::string needle = std::string("\r\n") + name;
+  const size_t at = lowered.find(needle);
+  if (at == std::string::npos) {
+    return {};
+  }
+  size_t start = at + needle.size();
+  while (start < raw_headers.size() && raw_headers[start] == ' ') {
+    ++start;
+  }
+  const size_t end = raw_headers.find("\r\n", start);
+  return raw_headers.substr(
+      start, end == std::string::npos ? std::string::npos : end - start);
+}
+
 // True when the request carries an Origin header.
 //
 // Only a browser sets Origin, and no browser is a legitimate client of this
@@ -439,7 +618,10 @@ bool CarriesOrigin(const std::string& raw_headers) {
 // Reads until the header terminator, then exactly Content-Length bytes.
 // Returns false when the peer is malformed or over budget, having already
 // written the refusal.
-bool ReadRequest(const int fd, const size_t max_body, std::string* out_body) {
+bool ReadRequest(const int fd,
+                 const size_t max_body,
+                 std::string* out_body,
+                 std::string* out_headers) {
   std::string buffer;
   size_t header_end = std::string::npos;
 
@@ -482,9 +664,11 @@ bool ReadRequest(const int fd, const size_t max_body, std::string* out_body) {
     return false;
   }
 
+  *out_headers = buffer.substr(0, header_end);
+
   // Header names are case-insensitive, so match on a lowered copy while
   // keeping the original for the body split.
-  std::string lowered = buffer.substr(0, header_end);
+  std::string lowered = *out_headers;
   for (char& c : lowered) {
     c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
   }
@@ -568,17 +752,24 @@ std::string EventFrame(const std::string& json) {
 // on the registry's watcher thread, and blocking here would stop every other
 // provider's notifications too. Such a client is dropped: a partial frame
 // would desynchronise the stream, and there is no way to resend.
-void Broadcast(const std::string& json) {
+// `uri` empty means the event is not resource-scoped (a list_changed), which
+// every stream receives: there is nothing to filter it against.
+void Broadcast(const std::string& json, const std::string& uri = {}) {
   Transport& t = TheTransport();
   const std::string frame = EventFrame(json);
 
   const std::lock_guard<std::mutex> lock(t.streams_mutex);
   auto it = t.streams.begin();
   while (it != t.streams.end()) {
+    if (!uri.empty() && !StreamWantsLocked(t, *it, uri)) {
+      ++it;
+      continue;
+    }
     size_t sent = 0;
     bool alive = true;
     while (sent < frame.size()) {
-      const ssize_t n = ::write(*it, frame.data() + sent, frame.size() - sent);
+      const ssize_t n =
+          ::write(it->fd, frame.data() + sent, frame.size() - sent);
       if (n < 0) {
         if (errno == EINTR) {
           continue;
@@ -592,7 +783,7 @@ void Broadcast(const std::string& json) {
       ++it;
       continue;
     }
-    ::close(*it);
+    ::close(it->fd);
     it = t.streams.erase(it);
   }
 }
@@ -610,12 +801,15 @@ void OnRegistryNotification(const IhsMcpNotification kind,
   const std::string resource = uri != nullptr ? uri : "";
   Broadcast(R"({"jsonrpc":"2.0","method":"notifications/resources/updated")"
             R"(,"params":{"uri":)" +
-            Escape(resource) + "}}");
+                Escape(resource) + "}}",
+            resource);
 }
 
 // Turns an accepted connection into an event stream. Returns false when the
 // client did not ask for one, leaving it to be served as an ordinary request.
-bool TryOpenEventStream(const int fd, const std::string& headers) {
+bool TryOpenEventStream(const int fd,
+                        const std::string& headers,
+                        const std::string& session) {
   // A GET asking for the event-stream media type is how MCP's Streamable HTTP
   // transport opens the server-to-client direction.
   if (headers.rfind("GET ", 0) != 0) {
@@ -651,7 +845,7 @@ bool TryOpenEventStream(const int fd, const std::string& headers) {
 
   Transport& t = TheTransport();
   const std::lock_guard<std::mutex> lock(t.streams_mutex);
-  t.streams.push_back(fd);
+  t.streams.push_back(Stream{fd, session});
   return true;
 }
 
@@ -685,30 +879,43 @@ bool ServeConnection(const int fd, const size_t max_body) {
                                 R"({"error":"origin not allowed"})"));
       return false;
     }
-    if (TryOpenEventStream(fd, headers)) {
+    // The stream carries the session so notifications can be filtered to
+    // what it subscribed to; absent, it is an unfiltered stream.
+    if (TryOpenEventStream(fd, headers,
+                           HeaderValue(headers, "mcp-session-id:"))) {
       Transport& t = TheTransport();
       const std::lock_guard<std::mutex> lock(t.streams_mutex);
       // Kept open only if it actually joined the registry; a refused GET was
       // answered and is finished with.
-      return std::find(t.streams.begin(), t.streams.end(), fd) !=
+      return std::find_if(t.streams.begin(), t.streams.end(),
+                          [fd](const Stream& s) { return s.fd == fd; }) !=
              t.streams.end();
     }
     return false;
   }
 
   std::string body;
-  if (!ReadRequest(fd, max_body, &body)) {
+  std::string headers;
+  if (!ReadRequest(fd, max_body, &body, &headers)) {
     return false;  // ReadRequest already answered, or the peer went away
   }
 
-  const std::string response = Dispatch(body);
+  std::string new_session;
+  const std::string response =
+      Dispatch(body, HeaderValue(headers, "mcp-session-id:"), &new_session);
   if (response.empty()) {
     // A notification. HTTP still needs a reply, and 202 says "taken, nothing
     // to return" without inventing a JSON-RPC response the client must ignore.
     WriteAll(fd, HttpResponse(202, "Accepted", ""));
     return false;
   }
-  WriteAll(fd, HttpResponse(200, "OK", response));
+  // initialize answers with the session it minted. In the header rather than
+  // the result body, which is where the Streamable HTTP transport puts it and
+  // means no invented field in a response the specification defines.
+  const std::string extra = new_session.empty()
+                                ? std::string()
+                                : "Mcp-Session-Id: " + new_session + "\r\n";
+  WriteAll(fd, HttpResponse(200, "OK", response, extra));
   return false;
 }
 
@@ -947,10 +1154,13 @@ void ihs_mcp_transport_stop() {
   // Closing a stream is how a client learns the server is gone: there is no
   // "goodbye" event, and the specification expects the transport to end.
   const std::lock_guard<std::mutex> streams_lock(t.streams_mutex);
-  for (const int stream : t.streams) {
-    ::close(stream);
+  for (const Stream& stream : t.streams) {
+    ::close(stream.fd);
   }
   t.streams.clear();
+  // Subscriptions describe streams that no longer exist, and a restart mints
+  // new session ids, so nothing here could be matched again.
+  t.subscriptions.clear();
 }
 
 bool ihs_mcp_transport_running() {
