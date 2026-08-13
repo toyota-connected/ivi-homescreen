@@ -119,6 +119,10 @@ struct NodeSpec {
   bool action_scroll_to_offset = false;
   bool action_expand = false;
   bool action_collapse = false;
+  // Set when the node declares application-defined actions. The ids
+  // themselves travel separately; this is what marks the node as able to
+  // run one at all.
+  bool action_custom_action = false;
 };
 
 // Pure translation from a Flutter semantics node's identity + flags + actions

@@ -195,3 +195,37 @@ TEST(SemanticsTranslator, EmptyNodeIsInertGenericContainer) {
   EXPECT_FALSE(s.action_tap);
   EXPECT_FALSE(s.focusable);
 }
+
+// ─── Actions ───────────────────────────────────────────────────────────────
+
+// Every action the hub can dispatch has to be read off the engine's mask
+// here, or the bit is never set and the action is refused before it is tried.
+//
+// Custom actions were missed for exactly that reason, and the unit tests did
+// not catch it because they published trees with the bit set by hand. Only
+// driving a real engine showed the node arriving with no custom-action bit at
+// all, so this asserts the translation rather than the fixture's arrangement
+// of it.
+TEST(SemanticsTranslator, CustomActionIsReadFromTheEngineMask) {
+  EXPECT_TRUE(Translate(1, Flags(0),
+                        Actions(kFlutterSemanticsActionCustomAction), false,
+                        false)
+                  .action_custom_action);
+  EXPECT_FALSE(
+      Translate(1, Flags(0), Actions(kFlutterSemanticsActionTap), false, false)
+          .action_custom_action);
+}
+
+// The neighbouring actions, so a future edit that renumbers or drops one is
+// caught here rather than in a flow that mysteriously stops working.
+TEST(SemanticsTranslator, ActionBitsAreReadIndividually) {
+  const NodeSpec tap =
+      Translate(1, Flags(0), Actions(kFlutterSemanticsActionTap), false, false);
+  EXPECT_TRUE(tap.action_tap);
+  EXPECT_FALSE(tap.action_increase);
+
+  const NodeSpec increase = Translate(
+      1, Flags(0), Actions(kFlutterSemanticsActionIncrease), false, false);
+  EXPECT_TRUE(increase.action_increase);
+  EXPECT_FALSE(increase.action_tap);
+}

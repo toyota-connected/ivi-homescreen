@@ -316,6 +316,7 @@ NodeSpec TranslateView(int32_t id,
       Has(actions, kFlutterSemanticsActionScrollToOffset);
   spec.action_expand = Has(actions, kFlutterSemanticsActionExpand);
   spec.action_collapse = Has(actions, kFlutterSemanticsActionCollapse);
+  spec.action_custom_action = Has(actions, kFlutterSemanticsActionCustomAction);
 
   return spec;
 }
