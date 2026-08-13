@@ -17,10 +17,10 @@
 // MCP provider registry: namespacing, capability masking, and routing between
 // registered providers and the server above them. See
 // include/ihs/ihs_mcp_provider.h for the provider contract and
-// include/ihs/ihs_mcp_host.h for the shell-facing routing surface.
+// include/ihs/ihs_mcp_registry.h for the shell-facing routing surface.
 
-#include "ihs/ihs_mcp_host.h"
 #include "ihs/ihs_mcp_provider.h"
+#include "ihs/ihs_mcp_registry.h"
 
 #include <cerrno>
 #include <condition_variable>
@@ -314,7 +314,7 @@ size_t ihs_mcp_provider_count(void) {
   return registry.providers.size();
 }
 
-int ihs_mcp_host_for_each_tool(IhsMcpToolVisitor fn, void* user_data) {
+int ihs_mcp_registry_for_each_tool(IhsMcpToolVisitor fn, void* user_data) {
   if (fn == nullptr) {
     return IHS_MCP_ERR_INVALID;
   }
@@ -338,7 +338,7 @@ int ihs_mcp_host_for_each_tool(IhsMcpToolVisitor fn, void* user_data) {
       const std::string prefixed =
           provider->tool_prefix +
           (tools[i].name != nullptr ? tools[i].name : "");
-      IhsMcpHostTool out;
+      IhsMcpRegistryTool out;
       out.name = prefixed.c_str();
       out.description =
           tools[i].description != nullptr ? tools[i].description : "";
@@ -353,7 +353,8 @@ int ihs_mcp_host_for_each_tool(IhsMcpToolVisitor fn, void* user_data) {
   return IHS_MCP_OK;
 }
 
-int ihs_mcp_host_for_each_resource(IhsMcpResourceVisitor fn, void* user_data) {
+int ihs_mcp_registry_for_each_resource(IhsMcpResourceVisitor fn,
+                                       void* user_data) {
   if (fn == nullptr) {
     return IHS_MCP_ERR_INVALID;
   }
@@ -371,7 +372,7 @@ int ihs_mcp_host_for_each_resource(IhsMcpResourceVisitor fn, void* user_data) {
       continue;
     }
     for (size_t i = 0; i < count; i++) {
-      IhsMcpHostResource out;
+      IhsMcpRegistryResource out;
       out.uri = resources[i].uri != nullptr ? resources[i].uri : "";
       out.name = resources[i].name != nullptr ? resources[i].name : "";
       out.description =
@@ -385,8 +386,8 @@ int ihs_mcp_host_for_each_resource(IhsMcpResourceVisitor fn, void* user_data) {
   return IHS_MCP_OK;
 }
 
-int ihs_mcp_host_set_notification_sink(const IhsMcpNotificationSink sink,
-                                       void* user_data) {
+int ihs_mcp_registry_set_notification_sink(const IhsMcpNotificationSink sink,
+                                           void* user_data) {
   Registry& registry = TheRegistry();
 
   if (sink == nullptr) {
@@ -435,10 +436,10 @@ int ihs_mcp_host_set_notification_sink(const IhsMcpNotificationSink sink,
   return IHS_MCP_OK;
 }
 
-int ihs_mcp_host_call_tool(const char* name,
-                           const char* arguments_json,
-                           size_t arguments_length,
-                           IhsMcpPayload* out_result) {
+int ihs_mcp_registry_call_tool(const char* name,
+                               const char* arguments_json,
+                               size_t arguments_length,
+                               IhsMcpPayload* out_result) {
   if (name == nullptr || out_result == nullptr) {
     return IHS_MCP_ERR_INVALID;
   }
@@ -495,7 +496,8 @@ int ihs_mcp_host_call_tool(const char* name,
                                        args_length, out_result);
 }
 
-int ihs_mcp_host_read_resource(const char* uri, IhsMcpPayload* out_content) {
+int ihs_mcp_registry_read_resource(const char* uri,
+                                   IhsMcpPayload* out_content) {
   if (uri == nullptr || out_content == nullptr) {
     return IHS_MCP_ERR_INVALID;
   }
@@ -509,7 +511,7 @@ int ihs_mcp_host_read_resource(const char* uri, IhsMcpPayload* out_content) {
                                            out_content);
 }
 
-int ihs_mcp_host_subscribe(const char* uri, bool subscribed) {
+int ihs_mcp_registry_subscribe(const char* uri, bool subscribed) {
   if (uri == nullptr) {
     return IHS_MCP_ERR_INVALID;
   }
@@ -527,7 +529,7 @@ int ihs_mcp_host_subscribe(const char* uri, bool subscribed) {
   return provider->callbacks.subscribe(provider->user_data, uri, subscribed);
 }
 
-void ihs_mcp_host_release_payload(IhsMcpPayload* payload) {
+void ihs_mcp_registry_release_payload(IhsMcpPayload* payload) {
   if (payload == nullptr || payload->release == nullptr) {
     return;
   }

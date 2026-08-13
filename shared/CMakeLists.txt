@@ -192,7 +192,7 @@ if (BUILD_MCP)
     target_compile_definitions(ihs_shared PUBLIC IHS_WITH_MCP=1)
     # The semantics provider bridges the two: it needs the hub as well as the
     # registry, so it is only built when both are.
-    # The transport is framing over a socket: it routes onto ihs_mcp_host and
+    # The transport is framing over a socket: it routes onto ihs_mcp_registry and
     # knows nothing about tools, so it builds with the registry rather than
     # with the semantics provider.
     target_sources(ihs_shared PRIVATE src/mcp_transport.cc)
@@ -286,7 +286,7 @@ endif ()
 if (NOT BUILD_MCP)
     list(APPEND _ihs_header_excludes
             PATTERN "ihs_mcp_provider.h" EXCLUDE
-            PATTERN "ihs_mcp_host.h" EXCLUDE
+            PATTERN "ihs_mcp_registry.h" EXCLUDE
             PATTERN "ihs_mcp_transport.h" EXCLUDE)
 endif ()
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/ihs

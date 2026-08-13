@@ -25,8 +25,8 @@
 #include <mutex>
 #include "gtest/gtest.h"
 
-#include "ihs/ihs_mcp_host.h"
 #include "ihs/ihs_mcp_provider.h"
+#include "ihs/ihs_mcp_registry.h"
 
 namespace {
 
@@ -137,8 +137,8 @@ IhsMcpToolDesc Tool(const char* name, uint64_t capability) {
 
 std::vector<std::string> ListedToolNames() {
   std::vector<std::string> names;
-  ihs_mcp_host_for_each_tool(
-      [](const IhsMcpHostTool* tool, void* user_data) {
+  ihs_mcp_registry_for_each_tool(
+      [](const IhsMcpRegistryTool* tool, void* user_data) {
         static_cast<std::vector<std::string>*>(user_data)->emplace_back(
             tool->name);
       },
@@ -297,7 +297,7 @@ TEST_F(McpProviderTest, ToolWithNoDeclaredCapabilityIsRefused) {
   EXPECT_TRUE(ListedToolNames().empty());
 
   IhsMcpPayload payload{};
-  EXPECT_EQ(ihs_mcp_host_call_tool("ui_mystery", nullptr, 0, &payload),
+  EXPECT_EQ(ihs_mcp_registry_call_tool("ui_mystery", nullptr, 0, &payload),
             IHS_MCP_ERR_CAPABILITY_DENIED);
 }
 
@@ -310,13 +310,13 @@ TEST_F(McpProviderTest, CallRoutesByPrefixAndStripsIt) {
   Register(scene.Desc("scene", "scene_", "scene", IHS_MCP_CAP_ALL));
 
   IhsMcpPayload payload{};
-  ASSERT_EQ(ihs_mcp_host_call_tool("scene_tap", "{\"a\":1}", 7, &payload),
+  ASSERT_EQ(ihs_mcp_registry_call_tool("scene_tap", "{\"a\":1}", 7, &payload),
             IHS_MCP_OK);
   // Reached the right provider, and saw its own unprefixed vocabulary.
   EXPECT_EQ(scene.last_tool_called, "tap");
   EXPECT_EQ(scene.last_arguments, "{\"a\":1}");
   EXPECT_TRUE(ui.last_tool_called.empty());
-  ihs_mcp_host_release_payload(&payload);
+  ihs_mcp_registry_release_payload(&payload);
 }
 
 // Providers are promised a non-null argument object, so the registry supplies
@@ -327,10 +327,10 @@ TEST_F(McpProviderTest, AbsentArgumentsBecomeAnEmptyObject) {
   Register(mock.Desc("semantics", "ui_", "ui", IHS_MCP_CAP_ALL));
 
   IhsMcpPayload payload{};
-  ASSERT_EQ(ihs_mcp_host_call_tool("ui_snapshot", nullptr, 0, &payload),
+  ASSERT_EQ(ihs_mcp_registry_call_tool("ui_snapshot", nullptr, 0, &payload),
             IHS_MCP_OK);
   EXPECT_EQ(mock.last_arguments, "{}");
-  ihs_mcp_host_release_payload(&payload);
+  ihs_mcp_registry_release_payload(&payload);
 }
 
 TEST_F(McpProviderTest, UnknownToolAndUnknownPrefixAreNotFound) {
@@ -339,9 +339,9 @@ TEST_F(McpProviderTest, UnknownToolAndUnknownPrefixAreNotFound) {
   Register(mock.Desc("semantics", "ui_", "ui", IHS_MCP_CAP_ALL));
 
   IhsMcpPayload payload{};
-  EXPECT_EQ(ihs_mcp_host_call_tool("ui_nonexistent", nullptr, 0, &payload),
+  EXPECT_EQ(ihs_mcp_registry_call_tool("ui_nonexistent", nullptr, 0, &payload),
             IHS_MCP_ERR_NOT_FOUND);
-  EXPECT_EQ(ihs_mcp_host_call_tool("scene_tap", nullptr, 0, &payload),
+  EXPECT_EQ(ihs_mcp_registry_call_tool("scene_tap", nullptr, 0, &payload),
             IHS_MCP_ERR_NOT_FOUND);
 }
 
@@ -355,7 +355,7 @@ TEST_F(McpProviderTest, ProviderWithoutListingCannotHaveToolsCalled) {
   Register(desc);
 
   IhsMcpPayload payload{};
-  EXPECT_EQ(ihs_mcp_host_call_tool("ui_tap", nullptr, 0, &payload),
+  EXPECT_EQ(ihs_mcp_registry_call_tool("ui_tap", nullptr, 0, &payload),
             IHS_MCP_ERR_CAPABILITY_DENIED);
   EXPECT_TRUE(mock.last_tool_called.empty());
 }
@@ -369,7 +369,7 @@ TEST_F(McpProviderTest, ProviderRefusalIsReportedVerbatim) {
   Register(mock.Desc("semantics", "ui_", "ui", IHS_MCP_CAP_ALL));
 
   IhsMcpPayload payload{};
-  EXPECT_EQ(ihs_mcp_host_call_tool("ui_tap", nullptr, 0, &payload),
+  EXPECT_EQ(ihs_mcp_registry_call_tool("ui_tap", nullptr, 0, &payload),
             IHS_MCP_ERR_REFUSED);
 }
 
@@ -395,8 +395,8 @@ TEST_F(McpProviderTest, ResourcesAreListedAndRoutedByScheme) {
 
   std::vector<std::string> uris;
   ASSERT_EQ(
-      ihs_mcp_host_for_each_resource(
-          [](const IhsMcpHostResource* resource, void* user_data) {
+      ihs_mcp_registry_for_each_resource(
+          [](const IhsMcpRegistryResource* resource, void* user_data) {
             static_cast<std::vector<std::string>*>(user_data)->emplace_back(
                 resource->uri);
           },
@@ -405,12 +405,13 @@ TEST_F(McpProviderTest, ResourcesAreListedAndRoutedByScheme) {
   ASSERT_EQ(uris.size(), 2u);
 
   IhsMcpPayload payload{};
-  ASSERT_EQ(ihs_mcp_host_read_resource("scene://graph", &payload), IHS_MCP_OK);
+  ASSERT_EQ(ihs_mcp_registry_read_resource("scene://graph", &payload),
+            IHS_MCP_OK);
   EXPECT_EQ(scene.last_uri_read, "scene://graph");
   EXPECT_TRUE(ui.last_uri_read.empty());
-  ihs_mcp_host_release_payload(&payload);
+  ihs_mcp_registry_release_payload(&payload);
 
-  EXPECT_EQ(ihs_mcp_host_read_resource("nope://x", &payload),
+  EXPECT_EQ(ihs_mcp_registry_read_resource("nope://x", &payload),
             IHS_MCP_ERR_NOT_FOUND);
 }
 
@@ -418,13 +419,16 @@ TEST_F(McpProviderTest, SubscribeRoutesByScheme) {
   MockProvider mock;
   Register(mock.Desc("semantics", "ui_", "ui", IHS_MCP_CAP_ALL));
 
-  EXPECT_EQ(ihs_mcp_host_subscribe("ui://semantics/tree", true), IHS_MCP_OK);
+  EXPECT_EQ(ihs_mcp_registry_subscribe("ui://semantics/tree", true),
+            IHS_MCP_OK);
   EXPECT_EQ(mock.last_uri_subscribed, "ui://semantics/tree");
   EXPECT_TRUE(mock.last_subscribed_state);
 
-  EXPECT_EQ(ihs_mcp_host_subscribe("ui://semantics/tree", false), IHS_MCP_OK);
+  EXPECT_EQ(ihs_mcp_registry_subscribe("ui://semantics/tree", false),
+            IHS_MCP_OK);
   EXPECT_FALSE(mock.last_subscribed_state);
-  EXPECT_EQ(ihs_mcp_host_subscribe("nope://x", true), IHS_MCP_ERR_NOT_FOUND);
+  EXPECT_EQ(ihs_mcp_registry_subscribe("nope://x", true),
+            IHS_MCP_ERR_NOT_FOUND);
 }
 
 // A provider that is always current may leave subscribe NULL; the registry
@@ -436,7 +440,8 @@ TEST_F(McpProviderTest, ProviderWithoutSubscribeSucceedsAnyway) {
   desc.callbacks.subscribe = nullptr;
   Register(desc);
 
-  EXPECT_EQ(ihs_mcp_host_subscribe("ui://semantics/tree", true), IHS_MCP_OK);
+  EXPECT_EQ(ihs_mcp_registry_subscribe("ui://semantics/tree", true),
+            IHS_MCP_OK);
   EXPECT_EQ(mock.subscribe_calls, 0);
 }
 
@@ -483,10 +488,10 @@ TEST_F(McpProviderTest, UnregisterReleasesTheNamespace) {
 // Releasing is idempotent so an error path can release unconditionally without
 // first working out whether anything was produced.
 TEST_F(McpProviderTest, PayloadReleaseIsIdempotentAndNullSafe) {
-  ihs_mcp_host_release_payload(nullptr);
+  ihs_mcp_registry_release_payload(nullptr);
 
   IhsMcpPayload payload{};
-  ihs_mcp_host_release_payload(&payload);  // zeroed: no release hook
+  ihs_mcp_registry_release_payload(&payload);  // zeroed: no release hook
 
   struct Counter {
     int releases = 0;
@@ -497,14 +502,15 @@ TEST_F(McpProviderTest, PayloadReleaseIsIdempotentAndNullSafe) {
   payload.release_ctx = &counter;
   payload.release = [](void* ctx) { static_cast<Counter*>(ctx)->releases++; };
 
-  ihs_mcp_host_release_payload(&payload);
-  ihs_mcp_host_release_payload(&payload);
+  ihs_mcp_registry_release_payload(&payload);
+  ihs_mcp_registry_release_payload(&payload);
   EXPECT_EQ(counter.releases, 1);
 }
 
 TEST_F(McpProviderTest, VisitorsRejectANullCallback) {
-  EXPECT_EQ(ihs_mcp_host_for_each_tool(nullptr, nullptr), IHS_MCP_ERR_INVALID);
-  EXPECT_EQ(ihs_mcp_host_for_each_resource(nullptr, nullptr),
+  EXPECT_EQ(ihs_mcp_registry_for_each_tool(nullptr, nullptr),
+            IHS_MCP_ERR_INVALID);
+  EXPECT_EQ(ihs_mcp_registry_for_each_resource(nullptr, nullptr),
             IHS_MCP_ERR_INVALID);
 }
 
@@ -545,7 +551,8 @@ void OnNotify(IhsMcpNotification kind, const char* uri, void* /*user_data*/) {
 TEST_F(McpProviderTest, SignallingTheNotifyFdReachesTheSink) {
   SinkRecord record;
   g_sink = &record;
-  ASSERT_EQ(ihs_mcp_host_set_notification_sink(OnNotify, nullptr), IHS_MCP_OK);
+  ASSERT_EQ(ihs_mcp_registry_set_notification_sink(OnNotify, nullptr),
+            IHS_MCP_OK);
 
   MockProvider mock;
   const int fd = ::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
@@ -568,7 +575,8 @@ TEST_F(McpProviderTest, SignallingTheNotifyFdReachesTheSink) {
   }
 
   ihs_mcp_provider_unregister(provider);
-  ASSERT_EQ(ihs_mcp_host_set_notification_sink(nullptr, nullptr), IHS_MCP_OK);
+  ASSERT_EQ(ihs_mcp_registry_set_notification_sink(nullptr, nullptr),
+            IHS_MCP_OK);
   ::close(fd);
   g_sink = nullptr;
 }
@@ -579,7 +587,8 @@ TEST_F(McpProviderTest, SignallingTheNotifyFdReachesTheSink) {
 TEST_F(McpProviderTest, UnregisterDoesNotLeaveTheWatcherOnAClosedFd) {
   SinkRecord record;
   g_sink = &record;
-  ASSERT_EQ(ihs_mcp_host_set_notification_sink(OnNotify, nullptr), IHS_MCP_OK);
+  ASSERT_EQ(ihs_mcp_registry_set_notification_sink(OnNotify, nullptr),
+            IHS_MCP_OK);
 
   for (int i = 0; i < 20; i++) {
     MockProvider mock;
@@ -594,7 +603,8 @@ TEST_F(McpProviderTest, UnregisterDoesNotLeaveTheWatcherOnAClosedFd) {
     ::close(fd);
   }
 
-  ASSERT_EQ(ihs_mcp_host_set_notification_sink(nullptr, nullptr), IHS_MCP_OK);
+  ASSERT_EQ(ihs_mcp_registry_set_notification_sink(nullptr, nullptr),
+            IHS_MCP_OK);
   g_sink = nullptr;
 }
 
@@ -603,11 +613,14 @@ TEST_F(McpProviderTest, UnregisterDoesNotLeaveTheWatcherOnAClosedFd) {
 TEST_F(McpProviderTest, OnlyOneSinkMayBeInstalled) {
   SinkRecord record;
   g_sink = &record;
-  ASSERT_EQ(ihs_mcp_host_set_notification_sink(OnNotify, nullptr), IHS_MCP_OK);
-  EXPECT_EQ(ihs_mcp_host_set_notification_sink(OnNotify, nullptr),
+  ASSERT_EQ(ihs_mcp_registry_set_notification_sink(OnNotify, nullptr),
+            IHS_MCP_OK);
+  EXPECT_EQ(ihs_mcp_registry_set_notification_sink(OnNotify, nullptr),
             IHS_MCP_ERR_REFUSED);
-  ASSERT_EQ(ihs_mcp_host_set_notification_sink(nullptr, nullptr), IHS_MCP_OK);
+  ASSERT_EQ(ihs_mcp_registry_set_notification_sink(nullptr, nullptr),
+            IHS_MCP_OK);
   // Uninstalling twice is harmless, so teardown paths need no bookkeeping.
-  EXPECT_EQ(ihs_mcp_host_set_notification_sink(nullptr, nullptr), IHS_MCP_OK);
+  EXPECT_EQ(ihs_mcp_registry_set_notification_sink(nullptr, nullptr),
+            IHS_MCP_OK);
   g_sink = nullptr;
 }
