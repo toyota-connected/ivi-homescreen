@@ -47,6 +47,27 @@ layout that breaks the first time a font or a screen size changes.
 | C4b | pointer | `ui_tap_at` at that region's rect reaches it anyway. C4a and C4b together are the DR-7 contrast, demonstrated rather than argued |
 | C5 | enabled gate | A disabled control is refused **and never reaches the widget** — the framework drops such an action silently, so a client would otherwise see success and no effect |
 
+## The app must be composited, or nothing works
+
+This bit is not obvious and cost real time to find. If the surface is not
+being composited -- occluded, on another workspace, or under a compositor
+that stops sending frame callbacks once nothing is damaged -- then no frames
+run, `setState` never rebuilds, and **every check fails in a way that looks
+like the dispatch path is broken**. The action does reach the framework; the
+result simply never lands.
+
+Run it under a compositor you control rather than a desktop session:
+
+```bash
+weston --backend=headless --width=900 --height=700 --socket=wl-mcp-test &
+WAYLAND_DISPLAY=wl-mcp-test <shell> -b <bundle> --enable-mcp
+```
+
+Even then a headless compositor may stop issuing frame callbacks while the UI
+is idle, which makes runs intermittent: the first interaction lands and later
+ones stall. If a check times out with the status frozen at an earlier value,
+that is this, not the tool it was exercising.
+
 ## Running it
 
 The shell must be built with `BUILD_MCP` (which requires `BUILD_ACCESSIBILITY`)
