@@ -24,9 +24,11 @@
 #include <mutex>
 #include "gtest/gtest.h"
 
+#include <functional>
 #include "ihs/ihs_mcp_provider.h"
 #include "ihs/ihs_mcp_registry.h"
 #include "ihs/ihs_mcp_semantics.h"
+
 #include "ihs/ihs_semantics.h"
 #include "ihs/ihs_semantics_host.h"
 
@@ -43,6 +45,13 @@ struct MockHost {
   // the shell will encode from.
   std::vector<uint8_t> last_data;
   bool semantics_enabled = false;
+  int pointer_taps = 0;
+
+  // Called from inside the dispatch, so a test can republish the tree the way
+  // the framework would after handling the action. That is the case
+  // verify-after-act exists for: without it every action looks like one that
+  // changed nothing.
+  std::function<void()> on_dispatch;
 };
 
 MockHost* g_host = nullptr;
@@ -61,6 +70,17 @@ int OnDispatch(void* /*user_data*/,
   g_host->last_node_id = node_id;
   g_host->last_action = action;
   g_host->last_data.assign(data, data + (data == nullptr ? 0 : data_length));
+  if (g_host->on_dispatch) {
+    g_host->on_dispatch();
+  }
+  return IHS_SEMANTICS_OK;
+}
+
+int OnPointerTap(void* /*user_data*/,
+                 int64_t /*view_id*/,
+                 double /*x*/,
+                 double /*y*/) {
+  g_host->pointer_taps++;
   return IHS_SEMANTICS_OK;
 }
 
@@ -119,6 +139,7 @@ class McpSemanticsProviderTest : public ::testing::Test {
     host.struct_size = sizeof(IhsSemanticsHost);
     host.set_semantics_enabled = OnEnable;
     host.dispatch = OnDispatch;
+    host.send_pointer_tap = OnPointerTap;
     ihs_semantics_set_host(&host);
     ihs_semantics_clear();
     ASSERT_EQ(ihs_mcp_semantics_provider_start(), IHS_MCP_OK);
@@ -521,4 +542,107 @@ TEST_F(McpSemanticsProviderTest, PublishingATreeNotifiesTheServer) {
   ASSERT_EQ(ihs_mcp_registry_set_notification_sink(nullptr, nullptr),
             IHS_MCP_OK);
   g_notify = nullptr;
+}
+
+// DR-8: an action reports what the tree looks like afterwards, so an agent
+// gets act-and-verify in one round trip instead of acting blind and re-reading.
+TEST_F(McpSemanticsProviderTest, ActionReportsThePostActionNode) {
+  TreeBuilder before;
+  before.Add(0, "root", IHS_SEMANTICS_ROLE_WINDOW);
+  IhsSemanticsPublishNode& slider =
+      before.Add(12, "Temperature", IHS_SEMANTICS_ROLE_SLIDER);
+  slider.actions = IHS_SEMANTICS_ACTION_INCREASE;
+  slider.value = "21.0";
+  ASSERT_EQ(before.Publish(), IHS_SEMANTICS_OK);
+
+  // The framework handles the action and republishes, which is what makes the
+  // new value visible at all.
+  TreeBuilder after;
+  host_.on_dispatch = [&after]() {
+    after.Add(0, "root", IHS_SEMANTICS_ROLE_WINDOW);
+    IhsSemanticsPublishNode& moved =
+        after.Add(12, "Temperature", IHS_SEMANTICS_ROLE_SLIDER);
+    moved.actions = IHS_SEMANTICS_ACTION_INCREASE;
+    moved.value = "22.0";
+    after.Publish();
+  };
+
+  int status = 0;
+  const std::string body =
+      CallTool("ui_increase", R"({"node_id":12})", &status);
+  EXPECT_EQ(status, IHS_MCP_OK);
+  EXPECT_TRUE(Contains(body, "\"mode\":\"semantics\"")) << body;
+  EXPECT_TRUE(Contains(body, "\"node_after\"")) << body;
+  // The point of the whole feature: the caller learns the new value without
+  // a second call.
+  EXPECT_TRUE(Contains(body, "22.0")) << body;
+  EXPECT_FALSE(Contains(body, "21.0")) << body;
+}
+
+// A tap that navigates takes its own node out of the tree. That is a
+// successful action, not a failure, so it is reported as null rather than an
+// error a client would retry.
+TEST_F(McpSemanticsProviderTest, NodeThatLeftTheTreeIsNullNotAnError) {
+  TreeBuilder before;
+  before.Add(0, "root", IHS_SEMANTICS_ROLE_WINDOW);
+  IhsSemanticsPublishNode& link =
+      before.Add(7, "Next", IHS_SEMANTICS_ROLE_LINK);
+  link.actions = IHS_SEMANTICS_ACTION_TAP;
+  ASSERT_EQ(before.Publish(), IHS_SEMANTICS_OK);
+
+  TreeBuilder route;
+  host_.on_dispatch = [&route]() {
+    route.Add(0, "root", IHS_SEMANTICS_ROLE_WINDOW);
+    route.Add(99, "Second page", IHS_SEMANTICS_ROLE_PANE);
+    route.Publish();
+  };
+
+  int status = 0;
+  const std::string body = CallTool("ui_tap", R"({"node_id":7})", &status);
+  EXPECT_EQ(status, IHS_MCP_OK) << body;
+  EXPECT_TRUE(Contains(body, "\"node_after\":null")) << body;
+}
+
+// An action that changes nothing visible -- firing a network call, say --
+// reports equal generations. That is an answer, and treating it as a failure
+// would make a client retry something that already happened.
+TEST_F(McpSemanticsProviderTest, NoTreeChangeIsAnAnswerNotAFailure) {
+  TreeBuilder tree;
+  tree.Add(0, "root", IHS_SEMANTICS_ROLE_WINDOW);
+  IhsSemanticsPublishNode& button =
+      tree.Add(3, "Sync", IHS_SEMANTICS_ROLE_BUTTON);
+  button.actions = IHS_SEMANTICS_ACTION_TAP;
+  ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
+
+  int status = 0;
+  const std::string body = CallTool("ui_tap", R"({"node_id":3})", &status);
+  EXPECT_EQ(status, IHS_MCP_OK) << body;
+  EXPECT_EQ(host_.dispatch_calls, 1);
+  // The node is still there and reported; only the generations say nothing
+  // moved.
+  EXPECT_TRUE(Contains(body, "\"node_after\"")) << body;
+  EXPECT_FALSE(Contains(body, "\"node_after\":null")) << body;
+
+  const size_t before_at = body.find("\"generation_before\":");
+  const size_t after_at = body.find("\"generation_after\":");
+  ASSERT_NE(before_at, std::string::npos) << body;
+  ASSERT_NE(after_at, std::string::npos) << body;
+  EXPECT_EQ(body.substr(before_at + 20, 3), body.substr(after_at + 19, 3))
+      << body;
+}
+
+// A coordinate tap still names no target -- nothing knows what was under the
+// point -- but it can say whether the tree moved, which is the only evidence
+// of effect available to it.
+TEST_F(McpSemanticsProviderTest, PointerTapReportsModeButNoNode) {
+  TreeBuilder tree;
+  tree.Add(0, "root", IHS_SEMANTICS_ROLE_WINDOW);
+  ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
+
+  int status = 0;
+  const std::string body =
+      CallTool("ui_tap_at", R"({"x":10.0,"y":20.0})", &status);
+  EXPECT_TRUE(Contains(body, "\"mode\":\"pointer\"")) << body;
+  EXPECT_TRUE(Contains(body, "\"generation_after\"")) << body;
+  EXPECT_FALSE(Contains(body, "\"node_after\"")) << body;
 }
