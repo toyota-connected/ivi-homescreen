@@ -20,12 +20,22 @@
  * out of it. Everything it serves comes from ihs_mcp_registry.h; it adds
  * framing and a socket, and knows nothing about tools or the semantics tree.
  *
- * Unix domain only, deliberately. A TCP listener would make the UI drivable
- * from off-box, which is a product-security decision rather than a transport
- * one, so there is no address family to configure and no token to get wrong.
- * A filesystem socket puts the decision where the operating system can enforce
- * it: the socket is created 0600, and every connection's peer credentials are
- * checked against the shell's own uid before a byte is read.
+ * Unix domain only, and it stays that way. A filesystem socket puts the
+ * access decision where the operating system can enforce it: the socket is
+ * created 0600 in a 0700 directory, and every connection's peer credentials
+ * are checked against the shell's own uid before a byte is read. That is a
+ * kernel-attested peer uid, which is a stronger statement than any token this
+ * could carry instead.
+ *
+ * Off-box access is supported, but not from here. Certificate provisioning,
+ * CA trust, rotation and cipher policy have their own lifecycle and belong to
+ * the product rather than to a UI shell, so a TLS terminator runs in front of
+ * this socket instead -- see docs/mcp-remote-access.md, which also covers the
+ * two things that arrangement makes easy to get wrong.
+ *
+ * The consequence for this file is the Origin check: a terminator forwards
+ * plain HTTP, so a rebound browser request would otherwise arrive looking
+ * like an ordinary local one.
  */
 
 #ifndef IHS_MCP_TRANSPORT_H_
