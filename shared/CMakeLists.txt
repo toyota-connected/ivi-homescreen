@@ -280,17 +280,40 @@ install(TARGETS ihs_shared EXPORT ihs_shared_targets
 # ihs_mcp_* symbols to link, so installing headers that declare them would let
 # an out-of-tree consumer compile against a surface that is not there and fail
 # at link instead of at the include.
-set(_ihs_header_excludes PATTERN "flutter_desktop_bridge.h" EXCLUDE)
+#
+# Others are shell-internal for the same reason -- they are the producing side
+# of surfaces whose consuming side is installed, and nothing out of tree
+# implements a producer. Two of them already say so in their own file comment:
+#
+#   ihs_semantics_host.h   installs the host that publishes the tree. Only the
+#                          shell has a Flutter engine to publish from; a plugin
+#                          reads through ihs_semantics.h or IhsApi::semantics.
+#   ihs_mcp_registry.h     the routing layer the transport calls. A provider
+#                          registers through ihs_mcp_provider.h and never
+#                          addresses the registry directly.
+#   ihs_mcp_transport.h    starts and stops the listener, which the shell does
+#                          from its own config; an agent speaks to the socket
+#                          over the wire, not to this.
+#   ihs_mcp_semantics.h    "SHELL-ONLY lifecycle ... Not part of the plugin ABI"
+#   platform_view_host.h   "SHELL-ONLY host seam ... NOT part of the plugin ABI"
+#
+# Installing them publishes a producer surface as though it were supported, and
+# invites an out-of-tree caller to install a second semantics host or platform
+# view host, or start a second transport -- all process-global, and none a
+# thing to find out by trying. The in-tree users take them from the source
+# include directory, so nothing in this build depends on their being installed.
+set(_ihs_header_excludes
+        PATTERN "flutter_desktop_bridge.h" EXCLUDE
+        PATTERN "ihs_semantics_host.h" EXCLUDE
+        PATTERN "ihs_mcp_registry.h" EXCLUDE
+        PATTERN "ihs_mcp_transport.h" EXCLUDE
+        PATTERN "ihs_mcp_semantics.h" EXCLUDE
+        PATTERN "platform_view_host.h" EXCLUDE)
 if (NOT BUILD_ACCESSIBILITY)
-    list(APPEND _ihs_header_excludes
-            PATTERN "ihs_semantics.h" EXCLUDE
-            PATTERN "ihs_semantics_host.h" EXCLUDE)
+    list(APPEND _ihs_header_excludes PATTERN "ihs_semantics.h" EXCLUDE)
 endif ()
 if (NOT BUILD_MCP)
-    list(APPEND _ihs_header_excludes
-            PATTERN "ihs_mcp_provider.h" EXCLUDE
-            PATTERN "ihs_mcp_registry.h" EXCLUDE
-            PATTERN "ihs_mcp_transport.h" EXCLUDE)
+    list(APPEND _ihs_header_excludes PATTERN "ihs_mcp_provider.h" EXCLUDE)
 endif ()
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/ihs
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
