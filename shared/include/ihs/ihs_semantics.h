@@ -459,6 +459,14 @@ typedef void (*IhsSemanticsDoneCallback)(int status, void* user_data);
  *                                          base, then extent
  *   IHS_SEMANTICS_ACTION_SCROLL_TO_OFFSET  two doubles in native byte order:
  *                                          dx, then dy
+ *   IHS_SEMANTICS_ACTION_CUSTOM_ACTION     one int32 in native byte order: the
+ *                                          id from the node's
+ *                                          custom_action_ids. Required, not
+ *                                          optional -- the id is the only
+ *                                          thing naming which of a node's
+ *                                          custom actions to run, and the
+ *                                          framework resolves the handler by
+ *                                          it
  *
  * A buffer that does not match the action's layout, or one supplied for an
  * action that takes no argument, fails with IHS_SEMANTICS_ERR_INVALID. The
