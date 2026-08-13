@@ -766,3 +766,124 @@ TEST_F(McpSemanticsProviderTest, CustomActionWithoutANameIsRefused) {
   EXPECT_EQ(status, IHS_MCP_ERR_INVALID);
   EXPECT_EQ(host_.dispatch_calls, 0);
 }
+
+// Finding what can be acted on is the first thing an agent does, and the
+// action names are the ones the tree already reported on each node.
+TEST_F(McpSemanticsProviderTest, QuerySelectsByActionOffered) {
+  TreeBuilder tree;
+  tree.Add(0, "root", IHS_SEMANTICS_ROLE_WINDOW);
+  IhsSemanticsPublishNode& button =
+      tree.Add(1, "Fan", IHS_SEMANTICS_ROLE_BUTTON);
+  button.actions = IHS_SEMANTICS_ACTION_TAP;
+  IhsSemanticsPublishNode& slider =
+      tree.Add(2, "Temp", IHS_SEMANTICS_ROLE_SLIDER);
+  slider.actions = IHS_SEMANTICS_ACTION_INCREASE;
+  ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
+
+  int status = 0;
+  const std::string body =
+      CallTool("ui_query", R"({"action":"increase"})", &status);
+  EXPECT_EQ(status, IHS_MCP_OK);
+  EXPECT_TRUE(Contains(body, "Temp")) << body;
+  EXPECT_FALSE(Contains(body, "Fan")) << body;
+}
+
+// A zero mask tests true against every node, so an unknown action name would
+// select the whole tree -- the opposite of what was asked for.
+TEST_F(McpSemanticsProviderTest, QueryWithAnUnknownActionIsAnError) {
+  TreeBuilder tree;
+  tree.Add(0, "root", IHS_SEMANTICS_ROLE_WINDOW);
+  tree.Add(1, "Fan", IHS_SEMANTICS_ROLE_BUTTON);
+  ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
+
+  const std::string body =
+      CallTool("ui_query", R"({"action":"levitate"})", nullptr);
+  EXPECT_TRUE(Contains(body, "no such action")) << body;
+  EXPECT_FALSE(Contains(body, "\"label\":\"Fan\"")) << body;
+}
+
+// The exit criterion drives flows by custom-action name, so finding the node
+// that offers one has to be a query rather than a walk of the whole tree.
+TEST_F(McpSemanticsProviderTest, QuerySelectsByCustomActionLabel) {
+  TreeBuilder tree;
+  PublishWithCustomActions(tree);
+  IhsSemanticsPublishNode& other =
+      tree.Add(9, "Plain", IHS_SEMANTICS_ROLE_PANE);
+  other.actions = IHS_SEMANTICS_ACTION_TAP;
+  ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
+
+  const std::string body =
+      CallTool("ui_query", R"({"custom_action":"Archive"})", nullptr);
+  EXPECT_TRUE(Contains(body, "Trip")) << body;
+  EXPECT_FALSE(Contains(body, "Plain")) << body;
+}
+
+// Selected by tristate name, not a bool: the hub keeps "disabled" and
+// "enablement does not apply" apart, and a bool would rejoin them here.
+TEST_F(McpSemanticsProviderTest, QuerySelectsByEnabledTristate) {
+  TreeBuilder tree;
+  tree.Add(0, "root", IHS_SEMANTICS_ROLE_WINDOW);
+  IhsSemanticsPublishNode& live =
+      tree.Add(1, "Live", IHS_SEMANTICS_ROLE_BUTTON);
+  live.enabled = IHS_SEMANTICS_TRISTATE_TRUE;
+  IhsSemanticsPublishNode& dead =
+      tree.Add(2, "Dead", IHS_SEMANTICS_ROLE_BUTTON);
+  dead.enabled = IHS_SEMANTICS_TRISTATE_FALSE;
+  IhsSemanticsPublishNode& moot = tree.Add(3, "Moot", IHS_SEMANTICS_ROLE_LABEL);
+  moot.enabled = IHS_SEMANTICS_TRISTATE_NONE;
+  ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
+
+  const std::string disabled =
+      CallTool("ui_query", R"({"enabled":"false"})", nullptr);
+  EXPECT_TRUE(Contains(disabled, "Dead")) << disabled;
+  EXPECT_FALSE(Contains(disabled, "Live")) << disabled;
+  EXPECT_FALSE(Contains(disabled, "Moot")) << disabled;
+
+  // Spelled exactly as the tree reports it -- the selector accepting a value
+  // the serializer never emits would match nothing and look like "no such
+  // nodes".
+  const std::string inapplicable =
+      CallTool("ui_query", R"({"enabled":"not_applicable"})", nullptr);
+  EXPECT_TRUE(Contains(inapplicable, "Moot")) << inapplicable;
+  EXPECT_FALSE(Contains(inapplicable, "Dead")) << inapplicable;
+}
+
+// Selectors narrow together; that is what makes having several worth anything.
+TEST_F(McpSemanticsProviderTest, QuerySelectorsCombine) {
+  TreeBuilder tree;
+  tree.Add(0, "root", IHS_SEMANTICS_ROLE_WINDOW);
+  IhsSemanticsPublishNode& right =
+      tree.Add(1, "Fan speed", IHS_SEMANTICS_ROLE_SLIDER);
+  right.actions = IHS_SEMANTICS_ACTION_INCREASE;
+  IhsSemanticsPublishNode& wrong_role =
+      tree.Add(2, "Fan speed", IHS_SEMANTICS_ROLE_BUTTON);
+  wrong_role.actions = IHS_SEMANTICS_ACTION_INCREASE;
+  ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
+
+  const std::string body = CallTool(
+      "ui_query", R"({"label":"Fan","role":"slider","action":"increase"})",
+      nullptr);
+  EXPECT_TRUE(Contains(body, "\"id\":1")) << body;
+  EXPECT_FALSE(Contains(body, "\"id\":2")) << body;
+}
+
+// A cap that looked like a complete answer would have an agent conclude the
+// rest does not exist, so the total is reported alongside the truncation.
+TEST_F(McpSemanticsProviderTest, QueryLimitReportsWhatItLeftOut) {
+  TreeBuilder tree;
+  tree.Add(0, "root", IHS_SEMANTICS_ROLE_WINDOW);
+  for (int32_t i = 1; i <= 5; i++) {
+    tree.Add(i, "Seat", IHS_SEMANTICS_ROLE_BUTTON);
+  }
+  ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
+
+  const std::string body =
+      CallTool("ui_query", R"({"label":"Seat","limit":2})", nullptr);
+  EXPECT_TRUE(Contains(body, "\"match_count\":5")) << body;
+  EXPECT_TRUE(Contains(body, "\"truncated\":true")) << body;
+
+  const std::string whole =
+      CallTool("ui_query", R"({"label":"Seat"})", nullptr);
+  EXPECT_TRUE(Contains(whole, "\"match_count\":5")) << whole;
+  EXPECT_TRUE(Contains(whole, "\"truncated\":false")) << whole;
+}

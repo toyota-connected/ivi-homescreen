@@ -67,7 +67,11 @@ constexpr char kQuerySchema[] =
     R"({"type":"object","properties":{)"
     R"("identifier":{"type":"string"},)"
     R"("label":{"type":"string","description":"Substring match, case sensitive."},)"
-    R"("role":{"type":"string","description":"Role name, e.g. button or slider."})"
+    R"("role":{"type":"string","description":"Role name, e.g. button or slider."},)"
+    R"("action":{"type":"string","description":"Only nodes offering this action, named as the tree reports it."},)"
+    R"("custom_action":{"type":"string","description":"Only nodes declaring a custom action with this label."},)"
+    R"("enabled":{"type":"string","enum":["true","false","not_applicable"],"description":"Enabled tristate, spelled as the tree reports it; not_applicable means enablement is meaningless for the node."},)"
+    R"("limit":{"type":"integer","description":"Cap on returned nodes. match_count and truncated always report the full total."})"
     R"(}})";
 
 constexpr char kSetTextSchema[] =
@@ -638,14 +642,59 @@ int ReadResource(void* /* user_data */,
   return IHS_MCP_OK;
 }
 
+// Resolves an action name to its bit, using the same table WriteActions
+// reports from -- so the names a client can select on are exactly the names it
+// was shown, and there is no second list to fall out of step.
+uint64_t ActionBitFor(const std::string& name) {
+  for (const ToolEntry& tool : kTools) {
+    if (tool.action != 0 && name == tool.name) {
+      return tool.action;
+    }
+  }
+  return 0;
+}
+
+bool DeclaresCustomAction(const IhsSemanticsSnapshot* snapshot,
+                          const IhsSemanticsNode* node,
+                          const std::string& label) {
+  for (size_t i = 0; i < node->custom_action_count; i++) {
+    const IhsSemanticsCustomAction* declared =
+        ihs_semantics_find_custom_action(snapshot, node->custom_action_ids[i]);
+    if (declared != nullptr && label == declared->label) {
+      return true;
+    }
+  }
+  return false;
+}
+
 std::string RunQuery(const IhsSemanticsSnapshot* snapshot,
                      const char* arguments) {
   std::string want_identifier;
   std::string want_label;
   std::string want_role;
+  std::string want_action;
+  std::string want_custom_action;
+  std::string want_enabled;
   ExtractString(arguments, "identifier", &want_identifier);
   ExtractString(arguments, "label", &want_label);
   ExtractString(arguments, "role", &want_role);
+  ExtractString(arguments, "action", &want_action);
+  ExtractString(arguments, "custom_action", &want_custom_action);
+  ExtractString(arguments, "enabled", &want_enabled);
+
+  int32_t limit = 0;
+  const bool bounded = ExtractInt(arguments, "limit", &limit) && limit > 0;
+
+  // An action name that names nothing would otherwise select every node, since
+  // a zero mask tests true against anything. Reported rather than silently
+  // widened: the caller misspelled a name it was given.
+  const uint64_t want_action_bit =
+      want_action.empty() ? 0 : ActionBitFor(want_action);
+  if (!want_action.empty() && want_action_bit == 0) {
+    return std::string(R"({"error":"no such action: )") + want_action +
+           R"(","generation":)" +
+           std::to_string(ihs_semantics_snapshot_generation(snapshot)) + "}";
+  }
 
   rapidjson::StringBuffer buffer;
   rapidjson::Writer<rapidjson::StringBuffer> w(buffer);
@@ -655,6 +704,8 @@ std::string RunQuery(const IhsSemanticsSnapshot* snapshot,
   w.Key("nodes");
   w.StartArray();
 
+  size_t matched = 0;
+  size_t emitted = 0;
   const size_t count = ihs_semantics_snapshot_node_count(snapshot);
   for (size_t i = 0; i < count; i++) {
     const IhsSemanticsNode* node = ihs_semantics_snapshot_node_at(snapshot, i);
@@ -673,9 +724,36 @@ std::string RunQuery(const IhsSemanticsSnapshot* snapshot,
     if (!want_role.empty() && want_role != RoleName(node->role)) {
       continue;
     }
+    if (want_action_bit != 0 && (node->actions & want_action_bit) == 0) {
+      continue;
+    }
+    if (!want_custom_action.empty() &&
+        !DeclaresCustomAction(snapshot, node, want_custom_action)) {
+      continue;
+    }
+    // Selected by tristate name rather than a bool, because the hub keeps
+    // "disabled" and "enablement does not apply" apart and a bool here would
+    // put them back together at the last step.
+    if (!want_enabled.empty() && want_enabled != TristateName(node->enabled)) {
+      continue;
+    }
+
+    matched++;
+    if (bounded && emitted >= static_cast<size_t>(limit)) {
+      continue;  // counted, not emitted: the count is what makes the cap
+                 // visible
+    }
     WriteNode(w, node, snapshot);
+    emitted++;
   }
   w.EndArray();
+
+  // A truncated result that looked complete would have an agent conclude the
+  // rest does not exist, so the cap reports itself.
+  w.Key("match_count");
+  w.Uint64(matched);
+  w.Key("truncated");
+  w.Bool(matched > emitted);
   w.EndObject();
   return buffer.GetString();
 }
