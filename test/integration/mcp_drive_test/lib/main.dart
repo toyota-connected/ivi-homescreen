@@ -21,6 +21,7 @@
 import 'package:flutter/material.dart';
 // CustomSemanticsAction is not exported by material.dart.
 import 'package:flutter/semantics.dart';
+import 'package:ihs_mcp_app_tools/ihs_mcp_app_tools.dart';
 
 void main() {
   runApp(const McpDriveTestApp());
@@ -84,9 +85,60 @@ class _DriveTestPageState extends State<DriveTestPage> {
     });
   }
 
+  McpAppTools? _appTools;
+
+  // A typed tool, which is the thing the semantics verbs cannot express: an
+  // agent names the zone and the temperature rather than working out how many
+  // times to press a control it found by role.
+  void _registerAppTools() {
+    try {
+      _appTools = McpAppTools.register(
+        prefix: 'fixture_',
+        tools: <McpTool>[
+          McpTool(
+            name: 'set_temp',
+            description: 'Set the cabin temperature, in celsius.',
+            inputSchema: <String, Object?>{
+              'type': 'object',
+              'properties': <String, Object?>{
+                'celsius': <String, Object?>{
+                  'type': 'number',
+                  'minimum': 16,
+                  'maximum': 28,
+                },
+              },
+              'required': <String>['celsius'],
+            },
+            handler: (Map<String, Object?> arguments) async {
+              final num? celsius = arguments['celsius'] as num?;
+              if (celsius == null) {
+                // Thrown rather than returned: this is the tool running and
+                // failing, which a client is told apart from the tool being
+                // absent.
+                throw ArgumentError('celsius is required');
+              }
+              setState(() {
+                _temperature = celsius.toDouble().clamp(16.0, 28.0);
+                _last = 'tool:set_temp';
+                _events++;
+              });
+              return <String, Object?>{'celsius': _temperature};
+            },
+          ),
+        ],
+      );
+    } on Object catch (error) {
+      // Reported through the status line rather than thrown: the shell may be
+      // built without the MCP surface, and the rest of the fixture still has
+      // something to say in that case.
+      setState(() => _last = 'tools:unavailable:$error');
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+    _registerAppTools();
     // After the first layout, publish where the unannotated region ended up.
     WidgetsBinding.instance.addPostFrameCallback((_) => _publishOpaqueRect());
   }
@@ -104,6 +156,9 @@ class _DriveTestPageState extends State<DriveTestPage> {
 
   @override
   void dispose() {
+    // Withdrawn before the state goes: a stale tool an agent can still call is
+    // worse than none, because it fails only after the timeout.
+    _appTools?.unregister();
     _destination.dispose();
     super.dispose();
   }

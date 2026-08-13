@@ -379,6 +379,52 @@ def main():
                 f"the tree moved but the app did not: app was {app_start}, "
                 f"now {reported}, while node_after went {start} -> {twice}")
 
+    # C7 -- a tool the application declared for itself, with a schema. The
+    # semantics verbs cannot express this: an agent names the value it wants
+    # instead of working out how many increments reach it.
+    def c7_app_declared_tool():
+        listed = rpc(args.socket, "tools/list", request_id=20)
+        if "error" in listed:
+            raise Failure(f"tools/list: {listed['error']}")
+        tools = {t["name"]: t for t in listed["result"]["tools"]}
+        declared = tools.get("fixture_set_temp")
+        if declared is None:
+            raise Failure(
+                "the application's tool was not advertised; it is registered "
+                f"from the app, so this means the FFI registration failed. "
+                f"Saw: {sorted(tools)}")
+
+        # The schema is the point of a declared tool -- it is what tells an
+        # agent the argument is a number in a range rather than a label to
+        # match.
+        schema = json.dumps(declared.get("inputSchema", {}))
+        if "celsius" not in schema:
+            raise Failure(f"the declared schema lost its arguments: {schema}")
+
+        ok, doc = call_tool(args.socket, "fixture_set_temp",
+                            {"celsius": 24.5}, 21)
+        if not ok:
+            raise Failure(f"fixture_set_temp was refused: {doc}")
+
+        # Confirmed through the app's own status line, so this shows the Dart
+        # handler ran rather than the call being accepted somewhere in between.
+        fields = wait_for(
+            args.socket,
+            lambda f: f.get("last") == "tool:set_temp",
+            args.timeout, "the application's tool handler to run")
+        reported = numeric(fields.get("temp"))
+        if reported is None or abs(reported - 24.5) > 0.01:
+            raise Failure(
+                f"the handler ran but the value did not land: {reported}")
+
+        # A tool that runs and fails is distinct from one that does not exist.
+        refused, _ = call_tool(args.socket, "fixture_set_temp", {}, 22)
+        if refused:
+            raise Failure("a call with no celsius was accepted")
+        missing, _ = call_tool(args.socket, "fixture_nonexistent", {}, 23)
+        if missing:
+            raise Failure("a call to a tool that does not exist was accepted")
+
     check("C1", "the tree describes the app", c1)
     check("C2", "ui_tap invokes the widget's own handler", c2)
     check("C3", "ui_set_text reaches the field (R-9)", c3)
@@ -387,6 +433,8 @@ def main():
     check("C5", "a disabled control is refused before dispatch", c5)
     check("C6", "a multi-step flow by role, label and custom-action name",
           c6_multi_step_flow)
+    check("C7", "a tool the application declared, with its schema",
+          c7_app_declared_tool)
 
     width = max(len(d) for _, d, _, _ in results)
     failed = 0

@@ -9,6 +9,9 @@ environment:
   sdk: '>=3.0.0 <4.0.0'
 
 dependencies:
+  # The application-declared tools binding, from this repo.
+  ihs_mcp_app_tools:
+    path: ../../../packages/ihs_mcp_app_tools
   flutter:
     sdk: flutter
 

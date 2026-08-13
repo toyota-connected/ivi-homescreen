@@ -29,6 +29,7 @@
 
 #include "gtest/gtest.h"
 
+#include "ihs/ihs_mcp_app_tools.h"
 #include "ihs/ihs_mcp_provider.h"
 #include "ihs/ihs_mcp_transport.h"
 
@@ -825,5 +826,42 @@ TEST_F(McpTransportTest, ABurstIsCollapsedRatherThanForwardedWhole) {
 
   ihs_mcp_provider_unregister(provider);
   ::close(notify);
+  ::close(stream);
+}
+
+namespace {
+
+void NoopInvoke(void*, uint64_t, const char*, const char*, size_t) {}
+
+}  // namespace
+
+// An application registers its tools when a route appears, which can be long
+// after an agent listed them. Without this the agent would have to poll to
+// notice, and a tool it never learned about may as well not exist.
+TEST_F(McpTransportTest, RegisteringApplicationToolsTellsOpenStreams) {
+  std::string headers;
+  const int stream = OpenStream(path_, &headers);
+  ASSERT_GE(stream, 0);
+
+  IhsMcpAppTool tool{};
+  tool.name = "set_temp";
+  tool.description = "Set the cabin temperature.";
+  tool.input_schema_json = R"({"type":"object","properties":{}})";
+
+  IhsMcpAppToolsDesc desc{};
+  desc.struct_size = sizeof(desc);
+  desc.tool_prefix = "hvac_";
+  desc.tools = &tool;
+  desc.tool_count = 1;
+  desc.invoke = NoopInvoke;
+
+  IhsMcpAppTools* handle = nullptr;
+  ASSERT_EQ(ihs_mcp_app_tools_register(&desc, &handle), IHS_MCP_OK);
+
+  const std::string got = DrainStream(stream, 600);
+  EXPECT_NE(got.find("tools/list_changed"), std::string::npos)
+      << "registering told no one: [" << got << "]";
+
+  ihs_mcp_app_tools_unregister(handle);
   ::close(stream);
 }
