@@ -887,8 +887,15 @@ void Engine::CoalesceTouchFrame(const TouchEvent* events,
 }
 
 void Engine::SendPointerEvents() {
-  if (!m_pointer_events.empty() && m_flutter_engine) {
+  if (m_flutter_engine) {
     std::scoped_lock lock(m_pointer_mutex);
+    // Emptiness is checked under the lock, not before it. The main loop
+    // flushes this queue as well as the caller, so with the test outside both
+    // could pass it and the loser would hand the engine a zero-length batch,
+    // which it rejects as invalid arguments.
+    if (m_pointer_events.empty()) {
+      return;
+    }
     LibFlutterEngine->SendPointerEvent(
         m_flutter_engine, m_pointer_events.data(), m_pointer_events.size());
     m_pointer_events.clear();
@@ -1042,9 +1049,18 @@ int Engine::SendSyntheticTap(const double x, const double y) {
                        0);
     CoalesceMouseEvent(kFlutterPointerSignalKindNone, kDown, x, y, 0.0, 0.0,
                        kFlutterPointerButtonMousePrimary, 0);
-    CoalesceMouseEvent(kFlutterPointerSignalKindNone, kUp, x, y, 0.0, 0.0, 0,
-                       0);
     SendPointerEvents();
+    // Release in a later task, not the same batch. A down and an up delivered
+    // in one packet are one frame's worth of input with no interval between
+    // them, which is not a gesture any recognizer is looking for.
+    asio::post(*m_platform_task_runner->GetStrandContext(), [this, x, y]() {
+      if (m_flutter_engine == nullptr) {
+        return;
+      }
+      CoalesceMouseEvent(kFlutterPointerSignalKindNone, kUp, x, y, 0.0, 0.0,
+                         kFlutterPointerButtonMousePrimary, 0);
+      SendPointerEvents();
+    });
   });
 
   // Accepted for delivery. Whether anything was under the point is not
