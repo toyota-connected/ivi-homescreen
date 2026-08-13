@@ -359,8 +359,26 @@ jobs:
           emb --version
           emb -v cross . --backend software \
             -D BUILD_CRASH_HANDLER=ON --build
-      - name: Save emb engine artifacts
+      # Only save a cache that has something in it. The save runs on failure
+      # on purpose -- a run whose fetch died partway should still leave the
+      # next one better off -- but a run that fetched *nothing* would
+      # otherwise store an empty directory, and since the restore takes the
+      # newest prefix match that empty entry becomes what every later run
+      # restores. A cache added to break a deadlock would then cause one.
+      - name: Check the engine artifacts landed
         if: always()
+        id: engine_present
+        run: |
+          if find ~/.cache/emb/store/engine -name 'libflutter_engine.so' \
+               -print -quit 2>/dev/null | grep -q .; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::no engine artifacts to cache"
+          fi
+
+      - name: Save emb engine artifacts
+        if: always() && steps.engine_present.outputs.present == 'true'
         uses: actions/cache/save@v6
         with:
           path: ~/.cache/emb/store/engine
@@ -440,8 +458,26 @@ jobs:
           emb -v cross . --backend software \
             -D BUILD_WATCHDOG=ON \
             --build
-      - name: Save emb engine artifacts
+      # Only save a cache that has something in it. The save runs on failure
+      # on purpose -- a run whose fetch died partway should still leave the
+      # next one better off -- but a run that fetched *nothing* would
+      # otherwise store an empty directory, and since the restore takes the
+      # newest prefix match that empty entry becomes what every later run
+      # restores. A cache added to break a deadlock would then cause one.
+      - name: Check the engine artifacts landed
         if: always()
+        id: engine_present
+        run: |
+          if find ~/.cache/emb/store/engine -name 'libflutter_engine.so' \
+               -print -quit 2>/dev/null | grep -q .; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::no engine artifacts to cache"
+          fi
+
+      - name: Save emb engine artifacts
+        if: always() && steps.engine_present.outputs.present == 'true'
         uses: actions/cache/save@v6
         with:
           path: ~/.cache/emb/store/engine
