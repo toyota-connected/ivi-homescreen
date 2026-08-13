@@ -24,8 +24,8 @@
 #include <mutex>
 #include "gtest/gtest.h"
 
-#include "ihs/ihs_mcp_host.h"
 #include "ihs/ihs_mcp_provider.h"
+#include "ihs/ihs_mcp_registry.h"
 #include "ihs/ihs_mcp_semantics.h"
 #include "ihs/ihs_semantics.h"
 #include "ihs/ihs_semantics_host.h"
@@ -94,7 +94,7 @@ struct TreeBuilder {
 std::string CallTool(const char* name, const char* args, int* status_out) {
   IhsMcpPayload payload{};
   const int status =
-      ihs_mcp_host_call_tool(name, args, args ? strlen(args) : 0, &payload);
+      ihs_mcp_registry_call_tool(name, args, args ? strlen(args) : 0, &payload);
   if (status_out != nullptr) {
     *status_out = status;
   }
@@ -102,7 +102,7 @@ std::string CallTool(const char* name, const char* args, int* status_out) {
   if (payload.data != nullptr) {
     body.assign(payload.data, payload.length);
   }
-  ihs_mcp_host_release_payload(&payload);
+  ihs_mcp_registry_release_payload(&payload);
   return body;
 }
 
@@ -153,8 +153,8 @@ TEST_F(McpSemanticsProviderTest, StartIsIdempotent) {
 // prefixed name and the provider still sees its own vocabulary.
 TEST_F(McpSemanticsProviderTest, ToolsAreAdvertisedUnderTheUiPrefix) {
   std::vector<std::string> names;
-  ihs_mcp_host_for_each_tool(
-      [](const IhsMcpHostTool* tool, void* user_data) {
+  ihs_mcp_registry_for_each_tool(
+      [](const IhsMcpRegistryTool* tool, void* user_data) {
         static_cast<std::vector<std::string>*>(user_data)->emplace_back(
             tool->name);
       },
@@ -171,8 +171,8 @@ TEST_F(McpSemanticsProviderTest, ToolsAreAdvertisedUnderTheUiPrefix) {
 // screen-reader cursor is exactly what the allow mask exists to prevent.
 TEST_F(McpSemanticsProviderTest, NoToolExposesAccessibilityFocus) {
   std::vector<std::string> names;
-  ihs_mcp_host_for_each_tool(
-      [](const IhsMcpHostTool* tool, void* user_data) {
+  ihs_mcp_registry_for_each_tool(
+      [](const IhsMcpRegistryTool* tool, void* user_data) {
         static_cast<std::vector<std::string>*>(user_data)->emplace_back(
             tool->name);
       },
@@ -339,13 +339,13 @@ TEST_F(McpSemanticsProviderTest, ResourceReturnsTheTree) {
   ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
 
   IhsMcpPayload payload{};
-  ASSERT_EQ(ihs_mcp_host_read_resource("ui://semantics/tree", &payload),
+  ASSERT_EQ(ihs_mcp_registry_read_resource("ui://semantics/tree", &payload),
             IHS_MCP_OK);
   const std::string body(payload.data, payload.length);
   EXPECT_TRUE(Contains(body, "\"nodes\""));
-  ihs_mcp_host_release_payload(&payload);
+  ihs_mcp_registry_release_payload(&payload);
 
-  EXPECT_EQ(ihs_mcp_host_read_resource("ui://nope", &payload),
+  EXPECT_EQ(ihs_mcp_registry_read_resource("ui://nope", &payload),
             IHS_MCP_ERR_NOT_FOUND);
 }
 
@@ -503,7 +503,7 @@ void OnProviderNotify(IhsMcpNotification kind, const char* uri, void*) {
 TEST_F(McpSemanticsProviderTest, PublishingATreeNotifiesTheServer) {
   NotifyRecord record;
   g_notify = &record;
-  ASSERT_EQ(ihs_mcp_host_set_notification_sink(OnProviderNotify, nullptr),
+  ASSERT_EQ(ihs_mcp_registry_set_notification_sink(OnProviderNotify, nullptr),
             IHS_MCP_OK);
 
   TreeBuilder tree;
@@ -518,6 +518,7 @@ TEST_F(McpSemanticsProviderTest, PublishingATreeNotifiesTheServer) {
     EXPECT_EQ(record.last_uri, "ui://");
   }
 
-  ASSERT_EQ(ihs_mcp_host_set_notification_sink(nullptr, nullptr), IHS_MCP_OK);
+  ASSERT_EQ(ihs_mcp_registry_set_notification_sink(nullptr, nullptr),
+            IHS_MCP_OK);
   g_notify = nullptr;
 }

@@ -32,7 +32,7 @@
 #include "config/common.h"
 #include "engine.h"
 #if BUILD_ACCESSIBILITY && BUILD_MCP
-#include "ihs/ihs_mcp_host.h"
+#include "ihs/ihs_mcp_registry.h"
 #include "ihs/ihs_mcp_semantics.h"
 #include "ihs/ihs_mcp_transport.h"
 #endif
