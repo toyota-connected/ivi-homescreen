@@ -294,6 +294,10 @@ def main():
         ok, doc = call_tool(args.socket, "ui_tap", {"node_id": node["id"]}, 13)
         if ok:
             raise Failure("ui_tap on a disabled control was accepted")
+        # The refusal has to say why. A bare "refused" leaves an agent unable
+        # to tell a disabled control from a missing one, and it retried.
+        if "disabled" not in json.dumps(doc):
+            raise Failure(f"the refusal did not say why: {doc}")
         time.sleep(0.2)
         after = status_fields(args.socket)
         if after.get("events") != before.get("events"):
@@ -418,9 +422,14 @@ def main():
                 f"the handler ran but the value did not land: {reported}")
 
         # A tool that runs and fails is distinct from one that does not exist.
-        refused, _ = call_tool(args.socket, "fixture_set_temp", {}, 22)
+        refused, why = call_tool(args.socket, "fixture_set_temp", {}, 22)
         if refused:
             raise Failure("a call with no celsius was accepted")
+        # The message comes from the Dart handler's own exception. For a tool
+        # the application declared it is the only thing that can say what went
+        # wrong, since the shell knows nothing about what the tool does.
+        if "celsius" not in json.dumps(why):
+            raise Failure(f"the handler's reason did not reach the client: {why}")
         missing, _ = call_tool(args.socket, "fixture_nonexistent", {}, 23)
         if missing:
             raise Failure("a call to a tool that does not exist was accepted")
