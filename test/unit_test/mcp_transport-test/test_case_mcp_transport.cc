@@ -21,9 +21,11 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <thread>
 
 #include "gtest/gtest.h"
 
@@ -721,4 +723,107 @@ TEST_F(McpTransportTest, UnsubscribingFromTheLastUriRestoresEverything) {
   const std::string body =
       Body(Subscribe(path_, session, "ui://", "resources/unsubscribe"));
   EXPECT_NE(body.find(R"("result")"), std::string::npos) << body;
+}
+
+namespace {
+
+size_t CountOf(const std::string& haystack, const std::string& needle) {
+  size_t n = 0;
+  for (size_t at = haystack.find(needle); at != std::string::npos;
+       at = haystack.find(needle, at + needle.size())) {
+    n++;
+  }
+  return n;
+}
+
+// Registers a provider whose notify_fd the caller can signal. Returns the fd;
+// *out_provider receives the registration.
+int RegisterSignallingProvider(SignallingProvider* mock,
+                               IhsMcpProvider** out_provider) {
+  const int notify = ::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  if (notify < 0) {
+    return -1;
+  }
+  IhsMcpProviderDesc desc{};
+  desc.struct_size = sizeof(desc);
+  desc.name = "ui-burst";
+  desc.tool_prefix = "ui_";
+  desc.resource_scheme = "ui";
+  desc.capability_mask = IHS_MCP_CAP_ALL;
+  desc.notify_fd = notify;
+  desc.user_data = mock;
+  desc.callbacks.list_tools = &SignallingProvider::ListTools;
+  desc.callbacks.list_resources = &SignallingProvider::ListResources;
+  desc.callbacks.call_tool = &SignallingProvider::CallTool;
+  desc.callbacks.read_resource = &SignallingProvider::ReadResource;
+  if (ihs_mcp_provider_register(&desc, out_provider) != IHS_MCP_OK) {
+    ::close(notify);
+    return -1;
+  }
+  return notify;
+}
+
+void Signal(const int fd) {
+  const uint64_t one = 1;
+  (void)::write(fd, &one, sizeof(one));
+}
+
+}  // namespace
+
+// A change that arrives while a burst is being collapsed must still reach the
+// client. Dropping it would leave that client believing a stale tree is
+// current, with nothing to tell it otherwise -- worse than the volume the
+// debounce exists to reduce.
+TEST_F(McpTransportTest, TheLastChangeInABurstStillArrives) {
+  std::string headers;
+  const int stream = OpenStream(path_, &headers);
+  ASSERT_GE(stream, 0);
+
+  SignallingProvider mock;
+  IhsMcpProvider* provider = nullptr;
+  const int notify = RegisterSignallingProvider(&mock, &provider);
+  ASSERT_GE(notify, 0);
+
+  Signal(notify);  // leading edge: goes out at once
+  std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  Signal(notify);  // inside the window: must not be lost
+
+  const std::string got = DrainStream(stream, 600);
+  EXPECT_EQ(CountOf(got, "resources/updated"), 2u)
+      << "expected the immediate one and the trailing flush: [" << got << "]";
+
+  ihs_mcp_provider_unregister(provider);
+  ::close(notify);
+  ::close(stream);
+}
+
+// An animating UI signals per republished tree. Collapsing that is the point:
+// the notifications carry no state beyond "something changed", so a client
+// that gets one instead of ten re-reads once and sees the same thing.
+TEST_F(McpTransportTest, ABurstIsCollapsedRatherThanForwardedWhole) {
+  std::string headers;
+  const int stream = OpenStream(path_, &headers);
+  ASSERT_GE(stream, 0);
+
+  SignallingProvider mock;
+  IhsMcpProvider* provider = nullptr;
+  const int notify = RegisterSignallingProvider(&mock, &provider);
+  ASSERT_GE(notify, 0);
+
+  // Spaced so the registry's watcher wakes for each one rather than draining
+  // them as a single signal -- otherwise this would measure the eventfd's
+  // coalescing instead of the debounce.
+  for (int i = 0; i < 10; i++) {
+    Signal(notify);
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+
+  const std::string got = DrainStream(stream, 600);
+  const size_t seen = CountOf(got, "resources/updated");
+  EXPECT_GE(seen, 1u) << got;
+  EXPECT_LT(seen, 10u) << "ten signals were forwarded whole: [" << got << "]";
+
+  ihs_mcp_provider_unregister(provider);
+  ::close(notify);
+  ::close(stream);
 }
