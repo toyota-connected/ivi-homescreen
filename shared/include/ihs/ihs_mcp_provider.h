@@ -257,7 +257,14 @@ typedef struct IhsMcpProviderDesc {
   /* Claimed namespaces, both checked for collision at registration.
    * `tool_prefix` is a bare identifier prefix ("ui_"); `resource_scheme` is a
    * URI scheme without the separator ("ui"), which the host renders as
-   * "ui://". */
+   * "ui://".
+   *
+   * `resource_scheme` may be NULL or "" for a provider serving tools only.
+   * Requiring one would make such a provider claim a namespace it never
+   * answers for: reads would return "not found" indistinguishably from an
+   * absent resource, and no other provider could claim the scheme. A provider
+   * with no scheme is never routed a resource read and never emits a resource
+   * notification. `tool_prefix` is always required. */
   const char* tool_prefix;
   const char* resource_scheme;
 
