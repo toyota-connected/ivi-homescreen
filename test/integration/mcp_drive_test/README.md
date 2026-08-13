@@ -11,7 +11,7 @@ half:
 ```
 MCP client (tools/drive.py)
   -> Unix socket -> HTTP -> JSON-RPC        (transport)
-  -> ihs_mcp_host -> semantics provider     (routing)
+  -> ihs_mcp_registry -> semantics provider (routing)
   -> ihs_semantics_dispatch                 (funnel: mask, attribution)
   -> FlutterEngineSendSemanticsAction       (embedder)
   -> SemanticsOwner.performAction           (framework)
