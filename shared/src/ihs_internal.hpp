@@ -27,6 +27,10 @@
 #include "ihs/platform_view.h"
 #include "ihs/trace.h"
 
+#ifdef IHS_WITH_SEMANTICS
+#include "ihs/ihs_semantics.h"
+#endif
+
 namespace ihs::dlt {
 
 // Returns the logging sub-table (function pointers over the flat ihs_dlt_*
@@ -57,5 +61,17 @@ namespace ihs::pv {
 const IhsPlatformViewApi* platform_view_api() noexcept;
 
 }  // namespace ihs::pv
+
+#ifdef IHS_WITH_SEMANTICS
+namespace ihs::semantics {
+
+// Returns the semantics hub sub-table. Defined in semantics.cc, which is
+// compiled only with BUILD_ACCESSIBILITY -- hence the guard: without it there
+// is no hub, and IhsApi::semantics is null rather than pointing at a table
+// whose entry points do not exist.
+const IhsSemanticsApi* semantics_api() noexcept;
+
+}  // namespace ihs::semantics
+#endif
 
 #endif  // IHS_SHARED_SRC_IHS_INTERNAL_HPP_
