@@ -666,3 +666,30 @@ int ihs_semantics_dispatch(IhsSemanticsConsumer* consumer,
 }
 
 }  // extern "C"
+
+namespace ihs::semantics {
+
+// Function pointers over the flat entry points above -- the same functions, so
+// there is no second implementation to keep in step. Reaching them through
+// IhsApi is what lets a consumer ask whether the hub exists instead of failing
+// to load against a library built without it.
+const IhsSemanticsApi* semantics_api() noexcept {
+  static const IhsSemanticsApi api = {
+      sizeof(IhsSemanticsApi),
+      &ihs_semantics_acquire_snapshot,
+      &ihs_semantics_release_snapshot,
+      &ihs_semantics_snapshot_generation,
+      &ihs_semantics_snapshot_node_count,
+      &ihs_semantics_snapshot_node_at,
+      &ihs_semantics_snapshot_node_by_id,
+      &ihs_semantics_find_custom_action,
+      &ihs_semantics_node_numeric_value,
+      &ihs_semantics_register,
+      &ihs_semantics_unregister,
+      &ihs_semantics_dispatch,
+      &ihs_semantics_send_pointer_tap,
+  };
+  return &api;
+}
+
+}  // namespace ihs::semantics

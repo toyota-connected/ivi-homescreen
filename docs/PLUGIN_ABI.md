@@ -80,3 +80,22 @@ embedder convention already used throughout the shell.
 A sub-table pointer in `IhsApi` is `NULL` when that capability is not present in
 the running build. A consumer must treat a null sub-table as "capability
 absent" rather than assuming it is always available.
+
+## Reaching a capability through the table, not by symbol
+
+Both routes work: every sub-table's entries alias the flat entry points, so
+`api->semantics->dispatch` and `ihs_semantics_dispatch` are the same function.
+They fail differently, and that is the reason to prefer the table.
+
+A capability that is compiled out exports no symbols at all -- the semantics
+hub is built only with `BUILD_ACCESSIBILITY`, and its headers are not even
+installed without it. A consumer that names `ihs_semantics_dispatch` directly
+therefore fails to load against such a library, and fails whole: nothing else
+that consumer offers is available either, whether or not it needed semantics.
+Asking `api->semantics` instead turns that into a null check at runtime, and a
+consumer that treats the capability as optional keeps working without it.
+
+Prefer the sub-table wherever a capability might be absent. The flat symbols
+remain supported and are the better choice when a consumer cannot function
+without the capability anyway, since failing at load is then the clearer
+outcome.
