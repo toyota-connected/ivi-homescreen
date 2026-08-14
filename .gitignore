@@ -56,3 +56,11 @@ test/integration/*/pubspec.lock
 # Python bytecode from the fixture drivers.
 __pycache__/
 *.pyc
+
+# Working planning notes. Local to a checkout and deliberately never published:
+# they carry phase labels, decision-record ids and section numbers that mean
+# nothing to a reader who does not have the file, which is why commits, PR
+# summaries and source comments say what they mean instead. plan.md reached
+# origin once by accident and had to be removed from history; this is what
+# stops it happening again.
+plan.md
