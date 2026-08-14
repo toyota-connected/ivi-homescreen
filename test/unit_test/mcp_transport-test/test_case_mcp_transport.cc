@@ -16,15 +16,19 @@
 
 #include <dirent.h>
 #include <poll.h>
+#include <pwd.h>
+#include <sched.h>
 #include <sys/eventfd.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -1116,4 +1120,179 @@ TEST_F(McpTransportTest, AWorkingSessionSurvivesOthersBeingMinted) {
   const std::string body = Body(Subscribe(path_, mine, "ui://mine"));
   EXPECT_NE(body.find(R"("result")"), std::string::npos)
       << "the session was evicted while it was still being used: " << body;
+}
+
+// ---------------------------------------------------------------------------
+// Peer credentials
+//
+// Two layers guard the socket and they fail in different circumstances, so
+// both are worth proving. The file mode keeps other users from opening it at
+// all. The peer-credential check is what remains if the mode is ever wrong --
+// a directory loosened by a deployment script, an image that relaxes
+// permissions to make something else work. It is the layer nobody notices is
+// missing until it is the only one left.
+//
+// Producing a peer with a different uid needs a user namespace mapped onto a
+// subordinate range, so these skip where the environment cannot supply one
+// rather than passing vacuously.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// The subordinate uid range this user may map, from /etc/subuid. Returns 0
+// when there is none, which is the usual reason to skip.
+uid_t SubordinateUidBase() {
+  const passwd* self = ::getpwuid(::geteuid());
+  if (self == nullptr) {
+    return 0;
+  }
+  std::ifstream file("/etc/subuid");
+  std::string line;
+  while (std::getline(file, line)) {
+    const size_t first = line.find(':');
+    if (first == std::string::npos ||
+        line.compare(0, first, self->pw_name) != 0) {
+      continue;
+    }
+    const size_t second = line.find(':', first + 1);
+    if (second == std::string::npos) {
+      continue;
+    }
+    return static_cast<uid_t>(std::stoul(line.substr(first + 1, second)));
+  }
+  return 0;
+}
+
+bool HaveNewuidmap() {
+  return ::access("/usr/bin/newuidmap", X_OK) == 0;
+}
+
+// Writes the child's uid map through the setuid helper: inside 0 is this user,
+// and inside 1 upwards are subordinate uids, which is what makes the child a
+// genuinely different user from the server's point of view.
+bool MapSubordinate(const pid_t pid, const uid_t base) {
+  const pid_t helper = ::fork();
+  if (helper < 0) {
+    return false;
+  }
+  if (helper == 0) {
+    const std::string pid_text = std::to_string(pid);
+    const std::string self = std::to_string(::geteuid());
+    const std::string base_text = std::to_string(base);
+    ::execl("/usr/bin/newuidmap", "newuidmap", pid_text.c_str(), "0",
+            self.c_str(), "1", "1", base_text.c_str(), "1000", nullptr);
+    ::_exit(127);
+  }
+  int status = 0;
+  ::waitpid(helper, &status, 0);
+  return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
+struct ForeignAttempt {
+  bool connected = false;
+  std::string response;
+};
+
+// Connects to `path` as a subordinate uid and returns what happened.
+ForeignAttempt ConnectAsAnotherUser(const std::string& path, const uid_t base) {
+  int ready[2] = {-1, -1};
+  int result[2] = {-1, -1};
+  if (::pipe(ready) != 0 || ::pipe(result) != 0) {
+    return {};
+  }
+
+  const pid_t child = ::fork();
+  if (child == 0) {
+    ::close(ready[1]);
+    ::close(result[0]);
+    // _exit throughout: this child must never run gtest's teardown.
+    if (::unshare(CLONE_NEWUSER) != 0) {
+      ::_exit(10);
+    }
+    char token = 0;
+    if (::read(ready[0], &token, 1) != 1 || ::setuid(1) != 0) {
+      ::_exit(11);
+    }
+
+    const int fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    sockaddr_un address{};
+    address.sun_family = AF_UNIX;
+    std::strncpy(address.sun_path, path.c_str(), sizeof(address.sun_path) - 1);
+    const bool connected = ::connect(fd, reinterpret_cast<sockaddr*>(&address),
+                                     sizeof(address)) == 0;
+    const char flag = connected ? 'y' : 'n';
+    ::write(result[1], &flag, 1);
+    if (connected) {
+      const std::string request =
+          "POST / HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}";
+      ::write(fd, request.data(), request.size());
+      ::shutdown(fd, SHUT_WR);
+      char buffer[1024];
+      const ssize_t got = ::read(fd, buffer, sizeof(buffer));
+      if (got > 0) {
+        ::write(result[1], buffer, static_cast<size_t>(got));
+      }
+    }
+    ::_exit(0);
+  }
+
+  ::close(ready[0]);
+  ::close(result[1]);
+  ForeignAttempt attempt;
+  if (MapSubordinate(child, base)) {
+    ::write(ready[1], "x", 1);
+    char flag = 0;
+    if (::read(result[0], &flag, 1) == 1) {
+      attempt.connected = flag == 'y';
+      char buffer[1024];
+      ssize_t got = 0;
+      while ((got = ::read(result[0], buffer, sizeof(buffer))) > 0) {
+        attempt.response.append(buffer, static_cast<size_t>(got));
+      }
+    }
+  }
+  ::close(ready[1]);
+  ::close(result[0]);
+  int status = 0;
+  ::waitpid(child, &status, 0);
+  return attempt;
+}
+
+}  // namespace
+
+// At the mode the transport creates, another user cannot open the socket at
+// all -- the credential check below never gets a say, which is the ordering
+// that should hold in a correctly deployed image.
+TEST_F(McpTransportTest, AnotherUserCannotOpenTheSocket) {
+  const uid_t base = SubordinateUidBase();
+  if (base == 0 || !HaveNewuidmap()) {
+    GTEST_SKIP() << "no subordinate uid range or newuidmap; cannot produce a "
+                    "peer with a different uid";
+  }
+  const ForeignAttempt attempt = ConnectAsAnotherUser(path_, base);
+  EXPECT_FALSE(attempt.connected)
+      << "a foreign uid opened a 0600 socket: " << attempt.response;
+}
+
+// With the mode loosened, the connection succeeds and the credential check is
+// the only thing left. It refuses, and says so rather than hanging up silently
+// -- a client that is being denied should be able to tell that from a crash.
+TEST_F(McpTransportTest, AnotherUserIsRefusedOnceTheModeIsWrong) {
+  const uid_t base = SubordinateUidBase();
+  if (base == 0 || !HaveNewuidmap()) {
+    GTEST_SKIP() << "no subordinate uid range or newuidmap; cannot produce a "
+                    "peer with a different uid";
+  }
+  // Exactly the failure this layer exists for: something made the socket
+  // reachable that should not have.
+  ASSERT_EQ(::chmod(path_.c_str(), 0666), 0);
+
+  const ForeignAttempt attempt = ConnectAsAnotherUser(path_, base);
+  ASSERT_TRUE(attempt.connected)
+      << "the mode change did not take, so nothing here was tested";
+  EXPECT_NE(attempt.response.find("403"), std::string::npos)
+      << "served a peer whose uid is not ours: [" << attempt.response << "]";
+  EXPECT_EQ(attempt.response.find("\"jsonrpc\""), std::string::npos)
+      << "the request was answered rather than refused: [" << attempt.response
+      << "]";
 }
