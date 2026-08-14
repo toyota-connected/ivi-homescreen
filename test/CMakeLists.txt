@@ -8,3 +8,6 @@ endif ()
 
 add_subdirectory(unit_test)
 add_subdirectory(integration)
+# test/fuzz is added from the top-level CMakeLists instead: the fuzz targets
+# need no gtest and no golden images, so they must not depend on
+# BUILD_UNIT_TESTS being on as well.

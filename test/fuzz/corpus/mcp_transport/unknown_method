@@ -1,0 +1,6 @@
+POST / HTTP/1.1
+Host: localhost
+Content-Type: application/json
+Content-Length: 44
+
+{"jsonrpc":"2.0","id":10,"method":"no/such"}
