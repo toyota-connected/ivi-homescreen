@@ -14,6 +14,9 @@
  * limitations under the License.
  */
 
+#include <sys/mman.h>
+#include <unistd.h>
+
 #include <algorithm>
 #include <cstring>
 #include <string>
@@ -886,4 +889,112 @@ TEST_F(McpSemanticsProviderTest, QueryLimitReportsWhatItLeftOut) {
       CallTool("ui_query", R"({"label":"Seat"})", nullptr);
   EXPECT_TRUE(Contains(whole, "\"match_count\":5")) << whole;
   EXPECT_TRUE(Contains(whole, "\"truncated\":false")) << whole;
+}
+
+// ---------------------------------------------------------------------------
+// Argument decoding
+//
+// The provider is handed (pointer, length) and must honour both. It used to
+// scan the raw text for a quoted key, which read to a terminator the ABI does
+// not promise and could not tell a key from a key-like substring inside a
+// value a client chose. Fuzzing found the first; the second falls out of the
+// same fix.
+// ---------------------------------------------------------------------------
+
+// A key nested inside another object is not a top-level argument. A scanner
+// that searches the raw text cannot tell the two apart, so a request naming no
+// node_id of its own acted on whatever id appeared anywhere in the JSON -- the
+// tool then reports success against a node the arguments never asked for.
+TEST_F(McpSemanticsProviderTest, ANestedKeyIsNotAnArgument) {
+  TreeBuilder tree;
+  tree.Add(1, "Root", IHS_SEMANTICS_ROLE_PANE);
+  auto& target = tree.Add(2, "Target", IHS_SEMANTICS_ROLE_BUTTON);
+  target.actions = IHS_SEMANTICS_ACTION_TAP;
+  ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
+
+  int status = 0;
+  const std::string body = CallTool(
+      "ui_tap", R"({"identifier":"nothing","meta":{"node_id":2}})", &status);
+
+  EXPECT_EQ(host_.dispatch_calls, 0)
+      << "acted on a node the arguments never named: " << body;
+  EXPECT_EQ(status, IHS_MCP_ERR_NOT_FOUND) << body;
+}
+
+// The scanner took the run between the next two quote characters, so a
+// selector containing an escaped quote silently became a prefix of itself --
+// and a prefix matches more nodes than the caller asked for.
+TEST_F(McpSemanticsProviderTest, AnEscapedQuoteInASelectorSurvives) {
+  TreeBuilder tree;
+  tree.Add(1, "Root", IHS_SEMANTICS_ROLE_PANE);
+  tree.Add(2, R"(He said "go")", IHS_SEMANTICS_ROLE_LABEL);
+  tree.Add(3, "He said nothing", IHS_SEMANTICS_ROLE_LABEL);
+  ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
+
+  const std::string body =
+      CallTool("ui_query", R"({"label":"said \"go\""})", nullptr);
+
+  EXPECT_TRUE(Contains(body, R"(He said \"go\")")) << body;
+  EXPECT_FALSE(Contains(body, "He said nothing"))
+      << "the selector was truncated at the escape: " << body;
+}
+
+// Not a regression -- the previous extractor range-checked too. Kept because
+// the rewrite could quietly have lost it, and truncating an out-of-range id
+// lands on some other node: the caller would be told an action succeeded
+// against something it never named.
+TEST_F(McpSemanticsProviderTest, AnOutOfRangeNodeIdIsStillRefused) {
+  TreeBuilder tree;
+  tree.Add(1, "Root", IHS_SEMANTICS_ROLE_PANE);
+  auto& target = tree.Add(2, "Target", IHS_SEMANTICS_ROLE_BUTTON);
+  target.actions = IHS_SEMANTICS_ACTION_TAP;
+  ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
+
+  int status = 0;
+  const std::string body =
+      CallTool("ui_tap", R"({"node_id":4294967298})", &status);
+  EXPECT_EQ(host_.dispatch_calls, 0) << body;
+  EXPECT_EQ(status, IHS_MCP_ERR_NOT_FOUND) << body;
+}
+
+// The ABI hands over a pointer and a length. Nothing in it promises a
+// terminator, so a caller passing a slice of a larger buffer is within
+// contract, and the provider must not read past the length it was given.
+//
+// The arguments are placed so they end exactly at a page boundary with the
+// next page unmapped. A plain heap buffer would not do: reading past it lands
+// on adjacent heap and parses on regardless, so the test would pass under a
+// build without a sanitizer and prove nothing. Here a single byte too far is
+// a fault in every build, which is the point -- this is the one test standing
+// between the ABI's promise and a caller who takes it literally.
+TEST_F(McpSemanticsProviderTest, ArgumentsAreReadWithinTheirLength) {
+  TreeBuilder tree;
+  tree.Add(1, "Root", IHS_SEMANTICS_ROLE_PANE);
+  auto& target = tree.Add(2, "Target", IHS_SEMANTICS_ROLE_BUTTON);
+  target.actions = IHS_SEMANTICS_ACTION_TAP;
+  ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
+
+  const std::string json = R"({"node_id":2})";
+  const auto page = static_cast<size_t>(::sysconf(_SC_PAGESIZE));
+  ASSERT_GT(page, json.size());
+
+  char* region =
+      static_cast<char*>(::mmap(nullptr, page * 2, PROT_READ | PROT_WRITE,
+                                MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+  ASSERT_NE(region, MAP_FAILED);
+  ASSERT_EQ(::mprotect(region + page, page, PROT_NONE), 0);
+
+  char* arguments = region + page - json.size();
+  std::memcpy(arguments, json.data(), json.size());
+
+  IhsMcpPayload payload{};
+  const int status =
+      ihs_mcp_registry_call_tool("ui_tap", arguments, json.size(), &payload);
+  ihs_mcp_registry_release_payload(&payload);
+
+  EXPECT_EQ(status, IHS_MCP_OK);
+  EXPECT_EQ(host_.dispatch_calls, 1);
+  EXPECT_EQ(host_.last_node_id, 2);
+
+  ::munmap(region, page * 2);
 }

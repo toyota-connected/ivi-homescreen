@@ -386,107 +386,84 @@ std::string ErrorJson(const char* reason, const uint64_t generation) {
   return buffer.GetString();
 }
 
-// Minimal extraction for the two argument shapes this provider accepts. A full
-// parser is not warranted: the host hands over a JSON object, and what is
-// needed from it is one integer or one string.
-bool ExtractInt(const char* json, const char* key, int32_t* out) {
-  const std::string needle = std::string("\"") + key + "\"";
-  const char* at = std::strstr(json, needle.c_str());
-  if (at == nullptr) {
-    return false;
+// One tool call's arguments, parsed once.
+//
+// Two properties matter here and neither is incidental.
+//
+// It is bounded by the length the ABI supplies rather than by a terminator.
+// The callback signature is (const char*, size_t) and nothing in it promises
+// a NUL, so reaching for one reads past the buffer whenever a caller passes a
+// slice of a larger one. The transport happens to pass a NUL-terminated
+// std::string today, which is the only reason that was not already a fault --
+// an invariant held by the caller's accident rather than by the contract.
+//
+// It is a parse rather than a scan. The extractors this replaces searched the
+// raw text for "key", which meant a key-like substring inside a value was
+// indistinguishable from the argument itself: a client sending a label of
+// `x", "node_id": 2, "z": "` had a node_id the request never contained. It
+// also could not survive an escaped quote in any value a client chose, which
+// is every query selector.
+class Arguments {
+ public:
+  Arguments(const char* json, const size_t length) {
+    // An absent argument set is "{}" by the provider ABI, so a null here is a
+    // caller error rather than an empty call; either way there is nothing to
+    // read and every accessor reports absence.
+    if (json != nullptr) {
+      document_.Parse(json, length);
+    }
   }
-  at = std::strchr(at + needle.size(), ':');
-  if (at == nullptr) {
-    return false;
-  }
-  // strtol rather than sscanf: this reports whether anything was consumed and
-  // whether the value fits, so a malformed argument is refused rather than
-  // silently becoming node 0 -- which is the root, and would act on the wrong
-  // thing.
-  errno = 0;
-  char* end = nullptr;
-  const long value = std::strtol(at + 1, &end, 10);
-  if (end == at + 1 || errno == ERANGE || value < INT32_MIN ||
-      value > INT32_MAX) {
-    return false;
-  }
-  *out = static_cast<int32_t>(value);
-  return true;
-}
 
-bool ExtractString(const char* json, const char* key, std::string* out) {
-  const std::string needle = std::string("\"") + key + "\"";
-  const char* at = std::strstr(json, needle.c_str());
-  if (at == nullptr) {
-    return false;
+  bool Int(const char* key, int32_t* out) const {
+    const rapidjson::Value* value = Find(key);
+    // IsInt is the range check: a number too large for int32 is not an int
+    // here, so it is refused rather than truncated into some other node's id.
+    if (value == nullptr || !value->IsInt()) {
+      return false;
+    }
+    *out = value->GetInt();
+    return true;
   }
-  at = std::strchr(at + needle.size(), ':');
-  if (at == nullptr) {
-    return false;
-  }
-  const char* open = std::strchr(at, '"');
-  if (open == nullptr) {
-    return false;
-  }
-  const char* close = std::strchr(open + 1, '"');
-  if (close == nullptr) {
-    return false;
-  }
-  out->assign(open + 1, static_cast<size_t>(close - open - 1));
-  return true;
-}
 
-// The extractors above scan for a key and take the next quoted run, which
-// cannot survive an escaped quote or a key-like substring inside a value.
-// That is tolerable for an identifier, which the application chooses, and not
-// for arbitrary text a client sends, so the parameterized arguments are parsed
-// properly instead.
-bool ReadStringArgument(const char* json, const char* key, std::string* out) {
-  rapidjson::Document doc;
-  if (json == nullptr || doc.Parse(json).HasParseError() || !doc.IsObject()) {
-    return false;
+  bool String(const char* key, std::string* out) const {
+    const rapidjson::Value* value = Find(key);
+    if (value == nullptr || !value->IsString()) {
+      return false;
+    }
+    out->assign(value->GetString(), value->GetStringLength());
+    return true;
   }
-  const auto member = doc.FindMember(key);
-  if (member == doc.MemberEnd() || !member->value.IsString()) {
-    return false;
-  }
-  out->assign(member->value.GetString(), member->value.GetStringLength());
-  return true;
-}
 
-// Refuses rather than defaulting. A coordinate is not something to guess at:
-// tapping (0, 0) because the caller omitted y would press whatever is in the
-// corner, which is worse than an error.
-bool ReadNumberArgumentRequired(const char* json,
-                                const char* key,
-                                double* out) {
-  rapidjson::Document doc;
-  if (json == nullptr || doc.Parse(json).HasParseError() || !doc.IsObject()) {
-    return false;
+  // Refuses rather than defaulting. A coordinate is not something to guess at:
+  // tapping (0, 0) because the caller omitted y would press whatever is in the
+  // corner, which is worse than an error.
+  bool Number(const char* key, double* out) const {
+    const rapidjson::Value* value = Find(key);
+    if (value == nullptr || !value->IsNumber()) {
+      return false;
+    }
+    *out = value->GetDouble();
+    return true;
   }
-  const auto member = doc.FindMember(key);
-  if (member == doc.MemberEnd() || !member->value.IsNumber()) {
-    return false;
-  }
-  *out = member->value.GetDouble();
-  return true;
-}
 
-// Absent or non-numeric yields the fallback: an axis a caller did not name is
-// zero rather than an error, so scrolling a vertical list needs only dy.
-double ReadNumberArgument(const char* json,
-                          const char* key,
-                          const double fallback) {
-  rapidjson::Document doc;
-  if (json == nullptr || doc.Parse(json).HasParseError() || !doc.IsObject()) {
-    return fallback;
+  // Absent or non-numeric yields the fallback: an axis a caller did not name
+  // is zero rather than an error, so scrolling a vertical list needs only dy.
+  double NumberOr(const char* key, const double fallback) const {
+    double value = fallback;
+    return Number(key, &value) ? value : fallback;
   }
-  const auto member = doc.FindMember(key);
-  if (member == doc.MemberEnd() || !member->value.IsNumber()) {
-    return fallback;
+
+ private:
+  const rapidjson::Value* Find(const char* key) const {
+    if (document_.HasParseError() || !document_.IsObject()) {
+      return nullptr;
+    }
+    const auto member = document_.FindMember(key);
+    return member == document_.MemberEnd() ? nullptr : &member->value;
   }
-  return member->value.GetDouble();
-}
+
+  rapidjson::Document document_;
+};
 
 // Waits for a tree newer than `generation`, or gives up. Used where an action
 // only becomes available after the framework has rebuilt -- focusing a field
@@ -576,14 +553,13 @@ void WriteOutcome(rapidjson::Writer<rapidjson::StringBuffer>& w,
 
 // Resolves the node a tool call names, by id or by identifier.
 const IhsSemanticsNode* ResolveNode(const IhsSemanticsSnapshot* snapshot,
-                                    const char* arguments) {
+                                    const Arguments& arguments) {
   int32_t id = 0;
-  if (ExtractInt(arguments, "node_id", &id)) {
+  if (arguments.Int("node_id", &id)) {
     return ihs_semantics_snapshot_node_by_id(snapshot, id);
   }
   std::string identifier;
-  if (ExtractString(arguments, "identifier", &identifier) &&
-      !identifier.empty()) {
+  if (arguments.String("identifier", &identifier) && !identifier.empty()) {
     const size_t count = ihs_semantics_snapshot_node_count(snapshot);
     for (size_t i = 0; i < count; i++) {
       const IhsSemanticsNode* node =
@@ -675,22 +651,22 @@ bool DeclaresCustomAction(const IhsSemanticsSnapshot* snapshot,
 }
 
 std::string RunQuery(const IhsSemanticsSnapshot* snapshot,
-                     const char* arguments) {
+                     const Arguments& arguments) {
   std::string want_identifier;
   std::string want_label;
   std::string want_role;
   std::string want_action;
   std::string want_custom_action;
   std::string want_enabled;
-  ExtractString(arguments, "identifier", &want_identifier);
-  ExtractString(arguments, "label", &want_label);
-  ExtractString(arguments, "role", &want_role);
-  ExtractString(arguments, "action", &want_action);
-  ExtractString(arguments, "custom_action", &want_custom_action);
-  ExtractString(arguments, "enabled", &want_enabled);
+  arguments.String("identifier", &want_identifier);
+  arguments.String("label", &want_label);
+  arguments.String("role", &want_role);
+  arguments.String("action", &want_action);
+  arguments.String("custom_action", &want_custom_action);
+  arguments.String("enabled", &want_enabled);
 
   int32_t limit = 0;
-  const bool bounded = ExtractInt(arguments, "limit", &limit) && limit > 0;
+  const bool bounded = arguments.Int("limit", &limit) && limit > 0;
 
   // An action name that names nothing would otherwise select every node, since
   // a zero mask tests true against anything. Reported rather than silently
@@ -768,7 +744,7 @@ std::string RunQuery(const IhsSemanticsSnapshot* snapshot,
 int CallTool(void* /* user_data */,
              const char* name,
              const char* arguments_json,
-             size_t /* arguments_length */,
+             const size_t arguments_length,
              IhsMcpPayload* out_result) {
   const ToolEntry* tool = nullptr;
   for (const ToolEntry& candidate : kTools) {
@@ -780,6 +756,11 @@ int CallTool(void* /* user_data */,
   if (tool == nullptr) {
     return IHS_MCP_ERR_NOT_FOUND;
   }
+
+  // Parsed once, here, and read from by every path below. Bounded by the
+  // length the caller supplied rather than by a terminator the ABI does not
+  // promise.
+  const Arguments arguments(arguments_json, arguments_length);
 
   const IhsSemanticsSnapshot* snapshot = ihs_semantics_acquire_snapshot();
   if (snapshot == nullptr) {
@@ -796,7 +777,7 @@ int CallTool(void* /* user_data */,
     return IHS_MCP_OK;
   }
   if (std::strcmp(name, "query") == 0) {
-    FillPayload(out_result, RunQuery(snapshot, arguments_json));
+    FillPayload(out_result, RunQuery(snapshot, arguments));
     ihs_semantics_release_snapshot(snapshot);
     return IHS_MCP_OK;
   }
@@ -810,8 +791,7 @@ int CallTool(void* /* user_data */,
 
     double x = 0.0;
     double y = 0.0;
-    if (!ReadNumberArgumentRequired(arguments_json, "x", &x) ||
-        !ReadNumberArgumentRequired(arguments_json, "y", &y)) {
+    if (!arguments.Number("x", &x) || !arguments.Number("y", &y)) {
       FillPayload(out_result,
                   ErrorJson("tap_at requires x and y", generation_now));
       return IHS_MCP_ERR_INVALID;
@@ -848,7 +828,7 @@ int CallTool(void* /* user_data */,
     return IHS_MCP_OK;
   }
 
-  const IhsSemanticsNode* node = ResolveNode(snapshot, arguments_json);
+  const IhsSemanticsNode* node = ResolveNode(snapshot, arguments);
   if (node == nullptr) {
     FillPayload(out_result,
                 ErrorJson("no node matched node_id or identifier", generation));
@@ -871,8 +851,8 @@ int CallTool(void* /* user_data */,
 
     std::string wanted;
     int32_t action_id = 0;
-    const bool by_id = ExtractInt(arguments_json, "action_id", &action_id);
-    if (!by_id && !ReadStringArgument(arguments_json, "action", &wanted)) {
+    const bool by_id = arguments.Int("action_id", &action_id);
+    if (!by_id && !arguments.String("action", &wanted)) {
       FillPayload(
           out_result,
           ErrorJson("custom_action requires action or action_id", generation));
@@ -1012,7 +992,7 @@ int CallTool(void* /* user_data */,
       return IHS_MCP_ERR_REFUSED;
     }
     std::string text;
-    if (!ReadStringArgument(arguments_json, "text", &text)) {
+    if (!arguments.String("text", &text)) {
       FillPayload(out_result, ErrorJson("set_text requires text", generation));
       return IHS_MCP_ERR_INVALID;
     }
@@ -1020,8 +1000,8 @@ int CallTool(void* /* user_data */,
   } else if (tool->action == IHS_SEMANTICS_ACTION_SCROLL_TO_OFFSET) {
     // Absent axes are zero rather than an error: scrolling a vertical list
     // means naming dy, and demanding dx as well would be noise.
-    const double offset[2] = {ReadNumberArgument(arguments_json, "dx", 0.0),
-                              ReadNumberArgument(arguments_json, "dy", 0.0)};
+    const double offset[2] = {arguments.NumberOr("dx", 0.0),
+                              arguments.NumberOr("dy", 0.0)};
     const auto* bytes = reinterpret_cast<const uint8_t*>(offset);
     argument.assign(bytes, bytes + sizeof(offset));
   }
