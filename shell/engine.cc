@@ -1064,8 +1064,9 @@ int Engine::SendSyntheticTap(const double x, const double y) {
   });
 
   // Accepted for delivery. Whether anything was under the point is not
-  // knowable here, and saying otherwise would be the automatic fallback DR-7
-  // exists to avoid.
+  // knowable here, and reporting success as though it were would be the
+  // silent-guess behaviour this path is deliberately not: a coordinate tap is
+  // asked for explicitly, never substituted for a failed lookup.
   return IHS_SEMANTICS_OK;
 }
 
