@@ -122,3 +122,9 @@ specification requires HTTP transports to validate it for this reason.
 Do not configure the terminator to add or rewrite request headers. Nothing in
 the transport trusts `X-Forwarded-*`, and adding an `Origin` will get every
 request refused.
+
+---
+
+For what the surface exposes once a client reaches it, what bounds it, and the
+decisions an integrator still has to make, see
+[`mcp-security.md`](mcp-security.md).
