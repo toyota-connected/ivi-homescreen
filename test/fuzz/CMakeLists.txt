@@ -37,4 +37,8 @@ endfunction()
 
 if (BUILD_MCP)
     ihs_add_fuzzer(fuzz_mcp_transport fuzz_mcp_transport.cc)
+    # The semantics provider needs the hub as well as the registry.
+    if (BUILD_ACCESSIBILITY)
+        ihs_add_fuzzer(fuzz_mcp_semantics_tools fuzz_mcp_semantics_tools.cc)
+    endif ()
 endif ()
