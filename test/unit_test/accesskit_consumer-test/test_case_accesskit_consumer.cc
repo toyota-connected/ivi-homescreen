@@ -408,3 +408,103 @@ TEST(AccessKitConsumer, ScrollOffsetActionMapsToScrollToOffset) {
 TEST(AccessKitConsumer, SetValueIsNotMappedByTagAlone) {
   EXPECT_EQ(ToIhsAction(ACCESSKIT_ACTION_SET_VALUE), 0u);
 }
+
+// ---------------------------------------------------------------------------
+// Multi-application addressing
+//
+// AccessKit addresses the whole tree with one 64-bit id, while each
+// application numbers its nodes from its own root -- so two applications both
+// have a node 1. Every way of getting this wrong is silent with no assistive
+// technology attached: a collision hands a screen reader two different
+// controls under one id, and an unstable slot makes an id it is already
+// holding come to mean a different application.
+// ---------------------------------------------------------------------------
+
+TEST(AccessKitMultiView, IdsFromDifferentApplicationsDoNotCollide) {
+  // The case that matters: the same node id in two applications.
+  EXPECT_NE(accessibility::ComposeNodeId(0, 1),
+            accessibility::ComposeNodeId(1, 1));
+  EXPECT_NE(accessibility::ComposeNodeId(0, 0),
+            accessibility::ComposeNodeId(1, 0));
+}
+
+TEST(AccessKitMultiView, AnIdCarriesBackWhatWentIn) {
+  for (const uint32_t slot : {0u, 1u, 7u, 4294967295u}) {
+    for (const int32_t node :
+         {int32_t{0}, int32_t{1}, int32_t{-1}, INT32_MAX, INT32_MIN}) {
+      const accesskit_node_id id = accessibility::ComposeNodeId(slot, node);
+      EXPECT_EQ(accessibility::SlotOfNodeId(id), slot);
+      EXPECT_EQ(accessibility::NodeOfNodeId(id), node)
+          << "node id " << node << " did not survive slot " << slot;
+    }
+  }
+}
+
+// The first application seen keeps its own node ids, so a single-application
+// tree is addressed exactly as it was before any of this existed.
+TEST(AccessKitMultiView, TheFirstApplicationKeepsItsIdsUnchanged) {
+  EXPECT_EQ(accessibility::ComposeNodeId(0, 42), 42u);
+  EXPECT_EQ(accessibility::ComposeNodeId(0, 0), 0u);
+}
+
+// The reason slots are keyed by name rather than by position in the hub's
+// list: a position shifts when an application stops, which would silently
+// remap every id a screen reader is holding onto a different application.
+TEST(AccessKitMultiView, ASlotSurvivesOtherApplicationsComingAndGoing) {
+  const uint32_t cluster = accessibility::SlotForSourceName("cluster");
+  const uint32_t radio = accessibility::SlotForSourceName("radio");
+  const uint32_t nav = accessibility::SlotForSourceName("nav");
+  EXPECT_NE(cluster, radio);
+  EXPECT_NE(radio, nav);
+
+  // Asking again is asking about the same application, whatever happened to
+  // the others in between.
+  EXPECT_EQ(accessibility::SlotForSourceName("cluster"), cluster);
+  EXPECT_EQ(accessibility::SlotForSourceName("nav"), nav);
+
+  // And a name seen for the first time never reuses a slot, even if the
+  // application that had one is gone.
+  const uint32_t fresh = accessibility::SlotForSourceName("media");
+  EXPECT_NE(fresh, cluster);
+  EXPECT_NE(fresh, radio);
+  EXPECT_NE(fresh, nav);
+}
+
+// A node's children are addressed in its own application, not in whichever
+// happens to have a node of that number.
+TEST(AccessKitMultiView, ChildIdsAreComposedWithTheirOwnApplication) {
+  std::vector<IhsSemanticsPublishNode> nodes(2);
+  static const int32_t kChildren[] = {5};
+  nodes[0].id = 1;
+  nodes[0].label = "Root";
+  nodes[0].role = IHS_SEMANTICS_ROLE_PANE;
+  nodes[0].enabled = IHS_SEMANTICS_TRISTATE_NONE;
+  nodes[0].child_ids = kChildren;
+  nodes[0].child_count = 1;
+  nodes[1].id = 5;
+  nodes[1].label = "Child";
+  nodes[1].role = IHS_SEMANTICS_ROLE_BUTTON;
+  nodes[1].enabled = IHS_SEMANTICS_TRISTATE_NONE;
+
+  IhsSemanticsPublishInfo info{};
+  info.struct_size = sizeof(info);
+  info.nodes = nodes.data();
+  info.node_count = nodes.size();
+  ASSERT_EQ(ihs_semantics_publish(&info), IHS_SEMANTICS_OK);
+
+  const IhsSemanticsSnapshot* snapshot = ihs_semantics_acquire_snapshot();
+  ASSERT_NE(snapshot, nullptr);
+  const IhsSemanticsNode* root = ihs_semantics_snapshot_node_at(snapshot, 0);
+  ASSERT_NE(root, nullptr);
+
+  accesskit_node* built = accessibility::BuildNode(root, snapshot, /*slot=*/3);
+  ASSERT_NE(built, nullptr);
+  const accesskit_node_ids children = accesskit_node_children(built);
+  ASSERT_EQ(children.length, 1u);
+  EXPECT_EQ(children.values[0], accessibility::ComposeNodeId(3, 5))
+      << "a child was addressed in the wrong application";
+
+  accesskit_node_free(built);
+  ihs_semantics_release_snapshot(snapshot);
+  ihs_semantics_clear();
+}

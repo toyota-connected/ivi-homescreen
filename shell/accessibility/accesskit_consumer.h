@@ -19,6 +19,8 @@
 
 #include <accesskit.h>
 
+#include <string>
+
 #include <atomic>
 #include <cstdint>
 #include <thread>
@@ -46,8 +48,38 @@ uint64_t ToIhsAction(accesskit_action action);
 //
 // `snapshot` resolves the node's children and custom-action declarations, so
 // it must be the snapshot the node came from. Caller owns the result.
+/*
+ * `slot` is the application this node belongs to; child ids are composed from
+ * it so two applications' node 1 do not collide in AccessKit's single id
+ * space. Defaulted because the first application seen is slot 0, which leaves
+ * its ids exactly as they were.
+ */
 accesskit_node* BuildNode(const IhsSemanticsNode* node,
-                          const IhsSemanticsSnapshot* snapshot);
+                          const IhsSemanticsSnapshot* snapshot,
+                          uint32_t slot = 0);
+
+/*
+ * Node id composition, exposed for the same reason BuildNode is: it is only
+ * exercised with an assistive technology attached and several applications
+ * running, and every way of getting it wrong is silent. A collision hands a
+ * screen reader two different controls under one id; an unstable slot makes an
+ * id it is already holding come to mean a different application.
+ *
+ * AccessKit addresses the whole tree with one 64-bit id while each application
+ * numbers its nodes from its own root, so the id carries the application in
+ * its high half and the node in its low half.
+ */
+accesskit_node_id ComposeNodeId(uint32_t slot, int32_t node_id);
+uint32_t SlotOfNodeId(accesskit_node_id id);
+int32_t NodeOfNodeId(accesskit_node_id id);
+
+/*
+ * The slot for a source name: assigned on first sight and never reused, so an
+ * id survives other applications starting and stopping. Index in the hub's
+ * list would have been the obvious key and is exactly wrong -- it shifts when
+ * a source unregisters, silently remapping ids already in use.
+ */
+uint32_t SlotForSourceName(const std::string& name);
 
 // Bridges the semantics hub to a platform screen reader through AccessKit.
 //
@@ -86,7 +118,9 @@ class AccessKitConsumer {
   void PollLoop();
 
   // Publishes `snapshot` as a full AccessKit tree update.
-  void PushSnapshot(const IhsSemanticsSnapshot* snapshot);
+  // Rebuilds and pushes the tree spanning every application, if anything has
+  // published since the last push.
+  void PushSnapshot();
 
   IhsSemanticsConsumer* consumer_ = nullptr;
   int notify_fd_ = -1;    // eventfd the hub writes on publish
