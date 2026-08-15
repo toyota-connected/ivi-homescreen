@@ -82,7 +82,13 @@ FlutterSemanticsAction ToFlutterSemanticsAction(uint64_t ihs_action);
 // is the root and that every child index resolves, and an orphan satisfies
 // neither. Returns the hub status, or IHS_SEMANTICS_OK when the tree has no
 // root yet and there is nothing to say.
-int PublishTree(const AccessibilityTree& tree);
+/*
+ * Publishes to `source`, the hub registration belonging to this engine. NULL
+ * publishes to the implicit source, which is correct only where there is one
+ * engine: with several, an unkeyed publish means the last one to run owns the
+ * only tree there is.
+ */
+int PublishTree(const AccessibilityTree& tree, IhsSemanticsSource* source);
 
 }  // namespace accessibility
 

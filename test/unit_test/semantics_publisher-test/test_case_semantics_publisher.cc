@@ -198,7 +198,7 @@ TEST_F(SemanticsPublisherTest, PublishWithNoRootIsANoOp) {
   NodeBuilder orphan(5, {}, "orphan");
   Apply(tree, {&orphan.node});
 
-  EXPECT_EQ(PublishTree(tree), IHS_SEMANTICS_OK);
+  EXPECT_EQ(PublishTree(tree, nullptr), IHS_SEMANTICS_OK);
   EXPECT_EQ(ihs_semantics_acquire_snapshot(), nullptr);
 }
 
@@ -213,7 +213,7 @@ TEST_F(SemanticsPublisherTest, ChildRectsAreComposedToScreenSpace) {
   child.node.rect = {0.0, 0.0, 5.0, 5.0};
   Apply(tree, {&root.node, &child.node});
 
-  ASSERT_EQ(PublishTree(tree), IHS_SEMANTICS_OK);
+  ASSERT_EQ(PublishTree(tree, nullptr), IHS_SEMANTICS_OK);
   const IhsSemanticsSnapshot* snapshot = ihs_semantics_acquire_snapshot();
   ASSERT_NE(snapshot, nullptr);
 
@@ -236,7 +236,7 @@ TEST_F(SemanticsPublisherTest, RootIsPublishedFirstInTraversalOrder) {
   // Deliberately not root-first in the update.
   Apply(tree, {&second.node, &first.node, &root.node});
 
-  ASSERT_EQ(PublishTree(tree), IHS_SEMANTICS_OK);
+  ASSERT_EQ(PublishTree(tree, nullptr), IHS_SEMANTICS_OK);
   const IhsSemanticsSnapshot* snapshot = ihs_semantics_acquire_snapshot();
   ASSERT_NE(snapshot, nullptr);
 
@@ -261,7 +261,7 @@ TEST_F(SemanticsPublisherTest, TristatesArePublishedNotFlattened) {
   NodeBuilder plain(2, {}, "Label");  // enablement does not apply
 
   Apply(tree, {&root.node, &disabled.node, &plain.node});
-  ASSERT_EQ(PublishTree(tree), IHS_SEMANTICS_OK);
+  ASSERT_EQ(PublishTree(tree, nullptr), IHS_SEMANTICS_OK);
 
   const IhsSemanticsSnapshot* snapshot = ihs_semantics_acquire_snapshot();
   ASSERT_NE(snapshot, nullptr);
@@ -282,7 +282,7 @@ TEST_F(SemanticsPublisherTest, ActionsAndIdentifierReachTheSnapshot) {
       kFlutterSemanticsActionIncrease | kFlutterSemanticsActionDecrease);
   Apply(tree, {&root.node, &slider.node});
 
-  ASSERT_EQ(PublishTree(tree), IHS_SEMANTICS_OK);
+  ASSERT_EQ(PublishTree(tree, nullptr), IHS_SEMANTICS_OK);
   const IhsSemanticsSnapshot* snapshot = ihs_semantics_acquire_snapshot();
   ASSERT_NE(snapshot, nullptr);
   const IhsSemanticsNode* out = ihs_semantics_snapshot_node_by_id(snapshot, 1);
@@ -304,7 +304,7 @@ TEST_F(SemanticsPublisherTest, ObscuredIsReportedForPasswordFields) {
       kFlutterSemanticsFlagIsTextField | kFlutterSemanticsFlagIsObscured);
   Apply(tree, {&root.node, &password.node});
 
-  ASSERT_EQ(PublishTree(tree), IHS_SEMANTICS_OK);
+  ASSERT_EQ(PublishTree(tree, nullptr), IHS_SEMANTICS_OK);
   const IhsSemanticsSnapshot* snapshot = ihs_semantics_acquire_snapshot();
   ASSERT_NE(snapshot, nullptr);
   const IhsSemanticsNode* out = ihs_semantics_snapshot_node_by_id(snapshot, 1);
@@ -328,7 +328,7 @@ TEST_F(SemanticsPublisherTest, ScrollableCarriesANumericValue) {
   list.node.scroll_extent_max = 400.0;
   Apply(tree, {&root.node, &list.node});
 
-  ASSERT_EQ(PublishTree(tree), IHS_SEMANTICS_OK);
+  ASSERT_EQ(PublishTree(tree, nullptr), IHS_SEMANTICS_OK);
   const IhsSemanticsSnapshot* snapshot = ihs_semantics_acquire_snapshot();
   ASSERT_NE(snapshot, nullptr);
   const IhsSemanticsNode* out = ihs_semantics_snapshot_node_by_id(snapshot, 1);
@@ -355,7 +355,7 @@ TEST_F(SemanticsPublisherTest, NonScrollableHasNoNumericValue) {
   button.node.actions = kFlutterSemanticsActionTap;
   Apply(tree, {&root.node, &button.node});
 
-  ASSERT_EQ(PublishTree(tree), IHS_SEMANTICS_OK);
+  ASSERT_EQ(PublishTree(tree, nullptr), IHS_SEMANTICS_OK);
   const IhsSemanticsSnapshot* snapshot = ihs_semantics_acquire_snapshot();
   ASSERT_NE(snapshot, nullptr);
   const IhsSemanticsNode* out = ihs_semantics_snapshot_node_by_id(snapshot, 1);
@@ -381,7 +381,7 @@ TEST_F(SemanticsPublisherTest, UnboundedScrollableReportsNoNumericValue) {
   infinite.node.scroll_extent_max = std::numeric_limits<double>::infinity();
   Apply(tree, {&root.node, &infinite.node});
 
-  ASSERT_EQ(PublishTree(tree), IHS_SEMANTICS_OK);
+  ASSERT_EQ(PublishTree(tree, nullptr), IHS_SEMANTICS_OK);
   const IhsSemanticsSnapshot* snapshot = ihs_semantics_acquire_snapshot();
   ASSERT_NE(snapshot, nullptr);
   const IhsSemanticsNode* out = ihs_semantics_snapshot_node_by_id(snapshot, 1);
@@ -404,7 +404,7 @@ TEST_F(SemanticsPublisherTest, OverscrollClampsIntoRange) {
   list.node.scroll_extent_max = 400.0;
   Apply(tree, {&root.node, &list.node});
 
-  ASSERT_EQ(PublishTree(tree), IHS_SEMANTICS_OK);
+  ASSERT_EQ(PublishTree(tree, nullptr), IHS_SEMANTICS_OK);
   const IhsSemanticsSnapshot* snapshot = ihs_semantics_acquire_snapshot();
   ASSERT_NE(snapshot, nullptr);
   const IhsSemanticsNode* out = ihs_semantics_snapshot_node_by_id(snapshot, 1);
@@ -428,7 +428,7 @@ TEST_F(SemanticsPublisherTest, RepeatedPublishesAgreeOnOrder) {
   std::vector<std::string> first;
   std::vector<std::string> second;
   for (int pass = 0; pass < 2; pass++) {
-    ASSERT_EQ(PublishTree(tree), IHS_SEMANTICS_OK);
+    ASSERT_EQ(PublishTree(tree, nullptr), IHS_SEMANTICS_OK);
     const IhsSemanticsSnapshot* snapshot = ihs_semantics_acquire_snapshot();
     ASSERT_NE(snapshot, nullptr);
     auto& into = pass == 0 ? first : second;

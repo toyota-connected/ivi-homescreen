@@ -43,6 +43,14 @@ class Backend;
 class FlutterView;
 struct FlutterDesktopEngineState;
 
+#if BUILD_ACCESSIBILITY
+// Forward-declared rather than including the hub header: engine.h is widely
+// included and this is only ever held as a pointer.
+extern "C" {
+struct IhsSemanticsSource;
+}
+#endif
+
 class Engine {
  public:
   /**
@@ -470,6 +478,18 @@ class Engine {
 
  private:
   size_t m_index;
+
+  // The bundle's directory name, kept for the semantics source's name: it is
+  // what a person configuring the shell called this application, so it is what
+  // an outside reader should see addressing its tree.
+  std::string m_bundle_name;
+
+#if BUILD_ACCESSIBILITY
+  // This engine's hub registration. Each engine is an independent publisher --
+  // its own tree, its own node id space -- so a shared host would mean the
+  // last engine to start receiving every engine's actions.
+  IhsSemanticsSource* m_semantics_source = nullptr;
+#endif
   bool m_running;
 
   Backend* m_backend;
