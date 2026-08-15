@@ -810,6 +810,14 @@ TEST(SemanticsCapabilityTable, SubTableAliasesFlatEntryPoints) {
   EXPECT_EQ(api->semantics->register_consumer, &ihs_semantics_register);
   EXPECT_EQ(api->semantics->unregister_consumer, &ihs_semantics_unregister);
   EXPECT_EQ(api->semantics->dispatch, &ihs_semantics_dispatch);
+  EXPECT_EQ(api->semantics->source_count, &ihs_semantics_source_count);
+  EXPECT_EQ(api->semantics->source_at, &ihs_semantics_source_at);
+  EXPECT_EQ(api->semantics->source_name, &ihs_semantics_source_name);
+  EXPECT_EQ(api->semantics->acquire_snapshot_from,
+            &ihs_semantics_acquire_snapshot_from);
+  EXPECT_EQ(api->semantics->dispatch_from, &ihs_semantics_dispatch_from);
+  EXPECT_EQ(api->semantics->send_pointer_tap_to,
+            &ihs_semantics_send_pointer_tap_to);
   EXPECT_EQ(api->semantics->send_pointer_tap, &ihs_semantics_send_pointer_tap);
 }
 

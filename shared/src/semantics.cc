@@ -970,6 +970,12 @@ const IhsSemanticsApi* semantics_api() noexcept {
       &ihs_semantics_unregister,
       &ihs_semantics_dispatch,
       &ihs_semantics_send_pointer_tap,
+      &ihs_semantics_source_count,
+      &ihs_semantics_source_at,
+      &ihs_semantics_source_name,
+      &ihs_semantics_acquire_snapshot_from,
+      &ihs_semantics_dispatch_from,
+      &ihs_semantics_send_pointer_tap_to,
   };
   return &api;
 }

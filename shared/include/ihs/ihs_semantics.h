@@ -633,6 +633,37 @@ typedef struct IhsSemanticsApi {
                           int64_t view_id,
                           double x,
                           double y);
+
+  /*
+   * Source addressing, appended in ABI 1.4. Read only when struct_size reaches
+   * them; a plugin built against 1.3 has neither these nor the size to reach
+   * them.
+   *
+   * They are not optional extras where the shell runs several applications:
+   * the calls above resolve to a single unambiguous source, so with more than
+   * one registered acquire_snapshot returns NULL and dispatch fails. A plugin
+   * that wants to work in that configuration has to address a view, and these
+   * are how.
+   */
+  size_t (*source_count)(void);
+  IhsSemanticsSource* (*source_at)(size_t index);
+  const char* (*source_name)(const IhsSemanticsSource* source);
+  const IhsSemanticsSnapshot* (*acquire_snapshot_from)(
+      IhsSemanticsSource* source);
+  int (*dispatch_from)(IhsSemanticsConsumer* consumer,
+                       IhsSemanticsSource* source,
+                       int64_t view_id,
+                       int32_t node_id,
+                       uint64_t action,
+                       const uint8_t* data,
+                       size_t data_length,
+                       IhsSemanticsDoneCallback done,
+                       void* user_data);
+  int (*send_pointer_tap_to)(IhsSemanticsConsumer* consumer,
+                             IhsSemanticsSource* source,
+                             int64_t view_id,
+                             double x,
+                             double y);
 } IhsSemanticsApi;
 
 #ifdef __cplusplus
