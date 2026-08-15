@@ -20,7 +20,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
   push:
-    branches: [v2.0]
+    branches: [v3.0]
   workflow_dispatch:
 
 concurrency:
@@ -361,10 +361,17 @@ jobs:
             # -v streams the toolchain/compile output line-prefixed into the
             # log (tee'd) so every build leaves a full record, not just
             # spinners.
+            #
+            # 2>&1 before the pipe, because the grep below reads this file and
+            # emb reports a failed augment download on stderr. Without it the
+            # message reached the console -- both streams land there -- but
+            # never the file, so the retry decided every download failure was
+            # "something other than a download" and gave up on the first
+            # attempt. The retry has therefore never once fired.
             if emb -v cross . \
                  --target "${{ matrix.board }}-${{ matrix.pios }}" \
                  --build --backend "${{ matrix.backend }}" \
-                 --no-verify -w /emb | tee /tmp/emb-build.log; then
+                 --no-verify -w /emb 2>&1 | tee /tmp/emb-build.log; then
               break
             fi
             if ! grep -q "augment: download failed" /tmp/emb-build.log; then
