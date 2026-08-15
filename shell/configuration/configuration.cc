@@ -74,6 +74,19 @@ void Configuration::get_global_parameters(toml::table* root, Config& instance) {
     instance.enable_mcp =
         root->at_path("global.enable_mcp").value<bool>().value();
   }
+  // An empty list is meaningful -- it is the read-only surface -- so presence
+  // is what is tested, not contents. Distinguishing "narrowed to nothing" from
+  // "not narrowed" is the whole point of the key.
+  if (root->at_path("global.mcp_allowed_tools").is_array()) {
+    std::vector<std::string> tools;
+    for (auto&& element :
+         *root->at_path("global.mcp_allowed_tools").as_array()) {
+      if (const auto name = element.value<std::string>()) {
+        tools.emplace_back(*name);
+      }
+    }
+    instance.mcp_allowed_tools = std::move(tools);
+  }
 }
 
 namespace {

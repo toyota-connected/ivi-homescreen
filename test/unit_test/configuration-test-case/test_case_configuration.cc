@@ -25,8 +25,8 @@ TEST(HomescreenConfigurationParseConfig, Lv1Normal001) {
       Configuration::parse_config(config);
 
   const auto& [app_id, cursor_theme, disable_cursor, wayland_event_mask,
-               debug_backend, bundle_paths, enable_mcp, view, hud,
-               config_file] = configs.back();
+               debug_backend, bundle_paths, enable_mcp, mcp_allowed_tools, view,
+               hud, config_file] = configs.back();
 
   EXPECT_EQ("com.toyotaconnected.homescreen", app_id);
   EXPECT_EQ(false, disable_cursor.value_or(false));
@@ -87,8 +87,8 @@ TEST(HomescreenConfigurationParseArgcArgv, Lv1Normal001) {
   const auto configs = Configuration::ParseArgcArgv(argc, argv_p);
 
   const auto& [app_id, cursor_theme, disable_cursor, wayland_event_mask,
-               debug_backend, bundle_paths, enable_mcp, view, hud,
-               config_file] = configs.back();
+               debug_backend, bundle_paths, enable_mcp, mcp_allowed_tools, view,
+               hud, config_file] = configs.back();
   // check result
 
   EXPECT_EQ(kSourceRoot, view.bundle_path);

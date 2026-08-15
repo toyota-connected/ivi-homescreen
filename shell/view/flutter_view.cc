@@ -552,7 +552,9 @@ bool FlutterView::Initialize() {
       m_config.view.bundle_path,
       m_config.view.accessibility_features.value_or(0),
       m_config.view.merge_render_platform.value_or(false),
-      m_config.enable_mcp.value_or(false));
+      m_config.enable_mcp.value_or(false),
+      m_config.mcp_allowed_tools.value_or(std::vector<std::string>{}),
+      m_config.mcp_allowed_tools.has_value());
 
   m_state->engine = m_flutter_engine.get();
 

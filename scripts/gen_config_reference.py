@@ -52,6 +52,7 @@ META = {
     "global.wayland_event_mask": ("—", "comma/space list", "wayland", "Wayland input events to mask (e.g. 'keyboard pointer')."),
     "global.debug_backend": ("false", "true|false", "all", "Enable backend debug logging."),
     "global.enable_mcp": ("false", "true|false", "all", "Serve the MCP surface, letting an external agent read and drive the UI. Requires a build configured with BUILD_MCP; off unless both the build and this key ask for it."),
+    "global.mcp_allowed_tools": ("all tools", "array of tool names", "all", "Which UI tools the MCP surface offers, unprefixed: tap, long_press, increase, decrease, show_on_screen, dismiss, expand, collapse, set_text, scroll_to, custom_action, tap_at. Absent offers all of them. An empty list is a read-only surface -- snapshot and query are always offered, since reading is what the tree is for. This narrows and cannot widen: the accessibility-focus actions are never reachable whatever is listed. A name matching no tool refuses startup rather than being skipped."),
     # [sentry] — process-level (optional; DSN from $SENTRY_DSN)
     "sentry.release": ("—", "string", "all", "Sentry release tag."),
     "sentry.env": ("(built-in)", "string", "all", "Sentry environment."),

@@ -45,6 +45,21 @@ class Configuration {
     // those to switch semantics on. Left off, the surface costs nothing.
     std::optional<bool> enable_mcp;
 
+    // [global] mcp_allowed_tools: which of the UI tools the MCP surface
+    // offers, unprefixed -- "tap", "set_text", "tap_at". Absent means all of
+    // them, which is the compiled default and is already correct: it excludes
+    // the accessibility-focus actions, which an agent must never reach.
+    //
+    // Present, this narrows and cannot widen. An empty list is a read-only
+    // surface: an agent can still read and query the tree, because reading is
+    // what the tree is for, but it can change nothing. Reading is not
+    // listable, so "snapshot" and "query" need not appear.
+    //
+    // A name that matches no tool refuses startup rather than being skipped. A
+    // typo in a policy file must not quietly grant less than intended, and
+    // least of all must it quietly grant more.
+    std::optional<std::vector<std::string>> mcp_allowed_tools;
+
     struct {
       std::string bundle_path;
       // Engine / Dart VM switches -> FlutterProjectArgs.command_line_argv

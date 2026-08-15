@@ -37,6 +37,7 @@
 
 #include "ihs/ihs_mcp_provider.h"
 #include "ihs/ihs_semantics.h"
+#include "ihs/logging.h"
 
 namespace {
 
@@ -47,7 +48,21 @@ struct ToolEntry {
   const char* name;
   const char* description;
   const char* schema;
+
+  // The action the generic dispatch path sends. Zero for the tools answered
+  // from the snapshot, and for the two the call handler routes itself.
   uint64_t action;
+
+  // Every hub action this tool may cause, which is what the allow mask is
+  // built from and is not always `action`. Two tools dispatch something that
+  // field does not name: custom_action routes itself and sends CUSTOM_ACTION,
+  // and set_text focuses the field first, because the framework ignores text
+  // sent to a field with no input connection. Deriving the mask from `action`
+  // alone drops both, and the result is a tool that is advertised and then
+  // refused at the funnel -- which reads to a client as the surface being
+  // broken rather than as policy.
+  uint64_t dispatches;
+
   uint64_t capability;
 };
 
@@ -104,35 +119,46 @@ constexpr char kTapAtSchema[] =
     R"(},"required":["x","y"]})";
 
 const ToolEntry kTools[] = {
-    {"snapshot", "The whole semantics tree as JSON.", kEmptySchema, 0,
+    {"snapshot", "The whole semantics tree as JSON.", kEmptySchema, 0, 0,
      IHS_MCP_CAP_INSPECT},
     {"query", "Find nodes by identifier, label substring, or role.",
-     kQuerySchema, 0, IHS_MCP_CAP_INSPECT},
+     kQuerySchema, 0, 0, IHS_MCP_CAP_INSPECT},
     {"tap", "Activate a node, as a tap would.", kNodeSchema,
-     IHS_SEMANTICS_ACTION_TAP, IHS_MCP_CAP_INTERACT},
+     IHS_SEMANTICS_ACTION_TAP, IHS_SEMANTICS_ACTION_TAP, IHS_MCP_CAP_INTERACT},
     {"long_press", "Long-press a node.", kNodeSchema,
-     IHS_SEMANTICS_ACTION_LONG_PRESS, IHS_MCP_CAP_INTERACT},
+     IHS_SEMANTICS_ACTION_LONG_PRESS, IHS_SEMANTICS_ACTION_LONG_PRESS,
+     IHS_MCP_CAP_INTERACT},
     {"increase", "Increment a value, as on a slider.", kNodeSchema,
-     IHS_SEMANTICS_ACTION_INCREASE, IHS_MCP_CAP_INTERACT},
+     IHS_SEMANTICS_ACTION_INCREASE, IHS_SEMANTICS_ACTION_INCREASE,
+     IHS_MCP_CAP_INTERACT},
     {"decrease", "Decrement a value.", kNodeSchema,
-     IHS_SEMANTICS_ACTION_DECREASE, IHS_MCP_CAP_INTERACT},
+     IHS_SEMANTICS_ACTION_DECREASE, IHS_SEMANTICS_ACTION_DECREASE,
+     IHS_MCP_CAP_INTERACT},
     {"show_on_screen", "Scroll a node into view.", kNodeSchema,
-     IHS_SEMANTICS_ACTION_SHOW_ON_SCREEN, IHS_MCP_CAP_INTERACT},
+     IHS_SEMANTICS_ACTION_SHOW_ON_SCREEN, IHS_SEMANTICS_ACTION_SHOW_ON_SCREEN,
+     IHS_MCP_CAP_INTERACT},
     {"dismiss", "Dismiss a node, as a swipe-away would.", kNodeSchema,
-     IHS_SEMANTICS_ACTION_DISMISS, IHS_MCP_CAP_INTERACT},
+     IHS_SEMANTICS_ACTION_DISMISS, IHS_SEMANTICS_ACTION_DISMISS,
+     IHS_MCP_CAP_INTERACT},
     {"expand", "Expand a node.", kNodeSchema, IHS_SEMANTICS_ACTION_EXPAND,
-     IHS_MCP_CAP_INTERACT},
+     IHS_SEMANTICS_ACTION_EXPAND, IHS_MCP_CAP_INTERACT},
     {"collapse", "Collapse a node.", kNodeSchema, IHS_SEMANTICS_ACTION_COLLAPSE,
-     IHS_MCP_CAP_INTERACT},
+     IHS_SEMANTICS_ACTION_COLLAPSE, IHS_MCP_CAP_INTERACT},
+    // Focus as well as the text itself: the framework ignores text sent to a
+    // field with no input connection, so the tool opens one first.
     {"set_text", "Replace the text in a text field.", kSetTextSchema,
-     IHS_SEMANTICS_ACTION_SET_TEXT, IHS_MCP_CAP_INTERACT},
+     IHS_SEMANTICS_ACTION_SET_TEXT,
+     IHS_SEMANTICS_ACTION_SET_TEXT | IHS_SEMANTICS_ACTION_FOCUS,
+     IHS_MCP_CAP_INTERACT},
     {"scroll_to", "Scroll a container to a given offset.", kScrollToSchema,
+     IHS_SEMANTICS_ACTION_SCROLL_TO_OFFSET,
      IHS_SEMANTICS_ACTION_SCROLL_TO_OFFSET, IHS_MCP_CAP_INTERACT},
     {"custom_action",
      "Invoke one of a node's application-defined actions, named by the label "
      "the tree reports in custom_actions. These are the app's own verbs -- "
      "there is no fixed set, and a node offers only what it declared.",
-     kCustomActionSchema, 0, IHS_MCP_CAP_INTERACT},
+     kCustomActionSchema, 0, IHS_SEMANTICS_ACTION_CUSTOM_ACTION,
+     IHS_MCP_CAP_INTERACT},
     // Action 0: this one does not dispatch a semantics action at all, and the
     // call handler routes it separately. Its description says so, because the
     // difference is the caller's to reason about -- a tap that is hit-tested
@@ -142,7 +168,7 @@ const ToolEntry kTools[] = {
      "describe. Unlike ui_tap this is hit-tested: whatever is drawn on top "
      "receives it, it races animation, and nothing confirms what it hit. "
      "Prefer ui_tap wherever a node offers it.",
-     kTapAtSchema, 0, IHS_MCP_CAP_INTERACT},
+     kTapAtSchema, 0, 0, IHS_MCP_CAP_INTERACT},
 };
 
 // The accessibility-focus actions are deliberately absent from the table
@@ -150,6 +176,40 @@ const ToolEntry kTools[] = {
 // not be able to yank it away from someone reading the screen. The hub's
 // allow mask below enforces the same thing a second time, at the funnel.
 constexpr uint64_t kAllowMask = IHS_SEMANTICS_ACTION_NO_A11Y_FOCUS;
+
+constexpr size_t kToolCount = sizeof(kTools) / sizeof(kTools[0]);
+
+// Logging goes through the C API for the same reason the rest of ihs_shared
+// does: the library sits below the shell's C++ logging wrapper.
+int32_t TraceContext() {
+  static const int32_t ctx = ihs_log_context_open("MCPS", nullptr);
+  return ctx;
+}
+
+void Log(const int32_t level, const std::string& text) {
+  const int32_t ctx = TraceContext();
+  if (ctx < 0 || ihs_log_enabled(ctx, static_cast<uint8_t>(level)) == 0) {
+    return;
+  }
+  ihs_log(ctx, static_cast<uint8_t>(level), text.c_str(), text.size());
+}
+
+// Reading is what the tree is for, so the read-only tools are offered whatever
+// the policy says. A surface that cannot be read has no purpose: an agent
+// would see a tool list it cannot use and no way to find out why.
+bool AlwaysOffered(const char* name) {
+  return std::strcmp(name, "snapshot") == 0 || std::strcmp(name, "query") == 0;
+}
+
+// Index of a tool by its unprefixed name, or kToolCount when there is none.
+size_t ToolIndexFor(const char* name) {
+  for (size_t i = 0; i < kToolCount; i++) {
+    if (std::strcmp(kTools[i].name, name) == 0) {
+      return i;
+    }
+  }
+  return kToolCount;
+}
 
 const char* RoleName(const IhsSemanticsRole role) {
   switch (role) {
@@ -1034,6 +1094,42 @@ int CallTool(void* /* user_data */,
 extern "C" {
 
 int ihs_mcp_semantics_provider_start(void) {
+  return ihs_mcp_semantics_provider_start_with(nullptr);
+}
+
+int ihs_mcp_semantics_provider_start_with(const IhsMcpSemanticsConfig* config) {
+  if (config != nullptr &&
+      config->struct_size < sizeof(IhsMcpSemanticsConfig)) {
+    return IHS_MCP_ERR_INVALID;
+  }
+
+  // Which tools this start offers. Resolved before anything is registered:
+  // a policy that cannot be applied must not leave the surface running under
+  // some other one.
+  std::vector<bool> offered(kToolCount, true);
+  if (config != nullptr && config->narrow_tools) {
+    for (size_t i = 0; i < kToolCount; i++) {
+      offered[i] = AlwaysOffered(kTools[i].name);
+    }
+    for (size_t i = 0; i < config->allowed_tool_count; i++) {
+      const char* wanted =
+          config->allowed_tools == nullptr ? nullptr : config->allowed_tools[i];
+      if (wanted == nullptr) {
+        return IHS_MCP_ERR_INVALID;
+      }
+      const size_t index = ToolIndexFor(wanted);
+      if (index == kToolCount) {
+        // Naming a tool that does not exist is refused rather than ignored.
+        // A typo in a policy file must not quietly grant less than intended,
+        // and least of all must it quietly grant more.
+        Log(IHS_LEVEL_ERROR,
+            std::string("mcp: no such tool in the allow list: ") + wanted);
+        return IHS_MCP_ERR_INVALID;
+      }
+      offered[index] = true;
+    }
+  }
+
   Provider& p = TheProvider();
   std::lock_guard<std::mutex> lock(p.mutex);
   if (p.mcp != nullptr) {
@@ -1042,18 +1138,48 @@ int ihs_mcp_semantics_provider_start(void) {
 
   p.names.clear();
   p.tools.clear();
-  p.names.reserve(sizeof(kTools) / sizeof(kTools[0]));
-  p.tools.reserve(sizeof(kTools) / sizeof(kTools[0]));
-  for (const ToolEntry& entry : kTools) {
-    p.names.emplace_back(entry.name);
-  }
-  for (size_t i = 0; i < p.names.size(); i++) {
+  p.names.reserve(kToolCount);
+  p.tools.reserve(kToolCount);
+  // The hub mask carries only the tools that dispatch a semantics action, and
+  // never more than the compiled default allows. ui_tap_at is deliberately
+  // absent from it: it sends a pointer event rather than an action, so the
+  // hub has nothing to enforce and the tool list is the only thing standing
+  // in front of it. That the registry resolves a call against the list before
+  // routing it is what makes the list a gate rather than a suggestion.
+  uint64_t mask = 0;
+  for (size_t i = 0; i < kToolCount; i++) {
+    if (!offered[i]) {
+      continue;
+    }
+    mask |= kTools[i].dispatches;
+    p.names.emplace_back(kTools[i].name);
     IhsMcpToolDesc desc{};
-    desc.name = p.names[i].c_str();
     desc.description = kTools[i].description;
     desc.input_schema_json = kTools[i].schema;
     desc.capability = kTools[i].capability;
     p.tools.push_back(desc);
+  }
+  // Names are pointed at after the vector has stopped growing; a c_str() taken
+  // during the loop above would dangle on the next reallocation.
+  for (size_t i = 0; i < p.names.size(); i++) {
+    p.tools[i].name = p.names[i].c_str();
+  }
+  mask &= kAllowMask;
+
+  // What a policy actually permitted, once. Anything this grants should be
+  // visible without running an experiment to find out -- a mask read from
+  // configuration is exactly the kind of thing that is assumed rather than
+  // checked, and a narrowed surface that silently did not narrow looks
+  // identical to one that did until an agent uses it.
+  if (p.names.size() < kToolCount) {
+    std::string offered_names;
+    for (const std::string& name : p.names) {
+      offered_names += offered_names.empty() ? "" : ", ";
+      offered_names += name;
+    }
+    Log(IHS_LEVEL_INFO, "mcp: semantics tools narrowed to " +
+                            std::to_string(p.names.size()) + " of " +
+                            std::to_string(kToolCount) + ": " + offered_names);
   }
 
   p.resources[0].uri = "ui://semantics/tree";
@@ -1077,7 +1203,7 @@ int ihs_mcp_semantics_provider_start(void) {
   IhsSemanticsConsumerDesc consumer{};
   consumer.struct_size = sizeof(IhsSemanticsConsumerDesc);
   consumer.name = "mcp.semantics";
-  consumer.action_allow_mask = kAllowMask;
+  consumer.action_allow_mask = mask;
   consumer.notify_fd = p.notify_fd;
   if (ihs_semantics_register(&consumer, &p.consumer) != IHS_SEMANTICS_OK) {
     ::close(p.notify_fd);

@@ -135,12 +135,33 @@ user** or `SO_PEERCRED` refuses everything, and **past it the client
 certificate is the only remaining gate**, because peer credentials can no
 longer tell an agent from the terminator.
 
-### The action allow mask
+### Which tools the surface offers
 
-The compiled defaults are correct on their own: the MCP consumer gets no
-accessibility-focus actions, AccessKit gets everything. Configuration narrows
-or widens that. A production image that wants a read-only surface sets it
-there.
+`mcp_allowed_tools` lists the UI tools an image permits, unprefixed. Absent
+offers all of them, which is the compiled default and is already correct — it
+excludes the accessibility-focus actions, which are never reachable whatever
+is listed.
+
+```toml
+[global]
+enable_mcp = true
+mcp_allowed_tools = []                      # read-only: an agent can look, not touch
+mcp_allowed_tools = ["tap", "scroll_to"]    # or exactly what the product needs
+```
+
+`snapshot` and `query` are always offered, because reading is what the tree is
+for and a surface that cannot be read has no purpose.
+
+Three things worth knowing about how this behaves:
+
+- **It narrows and cannot widen.** The compiled default is the ceiling.
+- **A name matching no tool refuses startup**, leaving the surface absent
+  rather than open. A typo must not quietly grant less than intended, and
+  least of all more.
+- **The advertised list is the gate**, not a suggestion: the registry resolves
+  every call against it before routing. That is what makes narrowing effective
+  for `ui_tap_at`, which sends a pointer event rather than a semantics action
+  and so has nothing for the hub mask to enforce.
 
 Configuration is world-readable and unauthenticated. On a production image its
 integrity is the image's, which is the same line drawn everywhere else here —
@@ -148,10 +169,11 @@ the shell owns what only it can, and the product owns trust material.
 
 ## Residual risk, stated plainly
 
-- **An agent that reaches the socket can do anything the user can**, short of
-  moving the accessibility cursor or typing into an obscured field. There is
-  no per-tool authorization beyond the capability mask, and no audit trail
-  beyond the trace log.
+- **An agent that reaches the socket can do anything `mcp_allowed_tools`
+  permits**, which unset is everything the user can do short of moving the
+  accessibility cursor or typing into an obscured field. The policy is
+  per-image, not per-client: there is no way to admit one agent and restrict
+  another, and no audit trail beyond the trace log.
 - **Past a terminator, peer credentials mean nothing.** Every client the
   terminator admits is, to this transport, the same client.
 - **The tree is as revealing as the application makes it.** An application
@@ -169,7 +191,7 @@ For an image shipping this surface:
 - [ ] No deployment step relaxes permissions on the runtime directory
 - [ ] If a terminator is used, it runs as the shell's user and requires a
       client certificate
-- [ ] The action allow mask is set for the image, not left implicit
+- [ ] `mcp_allowed_tools` is set for the image, not left implicit
 - [ ] The application publishes no secret as a label or value
 - [ ] Applications declaring their own tools have had those tools reviewed —
       they are outside everything above
