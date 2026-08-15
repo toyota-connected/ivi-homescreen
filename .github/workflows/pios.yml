@@ -320,6 +320,34 @@ jobs:
       # deadlock: the archives only land after a green build, and the build
       # cannot go green while the download keeps failing. Saving whatever did
       # arrive means each attempt leaves the next one better off.
+      # DIAGNOSTIC — remove before merging.
+      #
+      # Every build job re-resolves the cross toolchain for 90-110 seconds,
+      # which across the matrix is roughly 40 minutes of CI per run. The image
+      # this job runs in is supposed to have it baked at /emb, and the publish
+      # job reports the content it would build is "already published --
+      # skipping resolve", so both sides agree on what the toolchain should be.
+      #
+      # What is not known is whether the mutable :${{ matrix.pios }} tag this
+      # container comes from actually carries that content, and whether it is
+      # baked under the path and profile hash the build then asks for. This
+      # prints exactly that, and nothing else, so the answer comes from the
+      # container rather than from reasoning about it.
+      - name: Diagnose baked toolchain
+        continue-on-error: true
+        run: |
+          echo "::group::what the image baked"
+          ls -la /emb/.config/flutter_workspace/ 2>&1 || echo "MISSING: /emb/.config/flutter_workspace"
+          echo "--- cross profiles present ---"
+          ls -d /emb/.config/flutter_workspace/cross-* 2>&1 || echo "none"
+          echo "--- size of each ---"
+          du -sh /emb/.config/flutter_workspace/cross-* 2>&1 || true
+          echo "--- overlay-src (augment archives) ---"
+          ls -la /emb/.config/flutter_workspace/overlay-src/ 2>&1 | head -20 || echo "none"
+          echo "--- what /emb looks like at the top ---"
+          ls -la /emb/ 2>&1 | head -10
+          echo "::endgroup::"
+
       - name: Restore augment sources
         uses: actions/cache/restore@v6
         with:
