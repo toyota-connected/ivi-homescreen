@@ -11,13 +11,15 @@ That is the feature. Everything below is about who gets to.
 
 | | |
 | --- | --- |
-| **Read** | The entire semantics tree — every label, value, role and screen rectangle the application publishes for accessibility |
+| **Read** | The entire semantics tree of every running application — every label, value, role and screen rectangle each publishes for accessibility. One resource per application, `ui://semantics/{view}/tree` |
 | **Act** | Any semantics action the application offers on any node: taps, text entry, scrolling, and the application's own custom actions |
 | **Coordinates** | `ui_tap_at` synthesizes a hit-tested tap at a point, reaching what the tree does not describe |
 | **Application tools** | Whatever an application declares through `ihs_mcp_app_tools.h`, under its own prefix |
 
 Treat the tree as **everything on screen**. An agent that can read it can read
-the user's destination, their media, and any text a field displays.
+the user's destination, their media, and any text a field displays — and where
+the shell runs several applications, it can read all of them. There is no
+per-application access control: admitting a client admits it to every view.
 
 ## What stops it
 

@@ -46,6 +46,11 @@ using FlutterDesktopMessengerReferenceOwner =
 using UniqueAotDataPtr = std::unique_ptr<_FlutterEngineAOTData, AOTDataDeleter>;
 /// Maintains one ref on the FlutterDesktopMessenger's internal reference count.
 
+extern "C" {
+// Held only as a pointer; the hub header is not needed here.
+struct IhsSemanticsSource;
+}
+
 // Struct for storing state of a Flutter engine instance.
 struct FlutterDesktopEngineState {
   // The handle to the Flutter engine instance.
@@ -93,6 +98,11 @@ struct FlutterDesktopEngineState {
 #endif
 
   AccessibilityTree* accessibility_tree = nullptr;
+
+  // The hub registration this engine publishes its tree to, travelling beside
+  // the tree because the two are only meaningful together: publishing without
+  // it means the last engine to run owns the only tree there is.
+  IhsSemanticsSource* semantics_source = nullptr;
 
   // The controller associated with this engine instance, if any.
   // This will always be null for a headless engine.

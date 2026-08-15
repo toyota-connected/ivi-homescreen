@@ -137,6 +137,7 @@ Engine::Engine(FlutterView* view,
                std::vector<std::string> mcp_allowed_tools,
                const bool mcp_tools_narrowed)
     : m_index(index),
+      m_bundle_name(std::filesystem::path(bundle_path).filename().string()),
       m_running(false),
       m_backend(view->GetBackend()),
       m_view(view),
@@ -338,6 +339,19 @@ void Engine::Shutdown() {
     // standing on. Stop guarantees nothing is in flight when it returns.
     ihs_mcp_transport_stop();
     ihs_mcp_semantics_provider_stop();
+  }
+#endif
+#if BUILD_ACCESSIBILITY
+  // After the consumers above are gone, so nothing is mid-read of this tree,
+  // and before the engine is torn down, so no publish can arrive for a source
+  // that no longer exists. A snapshot a consumer still holds stays valid
+  // regardless -- snapshots are refcounted independently of the source.
+  if (m_semantics_source != nullptr) {
+    ihs_semantics_source_unregister(m_semantics_source);
+    m_semantics_source = nullptr;
+    if (m_engine_state != nullptr) {
+      m_engine_state->semantics_source = nullptr;
+    }
   }
 #endif
   // Deinitialize stops new frame work; Shutdown joins the platform, UI and
@@ -1055,7 +1069,40 @@ void Engine::InstallSemanticsHost() {
     return engine->SendSyntheticTap(x, y);
   };
 
-  ihs_semantics_set_host(&host);
+  // A name an outside reader can recognise: the bundle's own directory, which
+  // is what a person configuring the shell named it. The index disambiguates
+  // the case two bundles share a basename, which registration would otherwise
+  // refuse -- and refusing would take semantics away from the second view
+  // rather than merely naming it awkwardly.
+  std::string name = m_bundle_name;
+  if (name.empty()) {
+    name = "view";
+  }
+
+  IhsSemanticsSourceDesc desc{};
+  desc.struct_size = sizeof(desc);
+  desc.name = name.c_str();
+  desc.host = host;
+  if (ihs_semantics_source_register(&desc, &m_semantics_source) !=
+      IHS_SEMANTICS_OK) {
+    const std::string unique = name + "-" + std::to_string(m_index);
+    desc.name = unique.c_str();
+    if (ihs_semantics_source_register(&desc, &m_semantics_source) !=
+        IHS_SEMANTICS_OK) {
+      ihs::log::error(
+          "({}) semantics source registration failed; this view "
+          "publishes no tree",
+          m_index);
+      m_semantics_source = nullptr;
+    }
+  }
+
+  // The publish callback reaches the source through the engine state, which is
+  // what it already has: the tree and the source it belongs to travel
+  // together, because publishing one without the other is the defect.
+  if (m_engine_state != nullptr) {
+    m_engine_state->semantics_source = m_semantics_source;
+  }
 }
 
 int Engine::SendSyntheticTap(const double x, const double y) {
@@ -1195,7 +1242,8 @@ void Engine::onSemanticsUpdateCallback(const FlutterSemanticsUpdate2* update,
   // Hand the refreshed tree to the semantics hub. Publication is whole-tree
   // and happens here, at the batch boundary, because that is the only point at
   // which the mirror is known consistent.
-  const int status = accessibility::PublishTree(*accessibility_tree);
+  const int status = accessibility::PublishTree(*accessibility_tree,
+                                                engine_state->semantics_source);
   if (status != IHS_SEMANTICS_OK) {
     ihs::log::warn("Failed to publish semantics snapshot: {}", status);
   }

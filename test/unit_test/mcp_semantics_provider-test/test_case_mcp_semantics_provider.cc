@@ -375,8 +375,9 @@ TEST_F(McpSemanticsProviderTest, ResourceReturnsTheTree) {
   ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
 
   IhsMcpPayload payload{};
-  ASSERT_EQ(ihs_mcp_registry_read_resource("ui://semantics/tree", &payload),
-            IHS_MCP_OK);
+  ASSERT_EQ(
+      ihs_mcp_registry_read_resource("ui://semantics/default/tree", &payload),
+      IHS_MCP_OK);
   const std::string body(payload.data, payload.length);
   EXPECT_TRUE(Contains(body, "\"nodes\""));
   ihs_mcp_registry_release_payload(&payload);
@@ -1170,4 +1171,218 @@ TEST_F(McpSemanticsProviderTest, ANarrowedPolicyStillAllowsWhatItsToolsNeed) {
   EXPECT_EQ(status, IHS_MCP_OK)
       << "custom_action was offered but the mask does not carry its action: "
       << body;
+}
+
+// ---------------------------------------------------------------------------
+// Multi-view
+//
+// Two applications, two trees, two id spaces. Reading may span them because an
+// agent looking for a control does not yet know which application owns it.
+// Acting may not: an unqualified action has no defensible reading, and
+// choosing one is how a client acts on something it never looked at.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+struct ViewHost {
+  const char* name;
+  int dispatches = 0;
+  int32_t last_node = 0;
+};
+
+int OnViewDispatch(void* user_data,
+                   int64_t,
+                   int32_t node_id,
+                   uint64_t,
+                   const uint8_t*,
+                   size_t) {
+  auto* h = static_cast<ViewHost*>(user_data);
+  h->dispatches++;
+  h->last_node = node_id;
+  return IHS_SEMANTICS_OK;
+}
+
+IhsSemanticsSource* AddView(const char* name, ViewHost* host_data) {
+  IhsSemanticsHost host{};
+  host.struct_size = sizeof(host);
+  host.user_data = host_data;
+  host.set_semantics_enabled = [](void*, bool) {};
+  host.dispatch = OnViewDispatch;
+
+  IhsSemanticsSourceDesc desc{};
+  desc.struct_size = sizeof(desc);
+  desc.name = name;
+  desc.host = host;
+  IhsSemanticsSource* source = nullptr;
+  return ihs_semantics_source_register(&desc, &source) == IHS_SEMANTICS_OK
+             ? source
+             : nullptr;
+}
+
+// One tappable node, published to a named view.
+void PublishOne(IhsSemanticsSource* source, int32_t id, const char* label) {
+  IhsSemanticsPublishNode node{};
+  node.id = id;
+  node.label = label;
+  node.role = IHS_SEMANTICS_ROLE_BUTTON;
+  node.enabled = IHS_SEMANTICS_TRISTATE_NONE;
+  node.actions = IHS_SEMANTICS_ACTION_TAP;
+  IhsSemanticsPublishInfo info{};
+  info.struct_size = sizeof(info);
+  info.nodes = &node;
+  info.node_count = 1;
+  info.source = source;
+  ASSERT_EQ(ihs_semantics_publish(&info), IHS_SEMANTICS_OK);
+}
+
+}  // namespace
+
+// Each application's tree is addressable, and the URI says which. There is no
+// unqualified "the tree": what it would name depends on how many applications
+// happen to be running, which a client cannot see.
+TEST_F(McpSemanticsProviderTest, EachViewHasItsOwnResource) {
+  ihs_semantics_set_host(nullptr);
+  ViewHost a{"a"};
+  ViewHost b{"b"};
+  IhsSemanticsSource* cluster = AddView("cluster", &a);
+  IhsSemanticsSource* radio = AddView("radio", &b);
+  ASSERT_NE(cluster, nullptr);
+  ASSERT_NE(radio, nullptr);
+  PublishOne(cluster, 1, "Speed");
+  PublishOne(radio, 1, "Volume");
+
+  std::vector<std::string> uris;
+  ihs_mcp_registry_for_each_resource(
+      [](const IhsMcpRegistryResource* resource, void* user_data) {
+        static_cast<std::vector<std::string>*>(user_data)->emplace_back(
+            resource->uri);
+      },
+      &uris);
+  EXPECT_NE(std::find(uris.begin(), uris.end(), "ui://semantics/cluster/tree"),
+            uris.end());
+  EXPECT_NE(std::find(uris.begin(), uris.end(), "ui://semantics/radio/tree"),
+            uris.end());
+
+  IhsMcpPayload payload{};
+  ASSERT_EQ(
+      ihs_mcp_registry_read_resource("ui://semantics/radio/tree", &payload),
+      IHS_MCP_OK);
+  const std::string body(payload.data, payload.length);
+  EXPECT_TRUE(Contains(body, "Volume"));
+  EXPECT_FALSE(Contains(body, "Speed")) << "a view's resource returned another "
+                                           "application's tree: "
+                                        << body;
+  ihs_mcp_registry_release_payload(&payload);
+
+  ihs_semantics_source_unregister(cluster);
+  ihs_semantics_source_unregister(radio);
+}
+
+// The defect, at the surface an agent actually uses: two applications with the
+// same node id, act on one, and the other must not receive it.
+TEST_F(McpSemanticsProviderTest, AnActionGoesToTheViewItNames) {
+  ihs_semantics_set_host(nullptr);
+  ViewHost cluster_host{"cluster"};
+  ViewHost radio_host{"radio"};
+  IhsSemanticsSource* cluster = AddView("cluster", &cluster_host);
+  IhsSemanticsSource* radio = AddView("radio", &radio_host);
+  ASSERT_NE(cluster, nullptr);
+  ASSERT_NE(radio, nullptr);
+  PublishOne(cluster, 7, "Trip reset");
+  PublishOne(radio, 7, "Mute");
+
+  int status = 0;
+  const std::string body =
+      CallTool("ui_tap", R"({"view":"radio","node_id":7})", &status);
+  EXPECT_EQ(status, IHS_MCP_OK) << body;
+  EXPECT_EQ(radio_host.dispatches, 1);
+  EXPECT_EQ(cluster_host.dispatches, 0)
+      << "the action reached an application the call did not name";
+
+  ihs_semantics_source_unregister(cluster);
+  ihs_semantics_source_unregister(radio);
+}
+
+// An action that names no view, with several running, is refused. Choosing one
+// is precisely the defect; the error says what is missing, because an agent
+// that omitted the argument needs to learn it exists.
+TEST_F(McpSemanticsProviderTest, AnUnqualifiedActionIsRefused) {
+  ihs_semantics_set_host(nullptr);
+  ViewHost a{"a"};
+  ViewHost b{"b"};
+  IhsSemanticsSource* first = AddView("cluster", &a);
+  IhsSemanticsSource* second = AddView("radio", &b);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  PublishOne(first, 7, "One");
+  PublishOne(second, 7, "Two");
+
+  int status = 0;
+  const std::string body = CallTool("ui_tap", R"({"node_id":7})", &status);
+  EXPECT_EQ(status, IHS_MCP_ERR_INVALID) << body;
+  EXPECT_TRUE(Contains(body, "view is required")) << body;
+  EXPECT_EQ(a.dispatches, 0);
+  EXPECT_EQ(b.dispatches, 0);
+
+  ihs_semantics_source_unregister(first);
+  ihs_semantics_source_unregister(second);
+}
+
+// A read that names no view searches every one and reports where each result
+// came from -- which is what an agent hunting for a control needs, since it
+// does not yet know which application owns it.
+TEST_F(McpSemanticsProviderTest, AnUnqualifiedReadSpansEveryView) {
+  ihs_semantics_set_host(nullptr);
+  ViewHost a{"a"};
+  ViewHost b{"b"};
+  IhsSemanticsSource* cluster = AddView("cluster", &a);
+  IhsSemanticsSource* radio = AddView("radio", &b);
+  ASSERT_NE(cluster, nullptr);
+  ASSERT_NE(radio, nullptr);
+  PublishOne(cluster, 1, "Speed");
+  PublishOne(radio, 2, "Volume");
+
+  const std::string body = CallTool("ui_query", R"({"label":"o"})", nullptr);
+  EXPECT_TRUE(Contains(body, "\"views\"")) << body;
+  EXPECT_TRUE(Contains(body, "cluster")) << body;
+  EXPECT_TRUE(Contains(body, "radio")) << body;
+  EXPECT_TRUE(Contains(body, "Volume")) << body;
+
+  ihs_semantics_source_unregister(cluster);
+  ihs_semantics_source_unregister(radio);
+}
+
+// Naming a view that does not exist is a different mistake from omitting one,
+// and says so.
+TEST_F(McpSemanticsProviderTest, AnUnknownViewNameIsRejected) {
+  ihs_semantics_set_host(nullptr);
+  ViewHost a{"a"};
+  IhsSemanticsSource* only = AddView("cluster", &a);
+  ASSERT_NE(only, nullptr);
+  PublishOne(only, 1, "Speed");
+
+  int status = 0;
+  const std::string body =
+      CallTool("ui_tap", R"({"view":"nosuch","node_id":1})", &status);
+  EXPECT_EQ(status, IHS_MCP_ERR_INVALID) << body;
+  EXPECT_TRUE(Contains(body, "no view named")) << body;
+
+  ihs_semantics_source_unregister(only);
+}
+
+// One application is unambiguous, so naming it is optional -- the argument
+// exists to remove ambiguity, not as ceremony.
+TEST_F(McpSemanticsProviderTest, OneViewNeedsNoNaming) {
+  ihs_semantics_set_host(nullptr);
+  ViewHost only_host{"only"};
+  IhsSemanticsSource* only = AddView("cockpit", &only_host);
+  ASSERT_NE(only, nullptr);
+  PublishOne(only, 4, "Play");
+
+  int status = 0;
+  const std::string body = CallTool("ui_tap", R"({"node_id":4})", &status);
+  EXPECT_EQ(status, IHS_MCP_OK) << body;
+  EXPECT_EQ(only_host.dispatches, 1);
+
+  ihs_semantics_source_unregister(only);
 }

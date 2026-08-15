@@ -643,9 +643,9 @@ TEST_F(McpTransportTest, NotificationsGoOnlyToStreamsThatSubscribed) {
 
   // Subscribed to the concrete resource, not the scheme the registry will
   // report -- which is exactly the mismatch a naive equality check drops.
-  ASSERT_NE(
-      Body(Subscribe(path_, a, "ui://semantics/tree")).find(R"("result")"),
-      std::string::npos);
+  ASSERT_NE(Body(Subscribe(path_, a, "ui://semantics/default/tree"))
+                .find(R"("result")"),
+            std::string::npos);
   ASSERT_NE(Body(Subscribe(path_, b, "other://elsewhere")).find(R"("result")"),
             std::string::npos);
 

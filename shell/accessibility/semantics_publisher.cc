@@ -303,7 +303,7 @@ FlutterSemanticsAction ToFlutterSemanticsAction(const uint64_t ihs_action) {
   }
 }
 
-int PublishTree(const AccessibilityTree& tree) {
+int PublishTree(const AccessibilityTree& tree, IhsSemanticsSource* source) {
   const AccessibilityNode* root = tree.FindNode(0);
   if (root == nullptr) {
     // No root yet: Flutter sends it in the first update, and until it arrives
@@ -426,6 +426,7 @@ int PublishTree(const AccessibilityTree& tree) {
   info.custom_actions =
       custom_actions.empty() ? nullptr : custom_actions.data();
   info.custom_action_count = custom_actions.size();
+  info.source = source;
   return ihs_semantics_publish(&info);
 }
 

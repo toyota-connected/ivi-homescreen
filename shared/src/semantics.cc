@@ -21,6 +21,7 @@
 #include "ihs/ihs_semantics.h"
 #include "ihs/ihs_semantics_host.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <cmath>
@@ -66,6 +67,20 @@ struct Consumer {
   int notify_fd = -1;
 };
 
+// One publisher: its tree, and where its actions go. Two engines are two of
+// these, and keeping the pair together is the point -- a tree read from one
+// source dispatches back to that source's host, so reading and acting cannot
+// drift onto different applications.
+// What set_host's source is called. Addressable like any other name.
+constexpr const char* kImplicitSourceName = "default";
+
+struct Source {
+  std::string name;
+  IhsSemanticsHost host{};
+  bool host_installed = false;
+  Snapshot* current = nullptr;  // owns one reference
+};
+
 // One process-wide hub. A mutex rather than a lock-free protocol: it is held
 // only to swap a pointer or touch the registry, never across consumer work or
 // a host call, so no consumer can stall the platform thread or another
@@ -73,11 +88,12 @@ struct Consumer {
 // sake would buy nothing and cost a reclamation scheme.
 struct Hub {
   std::mutex mutex;
-  Snapshot* current = nullptr;  // owns one reference
+  // Generations are hub-wide rather than per-source, so a consumer watching
+  // several trees can order what it saw. Per-source counters would make two
+  // publishes from different engines indistinguishable by number.
   uint64_t next_generation = 1;
+  std::vector<std::unique_ptr<Source>> sources;
   std::vector<std::unique_ptr<Consumer>> consumers;
-  IhsSemanticsHost host{};
-  bool host_installed = false;
 };
 
 Hub& TheHub() {
@@ -140,6 +156,37 @@ void Own(std::vector<std::string>& pool, const char* s) {
 // byte both just mean "generation changed, go look". EAGAIN means a previous
 // wake has not been drained yet, which is exactly the coalescing the contract
 // promises, so it is success rather than an error.
+// The source an unkeyed call means.
+//
+// Two answers are correct and a third is not. The implicit source that
+// set_host creates is what a caller predating sources gets. Failing that, a
+// single registered source is unambiguous and answering with it is what keeps
+// a consumer working while a shell migrates. More than one, and there is no
+// right answer -- returning any of them is how a client ends up reading one
+// application and acting on another, which is the defect sources exist to fix,
+// so it returns nothing and the caller gets a clean failure instead.
+//
+// Called with the hub lock held.
+Source* DefaultSourceLocked(Hub& hub) {
+  for (const auto& source : hub.sources) {
+    if (source->name == kImplicitSourceName) {
+      return source.get();
+    }
+  }
+  return hub.sources.size() == 1 ? hub.sources.front().get() : nullptr;
+}
+
+// Whether `source` is still registered. A consumer may hold a pointer across
+// an engine going away, and dereferencing it then would be a use-after-free
+// rather than the "that application is gone" the caller can act on.
+// Called with the hub lock held.
+bool SourceIsLiveLocked(Hub& hub, const Source* source) {
+  return std::any_of(hub.sources.begin(), hub.sources.end(),
+                     [source](const std::unique_ptr<Source>& candidate) {
+                       return candidate.get() == source;
+                     });
+}
+
 void Notify(int fd) {
   if (fd < 0) {
     return;
@@ -362,13 +409,14 @@ const IhsSemanticsCustomAction* ihs_semantics_find_custom_action(
 const IhsSemanticsSnapshot* ihs_semantics_acquire_snapshot(void) {
   Hub& hub = TheHub();
   std::lock_guard<std::mutex> lock(hub.mutex);
-  if (hub.current == nullptr) {
+  Source* source = DefaultSourceLocked(hub);
+  if (source == nullptr || source->current == nullptr) {
     return nullptr;
   }
   // Under the lock, so this cannot race the publisher dropping the last
   // reference: the retire in publish happens with the lock held too.
-  Retain(hub.current);
-  return reinterpret_cast<const IhsSemanticsSnapshot*>(hub.current);
+  Retain(source->current);
+  return reinterpret_cast<const IhsSemanticsSnapshot*>(source->current);
 }
 
 void ihs_semantics_release_snapshot(const IhsSemanticsSnapshot* snapshot) {
@@ -378,22 +426,159 @@ void ihs_semantics_release_snapshot(const IhsSemanticsSnapshot* snapshot) {
   Release(const_cast<Snapshot*>(reinterpret_cast<const Snapshot*>(snapshot)));
 }
 
+// The implicit source: created on demand by set_host and named "default",
+// which is both how DefaultSourceLocked finds it and what addresses its tree
+// from outside. A real name rather than an empty one because it is addressable
+// like any other -- ui://semantics/default/tree -- and an empty segment would
+// produce a URI with a hole in it.
+// Called with the hub lock held. Static: it sits inside the extern "C" block
+// beside its only callers, where an unmangled external name would be one more
+// symbol than this needs.
+static Source* ImplicitSourceLocked(Hub& hub) {
+  for (const auto& source : hub.sources) {
+    if (source->name == kImplicitSourceName) {
+      return source.get();
+    }
+  }
+  auto created = std::make_unique<Source>();
+  created->name = kImplicitSourceName;
+  hub.sources.push_back(std::move(created));
+  return hub.sources.back().get();
+}
+
 void ihs_semantics_set_host(const IhsSemanticsHost* host) {
   Hub& hub = TheHub();
+  Snapshot* retired = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(hub.mutex);
+    if (host == nullptr || host->struct_size < sizeof(IhsSemanticsHost)) {
+      // Uninstalling drops the implicit source entirely rather than leaving it
+      // present with no host: a source that cannot dispatch is not a source,
+      // and leaving it registered would keep DefaultSourceLocked answering
+      // with it in preference to a real one.
+      for (auto it = hub.sources.begin(); it != hub.sources.end(); ++it) {
+        if ((*it)->name == kImplicitSourceName) {
+          retired = (*it)->current;
+          hub.sources.erase(it);
+          break;
+        }
+      }
+    } else {
+      Source* source = ImplicitSourceLocked(hub);
+      source->host = *host;
+      source->host_installed = true;
+    }
+  }
+  Release(retired);
+}
+
+int ihs_semantics_source_register(const IhsSemanticsSourceDesc* desc,
+                                  IhsSemanticsSource** out_source) {
+  if (desc == nullptr || out_source == nullptr ||
+      desc->struct_size < sizeof(IhsSemanticsSourceDesc) ||
+      desc->name == nullptr || desc->name[0] == '\0' ||
+      desc->host.struct_size < sizeof(IhsSemanticsHost)) {
+    return IHS_SEMANTICS_ERR_INVALID;
+  }
+
+  Hub& hub = TheHub();
   std::lock_guard<std::mutex> lock(hub.mutex);
-  if (host == nullptr || host->struct_size < sizeof(IhsSemanticsHost)) {
-    hub.host = IhsSemanticsHost{};
-    hub.host_installed = false;
+  for (const auto& existing : hub.sources) {
+    if (existing->name == desc->name) {
+      // Two trees under one name are indistinguishable to anything addressing
+      // them by it, which is the whole failure this mechanism prevents.
+      LogInfo(std::string("semantics: source name already registered: ") +
+              desc->name);
+      return IHS_SEMANTICS_ERR_INVALID;
+    }
+  }
+
+  auto source = std::make_unique<Source>();
+  source->name = desc->name;
+  source->host = desc->host;
+  source->host_installed = true;
+  *out_source = reinterpret_cast<IhsSemanticsSource*>(source.get());
+  hub.sources.push_back(std::move(source));
+  return IHS_SEMANTICS_OK;
+}
+
+void ihs_semantics_source_unregister(IhsSemanticsSource* source) {
+  if (source == nullptr) {
     return;
   }
-  hub.host = *host;
-  hub.host_installed = true;
+  Hub& hub = TheHub();
+  Snapshot* retired = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(hub.mutex);
+    auto* target = reinterpret_cast<Source*>(source);
+    for (auto it = hub.sources.begin(); it != hub.sources.end(); ++it) {
+      if (it->get() == target) {
+        retired = target->current;
+        hub.sources.erase(it);
+        break;
+      }
+    }
+  }
+  // Outside the lock, and only the publisher's reference: a consumer still
+  // reading this tree keeps it alive until it releases.
+  Release(retired);
+}
+
+size_t ihs_semantics_source_count(void) {
+  Hub& hub = TheHub();
+  std::lock_guard<std::mutex> lock(hub.mutex);
+  return hub.sources.size();
+}
+
+IhsSemanticsSource* ihs_semantics_source_at(const size_t index) {
+  Hub& hub = TheHub();
+  std::lock_guard<std::mutex> lock(hub.mutex);
+  if (index >= hub.sources.size()) {
+    return nullptr;
+  }
+  return reinterpret_cast<IhsSemanticsSource*>(hub.sources[index].get());
+}
+
+const char* ihs_semantics_source_name(const IhsSemanticsSource* source) {
+  if (source == nullptr) {
+    return "";
+  }
+  Hub& hub = TheHub();
+  std::lock_guard<std::mutex> lock(hub.mutex);
+  const auto* target = reinterpret_cast<const Source*>(source);
+  return SourceIsLiveLocked(hub, target) ? target->name.c_str() : "";
+}
+
+const IhsSemanticsSnapshot* ihs_semantics_acquire_snapshot_from(
+    IhsSemanticsSource* source) {
+  if (source == nullptr) {
+    return nullptr;
+  }
+  Hub& hub = TheHub();
+  std::lock_guard<std::mutex> lock(hub.mutex);
+  auto* target = reinterpret_cast<Source*>(source);
+  if (!SourceIsLiveLocked(hub, target) || target->current == nullptr) {
+    return nullptr;
+  }
+  Retain(target->current);
+  return reinterpret_cast<const IhsSemanticsSnapshot*>(target->current);
 }
 
 int ihs_semantics_publish(const IhsSemanticsPublishInfo* info) {
-  if (info == nullptr || info->struct_size < sizeof(IhsSemanticsPublishInfo)) {
+  // Only the members through custom_action_count are required: `source` was
+  // appended in ABI 1.4 and a caller built against 1.3 supplies neither it nor
+  // the size to reach it.
+  constexpr size_t kSourceEnd =
+      offsetof(IhsSemanticsPublishInfo, source) + sizeof(void*);
+  constexpr size_t kRequired =
+      offsetof(IhsSemanticsPublishInfo, custom_action_count) + sizeof(size_t);
+  static_assert(kRequired <= sizeof(IhsSemanticsPublishInfo),
+                "required publish members overrun IhsSemanticsPublishInfo");
+  if (info == nullptr || info->struct_size < kRequired) {
     return IHS_SEMANTICS_ERR_INVALID;
   }
+  IhsSemanticsSource* requested =
+      info->struct_size >= kSourceEnd ? info->source : nullptr;
 
   Hub& hub = TheHub();
 
@@ -412,8 +597,31 @@ int ihs_semantics_publish(const IhsSemanticsPublishInfo* info) {
   Snapshot* retired = nullptr;
   {
     std::lock_guard<std::mutex> lock(hub.mutex);
-    retired = hub.current;
-    hub.current = built;
+    Source* target = nullptr;
+    if (requested != nullptr) {
+      target = reinterpret_cast<Source*>(requested);
+      // A named source that has gone away. The built tree is dropped rather
+      // than published somewhere arbitrary.
+      if (!SourceIsLiveLocked(hub, target)) {
+        Release(built);
+        return IHS_SEMANTICS_ERR_UNAVAILABLE;
+      }
+    } else {
+      target = DefaultSourceLocked(hub);
+      if (target == nullptr) {
+        // Publishing without ever installing a host is legitimate and always
+        // has been: the tree is readable, and only dispatch needs somewhere to
+        // send an action. Creating the implicit source here keeps that true,
+        // rather than making a publish depend on a host it does not use.
+        //
+        // This cannot silently pick a wrong source: DefaultSourceLocked
+        // already refused to guess between several, so reaching here means
+        // there are none.
+        target = ImplicitSourceLocked(hub);
+      }
+    }
+    retired = target->current;
+    target->current = built;
     notify_fds.reserve(hub.consumers.size());
     for (const auto& consumer : hub.consumers) {
       notify_fds.push_back(consumer->notify_fd);
@@ -431,14 +639,19 @@ int ihs_semantics_publish(const IhsSemanticsPublishInfo* info) {
 
 void ihs_semantics_clear(void) {
   Hub& hub = TheHub();
-  Snapshot* retired = nullptr;
+  std::vector<Snapshot*> retired;
   {
     std::lock_guard<std::mutex> lock(hub.mutex);
-    retired = hub.current;
-    hub.current = nullptr;
+    retired.reserve(hub.sources.size());
+    for (const auto& source : hub.sources) {
+      retired.push_back(source->current);
+      source->current = nullptr;
+    }
     hub.next_generation = 1;
   }
-  Release(retired);
+  for (Snapshot* snapshot : retired) {
+    Release(snapshot);
+  }
 }
 
 size_t ihs_semantics_consumer_count(void) {
@@ -462,13 +675,19 @@ int ihs_semantics_register(const IhsSemanticsConsumerDesc* desc,
 
   Consumer* raw = consumer.get();
   bool first = false;
-  IhsSemanticsHost host{};
+  // Every source, not one host: the registration count is hub-wide, but each
+  // engine has its own semantics switch and a consumer wants all of their
+  // trees. Telling only one would leave the others producing nothing.
+  std::vector<IhsSemanticsHost> hosts;
   {
     Hub& hub = TheHub();
     std::lock_guard<std::mutex> lock(hub.mutex);
     first = hub.consumers.empty();
     hub.consumers.push_back(std::move(consumer));
-    host = hub.host;
+    hosts.reserve(hub.sources.size());
+    for (const auto& source : hub.sources) {
+      hosts.push_back(source->host);
+    }
   }
 
   LogInfo("consumer '" + raw->name + "' registered, mask 0x" +
@@ -476,8 +695,12 @@ int ihs_semantics_register(const IhsSemanticsConsumerDesc* desc,
 
   // Outside the lock: the shell's enable path reaches into the engine, and
   // holding the registry across it would let engine work block every consumer.
-  if (first && host.set_semantics_enabled != nullptr) {
-    host.set_semantics_enabled(host.user_data, true);
+  if (first) {
+    for (const IhsSemanticsHost& host : hosts) {
+      if (host.set_semantics_enabled != nullptr) {
+        host.set_semantics_enabled(host.user_data, true);
+      }
+    }
   }
 
   *out_consumer = reinterpret_cast<IhsSemanticsConsumer*>(raw);
@@ -491,7 +714,7 @@ void ihs_semantics_unregister(IhsSemanticsConsumer* consumer) {
   auto* raw = reinterpret_cast<Consumer*>(consumer);
 
   bool last = false;
-  IhsSemanticsHost host{};
+  std::vector<IhsSemanticsHost> hosts;
   std::unique_ptr<Consumer> owned;
   {
     Hub& hub = TheHub();
@@ -507,7 +730,10 @@ void ihs_semantics_unregister(IhsSemanticsConsumer* consumer) {
       return;  // not registered, or already unregistered
     }
     last = hub.consumers.empty();
-    host = hub.host;
+    hosts.reserve(hub.sources.size());
+    for (const auto& source : hub.sources) {
+      hosts.push_back(source->host);
+    }
   }
 
   LogInfo("consumer '" + owned->name + "' unregistered");
@@ -515,8 +741,12 @@ void ihs_semantics_unregister(IhsSemanticsConsumer* consumer) {
   // Dispatch is synchronous through to the host, so removal from the registry
   // under the lock is itself the drain: no dispatch for this consumer can be
   // in flight once we are here, and none can start.
-  if (last && host.set_semantics_enabled != nullptr) {
-    host.set_semantics_enabled(host.user_data, false);
+  if (last) {
+    for (const IhsSemanticsHost& host : hosts) {
+      if (host.set_semantics_enabled != nullptr) {
+        host.set_semantics_enabled(host.user_data, false);
+      }
+    }
   }
 }
 
@@ -524,6 +754,14 @@ int ihs_semantics_send_pointer_tap(IhsSemanticsConsumer* consumer,
                                    const int64_t view_id,
                                    const double x,
                                    const double y) {
+  return ihs_semantics_send_pointer_tap_to(consumer, nullptr, view_id, x, y);
+}
+
+int ihs_semantics_send_pointer_tap_to(IhsSemanticsConsumer* consumer,
+                                      IhsSemanticsSource* source,
+                                      const int64_t view_id,
+                                      const double x,
+                                      const double y) {
   int status = IHS_SEMANTICS_OK;
   std::string name;
 
@@ -549,7 +787,15 @@ int ihs_semantics_send_pointer_tap(IhsSemanticsConsumer* consumer,
     } else {
       name = raw->name;
       allow_mask = raw->action_allow_mask;
-      host = hub.host;
+      // A coordinate means nothing without knowing whose screen it is on, so
+      // an ambiguous default is refused here exactly as it is for dispatch.
+      Source* target = source != nullptr ? reinterpret_cast<Source*>(source)
+                                         : DefaultSourceLocked(hub);
+      if (target == nullptr || !SourceIsLiveLocked(hub, target)) {
+        status = IHS_SEMANTICS_ERR_UNAVAILABLE;
+      } else {
+        host = target->host;
+      }
     }
   }
 
@@ -588,8 +834,23 @@ int ihs_semantics_dispatch(IhsSemanticsConsumer* consumer,
                            size_t data_length,
                            IhsSemanticsDoneCallback done,
                            void* user_data) {
+  return ihs_semantics_dispatch_from(consumer, nullptr, view_id, node_id,
+                                     action, data, data_length, done,
+                                     user_data);
+}
+
+int ihs_semantics_dispatch_from(IhsSemanticsConsumer* consumer,
+                                IhsSemanticsSource* source,
+                                int64_t view_id,
+                                int32_t node_id,
+                                uint64_t action,
+                                const uint8_t* data,
+                                size_t data_length,
+                                IhsSemanticsDoneCallback done,
+                                void* user_data) {
   int status = IHS_SEMANTICS_OK;
   std::string name;
+  std::string source_name;
 
   if (consumer == nullptr || action == 0) {
     status = IHS_SEMANTICS_ERR_INVALID;
@@ -597,6 +858,10 @@ int ihs_semantics_dispatch(IhsSemanticsConsumer* consumer,
 
   IhsSemanticsHost host{};
   uint64_t allow_mask = 0;
+  // Resolved under the same lock that validates the consumer, and held as a
+  // pointer only for the snapshot lookup below -- which re-checks liveness,
+  // because an engine may go away between the two.
+  Source* target = nullptr;
   if (status == IHS_SEMANTICS_OK) {
     auto* raw = reinterpret_cast<Consumer*>(consumer);
     Hub& hub = TheHub();
@@ -613,7 +878,19 @@ int ihs_semantics_dispatch(IhsSemanticsConsumer* consumer,
     } else {
       name = raw->name;
       allow_mask = raw->action_allow_mask;
-      host = hub.host;
+      target = source != nullptr ? reinterpret_cast<Source*>(source)
+                                 : DefaultSourceLocked(hub);
+      if (target == nullptr || !SourceIsLiveLocked(hub, target)) {
+        // Either the named engine is gone, or there is no unambiguous default
+        // because more than one is registered. Both are the caller addressing
+        // something that does not exist, and both must fail rather than
+        // pick one.
+        status = IHS_SEMANTICS_ERR_UNAVAILABLE;
+        target = nullptr;
+      } else {
+        source_name = target->name;
+        host = target->host;
+      }
     }
   }
 
@@ -625,7 +902,12 @@ int ihs_semantics_dispatch(IhsSemanticsConsumer* consumer,
   }
 
   if (status == IHS_SEMANTICS_OK) {
-    const IhsSemanticsSnapshot* snapshot = ihs_semantics_acquire_snapshot();
+    // This source's tree, not whichever published last. Resolving the node in
+    // the same tree the caller read is the entire point: the id spaces of two
+    // engines overlap, so looking it up anywhere else finds a real but
+    // unrelated control.
+    const IhsSemanticsSnapshot* snapshot = ihs_semantics_acquire_snapshot_from(
+        reinterpret_cast<IhsSemanticsSource*>(target));
     if (snapshot == nullptr) {
       status = IHS_SEMANTICS_ERR_UNAVAILABLE;
     } else {
@@ -655,9 +937,9 @@ int ihs_semantics_dispatch(IhsSemanticsConsumer* consumer,
   // Attribution is the point of the funnel: every action that reaches the UI
   // is traceable to a named actor, and so is every one that was refused.
   LogInfo("dispatch consumer='" +
-          (name.empty() ? std::string("<unregistered>") : name) +
-          "' node=" + std::to_string(node_id) + " action=0x" + ToHex(action) +
-          " status=" + std::to_string(status));
+          (name.empty() ? std::string("<unregistered>") : name) + "' source='" +
+          source_name + "' node=" + std::to_string(node_id) + " action=0x" +
+          ToHex(action) + " status=" + std::to_string(status));
 
   if (done != nullptr) {
     done(status, user_data);
@@ -688,6 +970,12 @@ const IhsSemanticsApi* semantics_api() noexcept {
       &ihs_semantics_unregister,
       &ihs_semantics_dispatch,
       &ihs_semantics_send_pointer_tap,
+      &ihs_semantics_source_count,
+      &ihs_semantics_source_at,
+      &ihs_semantics_source_name,
+      &ihs_semantics_acquire_snapshot_from,
+      &ihs_semantics_dispatch_from,
+      &ihs_semantics_send_pointer_tap_to,
   };
   return &api;
 }

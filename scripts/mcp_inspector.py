@@ -40,7 +40,11 @@ import socket
 import sys
 import time
 
-TREE_URI = "ui://semantics/tree"
+# The tree URIs are discovered rather than hardcoded: there is one per running
+# application, named for it, and which are present depends on what the shell
+# was configured with. A client that assumes a single fixed URI works until a
+# second application appears and then reads the wrong one, or nothing.
+TREE_URI_PREFIX = "ui://semantics/"
 
 # Roles worth telling apart at a glance. Anything unlisted renders plain,
 # which keeps an unfamiliar role visible rather than mis-coloured.
@@ -115,8 +119,29 @@ def rpc(path, method, params=None, request_id=1):
     return reply["result"]
 
 
-def read_tree(path):
-    result = rpc(path, "resources/read", {"uri": TREE_URI}, request_id=2)
+def tree_uris(path):
+    """Every semantics tree the server is serving, in listed order."""
+    result = rpc(path, "resources/list", {}, request_id=2)
+    return [
+        r["uri"]
+        for r in result.get("resources", [])
+        if r.get("uri", "").startswith(TREE_URI_PREFIX)
+    ]
+
+
+def read_tree(path, uri=None):
+    """One application's tree. With no uri, the only one -- and it says so
+    rather than guessing when there are several, because picking one would
+    silently show a different application than the caller meant."""
+    if uri is None:
+        found = tree_uris(path)
+        if not found:
+            raise ServerGone("no application is publishing a UI")
+        if len(found) > 1:
+            names = ", ".join(found)
+            raise ServerGone(f"several applications are running; name one: {names}")
+        uri = found[0]
+    result = rpc(path, "resources/read", {"uri": uri}, request_id=3)
     return json.loads(result["contents"][0]["text"])
 
 
