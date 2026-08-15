@@ -21,9 +21,13 @@
 #include <sys/eventfd.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdint>
 #include <cstring>
+#include <map>
+#include <mutex>
+#include <string>
 #include <vector>
 
 #include "ihs/ihs_semantics.h"
@@ -182,8 +186,75 @@ void AddActions(accesskit_node* node,
 // flattened: a screen reader announces "unchecked" and "not checkable" very
 // differently, and collapsing them would make every container sound like an
 // unchecked checkbox.
+namespace {
+
+// AccessKit addresses nodes with one 64-bit id across the whole tree, while
+// each application numbers its own nodes from its own root -- so two
+// applications both have a node 1. The id carries the application in its high
+// half and the node in its low half, which makes it unique without asking the
+// applications to coordinate.
+//
+// The slot is assigned per source name on first sight and never reused, so an
+// id a screen reader is holding cannot come to mean a different application
+// because something else started or stopped. Index in the hub's list would
+// have been the obvious key and is exactly wrong: it shifts when a source
+// unregisters.
+//
+// The first application seen gets slot 0, so with one application the ids are
+// its node ids unchanged.
+constexpr uint64_t kSyntheticRootId = UINT64_MAX;
+
+}  // namespace
+
+uint32_t SlotForSourceName(const std::string& name) {
+  static std::mutex mutex;
+  static std::map<std::string, uint32_t> slots;
+  static uint32_t next = 0;
+  const std::lock_guard<std::mutex> lock(mutex);
+  const auto it = slots.find(name);
+  if (it != slots.end()) {
+    return it->second;
+  }
+  const uint32_t assigned = next++;
+  slots.emplace(name, assigned);
+  return assigned;
+}
+
+accesskit_node_id ComposeNodeId(const uint32_t slot, const int32_t node_id) {
+  return (static_cast<uint64_t>(slot) << 32) | static_cast<uint32_t>(node_id);
+}
+
+uint32_t SlotOfNodeId(const accesskit_node_id id) {
+  return static_cast<uint32_t>(id >> 32);
+}
+
+int32_t NodeOfNodeId(const accesskit_node_id id) {
+  return static_cast<int32_t>(static_cast<uint32_t>(id & 0xffffffffu));
+}
+
+namespace {
+
+uint32_t SlotForSource(IhsSemanticsSource* source) {
+  return SlotForSourceName(ihs_semantics_source_name(source));
+}
+
+// The source a composed id belongs to, or NULL if that application has gone.
+IhsSemanticsSource* SourceForSlot(const uint32_t slot) {
+  const size_t count = ihs_semantics_source_count();
+  for (size_t i = 0; i < count; i++) {
+    IhsSemanticsSource* source = ihs_semantics_source_at(i);
+    if (source != nullptr && SlotForSource(source) == slot) {
+      return source;
+    }
+  }
+  return nullptr;
+}
+
+}  // namespace
+
 accesskit_node* BuildNode(const IhsSemanticsNode* node,
-                          const IhsSemanticsSnapshot* snapshot) {
+                          const IhsSemanticsSnapshot* snapshot,
+                          const uint32_t slot) {
   const accesskit_role role = ToAccessKitRole(node->role);
   accesskit_node* out = accesskit_node_new(role);
 
@@ -191,7 +262,7 @@ accesskit_node* BuildNode(const IhsSemanticsNode* node,
     const IhsSemanticsNode* child =
         ihs_semantics_snapshot_node_at(snapshot, node->child_indices[i]);
     if (child != nullptr) {
-      accesskit_node_push_child(out, static_cast<accesskit_node_id>(child->id));
+      accesskit_node_push_child(out, ComposeNodeId(slot, child->id));
     }
   }
 
@@ -335,36 +406,105 @@ accesskit_node* BuildNode(const IhsSemanticsNode* node,
 
 namespace {
 
-// Builds a full tree update from a snapshot. The caller owns the result.
-accesskit_tree_update* BuildTreeUpdate(const IhsSemanticsSnapshot* snapshot) {
-  const size_t count = ihs_semantics_snapshot_node_count(snapshot);
-  if (count == 0) {
+// Builds a tree update spanning every application. The caller owns the result.
+//
+// A screen reader wants the desktop, not one window of it, so every source
+// contributes. AccessKit's tree has a single root and each application has one
+// of its own, so with more than one a synthetic root parents them; with one it
+// stays the root, leaving the single-application tree exactly as it was.
+accesskit_tree_update* BuildTreeUpdate() {
+  struct Contribution {
+    IhsSemanticsSource* source;
+    const IhsSemanticsSnapshot* snapshot;
+    uint32_t slot;
+    size_t count;
+  };
+
+  std::vector<Contribution> contributions;
+  size_t total = 0;
+  const size_t sources = ihs_semantics_source_count();
+  for (size_t i = 0; i < sources; i++) {
+    IhsSemanticsSource* source = ihs_semantics_source_at(i);
+    if (source == nullptr) {
+      continue;
+    }
+    const IhsSemanticsSnapshot* snapshot =
+        ihs_semantics_acquire_snapshot_from(source);
+    if (snapshot == nullptr) {
+      continue;  // registered but has published nothing yet
+    }
+    const size_t count = ihs_semantics_snapshot_node_count(snapshot);
+    if (count == 0) {
+      ihs_semantics_release_snapshot(snapshot);
+      continue;
+    }
+    contributions.push_back({source, snapshot, SlotForSource(source), count});
+    total += count;
+  }
+
+  if (contributions.empty()) {
     return nullptr;
   }
 
-  // Focus follows whichever node reports it; the root is the fallback, since
-  // AccessKit requires the focus id to name a node that exists in the update.
-  accesskit_node_id focus = 0;
-  for (size_t i = 0; i < count; i++) {
-    const IhsSemanticsNode* node = ihs_semantics_snapshot_node_at(snapshot, i);
-    if (node != nullptr && node->focused == IHS_SEMANTICS_TRISTATE_TRUE) {
-      focus = static_cast<accesskit_node_id>(node->id);
+  const bool synthetic_root = contributions.size() > 1;
+  const accesskit_node_id root =
+      synthetic_root ? kSyntheticRootId
+                     : ComposeNodeId(contributions.front().slot,
+                                     ihs_semantics_snapshot_node_at(
+                                         contributions.front().snapshot, 0)
+                                         ->id);
+
+  // Focus follows whichever node reports it, across every application; the
+  // root is the fallback, since AccessKit requires the focus id to name a node
+  // present in the update.
+  accesskit_node_id focus = root;
+  for (const Contribution& c : contributions) {
+    bool found = false;
+    for (size_t i = 0; i < c.count; i++) {
+      const IhsSemanticsNode* node =
+          ihs_semantics_snapshot_node_at(c.snapshot, i);
+      if (node != nullptr && node->focused == IHS_SEMANTICS_TRISTATE_TRUE) {
+        focus = ComposeNodeId(c.slot, node->id);
+        found = true;
+        break;
+      }
+    }
+    if (found) {
       break;
     }
   }
 
-  accesskit_tree_update* update =
-      accesskit_tree_update_with_capacity_and_focus(count, focus);
-  accesskit_tree_update_set_tree(update, accesskit_tree_new(0));
+  accesskit_tree_update* update = accesskit_tree_update_with_capacity_and_focus(
+      total + (synthetic_root ? 1 : 0), focus);
+  accesskit_tree_update_set_tree(update, accesskit_tree_new(root));
 
-  for (size_t i = 0; i < count; i++) {
-    const IhsSemanticsNode* node = ihs_semantics_snapshot_node_at(snapshot, i);
-    if (node == nullptr) {
-      continue;
+  if (synthetic_root) {
+    // A container whose children are the applications' own roots. Given the
+    // window role because that is what it is to a screen reader: several
+    // applications sharing one screen.
+    accesskit_node* container = accesskit_node_new(ACCESSKIT_ROLE_WINDOW);
+    for (const Contribution& c : contributions) {
+      const IhsSemanticsNode* app_root =
+          ihs_semantics_snapshot_node_at(c.snapshot, 0);
+      if (app_root != nullptr) {
+        accesskit_node_push_child(container,
+                                  ComposeNodeId(c.slot, app_root->id));
+      }
     }
-    accesskit_tree_update_push_node(update,
-                                    static_cast<accesskit_node_id>(node->id),
-                                    BuildNode(node, snapshot));
+    accesskit_tree_update_push_node(update, kSyntheticRootId, container);
+  }
+
+  for (const Contribution& c : contributions) {
+    for (size_t i = 0; i < c.count; i++) {
+      const IhsSemanticsNode* node =
+          ihs_semantics_snapshot_node_at(c.snapshot, i);
+      if (node == nullptr) {
+        continue;
+      }
+      accesskit_tree_update_push_node(update, ComposeNodeId(c.slot, node->id),
+                                      BuildNode(node, c.snapshot, c.slot));
+    }
+    ihs_semantics_release_snapshot(c.snapshot);
   }
   return update;
 }
@@ -373,15 +513,10 @@ accesskit_tree_update* BuildTreeUpdate(const IhsSemanticsSnapshot* snapshot) {
 // This runs on AccessKit's thread, which is safe now only because it reads a
 // snapshot rather than the shell's mutable tree.
 accesskit_tree_update* ActivationHandler(void* /* user_data */) {
-  const IhsSemanticsSnapshot* snapshot = ihs_semantics_acquire_snapshot();
-  if (snapshot == nullptr) {
-    // Nothing published yet. Returning null tells AccessKit there is no tree
-    // to show, and the next publish will push one.
-    return nullptr;
-  }
-  accesskit_tree_update* update = BuildTreeUpdate(snapshot);
-  ihs_semantics_release_snapshot(snapshot);
-  return update;
+  // Every application, not one: an assistive technology attaching wants the
+  // whole screen. Null when nothing has published yet, which tells AccessKit
+  // there is no tree to show; the next publish pushes one.
+  return BuildTreeUpdate();
 }
 
 // A screen reader asked for something. Everything the framework can act on
@@ -416,10 +551,11 @@ void ActionHandler(accesskit_action_request* request, void* user_data) {
       const double value = request->data.value.numeric_value;
       bool horizontal = false;
       if (const IhsSemanticsSnapshot* snapshot =
-              ihs_semantics_acquire_snapshot();
+              ihs_semantics_acquire_snapshot_from(
+                  SourceForSlot(SlotOfNodeId(request->target_node)));
           snapshot != nullptr) {
         if (const IhsSemanticsNode* node = ihs_semantics_snapshot_node_by_id(
-                snapshot, static_cast<int32_t>(request->target_node));
+                snapshot, NodeOfNodeId(request->target_node));
             node != nullptr) {
           const bool vertical =
               (node->actions & (IHS_SEMANTICS_ACTION_SCROLL_UP |
@@ -469,8 +605,14 @@ void ActionHandler(accesskit_action_request* request, void* user_data) {
     }
   }
 
-  const int status = ihs_semantics_dispatch(
-      consumer, 0, static_cast<int32_t>(request->target_node), action,
+  // Back to the application the id came from. Its high half names which, and
+  // the low half is that application's own node id -- so an action reaches the
+  // control the screen reader was reading, not whichever application happens
+  // to have a node of the same number.
+  IhsSemanticsSource* source =
+      SourceForSlot(SlotOfNodeId(request->target_node));
+  const int status = ihs_semantics_dispatch_from(
+      consumer, source, 0, NodeOfNodeId(request->target_node), action,
       argument.empty() ? nullptr : argument.data(), argument.size(), nullptr,
       nullptr);
   if (status != IHS_SEMANTICS_OK) {
@@ -602,23 +744,44 @@ void AccessKitConsumer::PollLoop() {
       got = ::read(notify_fd_, &token, sizeof(token));
     } while (got < 0 && errno == EINTR);
 
-    const IhsSemanticsSnapshot* snapshot = ihs_semantics_acquire_snapshot();
-    if (snapshot == nullptr) {
-      continue;
-    }
-    PushSnapshot(snapshot);
-    ihs_semantics_release_snapshot(snapshot);
+    PushSnapshot();
   }
 }
 
-void AccessKitConsumer::PushSnapshot(const IhsSemanticsSnapshot* snapshot) {
-  const uint64_t generation = ihs_semantics_snapshot_generation(snapshot);
-  if (generation == last_generation_) {
-    return;  // a wake with nothing newer behind it
+namespace {
+
+// The newest generation any application has published. The hub's counter is
+// process-wide rather than per-source, so one number orders publishes from
+// different applications and is enough to tell whether anything changed since
+// the last push.
+uint64_t NewestGeneration() {
+  uint64_t newest = 0;
+  const size_t count = ihs_semantics_source_count();
+  for (size_t i = 0; i < count; i++) {
+    IhsSemanticsSource* source = ihs_semantics_source_at(i);
+    if (source == nullptr) {
+      continue;
+    }
+    if (const IhsSemanticsSnapshot* snapshot =
+            ihs_semantics_acquire_snapshot_from(source);
+        snapshot != nullptr) {
+      newest = std::max(newest, ihs_semantics_snapshot_generation(snapshot));
+      ihs_semantics_release_snapshot(snapshot);
+    }
+  }
+  return newest;
+}
+
+}  // namespace
+
+void AccessKitConsumer::PushSnapshot() {
+  const uint64_t generation = NewestGeneration();
+  if (generation == 0 || generation == last_generation_) {
+    return;  // nothing published, or a wake with nothing newer behind it
   }
   last_generation_ = generation;
 
-  accesskit_tree_update* update = BuildTreeUpdate(snapshot);
+  accesskit_tree_update* update = BuildTreeUpdate();
   if (update == nullptr) {
     return;
   }
