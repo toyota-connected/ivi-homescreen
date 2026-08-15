@@ -37,6 +37,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
+#include <deque>
 #include <map>
 #include <mutex>
 #include <random>
@@ -74,6 +75,27 @@ constexpr size_t kDefaultMaxRequestBytes = 1024 * 1024;
 // before any Content-Length is known, so without this a peer could stream
 // header bytes forever and never be refused.
 constexpr size_t kMaxHeaderBytes = 16 * 1024;
+
+// Bounds on what one client can make this transport hold on to.
+//
+// Every request is Connection: close, so a connection is not a lifetime and
+// there is nothing for the state below to be scoped to. Left unbounded, a
+// client that keeps asking makes the shell keep holding: open event streams
+// cost a descriptor each, and subscriptions cost memory keyed by strings the
+// client chose. Neither is reclaimed by anything the client does on its way
+// out, because a client that goes away does not say so.
+//
+// The numbers are generous against the real shape of this: an instrument
+// cluster is driven by one agent, occasionally a handful. Anything that
+// exceeds these is not a client that has been running a long time, it is a
+// client in a loop.
+constexpr size_t kMaxStreams = 32;
+constexpr size_t kMaxSessions = 64;
+constexpr size_t kMaxSubscriptionsPerSession = 64;
+
+// A resource URI is a name. The body limit alone would let one be a megabyte,
+// and it would then be held for as long as the session is.
+constexpr size_t kMaxUriBytes = 512;
 
 // The MCP revision this speaks. Sent back from initialize; a client asking for
 // something else still gets this, which is what the specification calls for --
@@ -132,6 +154,21 @@ struct Transport {
   // nothing" and "not interested in filtering" are not distinguishable, and
   // the safe reading is the one that keeps delivering.
   std::map<std::string, std::set<std::string>> subscriptions;
+
+  // Session ids this transport minted, least recently used first.
+  //
+  // A subscription may only name one of these. Without the check the id is
+  // whatever the client put in the header, so "session" would be a namespace
+  // the client writes into at will -- unbounded, and shared, which also lets
+  // one client unsubscribe another's URIs by naming its id.
+  //
+  // Bounded, and evicted least-recently-used rather than oldest-first: a
+  // long-lived agent stays at the back because every request it makes touches
+  // its id, so what falls off the front is a session nothing has spoken for.
+  // Eviction drops that session's filter, which means it receives everything
+  // rather than nothing -- the same reading as a session that never
+  // subscribed, and the safe direction to be wrong in.
+  std::deque<std::string> sessions;
 
   // Notification debounce.
   //
@@ -407,11 +444,45 @@ std::string NewSessionId() {
   return out;
 }
 
+// Records a freshly minted session, evicting the least recently used one if
+// that puts the count over the cap.
+//
+// Called with streams_mutex held, which is the lock covering both the session
+// list and the subscriptions keyed by it -- the two have to move together or
+// an evicted session leaves its filter behind, which is the leak this exists
+// to close.
+void RememberSessionLocked(Transport& t, const std::string& session) {
+  t.sessions.push_back(session);
+  while (t.sessions.size() > kMaxSessions) {
+    t.subscriptions.erase(t.sessions.front());
+    t.sessions.pop_front();
+  }
+}
+
+// Whether this transport minted `session`, moving it to the most-recently-used
+// end when it did. Called with streams_mutex held.
+//
+// The touch is what makes the cap survivable: without it the list is
+// oldest-first, and an agent that has been connected all day is evicted by
+// sixty-four initialize calls from anything else.
+bool TouchSessionLocked(Transport& t, const std::string& session) {
+  const auto it = std::find(t.sessions.begin(), t.sessions.end(), session);
+  if (it == t.sessions.end()) {
+    return false;
+  }
+  t.sessions.erase(it);
+  t.sessions.push_back(session);
+  return true;
+}
+
 // resources/subscribe and resources/unsubscribe.
 //
-// The session comes from the Mcp-Session-Id header rather than the params: it
-// identifies the caller, and a client that could name any session in the body
-// could redirect another client's stream.
+// The session comes from the Mcp-Session-Id header rather than the params, and
+// is checked against the ids this transport actually minted. The header is no
+// less client-controlled than the body would be, so taking it from there is
+// not by itself a protection -- the check is. Without it "session" is a
+// namespace the client writes into: unbounded, and shared, so one client can
+// name another's id and drop its subscriptions.
 std::string HandleSubscribe(const rapidjson::Value& params,
                             const std::string& id,
                             const std::string& session,
@@ -429,6 +500,11 @@ std::string HandleSubscribe(const rapidjson::Value& params,
   }
 
   const std::string uri = params["uri"].GetString();
+  if (uri.size() > kMaxUriBytes) {
+    return ErrorEnvelope(
+        id, kInvalidParams,
+        "uri is longer than " + std::to_string(kMaxUriBytes) + " bytes");
+  }
 
   // Pass it to the registry so the provider owning the scheme can start or
   // stop work on the strength of it.
@@ -447,8 +523,22 @@ std::string HandleSubscribe(const rapidjson::Value& params,
 
   Transport& t = TheTransport();
   const std::lock_guard<std::mutex> lock(t.streams_mutex);
+  if (!TouchSessionLocked(t, session)) {
+    return ErrorEnvelope(id, kInvalidParams,
+                         "unknown Mcp-Session-Id; call initialize first");
+  }
   if (subscribing) {
-    t.subscriptions[session].insert(uri);
+    auto& uris = t.subscriptions[session];
+    if (uris.size() >= kMaxSubscriptionsPerSession && uris.count(uri) == 0) {
+      // Refused rather than evicting one of its own: which URI a client cares
+      // about is its decision, and silently dropping one would leave it
+      // believing it is still being told about a resource it is not.
+      return ErrorEnvelope(id, kInvalidParams,
+                           "session already holds " +
+                               std::to_string(kMaxSubscriptionsPerSession) +
+                               " subscriptions");
+    }
+    uris.insert(uri);
   } else {
     const auto it = t.subscriptions.find(session);
     if (it != t.subscriptions.end()) {
@@ -536,6 +626,11 @@ std::string Dispatch(const std::string& body,
     // Connection: close, so connections are not sessions, and initialize is
     // the one point the protocol defines for establishing one.
     *out_new_session = NewSessionId();
+    {
+      Transport& t = TheTransport();
+      const std::lock_guard<std::mutex> lock(t.streams_mutex);
+      RememberSessionLocked(t, *out_new_session);
+    }
     response = ResultEnvelope(id, HandleInitialize());
   } else if (method == "tools/list") {
     response = ResultEnvelope(id, HandleToolsList());
@@ -970,6 +1065,16 @@ bool TryOpenEventStream(const int fd,
     return true;  // answered; caller should close
   }
 
+  {
+    Transport& t = TheTransport();
+    const std::lock_guard<std::mutex> lock(t.streams_mutex);
+    if (t.streams.size() >= kMaxStreams) {
+      WriteAll(fd, HttpResponse(503, "Service Unavailable",
+                                R"({"error":"too many open event streams"})"));
+      return true;  // answered; caller should close
+    }
+  }
+
   std::string response = "HTTP/1.1 200 OK\r\n";
   response += "Content-Type: text/event-stream\r\n";
   response += "Cache-Control: no-store\r\n";
@@ -1119,17 +1224,68 @@ bool StaleSocketRemoved(const std::string& path) {
   return true;
 }
 
+// Drops the streams that `poll` reported as hung up or readable.
+//
+// `polled` holds the two fixed descriptors first, so the streams begin at
+// index 2. Matching back by descriptor number is safe here for a reason worth
+// stating: streams are only ever added by the accept thread, which is the one
+// calling this, so the set cannot have grown since the snapshot. It can have
+// shrunk -- Broadcast drops a stream that will not take a frame -- and a
+// descriptor that is gone is simply not found, which is why nothing is closed
+// unless it was still present and removed here. Closing on the strength of the
+// snapshot alone would eventually close a descriptor belonging to something
+// else entirely.
+void ReapClosedStreams(const std::vector<pollfd>& polled) {
+  Transport& t = TheTransport();
+  const std::lock_guard<std::mutex> lock(t.streams_mutex);
+  for (size_t i = 2; i < polled.size(); ++i) {
+    if ((polled[i].revents & (POLLHUP | POLLERR | POLLNVAL | POLLIN)) == 0) {
+      continue;
+    }
+    const auto it =
+        std::find_if(t.streams.begin(), t.streams.end(),
+                     [&](const Stream& s) { return s.fd == polled[i].fd; });
+    if (it == t.streams.end()) {
+      continue;  // already dropped by a failed write; not ours to close
+    }
+    ::close(it->fd);
+    t.streams.erase(it);
+  }
+}
+
 void AcceptLoop() {
   Transport& t = TheTransport();
   const int listen_fd = t.listen_fd;
   const int wake_fd = t.wake_fd;
   const size_t max_body = t.max_request_bytes;
 
+  // Reused across iterations: two fixed entries plus one per open stream.
+  std::vector<pollfd> fds;
+  fds.reserve(2 + kMaxStreams);
+
   while (true) {
-    pollfd fds[2];
-    fds[0] = {listen_fd, POLLIN, 0};
-    fds[1] = {wake_fd, POLLIN, 0};
-    const int ready = ::poll(fds, 2, -1);
+    fds.clear();
+    fds.push_back({listen_fd, POLLIN, 0});
+    fds.push_back({wake_fd, POLLIN, 0});
+    // Watch the open streams too. Nothing is ever read from them -- they carry
+    // one direction -- but a client that hung up shows up as POLLHUP here, and
+    // that is the only prompt notice of it there is. The alternative is to
+    // discover the loss on the next write, which needs a notification that may
+    // never come, so an abandoned stream would hold its descriptor until the
+    // shell exits. A client looping over open-and-abandon then costs the whole
+    // process its descriptor table, not just the MCP surface.
+    //
+    // POLLIN is included because a client that sends on a stream has also
+    // given us EOF to detect: on a stream we never read, readable and hung-up
+    // arrive the same way and both mean the same thing.
+    {
+      const std::lock_guard<std::mutex> lock(t.streams_mutex);
+      for (const Stream& stream : t.streams) {
+        fds.push_back({stream.fd, POLLIN, 0});
+      }
+    }
+
+    const int ready = ::poll(fds.data(), fds.size(), -1);
     if (ready < 0) {
       if (errno == EINTR) {
         continue;
@@ -1139,6 +1295,11 @@ void AcceptLoop() {
     if ((fds[1].revents & POLLIN) != 0) {
       break;  // stop() asked
     }
+
+    // Reap before accepting, so a client at the stream cap that has already
+    // gone away does not keep a live one out.
+    ReapClosedStreams(fds);
+
     if ((fds[0].revents & POLLIN) == 0) {
       continue;
     }
@@ -1327,6 +1488,10 @@ void ihs_mcp_transport_stop() {
   // Subscriptions describe streams that no longer exist, and a restart mints
   // new session ids, so nothing here could be matched again.
   t.subscriptions.clear();
+  // The sessions themselves go with them. A session that survived a restart
+  // would let a client subscribe against an id from before the socket was
+  // rebound, and would spend the cap on ids nothing can reach.
+  t.sessions.clear();
 }
 
 bool ihs_mcp_transport_running() {

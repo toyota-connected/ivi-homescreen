@@ -1,0 +1,5 @@
+# The seeds are raw HTTP requests. Their CRLF line endings are part of the
+# protocol, not a platform artifact -- normalising them to LF produces bytes
+# no HTTP parser accepts, and the seed would silently stop reaching the code
+# it was written for. Treated as binary so nothing rewrites them.
+* -text -diff

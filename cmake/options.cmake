@@ -663,6 +663,55 @@ _ihs_require_sanitizer(SANITIZE_UNDEFINED UBSan "UndefinedBehaviorSanitizer"
         "Usually a missing runtime rather than a compiler that cannot do it: the flag compiles and only the link fails. Install it (Fedora: libubsan; Debian/Ubuntu: libubsan1).")
 
 #
+# Fuzz targets
+#
+# Off by default: they are development tools, they never run to completion, and
+# they link a sanitizer runtime, so nothing an image ships wants them.
+#
+# clang only. libFuzzer is part of the clang toolchain and GCC has no
+# equivalent, so this fails rather than quietly producing no targets -- a
+# configure that reports success and builds no fuzzer is the same trap the
+# sanitizer checks above exist to close.
+#
+# Enable alongside the surface under test, e.g.
+#   -D BUILD_ACCESSIBILITY=ON -D BUILD_MCP=ON -D BUILD_FUZZERS=ON
+#
+# The targets carry their own -fsanitize list, so do not combine this with the
+# SANITIZE_* options: two sanitizer flag sets on one link is a toolchain error
+# or, worse, one of them silently winning.
+option(BUILD_FUZZERS "Build coverage-guided fuzz targets (clang only)" OFF)
+if (BUILD_FUZZERS)
+    if (NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        MESSAGE(FATAL_ERROR
+                "BUILD_FUZZERS=ON needs clang; this is "
+                "${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}. "
+                "libFuzzer ships with clang and has no GCC equivalent.\n"
+                "Configure with -DCMAKE_CXX_COMPILER=clang++ "
+                "-DCMAKE_C_COMPILER=clang, or -D BUILD_FUZZERS=OFF.")
+    endif ()
+    if (SANITIZE_ADDRESS OR SANITIZE_THREAD OR SANITIZE_MEMORY OR SANITIZE_UNDEFINED)
+        MESSAGE(FATAL_ERROR
+                "BUILD_FUZZERS=ON conflicts with the SANITIZE_* options: the "
+                "fuzz targets already link ASan and UBSan with the fuzzer "
+                "runtime, and a second -fsanitize list on the same link either "
+                "fails or silently overrides one of them.\n"
+                "Build the fuzzers in their own build directory.")
+    endif ()
+    # The instrumentation has to reach the code under test, not just the
+    # driver. Without this the fuzzer links, runs, and reports coverage in the
+    # tens -- its own driver -- so every mutation looks equally uninteresting
+    # and the corpus never grows. That failure is quiet: the run looks healthy
+    # and finds nothing, which is indistinguishable from code that has no bugs.
+    #
+    # fuzzer-no-link here and fuzzer at the target, so ordinary executables in
+    # the same build do not each acquire a main() from libFuzzer.
+    add_compile_options(-fsanitize=fuzzer-no-link,address,undefined
+            -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address,undefined)
+    MESSAGE(STATUS "Fuzz targets ............ Enabled")
+endif ()
+
+#
 # Executable Name
 #
 if (NOT EXE_OUTPUT_NAME)

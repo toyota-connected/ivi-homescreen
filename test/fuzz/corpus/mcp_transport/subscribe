@@ -1,0 +1,6 @@
+POST / HTTP/1.1
+Host: localhost
+Content-Type: application/json
+Content-Length: 85
+
+{"jsonrpc":"2.0","id":8,"method":"resources/subscribe","params":{"uri":"fz://state"}}

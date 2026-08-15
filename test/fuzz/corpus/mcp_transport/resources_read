@@ -1,0 +1,6 @@
+POST / HTTP/1.1
+Host: localhost
+Content-Type: application/json
+Content-Length: 80
+
+{"jsonrpc":"2.0","id":7,"method":"resources/read","params":{"uri":"fz://state"}}

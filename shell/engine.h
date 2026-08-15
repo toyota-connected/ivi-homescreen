@@ -373,9 +373,10 @@ class Engine {
   void SendPointerEvents();
 
   /*
-   * Synthesizes a tap at a point in logical coordinates, for the MCP pointer
-   * fallback (DR-7). Rides the ordinary input path, so it is hit-tested like
-   * a real tap rather than invoking a node's handler by id.
+   * Synthesizes a tap at a point in logical coordinates, for the MCP
+   * coordinate fallback -- the escape hatch for a control the semantics tree
+   * does not describe. Rides the ordinary input path, so it is hit-tested
+   * like a real tap rather than invoking a node's handler by id.
    */
   int SendSyntheticTap(double x, double y);
 

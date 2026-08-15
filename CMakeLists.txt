@@ -174,6 +174,16 @@ if (BUILD_UNIT_TESTS)
     install(DIRECTORY DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/test/unit_test/test_images)
 endif ()
 
+#
+# Fuzz targets
+#
+# Independent of BUILD_UNIT_TESTS: these link no gtest and register no CTest
+# case, and a fuzz build should not have to carry the unit test suite.
+#
+if (BUILD_FUZZERS)
+    add_subdirectory(test/fuzz)
+endif ()
+
 if (NOT CMAKE_CROSSCOMPILING)
     include(packaging)
 endif ()

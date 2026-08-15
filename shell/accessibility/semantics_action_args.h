@@ -35,8 +35,9 @@ namespace accessibility {
  * baked into it.
  *
  * Uses the vendored flutter::StandardMessageCodec rather than a second
- * implementation: a reimplementation can drift from the decoder silently,
- * which drops arguments framework-side with no error anywhere (R-9).
+ * implementation: a reimplementation can drift from the decoder silently, and
+ * the framework then drops the argument with no error raised anywhere -- the
+ * action appears to have been delivered and simply does nothing.
  *
  * Returns the encoded message, or nullopt when `data` does not match the
  * layout the action requires -- a truncated offset or a stray byte count is a

@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include <dirent.h>
 #include <poll.h>
 #include <sys/eventfd.h>
 #include <sys/socket.h>
@@ -26,6 +27,7 @@
 #include <cstring>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "gtest/gtest.h"
 
@@ -954,4 +956,164 @@ TEST_F(McpTransportTest, AnUnknownToolRemainsAProtocolError) {
              R"("params":{"name":"nothing_claims_this","arguments":{}}})"));
   EXPECT_NE(body.find("-32601"), std::string::npos) << body;
   EXPECT_EQ(body.find(R"("isError")"), std::string::npos) << body;
+}
+
+// ---------------------------------------------------------------------------
+// Bounds on client-held state
+//
+// Every request is Connection: close, so a connection is not a lifetime and
+// there is nothing for the transport's per-client state to be scoped to.
+// Anything it keeps has to be bounded explicitly or a client in a loop makes
+// the shell hold memory and descriptors until it cannot serve at all. Each of
+// these was reachable before the bound existed; fuzzing found the first one.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// The number of descriptors the process holds. The transport's own are a
+// constant here, so what this measures across a loop is what the loop left
+// behind.
+size_t OpenDescriptorCount() {
+  size_t count = 0;
+  DIR* dir = ::opendir("/proc/self/fd");
+  if (dir == nullptr) {
+    return 0;
+  }
+  while (::readdir(dir) != nullptr) {
+    ++count;
+  }
+  ::closedir(dir);
+  return count;
+}
+
+}  // namespace
+
+// A client that opens an event stream and hangs up leaves a descriptor the
+// server is still holding. Nothing writes to that stream until a provider
+// signals, so without a positive check the loss is discovered only when a
+// notification happens to arrive -- which for an idle UI may be never.
+//
+// The cost is not confined to the MCP surface: descriptors are process-wide,
+// so a client looping over open-and-abandon eventually stops the shell from
+// opening anything at all.
+TEST_F(McpTransportTest, AnAbandonedStreamIsReclaimed) {
+  const size_t before = OpenDescriptorCount();
+  for (int i = 0; i < 40; ++i) {
+    std::string headers;
+    const int fd = OpenStream(path_, &headers);
+    ASSERT_GE(fd, 0) << "stream " << i << " was refused: the server is already "
+                     << "holding the ones before it";
+    ::close(fd);
+  }
+  // Reaping happens on the accept thread's next wake, so give it one.
+  for (int i = 0; i < 50 && OpenDescriptorCount() > before + 4; ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  }
+  const size_t after = OpenDescriptorCount();
+  EXPECT_LE(after, before + 4)
+      << "40 abandoned streams left " << (after - before) << " descriptors";
+}
+
+// Live streams are bounded too. A client that opens them and keeps them open
+// is not reclaimable by any means, so the only answer is to stop accepting
+// them -- and to say so, rather than accepting and silently never delivering.
+TEST_F(McpTransportTest, OpenStreamsAreCapped) {
+  std::vector<int> held;
+  std::string refusal;
+  for (int i = 0; i < 200; ++i) {
+    std::string headers;
+    const int fd = OpenStream(path_, &headers);
+    if (fd < 0) {
+      break;
+    }
+    if (headers.find("text/event-stream") == std::string::npos) {
+      refusal = headers;
+      ::close(fd);
+      break;
+    }
+    held.push_back(fd);
+  }
+  EXPECT_FALSE(refusal.empty())
+      << "200 streams were all accepted; nothing bounds them";
+  EXPECT_NE(refusal.find("503"), std::string::npos) << refusal;
+  EXPECT_LT(held.size(), 200u);
+  for (const int fd : held) {
+    ::close(fd);
+  }
+}
+
+// The session id arrives in a header the client writes, so accepting any
+// non-empty string makes "session" a namespace the client owns: unbounded,
+// and shared. Checking it against the ids actually minted is what closes both
+// -- the growth, and one client naming another's session.
+TEST_F(McpTransportTest, SubscribeWithAnUnmintedSessionIsRefused) {
+  const std::string body =
+      Body(Subscribe(path_, "0123456789abcdef0123456789abcdef", "ui://"));
+  EXPECT_NE(body.find("-32602"), std::string::npos) << body;
+  EXPECT_NE(body.find("unknown"), std::string::npos) << body;
+}
+
+// The same check from the other side: a session this transport did mint is
+// accepted, so the refusal above is about provenance and not about subscribing
+// having stopped working.
+TEST_F(McpTransportTest, SubscribeWithAMintedSessionStillWorks) {
+  const std::string session = SessionFrom(
+      Post(path_, R"({"jsonrpc":"2.0","id":1,"method":"initialize"})"));
+  ASSERT_FALSE(session.empty());
+  const std::string body = Body(Subscribe(path_, session, "ui://"));
+  EXPECT_NE(body.find(R"("result")"), std::string::npos) << body;
+}
+
+// A URI is a name. The body limit alone would let one be a megabyte, and it
+// would then be held for as long as the session is.
+TEST_F(McpTransportTest, AnOverlongSubscriptionUriIsRefused) {
+  const std::string session = SessionFrom(
+      Post(path_, R"({"jsonrpc":"2.0","id":1,"method":"initialize"})"));
+  ASSERT_FALSE(session.empty());
+  const std::string body =
+      Body(Subscribe(path_, session, "ui://" + std::string(4096, 'x')));
+  EXPECT_NE(body.find("-32602"), std::string::npos) << body;
+}
+
+// One session cannot hold an unbounded number of URIs either. Refused rather
+// than evicting one of its own: which resource a client cares about is its
+// decision, and dropping one silently would leave it believing it is still
+// being told about something it is not.
+TEST_F(McpTransportTest, SubscriptionsPerSessionAreCapped) {
+  const std::string session = SessionFrom(
+      Post(path_, R"({"jsonrpc":"2.0","id":1,"method":"initialize"})"));
+  ASSERT_FALSE(session.empty());
+  std::string last;
+  for (int i = 0; i < 200; ++i) {
+    last = Body(Subscribe(path_, session, "ui://r/" + std::to_string(i)));
+    if (last.find(R"("error")") != std::string::npos) {
+      break;
+    }
+  }
+  EXPECT_NE(last.find("-32602"), std::string::npos)
+      << "200 subscriptions on one session were all accepted: " << last;
+}
+
+// Minting is bounded as well, or initialize alone is the growth path. Eviction
+// is least-recently-used rather than oldest-first, so an agent that keeps
+// working keeps its session: what falls off is an id nothing has spoken for.
+TEST_F(McpTransportTest, AWorkingSessionSurvivesOthersBeingMinted) {
+  const std::string mine = SessionFrom(
+      Post(path_, R"({"jsonrpc":"2.0","id":1,"method":"initialize"})"));
+  ASSERT_FALSE(mine.empty());
+  ASSERT_NE(Body(Subscribe(path_, mine, "ui://mine")).find(R"("result")"),
+            std::string::npos);
+
+  // Well past the cap, with the working session touched along the way, which
+  // is exactly what a client making requests does.
+  for (int i = 0; i < 200; ++i) {
+    Post(path_, R"({"jsonrpc":"2.0","id":1,"method":"initialize"})");
+    if (i % 4 == 0) {
+      Subscribe(path_, mine, "ui://mine");
+    }
+  }
+
+  const std::string body = Body(Subscribe(path_, mine, "ui://mine"));
+  EXPECT_NE(body.find(R"("result")"), std::string::npos)
+      << "the session was evicted while it was still being used: " << body;
 }
