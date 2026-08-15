@@ -515,6 +515,67 @@ IHS_EXPORT int ihs_semantics_dispatch(IhsSemanticsConsumer* consumer,
                                       void* user_data);
 
 /*
+ * ---------------------------------------------------------------------------
+ * Sources (ABI 1.4)
+ * ---------------------------------------------------------------------------
+ *
+ * A source is one independent publisher of a tree. In this port that is one
+ * Flutter engine: each bundle gets an engine of its own, each with its own
+ * node id space starting at the root.
+ *
+ * Before this existed the hub held a single tree and a single host, so a
+ * second engine overwrote the first's tree and redirected the first's actions
+ * to itself. A client could read one application's tree and have its tap
+ * delivered to another -- silently, and to a real but unrelated control, since
+ * the two id spaces overlap. Keying by source is what makes reading and acting
+ * refer to the same application.
+ *
+ * Two trees are not one document. They are merged nowhere: a consumer asks a
+ * source for its tree and dispatches back to that same source, and the pairing
+ * is what the type system now enforces.
+ */
+typedef struct IhsSemanticsSource IhsSemanticsSource;
+
+/* How many sources are registered, and the one at `index`, or NULL. Together
+ * these let a consumer enumerate what it can address. */
+IHS_EXPORT size_t ihs_semantics_source_count(void);
+IHS_EXPORT IhsSemanticsSource* ihs_semantics_source_at(size_t index);
+
+/* The registered name, or "" for the implicit source ihs_semantics_set_host
+ * creates. Valid until that source is unregistered. */
+IHS_EXPORT const char* ihs_semantics_source_name(
+    const IhsSemanticsSource* source);
+
+/* This source's current tree, or NULL when it has published none. Release with
+ * ihs_semantics_release_snapshot, as for any snapshot. */
+IHS_EXPORT const IhsSemanticsSnapshot* ihs_semantics_acquire_snapshot_from(
+    IhsSemanticsSource* source);
+
+/*
+ * As ihs_semantics_dispatch, against a named source. The node id is resolved
+ * in that source's tree and the action reaches that source's host.
+ *
+ * Prefer this wherever the snapshot the node came from is known, which is
+ * everywhere a consumer acts on something it read.
+ */
+IHS_EXPORT int ihs_semantics_dispatch_from(IhsSemanticsConsumer* consumer,
+                                           IhsSemanticsSource* source,
+                                           int64_t view_id,
+                                           int32_t node_id,
+                                           uint64_t action,
+                                           const uint8_t* data,
+                                           size_t data_length,
+                                           IhsSemanticsDoneCallback done,
+                                           void* user_data);
+
+/* As ihs_semantics_send_pointer_tap, against a named source. */
+IHS_EXPORT int ihs_semantics_send_pointer_tap_to(IhsSemanticsConsumer* consumer,
+                                                 IhsSemanticsSource* source,
+                                                 int64_t view_id,
+                                                 double x,
+                                                 double y);
+
+/*
  * Semantics capability sub-table (IhsApi::semantics), added in ABI 1.2.
  *
  * The flat entry points above are the same functions and remain supported.

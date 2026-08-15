@@ -105,12 +105,56 @@ typedef struct IhsSemanticsHost {
 } IhsSemanticsHost;
 
 /*
- * Install the host. Exactly one per process, at engine bring-up and before the
- * first publish. Pass NULL to uninstall during teardown, after which dispatch
- * fails with IHS_SEMANTICS_ERR_UNAVAILABLE rather than calling into a shell
- * that is going away. The struct is copied; it need not outlive the call.
+ * Install the host for the implicit source, at bring-up and before the first
+ * publish. Pass NULL to uninstall during teardown, after which dispatch fails
+ * with IHS_SEMANTICS_ERR_UNAVAILABLE rather than calling into a shell that is
+ * going away. The struct is copied; it need not outlive the call.
+ *
+ * For one publisher this is all that is needed. **A shell running more than
+ * one engine must use ihs_semantics_source_register instead** (ABI 1.4): this
+ * call installs a single host, so a second caller replaces the first and its
+ * actions -- including actions read from the first engine's tree -- are
+ * delivered to the second.
  */
 IHS_EXPORT void ihs_semantics_set_host(const IhsSemanticsHost* host);
+
+/*
+ * Registering a source is the multi-publisher form of set_host (ABI 1.4),
+ * and lives here rather than beside the addressing calls in ihs_semantics.h
+ * because it carries a host: creating a publisher is a producer operation,
+ * and only the shell has one to offer.
+ */
+typedef struct IhsSemanticsSourceDesc {
+  size_t struct_size; /* sizeof(IhsSemanticsSourceDesc) */
+
+  /*
+   * Stable name, unique among registered sources. It addresses this tree from
+   * outside -- an MCP resource URI is built from it -- so it should be
+   * meaningful to someone who did not configure the shell, and should not
+   * change across a restart of the same application.
+   */
+  const char* name;
+
+  /* Where this source's dispatches go. Copied; not retained by pointer. */
+  IhsSemanticsHost host;
+} IhsSemanticsSourceDesc;
+
+/*
+ * Registers a publisher. Fails with IHS_SEMANTICS_ERR_INVALID for a malformed
+ * desc or a name already taken -- a duplicate name would make two trees
+ * indistinguishable to anything addressing them by it, which is the failure
+ * this whole mechanism exists to prevent.
+ */
+IHS_EXPORT int ihs_semantics_source_register(const IhsSemanticsSourceDesc* desc,
+                                             IhsSemanticsSource** out_source);
+
+/*
+ * Drops the source and releases its tree. Safe with NULL. Any snapshot a
+ * consumer still holds stays valid: snapshots are refcounted independently of
+ * the source that published them, so a consumer mid-read does not fault
+ * because an engine went away.
+ */
+IHS_EXPORT void ihs_semantics_source_unregister(IhsSemanticsSource* source);
 
 /*
  * One node as the shell hands it over. Distinct from IhsSemanticsNode -- this
@@ -197,6 +241,19 @@ typedef struct IhsSemanticsPublishInfo {
 
   const IhsSemanticsPublishCustomAction* custom_actions;
   size_t custom_action_count;
+
+  /*
+   * Which publisher this tree belongs to (ABI 1.4). NULL publishes to the
+   * implicit source ihs_semantics_set_host creates, which is what a caller
+   * that knows nothing of sources gets.
+   *
+   * A shell running more than one engine must set this. Without it the last
+   * engine to publish owns the only tree there is, and the last to install a
+   * host owns every dispatch -- so a consumer reads one application and acts
+   * on another. Read is gated on struct_size, so a caller built against 1.3
+   * is unaffected.
+   */
+  struct IhsSemanticsSource* source;
 } IhsSemanticsPublishInfo;
 
 /*

@@ -841,3 +841,238 @@ TEST_F(SemanticsHubTest, UsableEntirelyThroughTheTable) {
                                      nullptr, 0, nullptr, nullptr),
             IHS_SEMANTICS_ERR_INVALID);
 }
+
+// ---------------------------------------------------------------------------
+// Sources
+//
+// One hub, several publishers. Before sources existed the hub held a single
+// tree and a single host, so a second engine overwrote the first's tree and
+// captured the first's dispatches. A client could read one application and
+// have its tap delivered to another -- to a real but unrelated control, since
+// two engines' id spaces overlap.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// A second recorder, so a test can tell which engine a dispatch reached
+// rather than only that one did.
+struct Recorder {
+  const char* name;
+  int dispatches = 0;
+  int32_t last_node = 0;
+  int enables = 0;
+};
+
+int OnRecorderDispatch(void* user_data,
+                       int64_t,
+                       int32_t node_id,
+                       uint64_t,
+                       const uint8_t*,
+                       size_t) {
+  auto* r = static_cast<Recorder*>(user_data);
+  r->dispatches++;
+  r->last_node = node_id;
+  return IHS_SEMANTICS_OK;
+}
+
+void OnRecorderEnable(void* user_data, bool enabled) {
+  if (enabled) {
+    static_cast<Recorder*>(user_data)->enables++;
+  }
+}
+
+IhsSemanticsSource* RegisterSource(const char* name, Recorder* recorder) {
+  IhsSemanticsHost host{};
+  host.struct_size = sizeof(host);
+  host.user_data = recorder;
+  host.set_semantics_enabled = OnRecorderEnable;
+  host.dispatch = OnRecorderDispatch;
+
+  IhsSemanticsSourceDesc desc{};
+  desc.struct_size = sizeof(desc);
+  desc.name = name;
+  desc.host = host;
+
+  IhsSemanticsSource* source = nullptr;
+  return ihs_semantics_source_register(&desc, &source) == IHS_SEMANTICS_OK
+             ? source
+             : nullptr;
+}
+
+// Publishes a one-node tree to a named source.
+int PublishTo(IhsSemanticsSource* source, int32_t id, const char* label) {
+  IhsSemanticsPublishNode node{};
+  node.id = id;
+  node.label = label;
+  node.role = IHS_SEMANTICS_ROLE_BUTTON;
+  node.enabled = IHS_SEMANTICS_TRISTATE_NONE;
+  node.actions = IHS_SEMANTICS_ACTION_TAP;
+
+  IhsSemanticsPublishInfo info{};
+  info.struct_size = sizeof(info);
+  info.nodes = &node;
+  info.node_count = 1;
+  info.source = source;
+  return ihs_semantics_publish(&info);
+}
+
+}  // namespace
+
+// The defect this exists for, in one test. Two engines publish trees whose
+// node ids overlap -- which they do, because each engine numbers from its own
+// root. A client reads one tree and acts on what it read, and the action must
+// reach the engine it read from.
+TEST_F(SemanticsHubTest, AnActionReachesTheSourceItsTreeCameFrom) {
+  // The fixture installed a host; drop it so neither source is "the default"
+  // and every call below has to be explicit about which it means.
+  ihs_semantics_set_host(nullptr);
+
+  Recorder engine_a{"A"};
+  Recorder engine_b{"B"};
+  IhsSemanticsSource* a = RegisterSource("app-a", &engine_a);
+  IhsSemanticsSource* b = RegisterSource("app-b", &engine_b);
+  ASSERT_NE(a, nullptr);
+  ASSERT_NE(b, nullptr);
+
+  // Same node id in both trees, different controls.
+  ASSERT_EQ(PublishTo(a, 10, "A: Play"), IHS_SEMANTICS_OK);
+  ASSERT_EQ(PublishTo(b, 10, "B: Navigate"), IHS_SEMANTICS_OK);
+
+  IhsSemanticsConsumerDesc desc{};
+  desc.struct_size = sizeof(desc);
+  desc.name = "probe";
+  desc.action_allow_mask = IHS_SEMANTICS_ACTION_ALL;
+  desc.notify_fd = -1;
+  IhsSemanticsConsumer* consumer = nullptr;
+  ASSERT_EQ(ihs_semantics_register(&desc, &consumer), IHS_SEMANTICS_OK);
+
+  // Read A's tree, and check it is A's rather than whichever published last.
+  const IhsSemanticsSnapshot* from_a = ihs_semantics_acquire_snapshot_from(a);
+  ASSERT_NE(from_a, nullptr);
+  EXPECT_STREQ(ihs_semantics_snapshot_node_at(from_a, 0)->label, "A: Play");
+  ihs_semantics_release_snapshot(from_a);
+
+  EXPECT_EQ(
+      ihs_semantics_dispatch_from(consumer, a, 0, 10, IHS_SEMANTICS_ACTION_TAP,
+                                  nullptr, 0, nullptr, nullptr),
+      IHS_SEMANTICS_OK);
+
+  EXPECT_EQ(engine_a.dispatches, 1) << "the action did not reach the engine "
+                                       "whose tree the node was read from";
+  EXPECT_EQ(engine_b.dispatches, 0)
+      << "the action reached a different application's engine";
+  EXPECT_EQ(engine_a.last_node, 10);
+
+  ihs_semantics_unregister(consumer);
+  ihs_semantics_source_unregister(a);
+  ihs_semantics_source_unregister(b);
+}
+
+// Each source keeps its own tree. Publishing to one leaves the other's alone,
+// which is what makes "read A, act on A" meaningful at all.
+TEST_F(SemanticsHubTest, SourcesDoNotOverwriteEachOther) {
+  ihs_semantics_set_host(nullptr);
+  Recorder a_rec{"A"};
+  Recorder b_rec{"B"};
+  IhsSemanticsSource* a = RegisterSource("app-a", &a_rec);
+  IhsSemanticsSource* b = RegisterSource("app-b", &b_rec);
+  ASSERT_NE(a, nullptr);
+  ASSERT_NE(b, nullptr);
+
+  ASSERT_EQ(PublishTo(a, 1, "A one"), IHS_SEMANTICS_OK);
+  ASSERT_EQ(PublishTo(b, 1, "B one"), IHS_SEMANTICS_OK);
+  ASSERT_EQ(PublishTo(a, 1, "A two"), IHS_SEMANTICS_OK);
+
+  const IhsSemanticsSnapshot* sa = ihs_semantics_acquire_snapshot_from(a);
+  const IhsSemanticsSnapshot* sb = ihs_semantics_acquire_snapshot_from(b);
+  ASSERT_NE(sa, nullptr);
+  ASSERT_NE(sb, nullptr);
+  EXPECT_STREQ(ihs_semantics_snapshot_node_at(sa, 0)->label, "A two");
+  EXPECT_STREQ(ihs_semantics_snapshot_node_at(sb, 0)->label, "B one");
+  ihs_semantics_release_snapshot(sa);
+  ihs_semantics_release_snapshot(sb);
+
+  ihs_semantics_source_unregister(a);
+  ihs_semantics_source_unregister(b);
+}
+
+// With more than one source there is no unambiguous default, so an unkeyed
+// call refuses rather than choosing. Answering with either one is precisely
+// how a client ends up acting on the wrong application.
+TEST_F(SemanticsHubTest, AnUnkeyedCallRefusesWhenSeveralSourcesExist) {
+  ihs_semantics_set_host(nullptr);
+  Recorder a_rec{"A"};
+  Recorder b_rec{"B"};
+  IhsSemanticsSource* a = RegisterSource("app-a", &a_rec);
+  IhsSemanticsSource* b = RegisterSource("app-b", &b_rec);
+  ASSERT_NE(a, nullptr);
+  ASSERT_NE(b, nullptr);
+  ASSERT_EQ(PublishTo(a, 5, "A"), IHS_SEMANTICS_OK);
+  ASSERT_EQ(PublishTo(b, 5, "B"), IHS_SEMANTICS_OK);
+
+  EXPECT_EQ(ihs_semantics_acquire_snapshot(), nullptr)
+      << "an unkeyed read picked one of two trees";
+
+  IhsSemanticsConsumerDesc desc{};
+  desc.struct_size = sizeof(desc);
+  desc.name = "probe";
+  desc.action_allow_mask = IHS_SEMANTICS_ACTION_ALL;
+  desc.notify_fd = -1;
+  IhsSemanticsConsumer* consumer = nullptr;
+  ASSERT_EQ(ihs_semantics_register(&desc, &consumer), IHS_SEMANTICS_OK);
+  EXPECT_EQ(ihs_semantics_dispatch(consumer, 0, 5, IHS_SEMANTICS_ACTION_TAP,
+                                   nullptr, 0, nullptr, nullptr),
+            IHS_SEMANTICS_ERR_UNAVAILABLE)
+      << "an unkeyed dispatch chose one of two engines";
+  EXPECT_EQ(a_rec.dispatches, 0);
+  EXPECT_EQ(b_rec.dispatches, 0);
+
+  ihs_semantics_unregister(consumer);
+  ihs_semantics_source_unregister(a);
+  ihs_semantics_source_unregister(b);
+}
+
+// A single source is unambiguous, so the pre-sources entry points keep working
+// against it -- which is what lets a consumer migrate after the shell does.
+TEST_F(SemanticsHubTest, OneSourceStillAnswersUnkeyedCalls) {
+  ihs_semantics_set_host(nullptr);
+  Recorder only{"only"};
+  IhsSemanticsSource* s = RegisterSource("app", &only);
+  ASSERT_NE(s, nullptr);
+  ASSERT_EQ(PublishTo(s, 3, "Solo"), IHS_SEMANTICS_OK);
+
+  const IhsSemanticsSnapshot* snapshot = ihs_semantics_acquire_snapshot();
+  ASSERT_NE(snapshot, nullptr);
+  EXPECT_STREQ(ihs_semantics_snapshot_node_at(snapshot, 0)->label, "Solo");
+  ihs_semantics_release_snapshot(snapshot);
+  ihs_semantics_source_unregister(s);
+}
+
+// A duplicate name would make two trees indistinguishable to anything
+// addressing them by it, which is the failure the whole mechanism prevents.
+TEST_F(SemanticsHubTest, ADuplicateSourceNameIsRefused) {
+  ihs_semantics_set_host(nullptr);
+  Recorder one{"one"};
+  Recorder two{"two"};
+  IhsSemanticsSource* first = RegisterSource("same", &one);
+  ASSERT_NE(first, nullptr);
+  EXPECT_EQ(RegisterSource("same", &two), nullptr);
+  ihs_semantics_source_unregister(first);
+}
+
+// A snapshot outlives the engine that published it: a consumer mid-read must
+// not fault because an application went away.
+TEST_F(SemanticsHubTest, AHeldSnapshotSurvivesItsSourceUnregistering) {
+  ihs_semantics_set_host(nullptr);
+  Recorder rec{"gone"};
+  IhsSemanticsSource* s = RegisterSource("app", &rec);
+  ASSERT_NE(s, nullptr);
+  ASSERT_EQ(PublishTo(s, 9, "Still here"), IHS_SEMANTICS_OK);
+
+  const IhsSemanticsSnapshot* held = ihs_semantics_acquire_snapshot_from(s);
+  ASSERT_NE(held, nullptr);
+  ihs_semantics_source_unregister(s);
+
+  EXPECT_STREQ(ihs_semantics_snapshot_node_at(held, 0)->label, "Still here");
+  ihs_semantics_release_snapshot(held);
+}
