@@ -1100,11 +1100,47 @@ bool TryOpenEventStream(const int fd,
 
 // Serves one connection. Returns true when the descriptor has become an event
 // stream and must stay open; the caller closes it otherwise.
+// Closes a connection we are refusing, without losing the reason.
+//
+// A close with the peer's request still sitting unread discards both
+// directions, so the response we just wrote can vanish and the client sees an
+// empty reply rather than the refusal. Consuming what it sent first is what
+// makes the answer reliably arrive.
+//
+// The drain is bounded in both bytes and time: this runs before any
+// authorisation has succeeded, so a peer that keeps sending must not be able
+// to hold the accept thread. Whatever is left when the bound is reached is
+// abandoned -- at that point the response has had every chance to land, and
+// the peer is misbehaving anyway.
+void CloseRefused(const int fd) {
+  static constexpr size_t kMaxDrainBytes = 64 * 1024;
+  static constexpr int kDrainTimeoutMs = 50;
+
+  ::shutdown(fd, SHUT_WR);
+  size_t drained = 0;
+  while (drained < kMaxDrainBytes) {
+    pollfd poll_fd = {fd, POLLIN, 0};
+    if (::poll(&poll_fd, 1, kDrainTimeoutMs) <= 0) {
+      break;
+    }
+    char discard[4096];
+    const ssize_t got = ::recv(fd, discard, sizeof(discard), 0);
+    if (got <= 0) {
+      break;  // EOF, or an error that makes further reading pointless
+    }
+    drained += static_cast<size_t>(got);
+  }
+  ::close(fd);
+}
+
 bool ServeConnection(const int fd, const size_t max_body) {
   if (!PeerIsOwner(fd)) {
     Log(IHS_LEVEL_WARN, "mcp: refused a connection from another user");
     WriteAll(fd, HttpResponse(403, "Forbidden", R"({"error":"forbidden"})"));
-    return false;
+    // Returning true means "the descriptor is handled": this closes it itself,
+    // because a plain close here races the response away.
+    CloseRefused(fd);
+    return true;
   }
 
   // Peeked rather than read: a GET opens an event stream and a POST carries a
