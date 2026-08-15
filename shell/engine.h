@@ -67,7 +67,9 @@ class Engine {
          const std::string& bundle_path,
          int32_t accessibility_features,
          bool merge_render_platform,
-         bool enable_mcp);
+         bool enable_mcp,
+         std::vector<std::string> mcp_allowed_tools,
+         bool mcp_tools_narrowed);
 
   ~Engine();
 
@@ -493,6 +495,12 @@ class Engine {
   // [global] enable_mcp. Held rather than read at teardown so stop pairs with
   // exactly the start that ran, whatever config does afterwards.
   bool m_enable_mcp = false;
+
+  // [global] mcp_allowed_tools, flattened. The bool carries what an optional
+  // would: an empty list is a read-only surface and is not the same as no key
+  // at all, which is the compiled default.
+  std::vector<std::string> m_mcp_allowed_tools;
+  bool m_mcp_tools_narrowed = false;
 
 #if BUILD_ACCESSIBILITY && ENABLE_ACCESSKIT
   // Bridges published snapshots to a screen reader. Owned here because its

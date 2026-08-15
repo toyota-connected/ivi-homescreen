@@ -26,6 +26,10 @@
   # type=bool default=false values=true|false applies=all
   enable_mcp =
 
+  # Which UI tools the MCP surface offers, unprefixed: tap, long_press, increase, decrease, show_on_screen, dismiss, expand, collapse, set_text, scroll_to, custom_action, tap_at. Absent offers all of them. An empty list is a read-only surface -- snapshot and query are always offered, since reading is what the tree is for. This narrows and cannot widen: the accessibility-focus actions are never reachable whatever is listed. A name matching no tool refuses startup rather than being skipped.
+  # type=array<string> default=all tools values=array of tool names applies=all
+  mcp_allowed_tools =
+
   # Wayland input events to mask (e.g. 'keyboard pointer').
   # type=string default=— values=comma/space list applies=wayland
   wayland_event_mask =

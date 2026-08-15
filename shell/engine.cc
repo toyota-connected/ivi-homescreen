@@ -133,7 +133,9 @@ Engine::Engine(FlutterView* view,
                const std::string& bundle_path,
                const int32_t accessibility_features,
                const bool merge_render_platform,
-               const bool enable_mcp)
+               const bool enable_mcp,
+               std::vector<std::string> mcp_allowed_tools,
+               const bool mcp_tools_narrowed)
     : m_index(index),
       m_running(false),
       m_backend(view->GetBackend()),
@@ -144,6 +146,8 @@ Engine::Engine(FlutterView* view,
       m_prev_pixel_ratio(1.0),
       m_accessibility_features(accessibility_features),
       m_enable_mcp(enable_mcp),
+      m_mcp_allowed_tools(std::move(mcp_allowed_tools)),
+      m_mcp_tools_narrowed(mcp_tools_narrowed),
       m_flutter_engine(nullptr) {
   IHS_TRACE("({}) +Engine::Engine", m_index);
 
@@ -410,7 +414,32 @@ FlutterEngineResult Engine::Run(FlutterDesktopEngineState* state) {
   // semantics on, so leaving it off really does cost nothing rather than
   // merely hiding the tools.
   if (m_enable_mcp) {
-    const int status = ihs_mcp_semantics_provider_start();
+    // Pointers into m_mcp_allowed_tools, which outlives the call. Only built
+    // when the image actually set the key: a null list is the compiled
+    // default, and an empty non-null one is a read-only surface, so the two
+    // must not be conflated here.
+    std::vector<const char*> allowed;
+    allowed.reserve(m_mcp_allowed_tools.size());
+    for (const std::string& name : m_mcp_allowed_tools) {
+      allowed.push_back(name.c_str());
+    }
+    IhsMcpSemanticsConfig policy{};
+    policy.struct_size = sizeof(policy);
+    policy.narrow_tools = m_mcp_tools_narrowed;
+    policy.allowed_tools = allowed.empty() ? nullptr : allowed.data();
+    policy.allowed_tool_count = allowed.size();
+
+    const int status = ihs_mcp_semantics_provider_start_with(&policy);
+    if (status == IHS_MCP_ERR_INVALID) {
+      // A policy that could not be applied leaves nothing running, so the
+      // surface is absent rather than open. Loud, because an image that meant
+      // to narrow and instead got nothing should not have to find out by
+      // noticing an agent cannot connect.
+      ihs::log::error(
+          "({}) MCP not started: mcp_allowed_tools names a tool that does not "
+          "exist",
+          m_index);
+    }
     if (status == IHS_MCP_OK) {
       ihs::log::info("({}) MCP semantics provider started", m_index);
       // Only once there is something to serve: the transport routes onto the

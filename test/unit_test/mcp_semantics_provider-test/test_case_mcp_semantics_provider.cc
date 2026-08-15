@@ -14,6 +14,9 @@
  * limitations under the License.
  */
 
+#include <sys/mman.h>
+#include <unistd.h>
+
 #include <algorithm>
 #include <cstring>
 #include <string>
@@ -886,4 +889,285 @@ TEST_F(McpSemanticsProviderTest, QueryLimitReportsWhatItLeftOut) {
       CallTool("ui_query", R"({"label":"Seat"})", nullptr);
   EXPECT_TRUE(Contains(whole, "\"match_count\":5")) << whole;
   EXPECT_TRUE(Contains(whole, "\"truncated\":false")) << whole;
+}
+
+// ---------------------------------------------------------------------------
+// Argument decoding
+//
+// The provider is handed (pointer, length) and must honour both. It used to
+// scan the raw text for a quoted key, which read to a terminator the ABI does
+// not promise and could not tell a key from a key-like substring inside a
+// value a client chose. Fuzzing found the first; the second falls out of the
+// same fix.
+// ---------------------------------------------------------------------------
+
+// A key nested inside another object is not a top-level argument. A scanner
+// that searches the raw text cannot tell the two apart, so a request naming no
+// node_id of its own acted on whatever id appeared anywhere in the JSON -- the
+// tool then reports success against a node the arguments never asked for.
+TEST_F(McpSemanticsProviderTest, ANestedKeyIsNotAnArgument) {
+  TreeBuilder tree;
+  tree.Add(1, "Root", IHS_SEMANTICS_ROLE_PANE);
+  auto& target = tree.Add(2, "Target", IHS_SEMANTICS_ROLE_BUTTON);
+  target.actions = IHS_SEMANTICS_ACTION_TAP;
+  ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
+
+  int status = 0;
+  const std::string body = CallTool(
+      "ui_tap", R"({"identifier":"nothing","meta":{"node_id":2}})", &status);
+
+  EXPECT_EQ(host_.dispatch_calls, 0)
+      << "acted on a node the arguments never named: " << body;
+  EXPECT_EQ(status, IHS_MCP_ERR_NOT_FOUND) << body;
+}
+
+// The scanner took the run between the next two quote characters, so a
+// selector containing an escaped quote silently became a prefix of itself --
+// and a prefix matches more nodes than the caller asked for.
+TEST_F(McpSemanticsProviderTest, AnEscapedQuoteInASelectorSurvives) {
+  TreeBuilder tree;
+  tree.Add(1, "Root", IHS_SEMANTICS_ROLE_PANE);
+  tree.Add(2, R"(He said "go")", IHS_SEMANTICS_ROLE_LABEL);
+  tree.Add(3, "He said nothing", IHS_SEMANTICS_ROLE_LABEL);
+  ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
+
+  const std::string body =
+      CallTool("ui_query", R"({"label":"said \"go\""})", nullptr);
+
+  EXPECT_TRUE(Contains(body, R"(He said \"go\")")) << body;
+  EXPECT_FALSE(Contains(body, "He said nothing"))
+      << "the selector was truncated at the escape: " << body;
+}
+
+// Not a regression -- the previous extractor range-checked too. Kept because
+// the rewrite could quietly have lost it, and truncating an out-of-range id
+// lands on some other node: the caller would be told an action succeeded
+// against something it never named.
+TEST_F(McpSemanticsProviderTest, AnOutOfRangeNodeIdIsStillRefused) {
+  TreeBuilder tree;
+  tree.Add(1, "Root", IHS_SEMANTICS_ROLE_PANE);
+  auto& target = tree.Add(2, "Target", IHS_SEMANTICS_ROLE_BUTTON);
+  target.actions = IHS_SEMANTICS_ACTION_TAP;
+  ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
+
+  int status = 0;
+  const std::string body =
+      CallTool("ui_tap", R"({"node_id":4294967298})", &status);
+  EXPECT_EQ(host_.dispatch_calls, 0) << body;
+  EXPECT_EQ(status, IHS_MCP_ERR_NOT_FOUND) << body;
+}
+
+// The ABI hands over a pointer and a length. Nothing in it promises a
+// terminator, so a caller passing a slice of a larger buffer is within
+// contract, and the provider must not read past the length it was given.
+//
+// The arguments are placed so they end exactly at a page boundary with the
+// next page unmapped. A plain heap buffer would not do: reading past it lands
+// on adjacent heap and parses on regardless, so the test would pass under a
+// build without a sanitizer and prove nothing. Here a single byte too far is
+// a fault in every build, which is the point -- this is the one test standing
+// between the ABI's promise and a caller who takes it literally.
+TEST_F(McpSemanticsProviderTest, ArgumentsAreReadWithinTheirLength) {
+  TreeBuilder tree;
+  tree.Add(1, "Root", IHS_SEMANTICS_ROLE_PANE);
+  auto& target = tree.Add(2, "Target", IHS_SEMANTICS_ROLE_BUTTON);
+  target.actions = IHS_SEMANTICS_ACTION_TAP;
+  ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
+
+  const std::string json = R"({"node_id":2})";
+  const auto page = static_cast<size_t>(::sysconf(_SC_PAGESIZE));
+  ASSERT_GT(page, json.size());
+
+  char* region =
+      static_cast<char*>(::mmap(nullptr, page * 2, PROT_READ | PROT_WRITE,
+                                MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+  ASSERT_NE(region, MAP_FAILED);
+  ASSERT_EQ(::mprotect(region + page, page, PROT_NONE), 0);
+
+  char* arguments = region + page - json.size();
+  std::memcpy(arguments, json.data(), json.size());
+
+  IhsMcpPayload payload{};
+  const int status =
+      ihs_mcp_registry_call_tool("ui_tap", arguments, json.size(), &payload);
+  ihs_mcp_registry_release_payload(&payload);
+
+  EXPECT_EQ(status, IHS_MCP_OK);
+  EXPECT_EQ(host_.dispatch_calls, 1);
+  EXPECT_EQ(host_.last_node_id, 2);
+
+  ::munmap(region, page * 2);
+}
+
+// ---------------------------------------------------------------------------
+// Tool policy
+//
+// An image can narrow what the surface offers. The compiled default is
+// already correct, so this only ever takes away -- a configuration file that
+// has to be present for the shell to be safe is one whose absence is a
+// vulnerability.
+//
+// The list is a gate rather than a suggestion because the registry resolves a
+// call against list_tools before routing it. That is what makes narrowing the
+// advertised set sufficient for ui_tap_at, which sends a pointer event rather
+// than a semantics action and so has nothing for the hub mask to enforce.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+std::vector<std::string> OfferedTools() {
+  std::vector<std::string> names;
+  ihs_mcp_registry_for_each_tool(
+      [](const IhsMcpRegistryTool* tool, void* user_data) {
+        static_cast<std::vector<std::string>*>(user_data)->emplace_back(
+            tool->name);
+      },
+      &names);
+  return names;
+}
+
+bool Offers(const std::vector<std::string>& names, const char* tool) {
+  return std::find(names.begin(), names.end(), tool) != names.end();
+}
+
+// Restarts the provider under a policy. The fixture already started it, and
+// start is idempotent by design -- the policy of the first successful start is
+// the one in force -- so a restart is how a different one is applied.
+int RestartWith(const std::vector<const char*>& allowed, bool narrowed) {
+  ihs_mcp_semantics_provider_stop();
+  IhsMcpSemanticsConfig config{};
+  config.struct_size = sizeof(config);
+  config.narrow_tools = narrowed;
+  config.allowed_tools = allowed.empty() ? nullptr : allowed.data();
+  config.allowed_tool_count = allowed.size();
+  return ihs_mcp_semantics_provider_start_with(&config);
+}
+
+}  // namespace
+
+TEST_F(McpSemanticsProviderTest, NoPolicyOffersEverything) {
+  const std::vector<std::string> names = OfferedTools();
+  EXPECT_TRUE(Offers(names, "ui_tap"));
+  EXPECT_TRUE(Offers(names, "ui_set_text"));
+  EXPECT_TRUE(Offers(names, "ui_tap_at"));
+  EXPECT_TRUE(Offers(names, "ui_snapshot"));
+}
+
+// The read-only surface. Reading survives because that is what the tree is
+// for: an agent that cannot read it has nothing to work with, and would see a
+// tool list it could not explain.
+TEST_F(McpSemanticsProviderTest, AnEmptyPolicyLeavesOnlyReading) {
+  ASSERT_EQ(RestartWith({}, /*narrowed=*/true), IHS_MCP_OK);
+  const std::vector<std::string> names = OfferedTools();
+  EXPECT_TRUE(Offers(names, "ui_snapshot"));
+  EXPECT_TRUE(Offers(names, "ui_query"));
+  EXPECT_FALSE(Offers(names, "ui_tap"));
+  EXPECT_FALSE(Offers(names, "ui_set_text"));
+  EXPECT_FALSE(Offers(names, "ui_tap_at"))
+      << "the coordinate tap survived a read-only policy; the hub mask cannot "
+         "stop it, so the tool list is the only thing that can";
+}
+
+TEST_F(McpSemanticsProviderTest, APolicyOffersWhatItNamesAndNothingElse) {
+  ASSERT_EQ(RestartWith({"tap", "scroll_to"}, /*narrowed=*/true), IHS_MCP_OK);
+  const std::vector<std::string> names = OfferedTools();
+  EXPECT_TRUE(Offers(names, "ui_tap"));
+  EXPECT_TRUE(Offers(names, "ui_scroll_to"));
+  EXPECT_FALSE(Offers(names, "ui_set_text"));
+  EXPECT_FALSE(Offers(names, "ui_long_press"));
+}
+
+// Not advertised means not callable, because the registry resolves the name
+// against the listing before it routes. Worth asserting rather than assuming:
+// if that ever stopped being true, every narrowed policy would be decoration.
+TEST_F(McpSemanticsProviderTest, ANarrowedOutToolCannotBeCalled) {
+  TreeBuilder tree;
+  tree.Add(1, "Root", IHS_SEMANTICS_ROLE_PANE);
+  auto& target = tree.Add(2, "Target", IHS_SEMANTICS_ROLE_BUTTON);
+  target.actions = IHS_SEMANTICS_ACTION_TAP;
+  ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
+  ASSERT_EQ(RestartWith({}, /*narrowed=*/true), IHS_MCP_OK);
+
+  int status = 0;
+  const std::string body = CallTool("ui_tap", R"({"node_id":2})", &status);
+  EXPECT_EQ(status, IHS_MCP_ERR_NOT_FOUND) << body;
+  EXPECT_EQ(host_.dispatch_calls, 0)
+      << "a tool that is not offered still reached the framework: " << body;
+}
+
+// A name matching no tool refuses the start outright. Skipping it would grant
+// less than the image asked for and say nothing; the failure mode this avoids
+// is a policy file whose typo silently produced a different surface.
+TEST_F(McpSemanticsProviderTest, AnUnknownToolNameRefusesTheStart) {
+  ihs_mcp_semantics_provider_stop();
+  const std::vector<const char*> allowed = {"tap", "tapp"};
+  IhsMcpSemanticsConfig config{};
+  config.struct_size = sizeof(config);
+  config.narrow_tools = true;
+  config.allowed_tools = allowed.data();
+  config.allowed_tool_count = allowed.size();
+
+  EXPECT_EQ(ihs_mcp_semantics_provider_start_with(&config),
+            IHS_MCP_ERR_INVALID);
+  EXPECT_FALSE(ihs_mcp_semantics_provider_running())
+      << "a policy that could not be applied left a surface running under "
+         "some other one";
+  EXPECT_EQ(ihs_mcp_provider_count(), 0u);
+
+  // The fixture's teardown expects to be able to stop cleanly either way.
+  ASSERT_EQ(ihs_mcp_semantics_provider_start(), IHS_MCP_OK);
+}
+
+// A config from a caller built against an older header is refused rather than
+// read past. The struct carries its own size for exactly this.
+TEST_F(McpSemanticsProviderTest, AShortConfigIsRefused) {
+  ihs_mcp_semantics_provider_stop();
+  IhsMcpSemanticsConfig config{};
+  config.struct_size = sizeof(config) - 1;
+  EXPECT_EQ(ihs_mcp_semantics_provider_start_with(&config),
+            IHS_MCP_ERR_INVALID);
+  ASSERT_EQ(ihs_mcp_semantics_provider_start(), IHS_MCP_OK);
+}
+
+// The mask handed to the hub is derived from the tool table, so a tool that
+// dispatches more than its primary action has to say so. Two do: custom_action
+// routes itself, and set_text focuses the field first because the framework
+// ignores text sent to a field with no input connection.
+//
+// Deriving the mask from the primary action alone leaves those advertised and
+// then refused at the funnel, which reads to a client as the surface being
+// broken rather than as policy. This exercises both under a narrowed policy,
+// where the mask is at its tightest and the omission would show.
+TEST_F(McpSemanticsProviderTest, ANarrowedPolicyStillAllowsWhatItsToolsNeed) {
+  TreeBuilder tree;
+  tree.Add(1, "Root", IHS_SEMANTICS_ROLE_PANE);
+  auto& field = tree.Add(2, "Destination", IHS_SEMANTICS_ROLE_TEXT_INPUT);
+  field.actions = IHS_SEMANTICS_ACTION_SET_TEXT | IHS_SEMANTICS_ACTION_FOCUS;
+  auto& button = tree.Add(3, "Climate", IHS_SEMANTICS_ROLE_BUTTON);
+  button.actions = IHS_SEMANTICS_ACTION_CUSTOM_ACTION;
+  static const int32_t kIds[] = {11};
+  button.custom_action_ids = kIds;
+  button.custom_action_count = 1;
+  tree.AddCustomAction(11, "Set to maximum");
+  ASSERT_EQ(tree.Publish(), IHS_SEMANTICS_OK);
+
+  ASSERT_EQ(RestartWith({"set_text", "custom_action"}, /*narrowed=*/true),
+            IHS_MCP_OK);
+
+  int status = 0;
+  CallTool("ui_set_text", R"({"node_id":2,"text":"Portland"})", &status);
+  EXPECT_EQ(status, IHS_MCP_OK)
+      << "set_text was offered but the mask refused what it needs";
+
+  status = 0;
+  const std::string body =
+      CallTool("ui_custom_action", R"({"node_id":3,"action":"Set to maximum"})",
+               &status);
+  // The specific expectation, not the absence of one guessed error code: a
+  // mask missing this action refuses at the funnel, which surfaces as
+  // "refused" rather than "capability denied", and asserting the latter would
+  // pass straight over it.
+  EXPECT_EQ(status, IHS_MCP_OK)
+      << "custom_action was offered but the mask does not carry its action: "
+      << body;
 }

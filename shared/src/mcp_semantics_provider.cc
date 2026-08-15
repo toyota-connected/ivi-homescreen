@@ -37,6 +37,7 @@
 
 #include "ihs/ihs_mcp_provider.h"
 #include "ihs/ihs_semantics.h"
+#include "ihs/logging.h"
 
 namespace {
 
@@ -47,7 +48,21 @@ struct ToolEntry {
   const char* name;
   const char* description;
   const char* schema;
+
+  // The action the generic dispatch path sends. Zero for the tools answered
+  // from the snapshot, and for the two the call handler routes itself.
   uint64_t action;
+
+  // Every hub action this tool may cause, which is what the allow mask is
+  // built from and is not always `action`. Two tools dispatch something that
+  // field does not name: custom_action routes itself and sends CUSTOM_ACTION,
+  // and set_text focuses the field first, because the framework ignores text
+  // sent to a field with no input connection. Deriving the mask from `action`
+  // alone drops both, and the result is a tool that is advertised and then
+  // refused at the funnel -- which reads to a client as the surface being
+  // broken rather than as policy.
+  uint64_t dispatches;
+
   uint64_t capability;
 };
 
@@ -104,35 +119,46 @@ constexpr char kTapAtSchema[] =
     R"(},"required":["x","y"]})";
 
 const ToolEntry kTools[] = {
-    {"snapshot", "The whole semantics tree as JSON.", kEmptySchema, 0,
+    {"snapshot", "The whole semantics tree as JSON.", kEmptySchema, 0, 0,
      IHS_MCP_CAP_INSPECT},
     {"query", "Find nodes by identifier, label substring, or role.",
-     kQuerySchema, 0, IHS_MCP_CAP_INSPECT},
+     kQuerySchema, 0, 0, IHS_MCP_CAP_INSPECT},
     {"tap", "Activate a node, as a tap would.", kNodeSchema,
-     IHS_SEMANTICS_ACTION_TAP, IHS_MCP_CAP_INTERACT},
+     IHS_SEMANTICS_ACTION_TAP, IHS_SEMANTICS_ACTION_TAP, IHS_MCP_CAP_INTERACT},
     {"long_press", "Long-press a node.", kNodeSchema,
-     IHS_SEMANTICS_ACTION_LONG_PRESS, IHS_MCP_CAP_INTERACT},
+     IHS_SEMANTICS_ACTION_LONG_PRESS, IHS_SEMANTICS_ACTION_LONG_PRESS,
+     IHS_MCP_CAP_INTERACT},
     {"increase", "Increment a value, as on a slider.", kNodeSchema,
-     IHS_SEMANTICS_ACTION_INCREASE, IHS_MCP_CAP_INTERACT},
+     IHS_SEMANTICS_ACTION_INCREASE, IHS_SEMANTICS_ACTION_INCREASE,
+     IHS_MCP_CAP_INTERACT},
     {"decrease", "Decrement a value.", kNodeSchema,
-     IHS_SEMANTICS_ACTION_DECREASE, IHS_MCP_CAP_INTERACT},
+     IHS_SEMANTICS_ACTION_DECREASE, IHS_SEMANTICS_ACTION_DECREASE,
+     IHS_MCP_CAP_INTERACT},
     {"show_on_screen", "Scroll a node into view.", kNodeSchema,
-     IHS_SEMANTICS_ACTION_SHOW_ON_SCREEN, IHS_MCP_CAP_INTERACT},
+     IHS_SEMANTICS_ACTION_SHOW_ON_SCREEN, IHS_SEMANTICS_ACTION_SHOW_ON_SCREEN,
+     IHS_MCP_CAP_INTERACT},
     {"dismiss", "Dismiss a node, as a swipe-away would.", kNodeSchema,
-     IHS_SEMANTICS_ACTION_DISMISS, IHS_MCP_CAP_INTERACT},
+     IHS_SEMANTICS_ACTION_DISMISS, IHS_SEMANTICS_ACTION_DISMISS,
+     IHS_MCP_CAP_INTERACT},
     {"expand", "Expand a node.", kNodeSchema, IHS_SEMANTICS_ACTION_EXPAND,
-     IHS_MCP_CAP_INTERACT},
+     IHS_SEMANTICS_ACTION_EXPAND, IHS_MCP_CAP_INTERACT},
     {"collapse", "Collapse a node.", kNodeSchema, IHS_SEMANTICS_ACTION_COLLAPSE,
-     IHS_MCP_CAP_INTERACT},
+     IHS_SEMANTICS_ACTION_COLLAPSE, IHS_MCP_CAP_INTERACT},
+    // Focus as well as the text itself: the framework ignores text sent to a
+    // field with no input connection, so the tool opens one first.
     {"set_text", "Replace the text in a text field.", kSetTextSchema,
-     IHS_SEMANTICS_ACTION_SET_TEXT, IHS_MCP_CAP_INTERACT},
+     IHS_SEMANTICS_ACTION_SET_TEXT,
+     IHS_SEMANTICS_ACTION_SET_TEXT | IHS_SEMANTICS_ACTION_FOCUS,
+     IHS_MCP_CAP_INTERACT},
     {"scroll_to", "Scroll a container to a given offset.", kScrollToSchema,
+     IHS_SEMANTICS_ACTION_SCROLL_TO_OFFSET,
      IHS_SEMANTICS_ACTION_SCROLL_TO_OFFSET, IHS_MCP_CAP_INTERACT},
     {"custom_action",
      "Invoke one of a node's application-defined actions, named by the label "
      "the tree reports in custom_actions. These are the app's own verbs -- "
      "there is no fixed set, and a node offers only what it declared.",
-     kCustomActionSchema, 0, IHS_MCP_CAP_INTERACT},
+     kCustomActionSchema, 0, IHS_SEMANTICS_ACTION_CUSTOM_ACTION,
+     IHS_MCP_CAP_INTERACT},
     // Action 0: this one does not dispatch a semantics action at all, and the
     // call handler routes it separately. Its description says so, because the
     // difference is the caller's to reason about -- a tap that is hit-tested
@@ -142,7 +168,7 @@ const ToolEntry kTools[] = {
      "describe. Unlike ui_tap this is hit-tested: whatever is drawn on top "
      "receives it, it races animation, and nothing confirms what it hit. "
      "Prefer ui_tap wherever a node offers it.",
-     kTapAtSchema, 0, IHS_MCP_CAP_INTERACT},
+     kTapAtSchema, 0, 0, IHS_MCP_CAP_INTERACT},
 };
 
 // The accessibility-focus actions are deliberately absent from the table
@@ -150,6 +176,40 @@ const ToolEntry kTools[] = {
 // not be able to yank it away from someone reading the screen. The hub's
 // allow mask below enforces the same thing a second time, at the funnel.
 constexpr uint64_t kAllowMask = IHS_SEMANTICS_ACTION_NO_A11Y_FOCUS;
+
+constexpr size_t kToolCount = sizeof(kTools) / sizeof(kTools[0]);
+
+// Logging goes through the C API for the same reason the rest of ihs_shared
+// does: the library sits below the shell's C++ logging wrapper.
+int32_t TraceContext() {
+  static const int32_t ctx = ihs_log_context_open("MCPS", nullptr);
+  return ctx;
+}
+
+void Log(const int32_t level, const std::string& text) {
+  const int32_t ctx = TraceContext();
+  if (ctx < 0 || ihs_log_enabled(ctx, static_cast<uint8_t>(level)) == 0) {
+    return;
+  }
+  ihs_log(ctx, static_cast<uint8_t>(level), text.c_str(), text.size());
+}
+
+// Reading is what the tree is for, so the read-only tools are offered whatever
+// the policy says. A surface that cannot be read has no purpose: an agent
+// would see a tool list it cannot use and no way to find out why.
+bool AlwaysOffered(const char* name) {
+  return std::strcmp(name, "snapshot") == 0 || std::strcmp(name, "query") == 0;
+}
+
+// Index of a tool by its unprefixed name, or kToolCount when there is none.
+size_t ToolIndexFor(const char* name) {
+  for (size_t i = 0; i < kToolCount; i++) {
+    if (std::strcmp(kTools[i].name, name) == 0) {
+      return i;
+    }
+  }
+  return kToolCount;
+}
 
 const char* RoleName(const IhsSemanticsRole role) {
   switch (role) {
@@ -386,107 +446,84 @@ std::string ErrorJson(const char* reason, const uint64_t generation) {
   return buffer.GetString();
 }
 
-// Minimal extraction for the two argument shapes this provider accepts. A full
-// parser is not warranted: the host hands over a JSON object, and what is
-// needed from it is one integer or one string.
-bool ExtractInt(const char* json, const char* key, int32_t* out) {
-  const std::string needle = std::string("\"") + key + "\"";
-  const char* at = std::strstr(json, needle.c_str());
-  if (at == nullptr) {
-    return false;
+// One tool call's arguments, parsed once.
+//
+// Two properties matter here and neither is incidental.
+//
+// It is bounded by the length the ABI supplies rather than by a terminator.
+// The callback signature is (const char*, size_t) and nothing in it promises
+// a NUL, so reaching for one reads past the buffer whenever a caller passes a
+// slice of a larger one. The transport happens to pass a NUL-terminated
+// std::string today, which is the only reason that was not already a fault --
+// an invariant held by the caller's accident rather than by the contract.
+//
+// It is a parse rather than a scan. The extractors this replaces searched the
+// raw text for "key", which meant a key-like substring inside a value was
+// indistinguishable from the argument itself: a client sending a label of
+// `x", "node_id": 2, "z": "` had a node_id the request never contained. It
+// also could not survive an escaped quote in any value a client chose, which
+// is every query selector.
+class Arguments {
+ public:
+  Arguments(const char* json, const size_t length) {
+    // An absent argument set is "{}" by the provider ABI, so a null here is a
+    // caller error rather than an empty call; either way there is nothing to
+    // read and every accessor reports absence.
+    if (json != nullptr) {
+      document_.Parse(json, length);
+    }
   }
-  at = std::strchr(at + needle.size(), ':');
-  if (at == nullptr) {
-    return false;
-  }
-  // strtol rather than sscanf: this reports whether anything was consumed and
-  // whether the value fits, so a malformed argument is refused rather than
-  // silently becoming node 0 -- which is the root, and would act on the wrong
-  // thing.
-  errno = 0;
-  char* end = nullptr;
-  const long value = std::strtol(at + 1, &end, 10);
-  if (end == at + 1 || errno == ERANGE || value < INT32_MIN ||
-      value > INT32_MAX) {
-    return false;
-  }
-  *out = static_cast<int32_t>(value);
-  return true;
-}
 
-bool ExtractString(const char* json, const char* key, std::string* out) {
-  const std::string needle = std::string("\"") + key + "\"";
-  const char* at = std::strstr(json, needle.c_str());
-  if (at == nullptr) {
-    return false;
+  bool Int(const char* key, int32_t* out) const {
+    const rapidjson::Value* value = Find(key);
+    // IsInt is the range check: a number too large for int32 is not an int
+    // here, so it is refused rather than truncated into some other node's id.
+    if (value == nullptr || !value->IsInt()) {
+      return false;
+    }
+    *out = value->GetInt();
+    return true;
   }
-  at = std::strchr(at + needle.size(), ':');
-  if (at == nullptr) {
-    return false;
-  }
-  const char* open = std::strchr(at, '"');
-  if (open == nullptr) {
-    return false;
-  }
-  const char* close = std::strchr(open + 1, '"');
-  if (close == nullptr) {
-    return false;
-  }
-  out->assign(open + 1, static_cast<size_t>(close - open - 1));
-  return true;
-}
 
-// The extractors above scan for a key and take the next quoted run, which
-// cannot survive an escaped quote or a key-like substring inside a value.
-// That is tolerable for an identifier, which the application chooses, and not
-// for arbitrary text a client sends, so the parameterized arguments are parsed
-// properly instead.
-bool ReadStringArgument(const char* json, const char* key, std::string* out) {
-  rapidjson::Document doc;
-  if (json == nullptr || doc.Parse(json).HasParseError() || !doc.IsObject()) {
-    return false;
+  bool String(const char* key, std::string* out) const {
+    const rapidjson::Value* value = Find(key);
+    if (value == nullptr || !value->IsString()) {
+      return false;
+    }
+    out->assign(value->GetString(), value->GetStringLength());
+    return true;
   }
-  const auto member = doc.FindMember(key);
-  if (member == doc.MemberEnd() || !member->value.IsString()) {
-    return false;
-  }
-  out->assign(member->value.GetString(), member->value.GetStringLength());
-  return true;
-}
 
-// Refuses rather than defaulting. A coordinate is not something to guess at:
-// tapping (0, 0) because the caller omitted y would press whatever is in the
-// corner, which is worse than an error.
-bool ReadNumberArgumentRequired(const char* json,
-                                const char* key,
-                                double* out) {
-  rapidjson::Document doc;
-  if (json == nullptr || doc.Parse(json).HasParseError() || !doc.IsObject()) {
-    return false;
+  // Refuses rather than defaulting. A coordinate is not something to guess at:
+  // tapping (0, 0) because the caller omitted y would press whatever is in the
+  // corner, which is worse than an error.
+  bool Number(const char* key, double* out) const {
+    const rapidjson::Value* value = Find(key);
+    if (value == nullptr || !value->IsNumber()) {
+      return false;
+    }
+    *out = value->GetDouble();
+    return true;
   }
-  const auto member = doc.FindMember(key);
-  if (member == doc.MemberEnd() || !member->value.IsNumber()) {
-    return false;
-  }
-  *out = member->value.GetDouble();
-  return true;
-}
 
-// Absent or non-numeric yields the fallback: an axis a caller did not name is
-// zero rather than an error, so scrolling a vertical list needs only dy.
-double ReadNumberArgument(const char* json,
-                          const char* key,
-                          const double fallback) {
-  rapidjson::Document doc;
-  if (json == nullptr || doc.Parse(json).HasParseError() || !doc.IsObject()) {
-    return fallback;
+  // Absent or non-numeric yields the fallback: an axis a caller did not name
+  // is zero rather than an error, so scrolling a vertical list needs only dy.
+  double NumberOr(const char* key, const double fallback) const {
+    double value = fallback;
+    return Number(key, &value) ? value : fallback;
   }
-  const auto member = doc.FindMember(key);
-  if (member == doc.MemberEnd() || !member->value.IsNumber()) {
-    return fallback;
+
+ private:
+  const rapidjson::Value* Find(const char* key) const {
+    if (document_.HasParseError() || !document_.IsObject()) {
+      return nullptr;
+    }
+    const auto member = document_.FindMember(key);
+    return member == document_.MemberEnd() ? nullptr : &member->value;
   }
-  return member->value.GetDouble();
-}
+
+  rapidjson::Document document_;
+};
 
 // Waits for a tree newer than `generation`, or gives up. Used where an action
 // only becomes available after the framework has rebuilt -- focusing a field
@@ -576,14 +613,13 @@ void WriteOutcome(rapidjson::Writer<rapidjson::StringBuffer>& w,
 
 // Resolves the node a tool call names, by id or by identifier.
 const IhsSemanticsNode* ResolveNode(const IhsSemanticsSnapshot* snapshot,
-                                    const char* arguments) {
+                                    const Arguments& arguments) {
   int32_t id = 0;
-  if (ExtractInt(arguments, "node_id", &id)) {
+  if (arguments.Int("node_id", &id)) {
     return ihs_semantics_snapshot_node_by_id(snapshot, id);
   }
   std::string identifier;
-  if (ExtractString(arguments, "identifier", &identifier) &&
-      !identifier.empty()) {
+  if (arguments.String("identifier", &identifier) && !identifier.empty()) {
     const size_t count = ihs_semantics_snapshot_node_count(snapshot);
     for (size_t i = 0; i < count; i++) {
       const IhsSemanticsNode* node =
@@ -675,22 +711,22 @@ bool DeclaresCustomAction(const IhsSemanticsSnapshot* snapshot,
 }
 
 std::string RunQuery(const IhsSemanticsSnapshot* snapshot,
-                     const char* arguments) {
+                     const Arguments& arguments) {
   std::string want_identifier;
   std::string want_label;
   std::string want_role;
   std::string want_action;
   std::string want_custom_action;
   std::string want_enabled;
-  ExtractString(arguments, "identifier", &want_identifier);
-  ExtractString(arguments, "label", &want_label);
-  ExtractString(arguments, "role", &want_role);
-  ExtractString(arguments, "action", &want_action);
-  ExtractString(arguments, "custom_action", &want_custom_action);
-  ExtractString(arguments, "enabled", &want_enabled);
+  arguments.String("identifier", &want_identifier);
+  arguments.String("label", &want_label);
+  arguments.String("role", &want_role);
+  arguments.String("action", &want_action);
+  arguments.String("custom_action", &want_custom_action);
+  arguments.String("enabled", &want_enabled);
 
   int32_t limit = 0;
-  const bool bounded = ExtractInt(arguments, "limit", &limit) && limit > 0;
+  const bool bounded = arguments.Int("limit", &limit) && limit > 0;
 
   // An action name that names nothing would otherwise select every node, since
   // a zero mask tests true against anything. Reported rather than silently
@@ -768,7 +804,7 @@ std::string RunQuery(const IhsSemanticsSnapshot* snapshot,
 int CallTool(void* /* user_data */,
              const char* name,
              const char* arguments_json,
-             size_t /* arguments_length */,
+             const size_t arguments_length,
              IhsMcpPayload* out_result) {
   const ToolEntry* tool = nullptr;
   for (const ToolEntry& candidate : kTools) {
@@ -780,6 +816,11 @@ int CallTool(void* /* user_data */,
   if (tool == nullptr) {
     return IHS_MCP_ERR_NOT_FOUND;
   }
+
+  // Parsed once, here, and read from by every path below. Bounded by the
+  // length the caller supplied rather than by a terminator the ABI does not
+  // promise.
+  const Arguments arguments(arguments_json, arguments_length);
 
   const IhsSemanticsSnapshot* snapshot = ihs_semantics_acquire_snapshot();
   if (snapshot == nullptr) {
@@ -796,7 +837,7 @@ int CallTool(void* /* user_data */,
     return IHS_MCP_OK;
   }
   if (std::strcmp(name, "query") == 0) {
-    FillPayload(out_result, RunQuery(snapshot, arguments_json));
+    FillPayload(out_result, RunQuery(snapshot, arguments));
     ihs_semantics_release_snapshot(snapshot);
     return IHS_MCP_OK;
   }
@@ -810,8 +851,7 @@ int CallTool(void* /* user_data */,
 
     double x = 0.0;
     double y = 0.0;
-    if (!ReadNumberArgumentRequired(arguments_json, "x", &x) ||
-        !ReadNumberArgumentRequired(arguments_json, "y", &y)) {
+    if (!arguments.Number("x", &x) || !arguments.Number("y", &y)) {
       FillPayload(out_result,
                   ErrorJson("tap_at requires x and y", generation_now));
       return IHS_MCP_ERR_INVALID;
@@ -848,7 +888,7 @@ int CallTool(void* /* user_data */,
     return IHS_MCP_OK;
   }
 
-  const IhsSemanticsNode* node = ResolveNode(snapshot, arguments_json);
+  const IhsSemanticsNode* node = ResolveNode(snapshot, arguments);
   if (node == nullptr) {
     FillPayload(out_result,
                 ErrorJson("no node matched node_id or identifier", generation));
@@ -871,8 +911,8 @@ int CallTool(void* /* user_data */,
 
     std::string wanted;
     int32_t action_id = 0;
-    const bool by_id = ExtractInt(arguments_json, "action_id", &action_id);
-    if (!by_id && !ReadStringArgument(arguments_json, "action", &wanted)) {
+    const bool by_id = arguments.Int("action_id", &action_id);
+    if (!by_id && !arguments.String("action", &wanted)) {
       FillPayload(
           out_result,
           ErrorJson("custom_action requires action or action_id", generation));
@@ -1012,7 +1052,7 @@ int CallTool(void* /* user_data */,
       return IHS_MCP_ERR_REFUSED;
     }
     std::string text;
-    if (!ReadStringArgument(arguments_json, "text", &text)) {
+    if (!arguments.String("text", &text)) {
       FillPayload(out_result, ErrorJson("set_text requires text", generation));
       return IHS_MCP_ERR_INVALID;
     }
@@ -1020,8 +1060,8 @@ int CallTool(void* /* user_data */,
   } else if (tool->action == IHS_SEMANTICS_ACTION_SCROLL_TO_OFFSET) {
     // Absent axes are zero rather than an error: scrolling a vertical list
     // means naming dy, and demanding dx as well would be noise.
-    const double offset[2] = {ReadNumberArgument(arguments_json, "dx", 0.0),
-                              ReadNumberArgument(arguments_json, "dy", 0.0)};
+    const double offset[2] = {arguments.NumberOr("dx", 0.0),
+                              arguments.NumberOr("dy", 0.0)};
     const auto* bytes = reinterpret_cast<const uint8_t*>(offset);
     argument.assign(bytes, bytes + sizeof(offset));
   }
@@ -1054,6 +1094,42 @@ int CallTool(void* /* user_data */,
 extern "C" {
 
 int ihs_mcp_semantics_provider_start(void) {
+  return ihs_mcp_semantics_provider_start_with(nullptr);
+}
+
+int ihs_mcp_semantics_provider_start_with(const IhsMcpSemanticsConfig* config) {
+  if (config != nullptr &&
+      config->struct_size < sizeof(IhsMcpSemanticsConfig)) {
+    return IHS_MCP_ERR_INVALID;
+  }
+
+  // Which tools this start offers. Resolved before anything is registered:
+  // a policy that cannot be applied must not leave the surface running under
+  // some other one.
+  std::vector<bool> offered(kToolCount, true);
+  if (config != nullptr && config->narrow_tools) {
+    for (size_t i = 0; i < kToolCount; i++) {
+      offered[i] = AlwaysOffered(kTools[i].name);
+    }
+    for (size_t i = 0; i < config->allowed_tool_count; i++) {
+      const char* wanted =
+          config->allowed_tools == nullptr ? nullptr : config->allowed_tools[i];
+      if (wanted == nullptr) {
+        return IHS_MCP_ERR_INVALID;
+      }
+      const size_t index = ToolIndexFor(wanted);
+      if (index == kToolCount) {
+        // Naming a tool that does not exist is refused rather than ignored.
+        // A typo in a policy file must not quietly grant less than intended,
+        // and least of all must it quietly grant more.
+        Log(IHS_LEVEL_ERROR,
+            std::string("mcp: no such tool in the allow list: ") + wanted);
+        return IHS_MCP_ERR_INVALID;
+      }
+      offered[index] = true;
+    }
+  }
+
   Provider& p = TheProvider();
   std::lock_guard<std::mutex> lock(p.mutex);
   if (p.mcp != nullptr) {
@@ -1062,18 +1138,48 @@ int ihs_mcp_semantics_provider_start(void) {
 
   p.names.clear();
   p.tools.clear();
-  p.names.reserve(sizeof(kTools) / sizeof(kTools[0]));
-  p.tools.reserve(sizeof(kTools) / sizeof(kTools[0]));
-  for (const ToolEntry& entry : kTools) {
-    p.names.emplace_back(entry.name);
-  }
-  for (size_t i = 0; i < p.names.size(); i++) {
+  p.names.reserve(kToolCount);
+  p.tools.reserve(kToolCount);
+  // The hub mask carries only the tools that dispatch a semantics action, and
+  // never more than the compiled default allows. ui_tap_at is deliberately
+  // absent from it: it sends a pointer event rather than an action, so the
+  // hub has nothing to enforce and the tool list is the only thing standing
+  // in front of it. That the registry resolves a call against the list before
+  // routing it is what makes the list a gate rather than a suggestion.
+  uint64_t mask = 0;
+  for (size_t i = 0; i < kToolCount; i++) {
+    if (!offered[i]) {
+      continue;
+    }
+    mask |= kTools[i].dispatches;
+    p.names.emplace_back(kTools[i].name);
     IhsMcpToolDesc desc{};
-    desc.name = p.names[i].c_str();
     desc.description = kTools[i].description;
     desc.input_schema_json = kTools[i].schema;
     desc.capability = kTools[i].capability;
     p.tools.push_back(desc);
+  }
+  // Names are pointed at after the vector has stopped growing; a c_str() taken
+  // during the loop above would dangle on the next reallocation.
+  for (size_t i = 0; i < p.names.size(); i++) {
+    p.tools[i].name = p.names[i].c_str();
+  }
+  mask &= kAllowMask;
+
+  // What a policy actually permitted, once. Anything this grants should be
+  // visible without running an experiment to find out -- a mask read from
+  // configuration is exactly the kind of thing that is assumed rather than
+  // checked, and a narrowed surface that silently did not narrow looks
+  // identical to one that did until an agent uses it.
+  if (p.names.size() < kToolCount) {
+    std::string offered_names;
+    for (const std::string& name : p.names) {
+      offered_names += offered_names.empty() ? "" : ", ";
+      offered_names += name;
+    }
+    Log(IHS_LEVEL_INFO, "mcp: semantics tools narrowed to " +
+                            std::to_string(p.names.size()) + " of " +
+                            std::to_string(kToolCount) + ": " + offered_names);
   }
 
   p.resources[0].uri = "ui://semantics/tree";
@@ -1097,7 +1203,7 @@ int ihs_mcp_semantics_provider_start(void) {
   IhsSemanticsConsumerDesc consumer{};
   consumer.struct_size = sizeof(IhsSemanticsConsumerDesc);
   consumer.name = "mcp.semantics";
-  consumer.action_allow_mask = kAllowMask;
+  consumer.action_allow_mask = mask;
   consumer.notify_fd = p.notify_fd;
   if (ihs_semantics_register(&consumer, &p.consumer) != IHS_SEMANTICS_OK) {
     ::close(p.notify_fd);
