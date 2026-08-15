@@ -185,10 +185,22 @@ add_subdirectory(watchdog-test)
 add_subdirectory(wake_event_fd-test)
 add_subdirectory(libinput_log-test)
 add_subdirectory(partial_repaint_gate-test)
-add_subdirectory(gl_process_resolver-test)
+# EglProcessResolver is compiled only with a GL-based backend, so its test has
+# nothing to link against otherwise. The source list these drivers are built
+# from is the shell target's own, which means it already follows the backend
+# gating -- and a test subdirectory that does not follow it too is a build
+# break in any configuration nobody happens to run.
+if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_HEADLESS_EGL OR
+        BUILD_BACKEND_DRM_KMS_EGL)
+    add_subdirectory(gl_process_resolver-test)
+endif ()
 add_subdirectory(shared_library-test)
 add_subdirectory(backing_store_pool-test)
-add_subdirectory(present_layer_sequencer-test)
+# PresentLayerSequencer orders wl_subsurfaces, so it exists only in a Wayland
+# build -- same reasoning as gl_process_resolver-test above.
+if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN)
+    add_subdirectory(present_layer_sequencer-test)
+endif ()
 add_subdirectory(compositor_registry-test)
 add_subdirectory(platform_view_registry-test)
 add_subdirectory(backend_output_binding-test)

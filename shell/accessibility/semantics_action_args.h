@@ -51,6 +51,46 @@ std::optional<std::vector<uint8_t>> EncodeActionArguments(uint64_t action,
                                                           const uint8_t* data,
                                                           size_t data_length);
 
+/*
+ * Which engine entry point a semantics dispatch should use.
+ *
+ * The go-forward call carries a view id; the deprecated one does not and
+ * always lands on the implicit view. Whether the first exists is decided at
+ * load time by an optional symbol resolve, because a header that declares it
+ * says nothing about what the deployed engine exports.
+ */
+enum class SemanticsDispatchRoute {
+  /* FlutterEngineSendSemanticsAction: carries the view id. */
+  kSendWithViewId,
+  /* FlutterEngineDispatchSemanticsAction: implicit view only. */
+  kDeprecatedImplicitView,
+  /* Neither is correct: refuse. */
+  kRefuseMultiview,
+};
+
+/*
+ * Chooses the route, given whether the engine exported the newer entry point
+ * and which view the action is for.
+ *
+ * Extracted from the dispatch itself so the decision can be tested without an
+ * engine of the older revision to hand -- which is the only other way to reach
+ * two of these three answers, and is why they went unexercised.
+ *
+ * The case worth stating: an older engine plus a non-zero view id is refused
+ * rather than sent through the deprecated call. That entry point has no view
+ * id, so the action would arrive at the implicit view -- a different control
+ * than the caller named, activated silently and reported as success.
+ */
+constexpr SemanticsDispatchRoute ChooseSemanticsDispatch(
+    const bool engine_has_send_with_view_id,
+    const int64_t view_id) {
+  if (engine_has_send_with_view_id) {
+    return SemanticsDispatchRoute::kSendWithViewId;
+  }
+  return view_id == 0 ? SemanticsDispatchRoute::kDeprecatedImplicitView
+                      : SemanticsDispatchRoute::kRefuseMultiview;
+}
+
 }  // namespace accessibility
 
 #endif  // SHELL_ACCESSIBILITY_SEMANTICS_ACTION_ARGS_H_

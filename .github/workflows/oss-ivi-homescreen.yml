@@ -586,6 +586,54 @@ jobs:
         working-directory: ${{github.workspace}}/build/unit-tests
         run: ctest --output-on-failure --test-dir .
 
+      # A second configuration of the same sources, for one reason: the link
+      # flags differ by build type. -Wl,--as-needed is appended to
+      # CMAKE_EXE_LINKER_FLAGS_RELEASE only, and every other unit-test
+      # configuration in this repository is Debug -- so a library dropped for
+      # want of a DT_NEEDED is invisible here. That is not hypothetical: it
+      # left 19 test drivers unable to link against libGLESv2 while CI stayed
+      # green.
+      #
+      # The flags are deliberately minimal, and adding more backends here
+      # would quietly switch this check off. Measured on the defect this leg
+      # exists for: the default backend set fails 16 targets, wayland-egl
+      # alone fails 19, and turning every backend on fails none -- because
+      # some other consumer then names the library early enough to keep it.
+      # The default set is also what a contributor gets, since Release is what
+      # an unset CMAKE_BUILD_TYPE selects.
+      #
+      # Runs in this job rather than a new one: the checkout and packages are
+      # already here, and a runner of its own would cost more than the build.
+      # Coverage stays on the Debug build, which is where it has to be.
+      - name: Configure (Release, link-flag coverage)
+        run: |
+          cmake -GNinja \
+            -B ${{github.workspace}}/build/unit-tests-release \
+            -D CMAKE_BUILD_TYPE=Release \
+            -D BUILD_UNIT_TESTS=ON \
+            -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging-release/usr/local \
+            -D BUILD_NUMBER=${GITHUB_RUN_ID}
+
+      # Same ordering hazard the accesskit job documents: the unit-test targets
+      # compile the Wayland sources without depending on the scanner targets,
+      # so a fresh build directory races and ninja can reach them first. It
+      # surfaces as a couple of dozen compile errors that vanish on a second
+      # run, which is a confusing way to learn about a missing edge.
+      - name: Generate Wayland protocol headers (Release)
+        working-directory: ${{github.workspace}}/build/unit-tests-release
+        run: |
+          ninja $(ninja -t targets all \
+            | grep -oE "^shell/wayland-protocols/[a-z0-9_]+\.hpp" \
+            | sort -u | tr '\n' ' ')
+
+      - name: Build (Release)
+        working-directory: ${{github.workspace}}/build/unit-tests-release
+        run: ninja -C .
+
+      - name: Run unit tests (Release)
+        working-directory: ${{github.workspace}}/build/unit-tests-release
+        run: ctest --output-on-failure --test-dir .
+
       - name: Capture coverage data
         working-directory: ${{github.workspace}}/build/unit-tests
         run: |

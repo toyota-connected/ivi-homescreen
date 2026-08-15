@@ -191,3 +191,47 @@ TEST(SemanticsActionArgs, CustomActionWithAWrongSizedIdIsRefused) {
                    IHS_SEMANTICS_ACTION_CUSTOM_ACTION, stub, sizeof(stub))
                    .has_value());
 }
+
+// ---------------------------------------------------------------------------
+// Engine entry-point selection
+//
+// FlutterEngineSendSemanticsAction is resolved optionally at load time: the
+// vendored header declaring it says nothing about what the deployed engine
+// exports, and the deployment floor is older than the header. Two of the three
+// answers below are only reachable against such an engine, which is why they
+// went unexercised -- the decision is extracted so it can be tested without
+// one to hand.
+// ---------------------------------------------------------------------------
+
+TEST(SemanticsDispatchRouteTest, NewerEngineCarriesTheViewId) {
+  EXPECT_EQ(accessibility::ChooseSemanticsDispatch(true, 0),
+            accessibility::SemanticsDispatchRoute::kSendWithViewId);
+  EXPECT_EQ(accessibility::ChooseSemanticsDispatch(true, 3),
+            accessibility::SemanticsDispatchRoute::kSendWithViewId);
+}
+
+// The single-view case degrades cleanly: the deprecated entry point always
+// lands on the implicit view, which for view 0 is the right one.
+TEST(SemanticsDispatchRouteTest, OlderEngineUsesTheDeprecatedCallForViewZero) {
+  EXPECT_EQ(accessibility::ChooseSemanticsDispatch(false, 0),
+            accessibility::SemanticsDispatchRoute::kDeprecatedImplicitView);
+}
+
+// The case that matters. An older engine cannot address a view, so sending
+// through the deprecated call would activate a control on the implicit view --
+// a different one than the caller named, silently, and reported as success.
+// Refusing is the only answer that does not lie.
+TEST(SemanticsDispatchRouteTest, OlderEngineRefusesAMultiviewDispatch) {
+  EXPECT_EQ(accessibility::ChooseSemanticsDispatch(false, 1),
+            accessibility::SemanticsDispatchRoute::kRefuseMultiview);
+  EXPECT_EQ(accessibility::ChooseSemanticsDispatch(false, 42),
+            accessibility::SemanticsDispatchRoute::kRefuseMultiview);
+}
+
+// The choice is made without touching the engine, so it is usable from a
+// constant expression -- and, more to the point, a change that made it depend
+// on runtime state would stop compiling here rather than quietly becoming
+// untestable again.
+static_assert(accessibility::ChooseSemanticsDispatch(false, 1) ==
+                  accessibility::SemanticsDispatchRoute::kRefuseMultiview,
+              "the route decision must stay a pure function of its inputs");

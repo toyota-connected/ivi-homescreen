@@ -65,6 +65,29 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(XKBCOMMON_PLATFORM REQUIRED IMPORTED_TARGET xkbcommon)
 target_link_libraries(platform_homescreen PUBLIC PkgConfig::XKBCOMMON_PLATFORM)
 
+# The external-texture path calls GL directly (flutter_desktop_texture_registrar.cc
+# populates a FlutterOpenGLTexture; flutter_desktop.cc frees one), so declare
+# that here rather than relying on a consumer to have linked GL already.
+#
+# Relying on the consumer is what was happening, and it does not survive
+# -Wl,--as-needed. A consumer that names GL *before* this archive gets no
+# DT_NEEDED for it: at the point the linker saw libGLESv2 nothing had asked for
+# a GL symbol yet, and the archive members that do are pulled in afterwards.
+# The shell binary happened to order it the other way round; the unit test
+# drivers did not, and 19 of them failed to link on undefined glGenTextures.
+#
+# Declaring it on the target that actually calls GL puts the ordering in
+# CMake's hands for every consumer at once, which is the same reasoning as the
+# xkbcommon line above.
+#
+# Gated on a GL backend to match the guard in flutter_desktop.cc: a build with
+# none of them compiles the GL branches out and must not acquire a GL
+# dependency it has no use for.
+if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_DRM_KMS_EGL)
+    pkg_check_modules(GLES_PLATFORM REQUIRED IMPORTED_TARGET glesv2)
+    target_link_libraries(platform_homescreen PUBLIC PkgConfig::GLES_PLATFORM)
+endif ()
+
 # platform_homescreen needs no Wayland binding dependency: it includes no
 # Wayland protocol headers directly. The generated protocol headers attach to
 # the shell binary in shell/CMakeLists.txt.

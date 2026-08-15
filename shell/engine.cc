@@ -1136,39 +1136,43 @@ int Engine::DispatchSemanticsAction(const int64_t view_id,
   // The strand is serviced by the same thread that runs Flutter tasks, so
   // posting here lands the call on the platform thread with no extra
   // synchronization.
-  asio::post(*m_platform_task_runner->GetStrandContext(),
-             [this, view_id, node_id, fl_action,
-              payload = std::move(payload)]() mutable {
-               if (m_flutter_engine == nullptr) {
-                 return;
-               }
-               const uint8_t* bytes =
-                   payload.empty() ? nullptr : payload.data();
-               if (LibFlutterEngine->SendSemanticsAction != nullptr) {
-                 FlutterSendSemanticsActionInfo info = {};
-                 info.struct_size = sizeof(FlutterSendSemanticsActionInfo);
-                 info.view_id = view_id;
-                 info.node_id = static_cast<uint64_t>(node_id);
-                 info.action = fl_action;
-                 info.data = bytes;
-                 info.data_length = payload.size();
-                 LibFlutterEngine->SendSemanticsAction(m_flutter_engine, &info);
-                 return;
-               }
-               // Older engine: the deprecated entry point has no view id, so
-               // a multiview dispatch would land on the wrong view. Refuse
-               // rather than silently target the implicit one.
-               if (view_id != 0) {
-                 ihs::log::warn(
-                     "Dropping semantics action for view {}: this engine only "
-                     "exposes the single-view dispatch entry point",
-                     view_id);
-                 return;
-               }
-               LibFlutterEngine->DispatchSemanticsAction(
-                   m_flutter_engine, static_cast<uint64_t>(node_id), fl_action,
-                   bytes, payload.size());
-             });
+  asio::post(
+      *m_platform_task_runner->GetStrandContext(),
+      [this, view_id, node_id, fl_action,
+       payload = std::move(payload)]() mutable {
+        if (m_flutter_engine == nullptr) {
+          return;
+        }
+        const uint8_t* bytes = payload.empty() ? nullptr : payload.data();
+        switch (accessibility::ChooseSemanticsDispatch(
+            LibFlutterEngine->SendSemanticsAction != nullptr, view_id)) {
+          case accessibility::SemanticsDispatchRoute::kSendWithViewId: {
+            FlutterSendSemanticsActionInfo info = {};
+            info.struct_size = sizeof(FlutterSendSemanticsActionInfo);
+            info.view_id = view_id;
+            info.node_id = static_cast<uint64_t>(node_id);
+            info.action = fl_action;
+            info.data = bytes;
+            info.data_length = payload.size();
+            LibFlutterEngine->SendSemanticsAction(m_flutter_engine, &info);
+            return;
+          }
+          case accessibility::SemanticsDispatchRoute::kDeprecatedImplicitView:
+            LibFlutterEngine->DispatchSemanticsAction(
+                m_flutter_engine, static_cast<uint64_t>(node_id), fl_action,
+                bytes, payload.size());
+            return;
+          case accessibility::SemanticsDispatchRoute::kRefuseMultiview:
+            // The deprecated entry point has no view id, so this action
+            // would land on the implicit view -- a different control
+            // than the caller named, activated silently.
+            ihs::log::warn(
+                "Dropping semantics action for view {}: this engine "
+                "only exposes the single-view dispatch entry point",
+                view_id);
+            return;
+        }
+      });
 
   // Accepted for delivery. Whether the widget does anything with it is not
   // knowable here, and the hub's contract says so.
