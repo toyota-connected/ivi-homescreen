@@ -71,6 +71,9 @@ struct Consumer {
 // these, and keeping the pair together is the point -- a tree read from one
 // source dispatches back to that source's host, so reading and acting cannot
 // drift onto different applications.
+// What set_host's source is called. Addressable like any other name.
+constexpr const char* kImplicitSourceName = "default";
+
 struct Source {
   std::string name;
   IhsSemanticsHost host{};
@@ -166,7 +169,7 @@ void Own(std::vector<std::string>& pool, const char* s) {
 // Called with the hub lock held.
 Source* DefaultSourceLocked(Hub& hub) {
   for (const auto& source : hub.sources) {
-    if (source->name.empty()) {
+    if (source->name == kImplicitSourceName) {
       return source.get();
     }
   }
@@ -423,19 +426,23 @@ void ihs_semantics_release_snapshot(const IhsSemanticsSnapshot* snapshot) {
   Release(const_cast<Snapshot*>(reinterpret_cast<const Snapshot*>(snapshot)));
 }
 
-// The implicit source: created on demand by set_host, named "" so
-// DefaultSourceLocked can find it and so ihs_semantics_source_name reports
-// something a caller can recognise as unnamed rather than invented.
+// The implicit source: created on demand by set_host and named "default",
+// which is both how DefaultSourceLocked finds it and what addresses its tree
+// from outside. A real name rather than an empty one because it is addressable
+// like any other -- ui://semantics/default/tree -- and an empty segment would
+// produce a URI with a hole in it.
 // Called with the hub lock held. Static: it sits inside the extern "C" block
 // beside its only callers, where an unmangled external name would be one more
 // symbol than this needs.
 static Source* ImplicitSourceLocked(Hub& hub) {
   for (const auto& source : hub.sources) {
-    if (source->name.empty()) {
+    if (source->name == kImplicitSourceName) {
       return source.get();
     }
   }
-  hub.sources.push_back(std::make_unique<Source>());
+  auto created = std::make_unique<Source>();
+  created->name = kImplicitSourceName;
+  hub.sources.push_back(std::move(created));
   return hub.sources.back().get();
 }
 
@@ -450,7 +457,7 @@ void ihs_semantics_set_host(const IhsSemanticsHost* host) {
       // and leaving it registered would keep DefaultSourceLocked answering
       // with it in preference to a real one.
       for (auto it = hub.sources.begin(); it != hub.sources.end(); ++it) {
-        if ((*it)->name.empty()) {
+        if ((*it)->name == kImplicitSourceName) {
           retired = (*it)->current;
           hub.sources.erase(it);
           break;

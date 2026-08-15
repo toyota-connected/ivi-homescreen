@@ -39,7 +39,8 @@ import socket
 import sys
 import time
 
-TREE_URI = "ui://semantics/tree"
+# Discovered, not assumed: one tree per running application, named for it.
+TREE_URI_PREFIX = "ui://semantics/"
 
 
 class Failure(Exception):
@@ -91,7 +92,17 @@ def call_tool(path, name, arguments=None, request_id=1):
 
 
 def read_tree(path):
-    reply = rpc(path, "resources/read", {"uri": TREE_URI}, request_id=2)
+    listing = rpc(path, "resources/list", {}, request_id=2)
+    trees = [
+        r["uri"]
+        for r in listing.get("resources", [])
+        if r.get("uri", "").startswith(TREE_URI_PREFIX)
+    ]
+    if len(trees) != 1:
+        raise SystemExit(
+            f"expected exactly one application's tree, found {len(trees)}: {trees}"
+        )
+    reply = rpc(path, "resources/read", {"uri": trees[0]}, request_id=3)
     if "error" in reply:
         raise Failure(f"resources/read: {reply['error']}")
     return json.loads(reply["result"]["contents"][0]["text"])

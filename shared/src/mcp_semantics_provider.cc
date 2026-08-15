@@ -72,11 +72,24 @@ struct ToolEntry {
 // only ids must still be able to act.
 constexpr char kNodeSchema[] =
     R"({"type":"object","properties":{)"
-    R"("node_id":{"type":"integer","description":"Semantics tree id."},)"
-    R"("identifier":{"type":"string","description":"Application-assigned identifier, when the app sets one."})"
+    R"("node_id":{"type":"integer","description":"Semantics tree id. Unique only within a view -- two applications number from their own roots."},)"
+    R"("identifier":{"type":"string","description":"Application-assigned identifier, when the app sets one."},)"
+    R"("view":{"type":"string","description":"Which application's UI, as named by ui://semantics/{view}/tree. Required when more than one is running."})"
     R"(},"anyOf":[{"required":["node_id"]},{"required":["identifier"]}]})";
 
 constexpr char kEmptySchema[] = R"({"type":"object","properties":{}})";
+
+// The view argument, spelled the same wherever it appears. Its name is the
+// source name, which is what ui://semantics/{view}/tree carries and what
+// ui_query reports on every node it returns -- so an agent that found a node
+// already holds what it needs to act on it.
+constexpr char kViewProperty[] =
+    R"("view":{"type":"string","description":"Which application's UI, as named by ui://semantics/{view}/tree. Required when more than one is running; may be omitted when there is exactly one."})";
+
+constexpr char kSnapshotSchema[] =
+    R"({"type":"object","properties":{)"
+    R"("view":{"type":"string","description":"Which application's UI. Omitted, every one is returned, each tagged with its view."})"
+    R"(}})";
 
 constexpr char kQuerySchema[] =
     R"({"type":"object","properties":{)"
@@ -86,14 +99,16 @@ constexpr char kQuerySchema[] =
     R"("action":{"type":"string","description":"Only nodes offering this action, named as the tree reports it."},)"
     R"("custom_action":{"type":"string","description":"Only nodes declaring a custom action with this label."},)"
     R"("enabled":{"type":"string","enum":["true","false","not_applicable"],"description":"Enabled tristate, spelled as the tree reports it; not_applicable means enablement is meaningless for the node."},)"
-    R"("limit":{"type":"integer","description":"Cap on returned nodes. match_count and truncated always report the full total."})"
+    R"("limit":{"type":"integer","description":"Cap on returned nodes. match_count and truncated always report the full total."},)"
+    R"("view":{"type":"string","description":"Restrict to one application's UI. Omitted, every view is searched and each match reports the view it is in."})"
     R"(}})";
 
 constexpr char kSetTextSchema[] =
     R"({"type":"object","properties":{)"
     R"("node_id":{"type":"integer"},)"
     R"("identifier":{"type":"string"},)"
-    R"("text":{"type":"string","description":"Replacement text for the field."})"
+    R"("text":{"type":"string","description":"Replacement text for the field."},)"
+    R"("view":{"type":"string"})"
     R"(},"required":["text"]})";
 
 constexpr char kScrollToSchema[] =
@@ -101,7 +116,8 @@ constexpr char kScrollToSchema[] =
     R"("node_id":{"type":"integer"},)"
     R"("identifier":{"type":"string"},)"
     R"("dx":{"type":"number","description":"Horizontal offset in logical pixels."},)"
-    R"("dy":{"type":"number","description":"Vertical offset in logical pixels."})"
+    R"("dy":{"type":"number","description":"Vertical offset in logical pixels."},)"
+    R"("view":{"type":"string"})"
     R"(}})";
 
 constexpr char kCustomActionSchema[] =
@@ -109,13 +125,15 @@ constexpr char kCustomActionSchema[] =
     R"("node_id":{"type":"integer"},)"
     R"("identifier":{"type":"string"},)"
     R"("action":{"type":"string","description":"Custom action label, exactly as the tree reports it."},)"
-    R"("action_id":{"type":"integer","description":"Custom action id, as an alternative to the label."})"
+    R"("action_id":{"type":"integer","description":"Custom action id, as an alternative to the label."},)"
+    R"("view":{"type":"string"})"
     R"(}})";
 
 constexpr char kTapAtSchema[] =
     R"({"type":"object","properties":{)"
     R"("x":{"type":"number","description":"Screen x, in the same coordinates as a node rect."},)"
-    R"("y":{"type":"number","description":"Screen y, in the same coordinates as a node rect."})"
+    R"("y":{"type":"number","description":"Screen y, in the same coordinates as a node rect."},)"
+    R"("view":{"type":"string","description":"Which application's screen. Required when more than one is running."})"
     R"(},"required":["x","y"]})";
 
 const ToolEntry kTools[] = {
@@ -533,10 +551,12 @@ class Arguments {
 // server is waiting for.
 constexpr int kFocusSettleMs = 400;
 
-const IhsSemanticsSnapshot* WaitForNewerSnapshot(const uint64_t generation,
+const IhsSemanticsSnapshot* WaitForNewerSnapshot(IhsSemanticsSource* source,
+                                                 const uint64_t generation,
                                                  const int timeout_ms) {
   for (int waited = 0; waited <= timeout_ms; waited += 10) {
-    const IhsSemanticsSnapshot* candidate = ihs_semantics_acquire_snapshot();
+    const IhsSemanticsSnapshot* candidate =
+        ihs_semantics_acquire_snapshot_from(source);
     if (candidate != nullptr &&
         ihs_semantics_snapshot_generation(candidate) > generation) {
       return candidate;
@@ -570,17 +590,18 @@ constexpr int kVerifySettleMs = 150;
 // looks like. Reporting it as an error would make a client retry an action
 // that already happened.
 void WriteOutcome(rapidjson::Writer<rapidjson::StringBuffer>& w,
+                  IhsSemanticsSource* source,
                   const char* mode,
                   const uint64_t generation_before,
                   const int32_t node_id,
                   const bool report_node) {
   const IhsSemanticsSnapshot* after =
-      WaitForNewerSnapshot(generation_before, kVerifySettleMs);
+      WaitForNewerSnapshot(source, generation_before, kVerifySettleMs);
   if (after == nullptr) {
     // Nothing newer arrived. Read the current tree anyway rather than assuming
     // it still matches: the wait can only end early on a newer generation, so
     // this is the same tree, and looking is cheaper than reasoning about it.
-    after = ihs_semantics_acquire_snapshot();
+    after = ihs_semantics_acquire_snapshot_from(source);
   }
 
   w.Key("mode");
@@ -641,7 +662,14 @@ struct Provider {
   IhsSemanticsConsumer* consumer = nullptr;
   std::vector<IhsMcpToolDesc> tools;
   std::vector<std::string> names;  // prefix-free names, owned
-  IhsMcpResourceDesc resources[1]{};
+
+  // One resource per source, rebuilt whenever the set of sources changes. A
+  // tree belongs to a publisher and the URI says which -- there is no
+  // unqualified "the tree", because what it would name depends on how many
+  // applications happen to be running, which is not something a client can
+  // see or an identifier should depend on.
+  std::vector<IhsMcpResourceDesc> resources;
+  std::vector<std::string> resource_uris;  // owned; the descs point at these
 };
 
 Provider& TheProvider() {
@@ -658,22 +686,78 @@ int ListTools(void* /* user_data */,
   return IHS_MCP_OK;
 }
 
+// The resource URI naming `source`'s tree.
+std::string TreeUriFor(IhsSemanticsSource* source) {
+  return std::string("ui://semantics/") + ihs_semantics_source_name(source) +
+         "/tree";
+}
+
+// Rebuilds the resource list from the hub's current sources. Called on every
+// listing rather than cached at start: an application can come and go while
+// the shell runs, and a list that went stale would advertise a tree nobody
+// publishes and omit one somebody does.
+void RefreshResourcesLocked(Provider& p) {
+  const size_t count = ihs_semantics_source_count();
+  p.resource_uris.clear();
+  p.resources.clear();
+  p.resource_uris.reserve(count);
+  p.resources.reserve(count);
+  for (size_t i = 0; i < count; i++) {
+    IhsSemanticsSource* source = ihs_semantics_source_at(i);
+    if (source == nullptr) {
+      continue;
+    }
+    p.resource_uris.push_back(TreeUriFor(source));
+  }
+  // Pointed at after the vector has stopped growing; a c_str() taken during
+  // the loop would dangle on the next reallocation.
+  for (const std::string& uri : p.resource_uris) {
+    IhsMcpResourceDesc desc{};
+    desc.uri = uri.c_str();
+    desc.name = "semantics tree";
+    desc.description = "One application's UI as a semantics tree.";
+    desc.mime_type = "application/json";
+    p.resources.push_back(desc);
+  }
+}
+
 int ListResources(void* /* user_data */,
                   const IhsMcpResourceDesc** out_resources,
                   size_t* out_count) {
   Provider& p = TheProvider();
-  *out_resources = p.resources;
-  *out_count = 1;
+  const std::lock_guard<std::mutex> lock(p.mutex);
+  RefreshResourcesLocked(p);
+  *out_resources = p.resources.empty() ? nullptr : p.resources.data();
+  *out_count = p.resources.size();
   return IHS_MCP_OK;
+}
+
+// The source a resource URI names, or NULL. Resolved by comparing against the
+// URI each live source would produce, so there is exactly one place that
+// decides what a tree is called.
+IhsSemanticsSource* SourceForUri(const char* uri) {
+  if (uri == nullptr) {
+    return nullptr;
+  }
+  const size_t count = ihs_semantics_source_count();
+  for (size_t i = 0; i < count; i++) {
+    IhsSemanticsSource* source = ihs_semantics_source_at(i);
+    if (source != nullptr && TreeUriFor(source) == uri) {
+      return source;
+    }
+  }
+  return nullptr;
 }
 
 int ReadResource(void* /* user_data */,
                  const char* uri,
                  IhsMcpPayload* out_content) {
-  if (std::strcmp(uri, "ui://semantics/tree") != 0) {
+  IhsSemanticsSource* source = SourceForUri(uri);
+  if (source == nullptr) {
     return IHS_MCP_ERR_NOT_FOUND;
   }
-  const IhsSemanticsSnapshot* snapshot = ihs_semantics_acquire_snapshot();
+  const IhsSemanticsSnapshot* snapshot =
+      ihs_semantics_acquire_snapshot_from(source);
   if (snapshot == nullptr) {
     // Semantics has not produced a tree yet. An empty document says so
     // without pretending the UI has no nodes.
@@ -683,6 +767,93 @@ int ReadResource(void* /* user_data */,
   FillPayload(out_content, SerializeTree(snapshot));
   ihs_semantics_release_snapshot(snapshot);
   return IHS_MCP_OK;
+}
+
+std::string RunQuery(const IhsSemanticsSnapshot* snapshot,
+                     const Arguments& arguments);
+
+// Runs a read across every application, grouped by view.
+//
+// Grouped rather than flattened: two applications number their nodes from
+// their own roots, so a flat list of matches would carry ids that collide and
+// mean different things. The grouping is what makes each id usable -- an agent
+// reads a match, takes the view it is under, and has both halves of what an
+// action needs.
+std::string ReadEveryView(const char* tool, const Arguments& arguments) {
+  rapidjson::StringBuffer buffer;
+  rapidjson::Writer<rapidjson::StringBuffer> w(buffer);
+  w.StartObject();
+  w.Key("views");
+  w.StartArray();
+
+  const size_t count = ihs_semantics_source_count();
+  for (size_t i = 0; i < count; i++) {
+    IhsSemanticsSource* source = ihs_semantics_source_at(i);
+    if (source == nullptr) {
+      continue;
+    }
+    const IhsSemanticsSnapshot* snapshot =
+        ihs_semantics_acquire_snapshot_from(source);
+    if (snapshot == nullptr) {
+      continue;  // registered but has published nothing yet
+    }
+    w.StartObject();
+    w.Key("view");
+    w.String(ihs_semantics_source_name(source));
+    w.Key("result");
+    // Re-emitted rather than composed: each helper already produces a complete
+    // document, and reparsing it here would be a second place that has to know
+    // their shapes.
+    const std::string body = std::strcmp(tool, "snapshot") == 0
+                                 ? SerializeTree(snapshot)
+                                 : RunQuery(snapshot, arguments);
+    w.RawValue(body.c_str(), body.size(), rapidjson::kObjectType);
+    w.EndObject();
+    ihs_semantics_release_snapshot(snapshot);
+  }
+
+  w.EndArray();
+  w.EndObject();
+  return buffer.GetString();
+}
+
+// The source a `view` argument names.
+//
+// Absent, and exactly one application is running, that one is meant and saying
+// so would be noise. Absent with several running, there is no right answer:
+// choosing one is how a client ends up acting on an application it never read,
+// which is the defect sources exist to prevent, so it refuses instead. The
+// error names what it wanted, because an agent that omitted the argument needs
+// to know the argument exists.
+//
+// `found` distinguishes "no such view" from "ambiguous", which are different
+// mistakes: the first is a wrong name, the second a missing one.
+IhsSemanticsSource* ResolveView(const Arguments& arguments,
+                                std::string* out_error) {
+  std::string wanted;
+  const bool named = arguments.String("view", &wanted);
+
+  const size_t count = ihs_semantics_source_count();
+  if (!named) {
+    if (count == 1) {
+      return ihs_semantics_source_at(0);
+    }
+    *out_error = count == 0
+                     ? "no application is publishing a UI"
+                     : "view is required: " + std::to_string(count) +
+                           " applications are running. Name one, as listed by "
+                           "resources/list.";
+    return nullptr;
+  }
+
+  for (size_t i = 0; i < count; i++) {
+    IhsSemanticsSource* source = ihs_semantics_source_at(i);
+    if (source != nullptr && wanted == ihs_semantics_source_name(source)) {
+      return source;
+    }
+  }
+  *out_error = "no view named '" + wanted + "'";
+  return nullptr;
 }
 
 // Resolves an action name to its bit, using the same table WriteActions
@@ -822,7 +993,31 @@ int CallTool(void* /* user_data */,
   // promise.
   const Arguments arguments(arguments_json, arguments_length);
 
-  const IhsSemanticsSnapshot* snapshot = ihs_semantics_acquire_snapshot();
+  // Reading may span applications; acting may not. An agent looking for a
+  // control has no reason to know which application owns it -- that is what it
+  // is trying to find out -- so an unqualified read searches everything and
+  // reports where each result came from. An unqualified *action* has no such
+  // defensible reading, and is refused below.
+  const bool reads_only =
+      std::strcmp(name, "snapshot") == 0 || std::strcmp(name, "query") == 0;
+  std::string requested_view;
+  if (reads_only && !arguments.String("view", &requested_view)) {
+    FillPayload(out_result, ReadEveryView(name, arguments));
+    return IHS_MCP_OK;
+  }
+
+  // Which application this call is about, decided before anything is read or
+  // dispatched. Every path below uses this one source, so a call cannot read
+  // one application's tree and act on another's.
+  std::string view_error;
+  IhsSemanticsSource* source = ResolveView(arguments, &view_error);
+  if (source == nullptr) {
+    FillPayload(out_result, ErrorJson(view_error.c_str(), 0));
+    return IHS_MCP_ERR_INVALID;
+  }
+
+  const IhsSemanticsSnapshot* snapshot =
+      ihs_semantics_acquire_snapshot_from(source);
   if (snapshot == nullptr) {
     FillPayload(out_result, ErrorJson("no semantics tree has been published "
                                       "yet",
@@ -859,7 +1054,7 @@ int CallTool(void* /* user_data */,
 
     Provider& provider = TheProvider();
     const int tap_status =
-        ihs_semantics_send_pointer_tap(provider.consumer, 0, x, y);
+        ihs_semantics_send_pointer_tap_to(provider.consumer, source, 0, x, y);
     if (tap_status != IHS_SEMANTICS_OK) {
       FillPayload(out_result, ErrorJson("pointer tap refused", generation_now));
       return IHS_MCP_ERR_REFUSED;
@@ -881,7 +1076,7 @@ int CallTool(void* /* user_data */,
     tap_writer.Double(x);
     tap_writer.Key("y");
     tap_writer.Double(y);
-    WriteOutcome(tap_writer, "pointer", generation_now, 0,
+    WriteOutcome(tap_writer, source, "pointer", generation_now, 0,
                  /*report_node=*/false);
     tap_writer.EndObject();
     FillPayload(out_result, tap_buffer.GetString());
@@ -952,9 +1147,10 @@ int CallTool(void* /* user_data */,
     std::memcpy(payload.data(), &action_id, sizeof(action_id));
 
     Provider& provider = TheProvider();
-    const int custom_status = ihs_semantics_dispatch(
-        provider.consumer, 0, target, IHS_SEMANTICS_ACTION_CUSTOM_ACTION,
-        payload.data(), payload.size(), nullptr, nullptr);
+    const int custom_status = ihs_semantics_dispatch_from(
+        provider.consumer, source, 0, target,
+        IHS_SEMANTICS_ACTION_CUSTOM_ACTION, payload.data(), payload.size(),
+        nullptr, nullptr);
     if (custom_status != IHS_SEMANTICS_OK) {
       FillPayload(out_result, ErrorJson("dispatch refused", generation));
       return IHS_MCP_ERR_REFUSED;
@@ -969,7 +1165,7 @@ int CallTool(void* /* user_data */,
     custom_writer.Int(target);
     custom_writer.Key("action_id");
     custom_writer.Int(action_id);
-    WriteOutcome(custom_writer, "semantics", generation, target,
+    WriteOutcome(custom_writer, source, "semantics", generation, target,
                  /*report_node=*/true);
     custom_writer.EndObject();
     FillPayload(out_result, custom_buffer.GetString());
@@ -999,9 +1195,10 @@ int CallTool(void* /* user_data */,
     ihs_semantics_release_snapshot(snapshot);
 
     Provider& focus_provider = TheProvider();
-    if (ihs_semantics_dispatch(focus_provider.consumer, 0, focus_id,
-                               IHS_SEMANTICS_ACTION_FOCUS, nullptr, 0, nullptr,
-                               nullptr) != IHS_SEMANTICS_OK) {
+    if (ihs_semantics_dispatch_from(focus_provider.consumer, source, 0,
+                                    focus_id, IHS_SEMANTICS_ACTION_FOCUS,
+                                    nullptr, 0, nullptr,
+                                    nullptr) != IHS_SEMANTICS_OK) {
       FillPayload(out_result,
                   ErrorJson("could not focus the field before setting text",
                             generation));
@@ -1011,7 +1208,7 @@ int CallTool(void* /* user_data */,
     // Focusing takes effect on a frame, so the tree that advertises SetText is
     // the next one. Bounded so a field that never gains focus fails as a
     // refusal rather than hanging the caller.
-    snapshot = WaitForNewerSnapshot(generation, kFocusSettleMs);
+    snapshot = WaitForNewerSnapshot(source, generation, kFocusSettleMs);
     if (snapshot == nullptr) {
       FillPayload(out_result,
                   ErrorJson("field did not report focus in time", generation));
@@ -1068,9 +1265,9 @@ int CallTool(void* /* user_data */,
 
   Provider& p = TheProvider();
   const int status =
-      ihs_semantics_dispatch(p.consumer, 0, node_id, tool->action,
-                             argument.empty() ? nullptr : argument.data(),
-                             argument.size(), nullptr, nullptr);
+      ihs_semantics_dispatch_from(p.consumer, source, 0, node_id, tool->action,
+                                  argument.empty() ? nullptr : argument.data(),
+                                  argument.size(), nullptr, nullptr);
   if (status != IHS_SEMANTICS_OK) {
     FillPayload(out_result, ErrorJson("dispatch refused", generation));
     return IHS_MCP_ERR_REFUSED;
@@ -1083,7 +1280,8 @@ int CallTool(void* /* user_data */,
   w.Bool(true);
   w.Key("node_id");
   w.Int(node_id);
-  WriteOutcome(w, "semantics", generation, node_id, /*report_node=*/true);
+  WriteOutcome(w, source, "semantics", generation, node_id,
+               /*report_node=*/true);
   w.EndObject();
   FillPayload(out_result, buffer.GetString());
   return IHS_MCP_OK;
@@ -1182,10 +1380,7 @@ int ihs_mcp_semantics_provider_start_with(const IhsMcpSemanticsConfig* config) {
                             std::to_string(kToolCount) + ": " + offered_names);
   }
 
-  p.resources[0].uri = "ui://semantics/tree";
-  p.resources[0].name = "semantics tree";
-  p.resources[0].description = "The current UI as a semantics tree.";
-  p.resources[0].mime_type = "application/json";
+  RefreshResourcesLocked(p);
 
   // Register with the hub first: an MCP client can call the moment the
   // provider is visible, and answering with "no tree" because we had not
