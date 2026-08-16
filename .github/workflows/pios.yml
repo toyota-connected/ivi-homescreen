@@ -312,8 +312,24 @@ jobs:
       # for wayland-cxx-scanner and failed the build, and emb's own four
       # retries had already been spent. Keyed on the augment definitions, so a
       # new or bumped source misses and refetches; every other run stays off
-      # the network entirely. Not keyed on the OS -- the sources are the same
-      # archives for every target, so one entry serves the whole matrix.
+      # the network entirely.
+      #
+      # Keyed on the OS too, because bookworm and trixie do not fetch the same
+      # set. bookworm cross-builds libdisplay-info 0.2.0 -- it ships 0.1.1 and
+      # drm-cxx needs >= 0.2.0 -- while trixie takes libdisplay-info-dev from
+      # apt and declares `augment: [*augment_scanner]` alone. Two archives
+      # against one. This comment used to claim the opposite, and the claim was
+      # wrong in a way the restore-keys fallback below acts on: a bookworm job
+      # matching a trixie entry starts one archive short of what it needs.
+      # The OS-specific prefix is tried first for that reason; the bare
+      # `emb-augment-src-` below stays as a last resort, where restoring the
+      # one shared archive still beats restoring nothing.
+      #
+      # Board and backend are genuinely uniform. Every board aliases the same
+      # augment list, and the only backend-sensitive augments (sentry-native,
+      # accesskit-c) sit behind BUILD_CRASH_HANDLER / BUILD_ACCESSKIT, which
+      # this workflow never passes.
+      #
       # Restore and save are separate so the save can run after a failed
       # build. actions/cache skips saving when the job fails, which for a
       # cache whose whole purpose is to stop a flaky download would be a
@@ -329,8 +345,9 @@ jobs:
             /emb/.config/flutter_workspace/overlay-src/*.tar.bz2
             /emb/.config/flutter_workspace/overlay-src/*.tgz
             /emb/.config/flutter_workspace/overlay-src/*.zip
-          key: emb-augment-src-${{ hashFiles('ivi-homescreen/.emb/base.emb.yaml', 'ivi-homescreen/.emb/raspberry-pi.emb.yaml') }}
+          key: emb-augment-src-${{ hashFiles('ivi-homescreen/.emb/base.emb.yaml', 'ivi-homescreen/.emb/raspberry-pi.emb.yaml') }}-${{ matrix.pios }}
           restore-keys: |
+            emb-augment-src-${{ hashFiles('ivi-homescreen/.emb/base.emb.yaml', 'ivi-homescreen/.emb/raspberry-pi.emb.yaml') }}-${{ matrix.pios }}
             emb-augment-src-
 
       # The image bakes the toolchain + sysroot at /emb, so -w /emb resolves as
@@ -404,17 +421,26 @@ jobs:
       # The key carries a run id so a partial set never claims to be the
       # complete one; restore-keys above picks up the newest either way.
       #
-      # It carries nothing else. The archives do not vary by board, OS or
-      # backend -- the restore above says as much, and is keyed on the manifest
-      # alone -- so adding the matrix dimensions here multiplied one entry per
-      # run into twenty-six identical ones. That is not merely untidy: the
-      # repository cache is a fixed budget with least-recently-used eviction,
-      # so the duplicates evict the entries this workflow depends on, including
-      # each other.
+      # It carries the OS, and nothing else. The archives do not vary by board
+      # or backend, so those two multiplied one entry per OS into thirteen
+      # identical ones apiece. That is not merely untidy: the repository cache
+      # is a fixed budget with least-recently-used eviction, so the duplicates
+      # evict the entries this workflow depends on, including each other.
       #
-      # Every job in a run now writes the same key. The first wins and the rest
-      # log "unable to reserve cache", which is the expected outcome rather
-      # than a failure -- they were all writing identical archives.
+      # The OS stays because bookworm and trixie genuinely differ -- see the
+      # restore step above: bookworm fetches libdisplay-info on top of the
+      # scanner, trixie fetches the scanner alone. Collapsing them too would
+      # let whichever job saved first decide what the whole matrix restores,
+      # and a trixie job winning that race leaves every bookworm job in the
+      # next run re-downloading libdisplay-info with no way to cache it.
+      #
+      # pios precedes the run id so the restore step's prefix still matches:
+      # restore-keys are prefixes, and a run id in front of the OS would hide
+      # it from them.
+      #
+      # The thirteen jobs sharing an OS now write the same key. The first wins
+      # and the rest log "unable to reserve cache", which is the expected
+      # outcome rather than a failure -- they were writing identical archives.
       - name: Save augment sources
         if: always()
         uses: actions/cache/save@v6
@@ -425,7 +451,7 @@ jobs:
             /emb/.config/flutter_workspace/overlay-src/*.tar.bz2
             /emb/.config/flutter_workspace/overlay-src/*.tgz
             /emb/.config/flutter_workspace/overlay-src/*.zip
-          key: emb-augment-src-${{ hashFiles('ivi-homescreen/.emb/base.emb.yaml', 'ivi-homescreen/.emb/raspberry-pi.emb.yaml') }}-${{ github.run_id }}
+          key: emb-augment-src-${{ hashFiles('ivi-homescreen/.emb/base.emb.yaml', 'ivi-homescreen/.emb/raspberry-pi.emb.yaml') }}-${{ matrix.pios }}-${{ github.run_id }}
 
       - name: Upload homescreen binary
         uses: actions/upload-artifact@v7
