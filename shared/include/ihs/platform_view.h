@@ -57,6 +57,34 @@
 
 #include "ihs/ihs_export.h"
 
+/*
+ * An entry point a plugin may be built against but run without.
+ *
+ * A plugin links libihs_shared and is dlopen'd by the shell it finds at run
+ * time, which is not always the one it was built against. A normal reference
+ * to a symbol the running shell lacks fails the relocation, and the loader
+ * rejects the whole plugin -- so an entry point documented as "NULL on an
+ * older shell" could never actually report that, because nothing of the plugin
+ * ran. Declaring the import weak makes the address NULL instead, which the
+ * plugin can test.
+ *
+ * Consumers only: inside the library the definition stays strong.
+ *
+ * The test is on the symbol, not the return value, and both matter:
+ *
+ *     if (ihs_pv_assets_path) {
+ *       const char* p = ihs_pv_assets_path();   // may still be NULL
+ *     }
+ *
+ * Calling through the null address instead of testing it is a crash, so a
+ * plugin that skips the guard is worse off than before.
+ */
+#if defined(__GNUC__) && !defined(ihs_shared_EXPORTS)
+#define IHS_WEAK_IMPORT __attribute__((weak))
+#else
+#define IHS_WEAK_IMPORT
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -215,16 +243,22 @@ IHS_EXPORT int ihs_pv_query_capabilities(IhsPvCapabilities* out);
 
 /*
  * Absolute path to the running bundle's flutter_assets directory, or NULL if
- * the shell is older than this entry point, has no host installed, or has not
- * resolved a bundle. Borrowed: owned by the shell and valid for the engine's
- * lifetime; copy it if you need to outlive the call.
+ * the shell has no host installed or has not resolved a bundle. Borrowed:
+ * owned by the shell and valid for the engine's lifetime; copy it if you need
+ * to outlive the call.
  *
  * A plugin that resolves its own assets by relative path needs this. The
  * compositor-surface path receives the directory as an initialize() argument;
  * the platform-view path had no equivalent, so such a plugin had nothing to
  * resolve against.
+ *
+ * Added after 1.0, so a shell can predate it. IHS_WEAK_IMPORT (see above)
+ * makes that case a null symbol rather than a failed load; test the symbol
+ * before calling it:
+ *
+ *     const char* p = ihs_pv_assets_path ? ihs_pv_assets_path() : NULL;
  */
-IHS_EXPORT const char* ihs_pv_assets_path(void);
+IHS_EXPORT IHS_WEAK_IMPORT const char* ihs_pv_assets_path(void);
 
 /*
  * The backend's Vulkan objects, offered to a plugin that renders on a Vulkan
