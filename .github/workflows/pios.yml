@@ -403,6 +403,18 @@ jobs:
       # always(): the point is to keep what a failed run managed to fetch.
       # The key carries a run id so a partial set never claims to be the
       # complete one; restore-keys above picks up the newest either way.
+      #
+      # It carries nothing else. The archives do not vary by board, OS or
+      # backend -- the restore above says as much, and is keyed on the manifest
+      # alone -- so adding the matrix dimensions here multiplied one entry per
+      # run into twenty-six identical ones. That is not merely untidy: the
+      # repository cache is a fixed budget with least-recently-used eviction,
+      # so the duplicates evict the entries this workflow depends on, including
+      # each other.
+      #
+      # Every job in a run now writes the same key. The first wins and the rest
+      # log "unable to reserve cache", which is the expected outcome rather
+      # than a failure -- they were all writing identical archives.
       - name: Save augment sources
         if: always()
         uses: actions/cache/save@v6
@@ -413,7 +425,7 @@ jobs:
             /emb/.config/flutter_workspace/overlay-src/*.tar.bz2
             /emb/.config/flutter_workspace/overlay-src/*.tgz
             /emb/.config/flutter_workspace/overlay-src/*.zip
-          key: emb-augment-src-${{ hashFiles('ivi-homescreen/.emb/base.emb.yaml', 'ivi-homescreen/.emb/raspberry-pi.emb.yaml') }}-${{ github.run_id }}-${{ matrix.board }}-${{ matrix.pios }}-${{ matrix.backend }}
+          key: emb-augment-src-${{ hashFiles('ivi-homescreen/.emb/base.emb.yaml', 'ivi-homescreen/.emb/raspberry-pi.emb.yaml') }}-${{ github.run_id }}
 
       - name: Upload homescreen binary
         uses: actions/upload-artifact@v7
