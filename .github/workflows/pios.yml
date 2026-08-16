@@ -330,6 +330,12 @@ jobs:
       # accesskit-c) sit behind BUILD_CRASH_HANDLER / BUILD_ACCESSKIT, which
       # this workflow never passes.
       #
+      # The exact key is the complete set, written only by a green build. The
+      # first restore-key repeats it as a prefix, which is what reaches the
+      # `-partial-<run id>` entries a failed run leaves behind: preferred in
+      # that order, so a partial never shadows a complete one however recently
+      # it was written.
+      #
       # Restore and save are separate so the save can run after a failed
       # build. actions/cache skips saving when the job fails, which for a
       # cache whose whole purpose is to stop a flaky download would be a
@@ -354,6 +360,9 @@ jobs:
       # a pure cache hit (no download/extract). Host build tools (cmake, ninja,
       # meson, wayland-scanner) are baked too; only the augment libs rebuild.
       - name: Build ${{ matrix.backend }}
+        # id: the save steps below key off whether this succeeded, which is
+        # what tells a complete set of fetched archives from a partial one.
+        id: build
         working-directory: ivi-homescreen
         # Container jobs default to dash (sh); pipefail/SECONDS need bash.
         shell: bash
@@ -417,32 +426,32 @@ jobs:
               | sed -E 's/^[[:space:]]*[^A-Za-z]*/- /' || true
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # always(): the point is to keep what a failed run managed to fetch.
-      # The key carries a run id so a partial set never claims to be the
-      # complete one; restore-keys above picks up the newest either way.
+      # Two saves, because "what a run fetched" and "everything that has to be
+      # fetched" are not the same thing and must not share a key.
       #
-      # It carries the OS, and nothing else. The archives do not vary by board
-      # or backend, so those two multiplied one entry per OS into thirteen
-      # identical ones apiece. That is not merely untidy: the repository cache
-      # is a fixed budget with least-recently-used eviction, so the duplicates
-      # evict the entries this workflow depends on, including each other.
+      # The key is the manifest hash and the OS -- nothing more. Board and
+      # backend do not change what gets fetched, so carrying them turned one
+      # entry per OS into thirteen identical ones apiece. A run id does not
+      # belong here either: it is unique per run, so it would mint two fresh
+      # entries every single run and re-upload archives the cache already
+      # holds, which is the churn this is meant to remove. bookworm and trixie
+      # each own exactly one entry, for as long as the manifest is unchanged.
       #
-      # The OS stays because bookworm and trixie genuinely differ -- see the
-      # restore step above: bookworm fetches libdisplay-info on top of the
-      # scanner, trixie fetches the scanner alone. Collapsing them too would
-      # let whichever job saved first decide what the whole matrix restores,
-      # and a trixie job winning that race leaves every bookworm job in the
-      # next run re-downloading libdisplay-info with no way to cache it.
+      # A stable key cannot be overwritten, though -- actions/cache/save
+      # refuses a key that exists -- so a partial set saved by a failed run
+      # would own it until the manifest hash changed, and the flaky download
+      # the cache exists to absorb would be the one thing never cached. Hence
+      # the split: a green build means emb fetched everything, so that set
+      # claims the stable key; anything less is kept under a run-scoped key
+      # that the restore step reaches only as a fallback. Failure runs churn;
+      # green runs do not.
       #
-      # pios precedes the run id so the restore step's prefix still matches:
-      # restore-keys are prefixes, and a run id in front of the OS would hide
-      # it from them.
-      #
-      # The thirteen jobs sharing an OS now write the same key. The first wins
+      # The thirteen jobs sharing an OS all write the same key. The first wins
       # and the rest log "unable to reserve cache", which is the expected
-      # outcome rather than a failure -- they were writing identical archives.
+      # outcome rather than a failure -- they were writing identical archives,
+      # and the oras cache in this workflow already behaves this way.
       - name: Save augment sources
-        if: always()
+        if: steps.build.outcome == 'success'
         uses: actions/cache/save@v6
         with:
           path: |
@@ -451,7 +460,22 @@ jobs:
             /emb/.config/flutter_workspace/overlay-src/*.tar.bz2
             /emb/.config/flutter_workspace/overlay-src/*.tgz
             /emb/.config/flutter_workspace/overlay-src/*.zip
-          key: emb-augment-src-${{ hashFiles('ivi-homescreen/.emb/base.emb.yaml', 'ivi-homescreen/.emb/raspberry-pi.emb.yaml') }}-${{ matrix.pios }}-${{ github.run_id }}
+          key: emb-augment-src-${{ hashFiles('ivi-homescreen/.emb/base.emb.yaml', 'ivi-homescreen/.emb/raspberry-pi.emb.yaml') }}-${{ matrix.pios }}
+
+      # always(): the point is to keep what a failed run managed to fetch, so
+      # each attempt leaves the next one better off. Run-scoped so it never
+      # claims the stable key above.
+      - name: Save partial augment sources
+        if: always() && steps.build.outcome != 'success'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            /emb/.config/flutter_workspace/overlay-src/*.tar.gz
+            /emb/.config/flutter_workspace/overlay-src/*.tar.xz
+            /emb/.config/flutter_workspace/overlay-src/*.tar.bz2
+            /emb/.config/flutter_workspace/overlay-src/*.tgz
+            /emb/.config/flutter_workspace/overlay-src/*.zip
+          key: emb-augment-src-${{ hashFiles('ivi-homescreen/.emb/base.emb.yaml', 'ivi-homescreen/.emb/raspberry-pi.emb.yaml') }}-${{ matrix.pios }}-partial-${{ github.run_id }}
 
       - name: Upload homescreen binary
         uses: actions/upload-artifact@v7
