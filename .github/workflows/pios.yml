@@ -1,15 +1,36 @@
 ---
-# Cross-compiled PiOS (aarch64) artifacts via emb + a prebuilt toolchain image.
+# Cross-compiled PiOS (aarch64) artifacts via emb + a prebuilt build-env image.
 #
 # Two phases:
-#   publish-<os>  (per PiOS variant) — emb resolves the toolchain + sysroot and
-#                 publishes a content-addressed OCI image to GHCR. The emb cross
-#                 sandbox is cached, and `emb cross --publish` skips the build
-#                 when the image (keyed by the manifest's sysroot_key) already
-#                 exists, so this is a near-no-op once warm.
-#   build-...     (per board x os x backend) — runs INSIDE the published image,
-#                 where `emb cross --build -w /emb` is a pure cache hit on the
-#                 baked toolchain + sysroot. No per-run toolchain/sysroot fetch.
+#   publish-<os>  (per PiOS variant) — emb resolves the toolchain + sysroot,
+#                 pushes them to the content-addressed store (oras/OCI), and
+#                 publishes a build-env image to GHCR. `emb cross --publish`
+#                 skips the image build when the tag (keyed by the manifest's
+#                 sysroot_key plus the toolset) already exists, so this is a
+#                 near-no-op once warm.
+#   build-...     (per board x os x backend) — runs INSIDE the published image
+#                 and builds one backend.
+#
+# What that image is, precisely, because it is easy to assume otherwise: a
+# build *environment* and nothing more. `emb cross --dockerfile` emits
+# `FROM debian:bookworm-slim` plus cmake/ninja/meson/build-essential and the
+# codegen tools, with an empty build context -- see ToolchainImage.dockerfile
+# in emb_cli, which states it outright: "The cross toolchain and sysroot are
+# fetched from the shared cache / resolved at build time, not baked in."
+#
+# So three separate things are cached here, at three layers, and only the first
+# is the image:
+#   1. the image itself (GHCR)          -- host build tooling
+#   2. the store (oras/OCI)             -- resolved sysroot + toolchain, pulled
+#                                          per build job
+#   3. the augment sources (actions/cache) -- see the restore step below
+#
+# The augment libraries (libdisplay-info, wayland-cxx-scanner) are in none of
+# them: emb rebuilds them into the sysroot at consume time, so all 26 build
+# jobs repeat that work every run. Publishing the prepared overlay alongside
+# the store would remove both the source fetch and the rebuild, and would make
+# layer 3 deletable. Until then the source cache is what keeps the fetch off
+# the network.
 #
 # Runs on x86_64 runners: the pinned ARM toolchains cross-compile aarch64 (no
 # emulation). Hardware facts live in emb's board library; this repo's
@@ -356,9 +377,11 @@ jobs:
             emb-augment-src-${{ hashFiles('ivi-homescreen/.emb/base.emb.yaml', 'ivi-homescreen/.emb/raspberry-pi.emb.yaml') }}-${{ matrix.pios }}
             emb-augment-src-
 
-      # The image bakes the toolchain + sysroot at /emb, so -w /emb resolves as
-      # a pure cache hit (no download/extract). Host build tools (cmake, ninja,
-      # meson, wayland-scanner) are baked too; only the augment libs rebuild.
+      # -w /emb resolves as a cache hit because emb oras-pulls the sysroot +
+      # toolchain from EMB_CACHE_REGISTRY as part of this step, not because the
+      # image carries them -- the image is host build tooling only (see the
+      # header). The augment libs are cross-built here too, in every one of the
+      # 26 jobs.
       - name: Build ${{ matrix.backend }}
         # id: the save steps below key off whether this succeeded, which is
         # what tells a complete set of fetched archives from a partial one.
