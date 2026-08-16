@@ -312,8 +312,30 @@ jobs:
       # for wayland-cxx-scanner and failed the build, and emb's own four
       # retries had already been spent. Keyed on the augment definitions, so a
       # new or bumped source misses and refetches; every other run stays off
-      # the network entirely. Not keyed on the OS -- the sources are the same
-      # archives for every target, so one entry serves the whole matrix.
+      # the network entirely.
+      #
+      # Keyed on the OS too, because bookworm and trixie do not fetch the same
+      # set. bookworm cross-builds libdisplay-info 0.2.0 -- it ships 0.1.1 and
+      # drm-cxx needs >= 0.2.0 -- while trixie takes libdisplay-info-dev from
+      # apt and declares `augment: [*augment_scanner]` alone. Two archives
+      # against one. This comment used to claim the opposite, and the claim was
+      # wrong in a way the restore-keys fallback below acts on: a bookworm job
+      # matching a trixie entry starts one archive short of what it needs.
+      # The OS-specific prefix is tried first for that reason; the bare
+      # `emb-augment-src-` below stays as a last resort, where restoring the
+      # one shared archive still beats restoring nothing.
+      #
+      # Board and backend are genuinely uniform. Every board aliases the same
+      # augment list, and the only backend-sensitive augments (sentry-native,
+      # accesskit-c) sit behind BUILD_CRASH_HANDLER / BUILD_ACCESSKIT, which
+      # this workflow never passes.
+      #
+      # The exact key is the complete set, written only by a green build. The
+      # first restore-key repeats it as a prefix, which is what reaches the
+      # `-partial-<run id>` entries a failed run leaves behind: preferred in
+      # that order, so a partial never shadows a complete one however recently
+      # it was written.
+      #
       # Restore and save are separate so the save can run after a failed
       # build. actions/cache skips saving when the job fails, which for a
       # cache whose whole purpose is to stop a flaky download would be a
@@ -329,14 +351,18 @@ jobs:
             /emb/.config/flutter_workspace/overlay-src/*.tar.bz2
             /emb/.config/flutter_workspace/overlay-src/*.tgz
             /emb/.config/flutter_workspace/overlay-src/*.zip
-          key: emb-augment-src-${{ hashFiles('ivi-homescreen/.emb/base.emb.yaml', 'ivi-homescreen/.emb/raspberry-pi.emb.yaml') }}
+          key: emb-augment-src-${{ hashFiles('ivi-homescreen/.emb/base.emb.yaml', 'ivi-homescreen/.emb/raspberry-pi.emb.yaml') }}-${{ matrix.pios }}
           restore-keys: |
+            emb-augment-src-${{ hashFiles('ivi-homescreen/.emb/base.emb.yaml', 'ivi-homescreen/.emb/raspberry-pi.emb.yaml') }}-${{ matrix.pios }}
             emb-augment-src-
 
       # The image bakes the toolchain + sysroot at /emb, so -w /emb resolves as
       # a pure cache hit (no download/extract). Host build tools (cmake, ninja,
       # meson, wayland-scanner) are baked too; only the augment libs rebuild.
       - name: Build ${{ matrix.backend }}
+        # id: the save steps below key off whether this succeeded, which is
+        # what tells a complete set of fetched archives from a partial one.
+        id: build
         working-directory: ivi-homescreen
         # Container jobs default to dash (sh); pipefail/SECONDS need bash.
         shell: bash
@@ -400,11 +426,32 @@ jobs:
               | sed -E 's/^[[:space:]]*[^A-Za-z]*/- /' || true
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # always(): the point is to keep what a failed run managed to fetch.
-      # The key carries a run id so a partial set never claims to be the
-      # complete one; restore-keys above picks up the newest either way.
+      # Two saves, because "what a run fetched" and "everything that has to be
+      # fetched" are not the same thing and must not share a key.
+      #
+      # The key is the manifest hash and the OS -- nothing more. Board and
+      # backend do not change what gets fetched, so carrying them turned one
+      # entry per OS into thirteen identical ones apiece. A run id does not
+      # belong here either: it is unique per run, so it would mint two fresh
+      # entries every single run and re-upload archives the cache already
+      # holds, which is the churn this is meant to remove. bookworm and trixie
+      # each own exactly one entry, for as long as the manifest is unchanged.
+      #
+      # A stable key cannot be overwritten, though -- actions/cache/save
+      # refuses a key that exists -- so a partial set saved by a failed run
+      # would own it until the manifest hash changed, and the flaky download
+      # the cache exists to absorb would be the one thing never cached. Hence
+      # the split: a green build means emb fetched everything, so that set
+      # claims the stable key; anything less is kept under a run-scoped key
+      # that the restore step reaches only as a fallback. Failure runs churn;
+      # green runs do not.
+      #
+      # The thirteen jobs sharing an OS all write the same key. The first wins
+      # and the rest log "unable to reserve cache", which is the expected
+      # outcome rather than a failure -- they were writing identical archives,
+      # and the oras cache in this workflow already behaves this way.
       - name: Save augment sources
-        if: always()
+        if: steps.build.outcome == 'success'
         uses: actions/cache/save@v6
         with:
           path: |
@@ -413,7 +460,22 @@ jobs:
             /emb/.config/flutter_workspace/overlay-src/*.tar.bz2
             /emb/.config/flutter_workspace/overlay-src/*.tgz
             /emb/.config/flutter_workspace/overlay-src/*.zip
-          key: emb-augment-src-${{ hashFiles('ivi-homescreen/.emb/base.emb.yaml', 'ivi-homescreen/.emb/raspberry-pi.emb.yaml') }}-${{ github.run_id }}-${{ matrix.board }}-${{ matrix.pios }}-${{ matrix.backend }}
+          key: emb-augment-src-${{ hashFiles('ivi-homescreen/.emb/base.emb.yaml', 'ivi-homescreen/.emb/raspberry-pi.emb.yaml') }}-${{ matrix.pios }}
+
+      # always(): the point is to keep what a failed run managed to fetch, so
+      # each attempt leaves the next one better off. Run-scoped so it never
+      # claims the stable key above.
+      - name: Save partial augment sources
+        if: always() && steps.build.outcome != 'success'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            /emb/.config/flutter_workspace/overlay-src/*.tar.gz
+            /emb/.config/flutter_workspace/overlay-src/*.tar.xz
+            /emb/.config/flutter_workspace/overlay-src/*.tar.bz2
+            /emb/.config/flutter_workspace/overlay-src/*.tgz
+            /emb/.config/flutter_workspace/overlay-src/*.zip
+          key: emb-augment-src-${{ hashFiles('ivi-homescreen/.emb/base.emb.yaml', 'ivi-homescreen/.emb/raspberry-pi.emb.yaml') }}-${{ matrix.pios }}-partial-${{ github.run_id }}
 
       - name: Upload homescreen binary
         uses: actions/upload-artifact@v7
