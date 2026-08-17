@@ -751,3 +751,41 @@ TEST_F(AccessibilityTreeTest, DumpTreeEmitsCustomActionsInIdOrder) {
   EXPECT_EQ(doc["nodes"][0]["custom_actions"][1].GetInt(), 1);
   EXPECT_EQ(doc["nodes"][0]["custom_actions"][2].GetInt(), 5);
 }
+
+// Why one engine driving several views cannot share a mirror.
+//
+// Each view has its own root and numbers its nodes from it, and Flutter gives
+// every root id 0 -- SemanticsNode.root() is defined that way. Two views
+// applied to one tree therefore write over each other at id 0, and the loser's
+// subtree becomes unreachable from the root that survived. The publisher walks
+// from id 0 and drops what it cannot reach, so that view's nodes do not merely
+// come out wrong, they come out absent.
+//
+// This is the constraint that makes a tree per view the only workable shape,
+// so it is asserted rather than left as a remark in a commit message.
+TEST_F(AccessibilityTreeTest, TwoViewsInOneTreeOverwriteEachOther) {
+  AccessibilityTree shared;
+
+  NodeBuilder first_root(0, {1}, "cluster root");
+  NodeBuilder first_child(1, {}, "Speed");
+  Apply(shared, {&first_root.node, &first_child.node});
+  ASSERT_NE(FindById(shared, 1), nullptr);
+
+  // The second view's batch, with the root Flutter gives it: also 0.
+  NodeBuilder second_root(0, {2}, "radio root");
+  NodeBuilder second_child(2, {}, "Volume");
+  Apply(shared, {&second_root.node, &second_child.node});
+
+  const AccessibilityNode* root = FindById(shared, 0);
+  ASSERT_NE(root, nullptr);
+  EXPECT_STREQ(root->GetLabel(), "radio root")
+      << "the roots did not collide, so this test no longer shows anything";
+
+  // And the first view's node is gone outright: replacing the root's children
+  // detaches it, and a detached node is pruned rather than kept. So the loser
+  // does not come out stale or misparented, it comes out absent -- with nothing
+  // anywhere reporting that a view stopped being described.
+  ASSERT_EQ(root->NumberOfChildren(), 1u);
+  EXPECT_EQ(root->GetChild(0), 2);
+  EXPECT_EQ(FindById(shared, 1), nullptr);
+}

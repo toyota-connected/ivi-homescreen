@@ -99,6 +99,11 @@ struct FlutterDesktopEngineState {
 
   AccessibilityTree* accessibility_tree = nullptr;
 
+  // The engine that owns this state. Semantics batches arrive on a static
+  // callback that is handed only this struct, and routing one to the view it
+  // describes needs the per-view state the engine holds.
+  Engine* engine = nullptr;
+
   // The hub registration this engine publishes its tree to, travelling beside
   // the tree because the two are only meaningful together: publishing without
   // it means the last engine to run owns the only tree there is.
