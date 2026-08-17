@@ -1,0 +1,87 @@
+# Copyright 2026 Toyota Connected North America
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Install apt packages
+description: >-
+  Refreshes the apt index and installs packages, retrying a transient failure.
+  Local on purpose: a remote action is fetched during "Set up job", before any
+  step runs and with no way to retry it, so an outage at the registry fails
+  every leg of the matrix before a compiler is reached. This one arrives with
+  the checkout.
+
+inputs:
+  packages:
+    description: >-
+      Packages to install, separated by whitespace. A YAML folded scalar is
+      fine: newlines collapse to spaces before this sees them.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install apt packages
+      shell: bash
+      # Through the environment rather than interpolated into the script. The
+      # package list is often built from a matrix value, and a value that
+      # reached the script body would be shell rather than data.
+      env:
+        IHS_APT_PACKAGES: ${{ inputs.packages }}
+      run: |
+        set -euo pipefail
+
+        # Package names are literals. Word splitting is what turns the input
+        # into an argument list, so globbing is disabled around it rather than
+        # left to chance -- 'libc++-19-dev' is harmless, but a list is not the
+        # place to let the filesystem have an opinion.
+        set -f
+        # shellcheck disable=SC2206
+        packages=(${IHS_APT_PACKAGES})
+        set +f
+
+        if [ "${#packages[@]}" -eq 0 ]; then
+          echo "::error::no packages given"
+          exit 1
+        fi
+
+        # Unprivileged on a runner, root in a container. Both are used here.
+        sudo=""
+        if [ "$(id -u)" -ne 0 ]; then
+          sudo="sudo"
+        fi
+
+        # An apt mirror serving a 5xx, or a lock still held by the image's own
+        # unattended-upgrade, is a wait rather than a failure. Backs off so a
+        # slow release of the lock is not three failures in three seconds.
+        retry() {
+          local attempt=1 attempts=4 delay=5
+          until "$@"; do
+            if [ "${attempt}" -ge "${attempts}" ]; then
+              echo "::error::failed after ${attempts} attempts: $*"
+              return 1
+            fi
+            echo "::warning::attempt ${attempt} of ${attempts} failed," \
+                 "retrying in ${delay}s: $*"
+            sleep "${delay}"
+            attempt=$((attempt + 1))
+            delay=$((delay * 2))
+          done
+        }
+
+        # The index is refreshed here, every time, and that is load-bearing.
+        # The runner image ships a stale one, and once Ubuntu supersedes a
+        # revision the old .deb leaves the mirror -- so installing against the
+        # shipped index fetches a version that is no longer there and 404s.
+        export DEBIAN_FRONTEND=noninteractive
+        retry ${sudo} apt-get update
+        retry ${sudo} apt-get install -y "${packages[@]}"

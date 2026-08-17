@@ -55,17 +55,10 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Update apt package index
-        # Refresh the index before cache-apt-pkgs-action resolves versions, so
-        # it pins the revision currently on the mirror rather than a stale one
-        # the runner image still lists (a dropped .deb 404s and aborts install).
-        run: sudo apt-get update
-
       - name: Install dependencies
-        uses: awalsh128/cache-apt-pkgs-action@v1
+        uses: ./.github/actions/apt-packages
         with:
           packages: ninja-build libwayland-dev wayland-protocols libxkbcommon-dev mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils libglib2.0-dev libpugixml-dev ${{ matrix.extra_pkgs }}
-          version: 1.0
 
       - name: Configure
         env:
@@ -94,17 +87,10 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Update apt package index
-        # Refresh the index before cache-apt-pkgs-action resolves versions, so
-        # it pins the revision currently on the mirror rather than a stale one
-        # the runner image still lists (a dropped .deb 404s and aborts install).
-        run: sudo apt-get update
-
       - name: Install dependencies
-        uses: awalsh128/cache-apt-pkgs-action@v1
+        uses: ./.github/actions/apt-packages
         with:
           packages: ninja-build libwayland-dev wayland-protocols libxkbcommon-dev mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils libglib2.0-dev libpugixml-dev libdrm-dev libgbm-dev libinput-dev libudev-dev libseat-dev libxcursor-dev clang-19 clang-tidy-19 clang-format-19 llvm-19 lld-19 libc++-19-dev libc++abi-19-dev
-          version: 1.0
 
       - name: Setup libdisplay-info (system or from-source)
         uses: ./.github/actions/setup-libdisplay-info
@@ -164,17 +150,10 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Update apt package index
-        # Refresh the index before cache-apt-pkgs-action resolves versions, so
-        # it pins the revision currently on the mirror rather than a stale one
-        # the runner image still lists (a dropped .deb 404s and aborts install).
-        run: sudo apt-get update
-
       - name: Install dependencies
-        uses: awalsh128/cache-apt-pkgs-action@v1
+        uses: ./.github/actions/apt-packages
         with:
           packages: ninja-build clang-format-19
-          version: 1.0
 
       - name: clang-format
         run: scripts/format.sh --check
@@ -199,14 +178,20 @@ jobs:
       contents: read
 
     steps:
-      - name: Update apt package index
-        run: sudo apt-get update
+      # This job's workspace comes from the build artifact below rather than a
+      # checkout, so ./.github/actions would not be on disk. Fetch just that
+      # path: sparse and shallow, and it lands before the tarball is unpacked
+      # over it, so what the artifact carries still wins.
+      - name: Checkout the local actions
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/actions
+          sparse-checkout-cone-mode: false
 
       - name: Install dependencies
-        uses: awalsh128/cache-apt-pkgs-action@v1
+        uses: ./.github/actions/apt-packages
         with:
           packages: ninja-build libwayland-dev wayland-protocols libxkbcommon-dev mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils libglib2.0-dev libpugixml-dev libdrm-dev libgbm-dev libinput-dev libudev-dev libseat-dev libxcursor-dev clang-19 clang-tidy-19 clang-format-19 llvm-19 lld-19 libc++-19-dev libc++abi-19-dev
-          version: 1.0
 
       - name: Download build artifacts
         uses: actions/download-artifact@v8
