@@ -302,6 +302,58 @@ TEST_F(McpAppToolsTest, ACollidingPrefixIsRefused) {
   EXPECT_EQ(second, nullptr);
 }
 
+// Two instances of one application ask for the same prefix -- the same app on
+// two displays is an ordinary arrangement, not a mistake. Given a view, the
+// second is advertised under it instead of losing its tools entirely.
+TEST_F(McpAppToolsTest, ASecondInstanceFallsBackToItsViewsPrefix) {
+  ASSERT_EQ(RegisterOne("hvac_"), IHS_MCP_OK);
+  // The first claimant keeps the bare prefix: an application running alone
+  // advertises what it always did, and a second one starting later must not
+  // rename tools an agent has already discovered.
+  EXPECT_STREQ(ihs_mcp_app_tools_prefix(handle_), "hvac_");
+
+  std::vector<IhsMcpAppTool> more = {Tool("set_temp", kTempSchema)};
+  IhsMcpAppToolsDesc desc{};
+  desc.struct_size = sizeof(desc);
+  desc.tool_prefix = "hvac_";
+  desc.tools = more.data();
+  desc.tool_count = more.size();
+  desc.invoke = OnInvoke;
+  desc.view = "cluster";
+  IhsMcpAppTools* second = nullptr;
+  ASSERT_EQ(ihs_mcp_app_tools_register(&desc, &second), IHS_MCP_OK)
+      << "a second instance lost its tools rather than falling back";
+  ASSERT_NE(second, nullptr);
+  EXPECT_STREQ(ihs_mcp_app_tools_prefix(second), "cluster.hvac_");
+
+  // Reachable is the point: a name nothing can call would be no better than
+  // the refusal this replaces.
+  IhsMcpPayload out{};
+  EXPECT_EQ(ihs_mcp_registry_call_tool("cluster.hvac_set_temp", "{}", 2, &out),
+            IHS_MCP_OK);
+  ihs_mcp_registry_release_payload(&out);
+
+  ihs_mcp_app_tools_unregister(second);
+}
+
+// Without a view there is nothing to qualify with, so the refusal stands and
+// stays distinguishable from a plain decline.
+TEST_F(McpAppToolsTest, ASecondInstanceWithNoViewIsStillRefused) {
+  ASSERT_EQ(RegisterOne("hvac_"), IHS_MCP_OK);
+
+  std::vector<IhsMcpAppTool> more = {Tool("other", kTempSchema)};
+  IhsMcpAppToolsDesc desc{};
+  desc.struct_size = sizeof(desc);
+  desc.tool_prefix = "hvac_";
+  desc.tools = more.data();
+  desc.tool_count = more.size();
+  desc.invoke = OnInvoke;
+  IhsMcpAppTools* second = nullptr;
+  EXPECT_EQ(ihs_mcp_app_tools_register(&desc, &second),
+            IHS_MCP_ERR_PREFIX_TAKEN);
+  EXPECT_EQ(second, nullptr);
+}
+
 // Unregistering has to leave nothing behind: the tools go, and a call already
 // waiting is failed rather than left to time out against a callback that no
 // longer exists.

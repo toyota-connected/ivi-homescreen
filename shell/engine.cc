@@ -128,6 +128,7 @@ extern "C" void EngineThreadPrioritySetter(FlutterThreadPriority prio) {
 
 Engine::Engine(FlutterView* view,
                const size_t index,
+               std::string view_name,
                const std::vector<const char*>& command_line_args_c,
                const std::vector<const char*>& dart_entrypoint_args_c,
                const std::string& bundle_path,
@@ -138,6 +139,7 @@ Engine::Engine(FlutterView* view,
                const bool mcp_tools_narrowed)
     : m_index(index),
       m_bundle_name(std::filesystem::path(bundle_path).filename().string()),
+      m_view_name(std::move(view_name)),
       m_running(false),
       m_backend(view->GetBackend()),
       m_view(view),
@@ -1069,32 +1071,20 @@ void Engine::InstallSemanticsHost() {
     return engine->SendSyntheticTap(x, y);
   };
 
-  // A name an outside reader can recognise: the bundle's own directory, which
-  // is what a person configuring the shell named it. The index disambiguates
-  // the case two bundles share a basename, which registration would otherwise
-  // refuse -- and refusing would take semantics away from the second view
-  // rather than merely naming it awkwardly.
-  std::string name = m_bundle_name;
-  if (name.empty()) {
-    name = "view";
-  }
-
+  // App assigned this name and keeps it unique among live views, so there is
+  // nothing to fall back to here. It was derived before the engine started
+  // because the application is told it too -- one name, decided once, for the
+  // tree an agent reads and the tools it calls.
   IhsSemanticsSourceDesc desc{};
   desc.struct_size = sizeof(desc);
-  desc.name = name.c_str();
+  desc.name = m_view_name.c_str();
   desc.host = host;
   if (ihs_semantics_source_register(&desc, &m_semantics_source) !=
       IHS_SEMANTICS_OK) {
-    const std::string unique = name + "-" + std::to_string(m_index);
-    desc.name = unique.c_str();
-    if (ihs_semantics_source_register(&desc, &m_semantics_source) !=
-        IHS_SEMANTICS_OK) {
-      ihs::log::error(
-          "({}) semantics source registration failed; this view "
-          "publishes no tree",
-          m_index);
-      m_semantics_source = nullptr;
-    }
+    ihs::log::error(
+        "({}) semantics source '{}' was refused; this view publishes no tree",
+        m_index, m_view_name);
+    m_semantics_source = nullptr;
   }
 
   // The publish callback reaches the source through the engine state, which is

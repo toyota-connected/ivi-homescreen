@@ -29,6 +29,7 @@
 #include <cerrno>
 #include <chrono>
 #include <condition_variable>
+#include <cstddef>
 #include <cstring>
 #include <map>
 #include <memory>
@@ -75,7 +76,11 @@ struct PendingCall {
 };
 
 struct Registration {
+  // The prefix actually claimed, which is what the tools are advertised under.
+  // Not necessarily the one asked for: see the registration fallback below.
   std::string prefix;
+  // The view this application is, or "" when it did not say.
+  std::string view;
   std::vector<OwnedTool> tools;
   // Rebuilt whenever `tools` changes: the registry borrows this array and
   // reads the pointers out of it, so it has to outlive the list_tools call.
@@ -257,9 +262,17 @@ int ihs_mcp_app_tools_register(const IhsMcpAppToolsDesc* desc,
     return IHS_MCP_ERR_INVALID;
   }
 
+  // Appended after the struct's initial layout, so a caller built against the
+  // older header reports a smaller size and has no member here. The bounds
+  // check is what makes reading it safe rather than a guess.
+  constexpr size_t kViewNeeded =
+      offsetof(IhsMcpAppToolsDesc, view) + sizeof(desc->view);
+  const char* view = (desc->struct_size >= kViewNeeded) ? desc->view : nullptr;
+
   auto handle = std::make_unique<IhsMcpAppTools>();
   Registration& reg = handle->reg;
   reg.prefix = desc->tool_prefix;
+  reg.view = (view != nullptr) ? view : "";
   reg.invoke = desc->invoke;
   reg.user_data = desc->user_data;
   reg.timeout_ms = desc->call_timeout_ms != 0 ? desc->call_timeout_ms
@@ -296,7 +309,11 @@ int ihs_mcp_app_tools_register(const IhsMcpAppToolsDesc* desc,
 
   IhsMcpProviderDesc provider{};
   provider.struct_size = sizeof(provider);
-  provider.name = "app";
+  // Named for the view when there is one, so two applications are two
+  // providers rather than two things both called "app".
+  const std::string provider_name =
+      reg.view.empty() ? std::string("app") : ("app:" + reg.view);
+  provider.name = provider_name.c_str();
   provider.tool_prefix = reg.prefix.c_str();
   // No resource scheme: this provider serves tools only, and claiming one
   // would collide with a provider that actually publishes resources.
@@ -309,7 +326,26 @@ int ihs_mcp_app_tools_register(const IhsMcpAppToolsDesc* desc,
   provider.callbacks.call_tool = CallTool;
   provider.callbacks.read_resource = ReadResource;
 
-  const int status = ihs_mcp_provider_register(&provider, &reg.provider);
+  int status = ihs_mcp_provider_register(&provider, &reg.provider);
+
+  // The same application on two displays asks for the same prefix, and that is
+  // an ordinary arrangement rather than a mistake. Qualify with the view and
+  // try once more, so the second instance's tools are reachable under a name
+  // that says which one they act on.
+  //
+  // Only the loser qualifies. The application that got there first keeps the
+  // bare prefix, so a second instance starting later cannot rename tools an
+  // agent has already discovered -- and an application running alone advertises
+  // exactly what it always did.
+  if (status == IHS_MCP_ERR_PREFIX_TAKEN && !reg.view.empty()) {
+    const std::string qualified = reg.view + "." + reg.prefix;
+    Log(IHS_LEVEL_INFO, "prefix '" + reg.prefix + "' is taken; retrying as '" +
+                            qualified + "'");
+    reg.prefix = qualified;
+    provider.tool_prefix = reg.prefix.c_str();
+    status = ihs_mcp_provider_register(&provider, &reg.provider);
+  }
+
   if (status != IHS_MCP_OK) {
     if (reg.notify_fd >= 0) {
       ::close(reg.notify_fd);
@@ -358,6 +394,12 @@ int ihs_mcp_app_tools_complete(const uint64_t call_id,
   }
   call->cv.notify_one();
   return IHS_MCP_OK;
+}
+
+const char* ihs_mcp_app_tools_prefix(const IhsMcpAppTools* handle) {
+  // Fixed once registration returns, so this needs no lock: the fallback runs
+  // before the handle is handed out.
+  return handle != nullptr ? handle->reg.prefix.c_str() : "";
 }
 
 void ihs_mcp_app_tools_unregister(IhsMcpAppTools* handle) {

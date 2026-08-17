@@ -23,7 +23,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:ihs_mcp_app_tools/ihs_mcp_app_tools.dart';
 
-void main() {
+// The shell passes --ihs-view=<name> so an instance can tell which view it is.
+// Held here because the tool registration needs it and initState has no access
+// to the entrypoint arguments.
+String? _viewName;
+
+void main(List<String> args) {
+  _viewName = McpAppTools.viewFromArgs(args);
   runApp(const McpDriveTestApp());
 }
 
@@ -94,6 +100,10 @@ class _DriveTestPageState extends State<DriveTestPage> {
     try {
       _appTools = McpAppTools.register(
         prefix: 'fixture_',
+        // Only breaks a tie: with one instance this changes nothing, and with
+        // two the second is advertised under its view instead of losing its
+        // tools entirely.
+        view: _viewName,
         tools: <McpTool>[
           McpTool(
             name: 'set_temp',
