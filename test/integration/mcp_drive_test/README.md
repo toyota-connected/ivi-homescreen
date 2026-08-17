@@ -154,17 +154,17 @@ The checks drive the semantics and pointer paths. They do not exercise
 those have unit coverage and, for AccessKit, verification over a real AT-SPI
 bus, but not against a real engine here.
 
-Two gaps are specific to running several applications, both found by C8–C11 and
-neither fixed here:
+An earlier version of this file said `ui_tap_at` could not be aimed, and that a
+tap landed somewhere arbitrary "regardless of which application the caller
+named". The second half was wrong. A tap has always reached the right
+application: the tool resolves the view argument to a source, and the hub calls
+that source's own host.
 
-- **`ui_tap_at` cannot be aimed.** The host's pointer-tap seam takes a view and
-  the shell discards it, so a synthetic tap goes wherever the ordinary input
-  path sends it regardless of which application the caller named. C4b is
-  therefore not meaningful with more than one running.
-- **Tools an application declares are first-come.** The prefix is claimed
-  process-wide, so a second application registering the same one is refused and
-  its tools never appear. Semantics trees are addressed per application; these
-  are not.
+What was lost is narrower, and is fixed now: one engine can drive several
+Flutter views, and the view *within* the engine was dropped on the way to the
+pointer event, so a tap meant for an extra output arrived at the implicit one.
+It travels with the coordinate now, because a coordinate only means anything
+against a view.
 
 C4b depends on the region being unobscured. If the app grows a layout where
 something overlaps it, that check will correctly start failing — a pointer

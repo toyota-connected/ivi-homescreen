@@ -837,7 +837,8 @@ void Engine::CoalesceMouseEvent(const FlutterPointerSignalKind signal,
                                 const double scroll_delta_x,
                                 const double scroll_delta_y,
                                 const int64_t buttons,
-                                const uint64_t timestamp_us) {
+                                const uint64_t timestamp_us,
+                                const int64_t view_id) {
   // 0 = no high-resolution source; stamp with the arrival time (the engine
   // clock is CLOCK_MONOTONIC, so a caller-supplied kernel input timestamp in
   // the same domain slots in directly and predates this by the input path's
@@ -870,6 +871,10 @@ void Engine::CoalesceMouseEvent(const FlutterPointerSignalKind signal,
   e.scroll_delta_y = scroll_delta_y * m_pointer_scale;
   e.device_kind = kFlutterPointerDeviceKindMouse;
   e.buttons = buttons;
+  // Which view receives it. Zero is the implicit view, which is what every
+  // caller but a synthesized tap on an additional view means -- and what this
+  // was before the member was set at all.
+  e.view_id = view_id;
   e.pan_x = 0;
   e.pan_y = 0;
   e.scale = 0;
@@ -1073,10 +1078,13 @@ void Engine::InstallSemanticsHost() {
                                            data_length);
   };
 
+  // The source is the view, so its own id is used rather than the one the hub
+  // passes through -- the same rule dispatch follows. This source is the
+  // engine's implicit view.
   host.send_pointer_tap = [](void* user_data, const int64_t /* view_id */,
                              const double x, const double y) -> int {
     auto* engine = static_cast<Engine*>(user_data);
-    return engine->SendSyntheticTap(x, y);
+    return engine->SendSyntheticTap(0, x, y);
   };
 
   // App assigned this name and keeps it unique among live views, so there is
@@ -1104,39 +1112,44 @@ void Engine::InstallSemanticsHost() {
   }
 }
 
-int Engine::SendSyntheticTap(const double x, const double y) {
+int Engine::SendSyntheticTap(const int64_t view_id,
+                             const double x,
+                             const double y) {
   if (m_flutter_engine == nullptr) {
     return IHS_SEMANTICS_ERR_UNAVAILABLE;
   }
 
   // Posted rather than sent here: the coalescing buffer is drained on the
   // platform thread, and a caller may be on any thread.
-  asio::post(*m_platform_task_runner->GetStrandContext(), [this, x, y]() {
-    if (m_flutter_engine == nullptr) {
-      return;
-    }
-    // Add, then down, then up -- the sequence a real seat produces. Sent
-    // through the ordinary coalescing path rather than around it, so a
-    // synthesized tap is hit-tested, scaled and batched exactly as a physical
-    // one is; anything else would make the fallback behave unlike the input
-    // it stands in for.
-    CoalesceMouseEvent(kFlutterPointerSignalKindNone, kAdd, x, y, 0.0, 0.0, 0,
-                       0);
-    CoalesceMouseEvent(kFlutterPointerSignalKindNone, kDown, x, y, 0.0, 0.0,
-                       kFlutterPointerButtonMousePrimary, 0);
-    SendPointerEvents();
-    // Release in a later task, not the same batch. A down and an up delivered
-    // in one packet are one frame's worth of input with no interval between
-    // them, which is not a gesture any recognizer is looking for.
-    asio::post(*m_platform_task_runner->GetStrandContext(), [this, x, y]() {
-      if (m_flutter_engine == nullptr) {
-        return;
-      }
-      CoalesceMouseEvent(kFlutterPointerSignalKindNone, kUp, x, y, 0.0, 0.0,
-                         kFlutterPointerButtonMousePrimary, 0);
-      SendPointerEvents();
-    });
-  });
+  asio::post(
+      *m_platform_task_runner->GetStrandContext(), [this, view_id, x, y]() {
+        if (m_flutter_engine == nullptr) {
+          return;
+        }
+        // Add, then down, then up -- the sequence a real seat produces. Sent
+        // through the ordinary coalescing path rather than around it, so a
+        // synthesized tap is hit-tested, scaled and batched exactly as a
+        // physical one is; anything else would make the fallback behave unlike
+        // the input it stands in for.
+        CoalesceMouseEvent(kFlutterPointerSignalKindNone, kAdd, x, y, 0.0, 0.0,
+                           0, 0, view_id);
+        CoalesceMouseEvent(kFlutterPointerSignalKindNone, kDown, x, y, 0.0, 0.0,
+                           kFlutterPointerButtonMousePrimary, 0, view_id);
+        SendPointerEvents();
+        // Release in a later task, not the same batch. A down and an up
+        // delivered in one packet are one frame's worth of input with no
+        // interval between them, which is not a gesture any recognizer is
+        // looking for.
+        asio::post(*m_platform_task_runner->GetStrandContext(), [this, view_id,
+                                                                 x, y]() {
+          if (m_flutter_engine == nullptr) {
+            return;
+          }
+          CoalesceMouseEvent(kFlutterPointerSignalKindNone, kUp, x, y, 0.0, 0.0,
+                             kFlutterPointerButtonMousePrimary, 0, view_id);
+          SendPointerEvents();
+        });
+      });
 
   // Accepted for delivery. Whether anything was under the point is not
   // knowable here, and reporting success as though it were would be the
@@ -1303,7 +1316,7 @@ void Engine::PublishSemanticsUpdate(const FlutterSemanticsUpdate2* update) {
     host.send_pointer_tap = [](void* user_data, const int64_t /* view_id */,
                                const double x, const double y) -> int {
       auto* view = static_cast<ViewSemantics*>(user_data);
-      return view->engine->SendSyntheticTap(x, y);
+      return view->engine->SendSyntheticTap(view->view_id, x, y);
     };
 
     // Named from the view it belongs to, so a reader can see which output it
