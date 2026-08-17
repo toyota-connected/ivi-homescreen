@@ -322,7 +322,8 @@ class Engine {
                           double scroll_delta_x,
                           double scroll_delta_y,
                           int64_t buttons,
-                          uint64_t timestamp_us = 0);
+                          uint64_t timestamp_us = 0,
+                          int64_t view_id = 0);
 
   /**
    * @brief Coalesce touch event
@@ -389,7 +390,15 @@ class Engine {
    * does not describe. Rides the ordinary input path, so it is hit-tested
    * like a real tap rather than invoking a node's handler by id.
    */
-  int SendSyntheticTap(double x, double y);
+  /**
+   * @brief Synthesize a tap, on a named view.
+   *
+   * @param[in] view_id Which of this engine's views to aim at. One engine can
+   *                    drive several, and a tap is hit-tested against the view
+   *                    it is delivered to, so aiming at the wrong one silently
+   *                    misses -- there is no node id here to catch it.
+   */
+  int SendSyntheticTap(int64_t view_id, double x, double y);
 
   /**
    * @brief Get backend of view
