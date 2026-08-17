@@ -355,6 +355,14 @@ void Engine::Shutdown() {
       m_engine_state->semantics_source = nullptr;
     }
   }
+  // Additional views go with it, for the same reason and at the same point.
+  for (auto& [view_id, view] : m_extra_views) {
+    if (view->source != nullptr) {
+      ihs_semantics_source_unregister(view->source);
+      view->source = nullptr;
+    }
+  }
+  m_extra_views.clear();
 #endif
   // Deinitialize stops new frame work; Shutdown joins the platform, UI and
   // rasterizer threads. After this returns nothing in the engine touches the
@@ -1092,6 +1100,7 @@ void Engine::InstallSemanticsHost() {
   // together, because publishing one without the other is the defect.
   if (m_engine_state != nullptr) {
     m_engine_state->semantics_source = m_semantics_source;
+    m_engine_state->engine = this;
   }
 }
 
@@ -1221,21 +1230,106 @@ void Engine::onSemanticsUpdateCallback(const FlutterSemanticsUpdate2* update,
   FlutterDesktopEngineState const* engine_state =
       static_cast<FlutterDesktopEngineState*>(user_data);
 
-  auto* accessibility_tree = engine_state->accessibility_tree;
   IHS_TRACE(
       "[onSemanticsUpdateCallback] struct_size: {}, node_count: {} "
       "custom_action_count: {}",
       update->struct_size, update->node_count, update->custom_action_count);
 
-  accessibility_tree->HandleFlutterUpdate(update);
+  if (engine_state->engine == nullptr) {
+    return;
+  }
+  engine_state->engine->PublishSemanticsUpdate(update);
+}
 
-  // Hand the refreshed tree to the semantics hub. Publication is whole-tree
-  // and happens here, at the batch boundary, because that is the only point at
-  // which the mirror is known consistent.
-  const int status = accessibility::PublishTree(*accessibility_tree,
-                                                engine_state->semantics_source);
+void Engine::PublishSemanticsUpdate(const FlutterSemanticsUpdate2* update) {
+  // Which view this batch describes. Appended to the struct after its initial
+  // layout, so an engine older than the member reports a smaller size and every
+  // batch is the implicit view -- which is what such an engine can produce.
+  constexpr size_t kViewIdNeeded =
+      offsetof(FlutterSemanticsUpdate2, view_id) + sizeof(update->view_id);
+  const int64_t view_id =
+      update->struct_size >= kViewIdNeeded ? update->view_id : 0;
+
+  // The implicit view keeps the tree and source already in place. Every
+  // Wayland configuration is one view per engine and never reaches the branch
+  // below.
+  if (view_id == 0) {
+    auto* tree = m_engine_state->accessibility_tree;
+    if (tree == nullptr) {
+      return;
+    }
+    tree->HandleFlutterUpdate(update);
+    // Whole-tree publication, at the batch boundary, because that is the only
+    // point at which the mirror is known consistent.
+    const int status =
+        accessibility::PublishTree(*tree, m_engine_state->semantics_source);
+    if (status != IHS_SEMANTICS_OK) {
+      ihs::log::warn("({}) failed to publish semantics snapshot: {}", m_index,
+                     status);
+    }
+    return;
+  }
+
+  auto& slot = m_extra_views[view_id];
+  if (slot == nullptr) {
+    slot = std::make_unique<ViewSemantics>();
+    slot->engine = this;
+    slot->view_id = view_id;
+
+    IhsSemanticsHost host{};
+    host.struct_size = sizeof(host);
+    host.user_data = slot.get();
+    // Semantics is an engine-wide switch, so every view on this engine asks
+    // the same question of it. Repeating it is harmless and simpler than
+    // tracking which view spoke first.
+    host.set_semantics_enabled = [](void* user_data, const bool enabled) {
+      auto* view = static_cast<ViewSemantics*>(user_data);
+      if (view->engine->m_flutter_engine == nullptr) {
+        return;
+      }
+      LibFlutterEngine->UpdateSemanticsEnabled(view->engine->m_flutter_engine,
+                                               enabled);
+    };
+    // The view is the source, so its own id is used rather than the one the
+    // hub passes through. That is what makes an action come back to the view
+    // whose tree it was read from.
+    host.dispatch = [](void* user_data, int64_t /* view_id */,
+                       const int32_t node_id, const uint64_t action,
+                       const uint8_t* data, const size_t data_length) -> int {
+      auto* view = static_cast<ViewSemantics*>(user_data);
+      return view->engine->DispatchSemanticsAction(view->view_id, node_id,
+                                                   action, data, data_length);
+    };
+    host.send_pointer_tap = [](void* user_data, const int64_t /* view_id */,
+                               const double x, const double y) -> int {
+      auto* view = static_cast<ViewSemantics*>(user_data);
+      return view->engine->SendSyntheticTap(x, y);
+    };
+
+    // Named from the view it belongs to, so a reader can see which output it
+    // is looking at and which engine it came from.
+    const std::string name = m_view_name + "." + std::to_string(view_id);
+    IhsSemanticsSourceDesc desc{};
+    desc.struct_size = sizeof(desc);
+    desc.name = name.c_str();
+    desc.host = host;
+    if (ihs_semantics_source_register(&desc, &slot->source) !=
+        IHS_SEMANTICS_OK) {
+      ihs::log::error(
+          "({}) semantics source '{}' was refused; that view "
+          "publishes no tree",
+          m_index, name);
+      slot->source = nullptr;
+    } else {
+      ihs::log::info("({}) view {} publishes as '{}'", m_index, view_id, name);
+    }
+  }
+
+  slot->tree.HandleFlutterUpdate(update);
+  const int status = accessibility::PublishTree(slot->tree, slot->source);
   if (status != IHS_SEMANTICS_OK) {
-    ihs::log::warn("Failed to publish semantics snapshot: {}", status);
+    ihs::log::warn("({}) failed to publish semantics for view {}: {}", m_index,
+                   view_id, status);
   }
 }
 #endif

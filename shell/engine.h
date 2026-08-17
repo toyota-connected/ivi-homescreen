@@ -488,6 +488,33 @@ class Engine {
   std::string m_view_name;
 
 #if BUILD_ACCESSIBILITY
+  // One engine can drive several Flutter views -- the DRM backend attaches an
+  // additional view per extra output on the same card. Each has its own root
+  // and numbers its nodes from it, and Flutter gives every root id 0, so the
+  // views cannot share a mirror: the second root would overwrite the first and
+  // whatever was unreachable from the survivor would simply be dropped.
+  //
+  // So each view gets its own tree and its own hub source, and is addressed by
+  // its own name. Actions come back through the source they were read from,
+  // which is what stops a dispatch aimed at one output landing on another.
+  //
+  // The implicit view (id 0) is deliberately absent here: it keeps the tree and
+  // source that were already in place, so a shell with one view per engine --
+  // every Wayland configuration -- behaves exactly as before.
+  struct ViewSemantics {
+    AccessibilityTree tree;
+    IhsSemanticsSource* source = nullptr;
+    Engine* engine = nullptr;
+    int64_t view_id = 0;
+  };
+  std::map<int64_t, std::unique_ptr<ViewSemantics>> m_extra_views;
+
+  // Routes one batch to the view it belongs to, registering that view's source
+  // the first time it publishes. Platform thread only, like every publish.
+  void PublishSemanticsUpdate(const FlutterSemanticsUpdate2* update);
+#endif
+
+#if BUILD_ACCESSIBILITY
   // This engine's hub registration. Each engine is an independent publisher --
   // its own tree, its own node id space -- so a shared host would mean the
   // last engine to start receiving every engine's actions.
