@@ -18,6 +18,8 @@
 // assertion channel for the write path: if either direction is broken the
 // checks cannot pass by accident.
 
+import 'dart:ui' show FlutterView;
+
 import 'package:flutter/material.dart';
 // CustomSemanticsAction is not exported by material.dart.
 import 'package:flutter/semantics.dart';
@@ -30,7 +32,12 @@ String? _viewName;
 
 void main(List<String> args) {
   _viewName = McpAppTools.viewFromArgs(args);
-  runApp(const McpDriveTestApp());
+  // runWidget rather than runApp: one engine can be driving several views --
+  // the DRM backend attaches one per extra output on the same card -- and
+  // runApp renders into the implicit view alone. The others would exist,
+  // produce no semantics, and publish nothing, which looks from the outside
+  // exactly like a shell that dropped them.
+  runWidget(const McpDriveTestApp());
 }
 
 class McpDriveTestApp extends StatelessWidget {
@@ -38,16 +45,33 @@ class McpDriveTestApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const MaterialApp(
-      title: 'mcp_drive_test',
-      debugShowCheckedModeBanner: false,
-      home: DriveTestPage(),
+    final List<FlutterView> views =
+        WidgetsBinding.instance.platformDispatcher.views.toList();
+    return ViewCollection(
+      views: <Widget>[
+        for (final FlutterView view in views)
+          View(
+            view: view,
+            // A separate page per view, so each keeps its own state. That is
+            // what makes routing checkable: acting on one view has to leave
+            // the other's status line alone, and it cannot if they share one.
+            child: MaterialApp(
+              title: 'mcp_drive_test',
+              debugShowCheckedModeBanner: false,
+              home: DriveTestPage(viewId: view.viewId),
+            ),
+          ),
+      ],
     );
   }
 }
 
 class DriveTestPage extends StatefulWidget {
-  const DriveTestPage({super.key});
+  const DriveTestPage({super.key, this.viewId = 0});
+
+  /// Which of the engine's views this page is rendering into. Reported in the
+  /// status line so a driver can tell one view's page from another's.
+  final int viewId;
 
   @override
   State<DriveTestPage> createState() => _DriveTestPageState();
@@ -183,8 +207,12 @@ class _DriveTestPageState extends State<DriveTestPage> {
     // chose, and the realistic case for set_text has a space in it. A
     // separator the payload can contain makes the fixture pass only for
     // inputs that avoid it, which is the wrong way round.
+    // view is reported so a driver can tell which of the engine's views
+    // answered. With one view it is always 0 and says nothing; with several it
+    // is the only thing distinguishing two otherwise identical pages.
     return 'last=$_last; events=$_events; text=${_destination.text}; '
-        'temp=${_temperature.toStringAsFixed(1)}; mode=$_mode; $geometry';
+        'temp=${_temperature.toStringAsFixed(1)}; mode=$_mode; '
+        'view=${widget.viewId}; $geometry';
   }
 
   @override
