@@ -51,6 +51,9 @@ packages/*/.dart_tool/
 packages/*/pubspec.lock
 packages/*/.packages
 test/integration/*/build/
+# Assembled bundles: the READMEs tell you to build one here, and it holds an
+# engine shared object and icudtl, so it is tens of megabytes of build output.
+test/integration/*/bundle/
 test/integration/*/pubspec.lock
 
 # Python bytecode from the fixture drivers.
