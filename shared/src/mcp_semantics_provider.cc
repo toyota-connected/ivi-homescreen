@@ -571,7 +571,7 @@ const IhsSemanticsSnapshot* WaitForNewerSnapshot(IhsSemanticsSource* source,
 }
 
 // How long an action waits for the tree to settle before reporting what it
-// sees (DR-8).
+// sees.
 //
 // A bound on waiting, not an expectation: an action that changes nothing pays
 // this in full, which is the cost of answering "did anything happen" in the
@@ -582,7 +582,8 @@ const IhsSemanticsSnapshot* WaitForNewerSnapshot(IhsSemanticsSource* source,
 // looks like a real result.
 constexpr int kVerifySettleMs = 150;
 
-// Appends the verify-after-act fields to a tool result (DR-8, plan 4.1).
+// Appends the verify-after-act fields to a tool result: the caller learns
+// what the node became without a second round trip.
 //
 // generation_after equal to generation_before is a real answer rather than a
 // failure: the action was accepted and the tree did not change, which is what

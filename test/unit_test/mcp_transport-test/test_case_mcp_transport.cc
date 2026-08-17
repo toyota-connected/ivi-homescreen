@@ -962,6 +962,86 @@ TEST_F(McpTransportTest, AnUnknownToolRemainsAProtocolError) {
   EXPECT_EQ(body.find(R"("isError")"), std::string::npos) << body;
 }
 
+namespace {
+
+// Rejects the call before running anything, and says which argument was wrong.
+struct InvalidArgProvider {
+  static int ListTools(void*, const IhsMcpToolDesc** out, size_t* count) {
+    static const IhsMcpToolDesc kTool = {
+        "act", "needs a view", R"({"type":"object"})", IHS_MCP_CAP_INTERACT};
+    *out = &kTool;
+    *count = 1;
+    return IHS_MCP_OK;
+  }
+  static int ListResources(void*,
+                           const IhsMcpResourceDesc** out,
+                           size_t* count) {
+    *out = nullptr;
+    *count = 0;
+    return IHS_MCP_OK;
+  }
+  static int CallTool(void*,
+                      const char*,
+                      const char*,
+                      size_t,
+                      IhsMcpPayload* out) {
+    static const char kWhy[] =
+        R"({"error":"view is required when several applications are running"})";
+    out->struct_size = sizeof(IhsMcpPayload);
+    out->data = kWhy;
+    out->length = sizeof(kWhy) - 1;
+    out->release = nullptr;
+    out->release_ctx = nullptr;
+    return IHS_MCP_ERR_INVALID;
+  }
+  static int ReadResource(void*, const char*, IhsMcpPayload*) {
+    return IHS_MCP_ERR_NOT_FOUND;
+  }
+};
+
+IhsMcpProvider* RegisterInvalidArg(InvalidArgProvider* mock) {
+  IhsMcpProviderDesc desc{};
+  desc.struct_size = sizeof(desc);
+  desc.name = "invalid-arg";
+  desc.tool_prefix = "ia_";
+  desc.resource_scheme = nullptr;
+  desc.capability_mask = IHS_MCP_CAP_ALL;
+  desc.notify_fd = -1;
+  desc.user_data = mock;
+  desc.callbacks.list_tools = &InvalidArgProvider::ListTools;
+  desc.callbacks.list_resources = &InvalidArgProvider::ListResources;
+  desc.callbacks.call_tool = &InvalidArgProvider::CallTool;
+  desc.callbacks.read_resource = &InvalidArgProvider::ReadResource;
+  IhsMcpProvider* provider = nullptr;
+  return ihs_mcp_provider_register(&desc, &provider) == IHS_MCP_OK ? provider
+                                                                   : nullptr;
+}
+
+}  // namespace
+
+// A call rejected for a bad argument stays a protocol error -- nothing ran --
+// but the provider's explanation still has to reach the client. "invalid
+// arguments" on its own does not say which argument, and a client that cannot
+// tell has no move except the same call again.
+TEST_F(McpTransportTest, AnInvalidArgumentErrorCarriesItsExplanation) {
+  InvalidArgProvider mock;
+  IhsMcpProvider* provider = RegisterInvalidArg(&mock);
+  ASSERT_NE(provider, nullptr);
+
+  const std::string body =
+      Body(Post(path_, R"({"jsonrpc":"2.0","id":32,"method":"tools/call",)"
+                       R"("params":{"name":"ia_act","arguments":{}}})"));
+
+  // Still a protocol error: the classification is deliberate, and a result
+  // with isError would say the tool ran when it did not.
+  EXPECT_NE(body.find("-32602"), std::string::npos) << body;
+  EXPECT_EQ(body.find(R"("isError")"), std::string::npos) << body;
+  EXPECT_NE(body.find("view is required"), std::string::npos)
+      << "the reason the call was rejected never reached the client: " << body;
+
+  ihs_mcp_provider_unregister(provider);
+}
+
 // ---------------------------------------------------------------------------
 // Bounds on client-held state
 //
