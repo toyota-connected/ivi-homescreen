@@ -214,9 +214,18 @@ std::string ResultEnvelope(const std::string& id, const std::string& result) {
 
 std::string ErrorEnvelope(const std::string& id,
                           const int code,
-                          const std::string& message) {
-  return R"({"jsonrpc":"2.0","id":)" + id + R"(,"error":{"code":)" +
-         std::to_string(code) + R"(,"message":)" + Escape(message) + "}}";
+                          const std::string& message,
+                          const std::string& data = std::string()) {
+  std::string out = R"({"jsonrpc":"2.0","id":)" + id + R"(,"error":{"code":)" +
+                    std::to_string(code) + R"(,"message":)" + Escape(message);
+  // JSON-RPC's optional `data` member, used only when the provider explained
+  // the failure. The code and message classify it; this is what says which
+  // argument was wrong, which is the difference between a client that can
+  // correct itself and one that can only retry the same call.
+  if (!data.empty()) {
+    out += R"(,"data":)" + Escape(data);
+  }
+  return out + "}}";
 }
 
 // Maps a host status onto the JSON-RPC code that describes it. A denied
@@ -379,7 +388,12 @@ std::string HandleToolsCall(const rapidjson::Value& params,
   // explanation -- which for a tool the application declared is the only thing
   // saying what went wrong, since the host knows nothing about what it does.
   if (status != IHS_MCP_OK && !ToolExecuted(status)) {
-    return ErrorEnvelope(id, JsonRpcCodeFor(status), StatusText(status));
+    // Classified as a protocol error, but the provider's own explanation still
+    // travels: a call rejected for a missing argument is only actionable if the
+    // client is told which one. "invalid arguments" alone leaves an agent to
+    // guess, and the guess is usually the same call again.
+    return ErrorEnvelope(id, JsonRpcCodeFor(status), StatusText(status),
+                         content);
   }
 
   const bool failed = status != IHS_MCP_OK;

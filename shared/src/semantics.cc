@@ -101,7 +101,7 @@ Hub& TheHub() {
   return *hub;
 }
 
-// Attribution logging for the dispatch funnel (DR-11). Opened lazily so a
+// Attribution logging for the dispatch funnel. Opened lazily so a
 // process that never registers a consumer never allocates a log context; the
 // index is stable for the process once opened.
 int32_t TraceContext() {
@@ -481,24 +481,47 @@ int ihs_semantics_source_register(const IhsSemanticsSourceDesc* desc,
     return IHS_SEMANTICS_ERR_INVALID;
   }
 
-  Hub& hub = TheHub();
-  std::lock_guard<std::mutex> lock(hub.mutex);
-  for (const auto& existing : hub.sources) {
-    if (existing->name == desc->name) {
-      // Two trees under one name are indistinguishable to anything addressing
-      // them by it, which is the whole failure this mechanism prevents.
-      LogInfo(std::string("semantics: source name already registered: ") +
-              desc->name);
-      return IHS_SEMANTICS_ERR_INVALID;
+  // Whether this source has to be switched on as it arrives, decided under the
+  // lock and acted on outside it.
+  bool enable = false;
+  {
+    Hub& hub = TheHub();
+    std::lock_guard<std::mutex> lock(hub.mutex);
+    for (const auto& existing : hub.sources) {
+      if (existing->name == desc->name) {
+        // Two trees under one name are indistinguishable to anything addressing
+        // them by it, which is the whole failure this mechanism prevents.
+        LogInfo(std::string("semantics: source name already registered: ") +
+                desc->name);
+        return IHS_SEMANTICS_ERR_INVALID;
+      }
     }
+
+    auto source = std::make_unique<Source>();
+    source->name = desc->name;
+    source->host = desc->host;
+    source->host_installed = true;
+    *out_source = reinterpret_cast<IhsSemanticsSource*>(source.get());
+    hub.sources.push_back(std::move(source));
+
+    // The consumer path enables every source that exists when the first
+    // consumer registers. A source registering after that is not among them,
+    // and nothing else would ever ask its engine for semantics.
+    //
+    // A shell bringing up several engines hits this every time: the consumer
+    // arrives with the first engine's socket, so every later engine registers
+    // into a hub that already has consumers. Its tree is advertised and stays
+    // empty at generation 0 -- which reads as an application that publishes
+    // nothing rather than as an engine that was never asked to.
+    enable = !hub.consumers.empty();
   }
 
-  auto source = std::make_unique<Source>();
-  source->name = desc->name;
-  source->host = desc->host;
-  source->host_installed = true;
-  *out_source = reinterpret_cast<IhsSemanticsSource*>(source.get());
-  hub.sources.push_back(std::move(source));
+  // Outside the lock, for the same reason the consumer path is: the shell's
+  // enable path reaches into the engine, and holding the registry across it
+  // would let engine work block every consumer.
+  if (enable && desc->host.set_semantics_enabled != nullptr) {
+    desc->host.set_semantics_enabled(desc->host.user_data, true);
+  }
   return IHS_SEMANTICS_OK;
 }
 

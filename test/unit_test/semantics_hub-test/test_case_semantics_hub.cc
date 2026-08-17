@@ -1084,3 +1084,47 @@ TEST_F(SemanticsHubTest, AHeldSnapshotSurvivesItsSourceUnregistering) {
   EXPECT_STREQ(ihs_semantics_snapshot_node_at(held, 0)->label, "Still here");
   ihs_semantics_release_snapshot(held);
 }
+
+// A source that registers after a consumer already has to be switched on as it
+// arrives. The consumer path enables every source that exists when the first
+// consumer registers, so an engine coming up later would otherwise never be
+// asked for semantics at all.
+//
+// This is the ordinary case for a shell running several engines, not an edge
+// one: the consumer arrives with the first engine, so every later engine
+// registers into a hub that already has consumers. The symptom is not an error
+// anywhere -- the late engine's tree is advertised and stays empty, which reads
+// as an application that publishes nothing.
+TEST_F(SemanticsHubTest, ASourceRegisteringAfterAConsumerIsEnabled) {
+  ihs_semantics_set_host(nullptr);
+
+  Recorder early{"early"};
+  IhsSemanticsSource* first = RegisterSource("app-early", &early);
+  ASSERT_NE(first, nullptr);
+
+  IhsSemanticsConsumerDesc desc{};
+  desc.struct_size = sizeof(desc);
+  desc.name = "probe";
+  desc.action_allow_mask = IHS_SEMANTICS_ACTION_ALL;
+  desc.notify_fd = -1;
+  IhsSemanticsConsumer* consumer = nullptr;
+  ASSERT_EQ(ihs_semantics_register(&desc, &consumer), IHS_SEMANTICS_OK);
+  ASSERT_EQ(early.enables, 1) << "the source present at registration was not "
+                                 "enabled, so this test cannot show anything "
+                                 "about the one that comes later";
+
+  Recorder late{"late"};
+  IhsSemanticsSource* second = RegisterSource("app-late", &late);
+  ASSERT_NE(second, nullptr);
+  EXPECT_EQ(late.enables, 1)
+      << "a source registering while a consumer was already listening was "
+         "never asked to produce semantics; its tree would stay empty";
+
+  // And the early source is not enabled twice by the late one's arrival --
+  // set_semantics_enabled is meant to track the transition, not be re-sent.
+  EXPECT_EQ(early.enables, 1);
+
+  ihs_semantics_unregister(consumer);
+  ihs_semantics_source_unregister(first);
+  ihs_semantics_source_unregister(second);
+}
