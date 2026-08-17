@@ -81,6 +81,11 @@ class App final {
    *
    * @relation flutter, osgi
    */
+  // This view's identity: derived from its bundle and unique among live
+  // views. Names the view's semantics tree and is handed to the application.
+  [[nodiscard]] std::string NameForView(
+      const Configuration::Config& config) const;
+
   FlutterView* AddView(const Configuration::Config& config);
 
   /**

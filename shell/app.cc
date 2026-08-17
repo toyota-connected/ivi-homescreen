@@ -251,6 +251,45 @@ void App::WatchDisplayOutputs(const std::shared_ptr<IDisplay>& display) {
                   provider->EnumerateOutputs().size());
 }
 
+std::string App::NameForView(const Configuration::Config& config) const {
+  // The bundle's own directory, which is what a person configuring the shell
+  // named it, so an outside reader recognizes it. A bundle laid out as
+  // <app>/bundle would be called "bundle" and say nothing, so that one name
+  // defers to the directory holding it.
+  std::filesystem::path path = config.view.bundle_path;
+  while (!path.empty() && (path.filename() == "bundle" ||
+                           path.filename() == "." || path.filename() == "/")) {
+    path = path.parent_path();
+  }
+  std::string base = path.filename().string();
+  if (base.empty()) {
+    base = "view";
+  }
+
+  // Unique among live views, because the name addresses one: a repeated name
+  // would leave two trees indistinguishable to anything naming them, which is
+  // the failure the whole addressing scheme exists to prevent. Two instances of
+  // one bundle is an ordinary arrangement -- the same application on two
+  // displays -- so this disambiguates rather than refusing.
+  const auto taken = [this](const std::string& candidate) {
+    return std::any_of(m_views.begin(), m_views.end(),
+                       [&candidate](const std::unique_ptr<FlutterView>& v) {
+                         return v->GetName() == candidate;
+                       });
+  };
+  if (!taken(base)) {
+    return base;
+  }
+  // Suffixed from the index rather than a counter, so a name is stable for a
+  // given view rather than depending on what started before it.
+  for (size_t n = m_views.size();; n++) {
+    std::string candidate = base + "-" + std::to_string(n);
+    if (!taken(candidate)) {
+      return candidate;
+    }
+  }
+}
+
 FlutterView* App::AddView(const Configuration::Config& config) {
   const size_t display_count_before = m_displays.size();
   auto display = DisplayForContext(config);
@@ -276,7 +315,8 @@ FlutterView* App::AddView(const Configuration::Config& config) {
   // Index continues the constructor's sequence: it is the engine index that
   // shows up in the logs, and a duplicate would make two engines
   // indistinguishable there.
-  auto view = std::make_unique<FlutterView>(config, m_views.size(), display);
+  auto view = std::make_unique<FlutterView>(config, m_views.size(),
+                                            NameForView(config), display);
   // Initialize() runs the engine. Doing it here, one view at a time, is the
   // whole point of this entry point.
   //
@@ -323,7 +363,10 @@ App::App(const std::vector<Configuration::Config>& configs) {
   size_t index = 0;
   m_views.reserve(configs.size());
   for (auto const& cfg : configs) {
-    auto view = std::make_unique<FlutterView>(cfg, index, view_display[index]);
+    // m_views grows as this loop runs, so each name is checked against the
+    // views already built -- the same rule AddView applies later.
+    auto view = std::make_unique<FlutterView>(cfg, index, NameForView(cfg),
+                                              view_display[index]);
     if (!view->Initialize()) {
       // Fatal on this path only: the constructor runs before anything is up, so
       // there is no running system for a failed view to spare.

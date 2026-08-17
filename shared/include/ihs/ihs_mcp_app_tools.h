@@ -141,6 +141,26 @@ typedef struct IhsMcpAppToolsDesc {
    * one still working.
    */
   uint32_t call_timeout_ms;
+
+  /*
+   * Which view this application is, when the shell is running more than one.
+   * NULL or empty when it does not know, which is every single-view case.
+   *
+   * Only used to break a tie. Two instances of one bundle ask for the same
+   * prefix -- the same application on two displays is an ordinary arrangement,
+   * and without this the second registration is refused and its tools are
+   * simply absent, reported nowhere the agent can see. Given a view, the second
+   * claimant falls back to "<view>.<prefix>" instead of failing.
+   *
+   * The first claimant keeps the bare prefix, so an application running alone
+   * advertises exactly the names it always did, and a second one starting later
+   * cannot rename the tools an agent has already discovered.
+   *
+   * The shell passes this to the application as --ihs-view=<name>, and it is
+   * the same name that addresses the view's semantics tree, so an agent sees
+   * one identity rather than two.
+   */
+  const char* view;
 } IhsMcpAppToolsDesc;
 
 /*
@@ -169,6 +189,17 @@ IHS_EXPORT int ihs_mcp_app_tools_complete(uint64_t call_id,
                                           bool ok,
                                           const char* result_json,
                                           size_t result_length);
+
+/*
+ * The prefix the tools are actually advertised under, which is what an agent
+ * sees in front of every tool name. Usually the requested one; the view's
+ * qualified form when another application had already claimed it. Valid until
+ * the handle is unregistered, and "" for NULL.
+ *
+ * Worth logging at startup: it is the difference between an application whose
+ * tools an agent can find and one whose tools are there under another name.
+ */
+IHS_EXPORT const char* ihs_mcp_app_tools_prefix(const IhsMcpAppTools* handle);
 
 /*
  * Unregisters. Any call still outstanding is failed before this returns, and

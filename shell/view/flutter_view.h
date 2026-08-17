@@ -76,9 +76,19 @@ class TaskRunner;
 
 class FlutterView {
  public:
+  /**
+   * @param name  This view's identity, assigned by App and unique among live
+   *              views. It names the view's semantics tree and is handed to the
+   *              application so its tools can say which view they act on, so
+   *              one view is one name everywhere it is addressed from.
+   */
   FlutterView(Configuration::Config config,
               size_t index,
+              std::string name,
               const std::shared_ptr<IDisplay>& display);
+
+  /// This view's identity; see the constructor.
+  [[nodiscard]] const std::string& GetName() const { return m_name; }
   ~FlutterView();
 
   /**
@@ -406,6 +416,8 @@ class FlutterView {
   const Configuration::Config m_config;
   std::shared_ptr<PlatformChannel> m_platform_channel;
   size_t m_index;
+  // Assigned by App; see the constructor.
+  std::string m_name;
 
   std::unique_ptr<FlutterDesktopViewControllerState> m_state;
 

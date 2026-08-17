@@ -70,6 +70,7 @@ class Engine {
    */
   Engine(FlutterView* view,
          size_t index,
+         std::string view_name,
          const std::vector<const char*>& command_line_args_c,
          const std::vector<const char*>& dart_entrypoint_args_c,
          const std::string& bundle_path,
@@ -483,6 +484,8 @@ class Engine {
   // what a person configuring the shell called this application, so it is what
   // an outside reader should see addressing its tree.
   std::string m_bundle_name;
+  // Assigned by App: this view's identity, unique among live views.
+  std::string m_view_name;
 
 #if BUILD_ACCESSIBILITY
   // This engine's hub registration. Each engine is an independent publisher --

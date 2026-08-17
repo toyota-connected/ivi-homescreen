@@ -177,8 +177,12 @@ std::shared_ptr<Backend> Backend::Create(
 
 FlutterView::FlutterView(Configuration::Config config,
                          const size_t index,
+                         std::string name,
                          const std::shared_ptr<IDisplay>& display)
-    : m_display(display), m_config(std::move(config)), m_index(index) {
+    : m_display(display),
+      m_config(std::move(config)),
+      m_index(index),
+      m_name(std::move(name)) {
   m_backend = Backend::Create(m_config, display);
 
   IHS_DEBUG("Width: {}, Height: {}",
@@ -536,8 +540,17 @@ bool FlutterView::Initialize() {
 
   // Arguments to the Dart entrypoint main(List<String>) -> dart_entrypoint_argv
   // (no argv[0] convention).
+  //
+  // The view's own name goes in ahead of the configured ones. An application
+  // cannot work out which view it is -- every instance of a bundle runs the
+  // same code -- and it needs to, because two instances otherwise claim the
+  // same namespace for the tools they declare and the second one loses. This
+  // is the same name that addresses the view's semantics tree, so an agent
+  // reading a tree and calling a tool sees one identity rather than two.
+  const std::string view_arg = "--ihs-view=" + m_name;
   std::vector<const char*> m_dart_entrypoint_args_c;
-  m_dart_entrypoint_args_c.reserve(m_config.view.dart_args.size());
+  m_dart_entrypoint_args_c.reserve(m_config.view.dart_args.size() + 1);
+  m_dart_entrypoint_args_c.push_back(view_arg.c_str());
   for (const auto& arg : m_config.view.dart_args) {
     m_dart_entrypoint_args_c.push_back(arg.c_str());
   }
@@ -548,7 +561,7 @@ bool FlutterView::Initialize() {
 #endif
 
   m_flutter_engine = std::make_shared<Engine>(
-      this, m_index, m_command_line_args_c, m_dart_entrypoint_args_c,
+      this, m_index, m_name, m_command_line_args_c, m_dart_entrypoint_args_c,
       m_config.view.bundle_path,
       m_config.view.accessibility_features.value_or(0),
       m_config.view.merge_render_platform.value_or(false),

@@ -96,7 +96,11 @@ final class _AppToolsDesc extends ffi.Struct {
   external ffi.Pointer<ffi.Void> userData;
   @ffi.Uint32()
   external int callTimeoutMs;
+  external ffi.Pointer<Utf8> view;
 }
+
+typedef _PrefixNative = ffi.Pointer<Utf8> Function(ffi.Pointer<ffi.Void>);
+typedef _PrefixDart = ffi.Pointer<Utf8> Function(ffi.Pointer<ffi.Void>);
 
 typedef _InvokeNative = ffi.Void Function(
   ffi.Pointer<ffi.Void>,
@@ -124,6 +128,8 @@ class _Bindings {
             'ihs_mcp_app_tools_register'),
         complete = library.lookupFunction<_CompleteNative, _CompleteDart>(
             'ihs_mcp_app_tools_complete'),
+        prefixOf = library.lookupFunction<_PrefixNative, _PrefixDart>(
+            'ihs_mcp_app_tools_prefix'),
         unregister = library.lookupFunction<_UnregisterNative, _UnregisterDart>(
             'ihs_mcp_app_tools_unregister');
 
@@ -146,6 +152,7 @@ class _Bindings {
 
   final _RegisterDart register;
   final _CompleteDart complete;
+  final _PrefixDart prefixOf;
   final _UnregisterDart unregister;
 }
 
@@ -158,12 +165,14 @@ const int _errPrefixTaken = -2;
 
 /// A live registration. Tools stay advertised until [unregister].
 class McpAppTools {
-  McpAppTools._(this._handle, this._callable, this._allocations, this._tools);
+  McpAppTools._(this._handle, this._callable, this._allocations, this._tools,
+      this._prefix);
 
   final ffi.Pointer<ffi.Void> _handle;
   final ffi.NativeCallable<_InvokeNative> _callable;
   final List<ffi.Pointer<ffi.NativeType>> _allocations;
   final Map<String, McpTool> _tools;
+  final String _prefix;
   bool _released = false;
 
   /// Registers [tools] under [prefix] (a bare identifier prefix, `hvac_`).
@@ -171,9 +180,40 @@ class McpAppTools {
   /// Throws [StateError] if the prefix is already claimed by another
   /// application or by the shell's own tools, and [ArgumentError] for a
   /// malformed registration.
+  /// Reads the view this application is running as out of the entrypoint
+  /// arguments the shell passes to `main`, or null when it is not there.
+  ///
+  /// An application cannot work this out for itself -- every instance of a
+  /// bundle runs the same code -- and it matters as soon as two instances run
+  /// at once, because both would otherwise claim the same tool namespace and
+  /// the second would lose. Pass the result to [register] as `view`.
+  ///
+  /// The same name addresses this view's semantics tree, so an agent reading a
+  /// tree and calling a tool sees one identity.
+  static String? viewFromArgs(List<String> args) {
+    const String flag = '--ihs-view=';
+    for (final String arg in args) {
+      if (arg.startsWith(flag)) {
+        final String value = arg.substring(flag.length);
+        return value.isEmpty ? null : value;
+      }
+    }
+    return null;
+  }
+
+  /// The prefix the tools are actually advertised under.
+  ///
+  /// Usually [prefix] as asked for. When another application had already
+  /// claimed it and a [view] was given, it is that prefix qualified by the
+  /// view -- so the tools are reachable, under a name that says which view
+  /// they act on. Worth logging: it is the difference between tools an agent
+  /// can find and tools that are there under another name.
+  String get prefix => _prefix;
+
   static McpAppTools register({
     required String prefix,
     required List<McpTool> tools,
+    String? view,
     Duration timeout = const Duration(seconds: 5),
   }) {
     final Map<String, McpTool> byName = <String, McpTool>{
@@ -222,7 +262,8 @@ class McpAppTools {
       ..toolCount = tools.length
       ..invoke = callable.nativeFunction
       ..userData = ffi.nullptr
-      ..callTimeoutMs = timeout.inMilliseconds;
+      ..callTimeoutMs = timeout.inMilliseconds
+      ..view = view == null ? ffi.nullptr : allocate(view);
 
     final ffi.Pointer<ffi.Pointer<ffi.Void>> out = calloc<ffi.Pointer<ffi.Void>>();
     final int status = _abi.register(desc, out);
@@ -241,8 +282,12 @@ class McpAppTools {
       throw ArgumentError('registration was refused (status $status)');
     }
 
+    // Read back rather than assumed: the shell may have qualified it, and an
+    // application that logs the prefix it asked for would be reporting a name
+    // no agent will see.
+    final String effective = _abi.prefixOf(handle).toDartString();
     final McpAppTools registration =
-        McpAppTools._(handle, callable, allocations, byName);
+        McpAppTools._(handle, callable, allocations, byName, effective);
     _live[callable.nativeFunction.address] = registration;
     return registration;
   }
