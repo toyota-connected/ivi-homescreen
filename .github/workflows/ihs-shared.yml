@@ -40,16 +40,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Update apt package index
-        # cache-apt-pkgs-action resolves package versions before it runs its
-        # own apt update, so it pins whatever the runner image's stale index
-        # lists. When Ubuntu supersedes a revision and drops the old .deb from
-        # the mirror (e.g. libinput 1.25.0-1ubuntu3.4), that pinned fetch 404s
-        # and aborts the whole install. Refresh the index up front so it pins
-        # the version currently on the mirror.
-        run: sudo apt-get update
       - name: Install build deps
-        uses: awalsh128/cache-apt-pkgs-action@v1
+        uses: ./.github/actions/apt-packages
         with:
           packages: >-
             cmake ninja-build g++
@@ -112,16 +104,8 @@ jobs:
       - name: Fetch fmt submodule (raw-fmt reference)
         run: git submodule update --init --depth 1 third_party/fmt
 
-      - name: Update apt package index
-        # cache-apt-pkgs-action resolves package versions before it runs its
-        # own apt update, so it pins whatever the runner image's stale index
-        # lists. When Ubuntu supersedes a revision and drops the old .deb from
-        # the mirror (e.g. libinput 1.25.0-1ubuntu3.4), that pinned fetch 404s
-        # and aborts the whole install. Refresh the index up front so it pins
-        # the version currently on the mirror.
-        run: sudo apt-get update
       - name: Install build deps
-        uses: awalsh128/cache-apt-pkgs-action@v1
+        uses: ./.github/actions/apt-packages
         with:
           packages: >-
             cmake ninja-build g++
@@ -147,16 +131,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Update apt package index
-        # cache-apt-pkgs-action resolves package versions before it runs its
-        # own apt update, so it pins whatever the runner image's stale index
-        # lists. When Ubuntu supersedes a revision and drops the old .deb from
-        # the mirror (e.g. libinput 1.25.0-1ubuntu3.4), that pinned fetch 404s
-        # and aborts the whole install. Refresh the index up front so it pins
-        # the version currently on the mirror.
-        run: sudo apt-get update
       - name: Install build deps
-        uses: awalsh128/cache-apt-pkgs-action@v1
+        uses: ./.github/actions/apt-packages
         with:
           packages: >-
             cmake ninja-build g++ abigail-tools
@@ -216,16 +192,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Update apt package index
-        # cache-apt-pkgs-action resolves package versions before it runs its
-        # own apt update, so it pins whatever the runner image's stale index
-        # lists. When Ubuntu supersedes a revision and drops the old .deb from
-        # the mirror (e.g. libinput 1.25.0-1ubuntu3.4), that pinned fetch 404s
-        # and aborts the whole install. Refresh the index up front so it pins
-        # the version currently on the mirror.
-        run: sudo apt-get update
       - name: Install build deps
-        uses: awalsh128/cache-apt-pkgs-action@v1
+        uses: ./.github/actions/apt-packages
         with:
           packages: >-
             cmake ninja-build gcc g++ dlt-daemon dlt-tools

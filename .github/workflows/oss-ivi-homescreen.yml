@@ -22,16 +22,8 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Update apt package index
-        # cache-apt-pkgs-action resolves package versions before it runs its
-        # own apt update, so it pins whatever the runner image's stale index
-        # lists. When Ubuntu supersedes a revision and drops the old .deb from
-        # the mirror (e.g. libinput 1.25.0-1ubuntu3.4), that pinned fetch 404s
-        # and aborts the whole install. Refresh the index up front so it pins
-        # the version currently on the mirror.
-        run: sudo apt-get update
       - name: Install build deps
-        uses: awalsh128/cache-apt-pkgs-action@v1
+        uses: ./.github/actions/apt-packages
         with:
           packages: >-
             ninja-build
@@ -140,16 +132,8 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Update apt package index
-        # cache-apt-pkgs-action resolves package versions before it runs its
-        # own apt update, so it pins whatever the runner image's stale index
-        # lists. When Ubuntu supersedes a revision and drops the old .deb from
-        # the mirror (e.g. libinput 1.25.0-1ubuntu3.4), that pinned fetch 404s
-        # and aborts the whole install. Refresh the index up front so it pins
-        # the version currently on the mirror.
-        run: sudo apt-get update
       - name: Install build deps
-        uses: awalsh128/cache-apt-pkgs-action@v1
+        uses: ./.github/actions/apt-packages
         with:
           packages: >-
             ninja-build
@@ -192,12 +176,8 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Update apt package index
-        # See the accessibility job: the cache action pins versions from the
-        # runner's stale index, which 404s once a revision is superseded.
-        run: sudo apt-get update
       - name: Install build deps
-        uses: awalsh128/cache-apt-pkgs-action@v1
+        uses: ./.github/actions/apt-packages
         with:
           packages: >-
             ninja-build
@@ -330,16 +310,8 @@ jobs:
         uses: actions/checkout@v7
         with:
           submodules: recursive
-      - name: Update apt package index
-        # cache-apt-pkgs-action resolves package versions before it runs its
-        # own apt update, so it pins whatever the runner image's stale index
-        # lists. When Ubuntu supersedes a revision and drops the old .deb from
-        # the mirror (e.g. libinput 1.25.0-1ubuntu3.4), that pinned fetch 404s
-        # and aborts the whole install. Refresh the index up front so it pins
-        # the version currently on the mirror.
-        run: sudo apt-get update
       - name: Install build deps
-        uses: awalsh128/cache-apt-pkgs-action@v1
+        uses: ./.github/actions/apt-packages
         with:
           packages: >-
             build-essential cmake ninja-build pkg-config git python3
@@ -421,16 +393,8 @@ jobs:
         uses: actions/checkout@v7
         with:
           submodules: recursive
-      - name: Update apt package index
-        # cache-apt-pkgs-action resolves package versions before it runs its
-        # own apt update, so it pins whatever the runner image's stale index
-        # lists. When Ubuntu supersedes a revision and drops the old .deb from
-        # the mirror (e.g. libinput 1.25.0-1ubuntu3.4), that pinned fetch 404s
-        # and aborts the whole install. Refresh the index up front so it pins
-        # the version currently on the mirror.
-        run: sudo apt-get update
       - name: Install build deps
-        uses: awalsh128/cache-apt-pkgs-action@v1
+        uses: ./.github/actions/apt-packages
         with:
           packages: >-
             build-essential cmake ninja-build pkg-config git python3
@@ -489,7 +453,7 @@ jobs:
           path: ~/.cache/emb/store/engine
           key: emb-engine-x86_64-${{ github.run_id }}
       - name: Install build deps
-        uses: awalsh128/cache-apt-pkgs-action@v1
+        uses: ./.github/actions/apt-packages
         with:
           packages: >-
             libsystemd-dev
@@ -521,32 +485,18 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Update apt package index
-        # Refresh the index before cache-apt-pkgs-action resolves versions, so
-        # it pins the revision currently on the mirror rather than a stale one
-        # the runner image still lists (a dropped .deb 404s and aborts install).
-        run: sudo apt-get update
-
       - name: Install dependencies
-        uses: awalsh128/cache-apt-pkgs-action@v1
+        uses: ./.github/actions/apt-packages
         with:
           packages: ninja-build libwayland-dev wayland-protocols libxkbcommon-dev mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils libglib2.0-dev libpugixml-dev libdrm-dev libgbm-dev libinput-dev libudev-dev libseat-dev libxcursor-dev clang-19 clang-tidy-19 clang-format-19 llvm-19 lld-19 libc++-19-dev libc++abi-19-dev
-          version: 1.0
-
-      - name: Update apt package index
-        # Refresh the index before cache-apt-pkgs-action resolves versions, so
-        # it pins the revision currently on the mirror rather than a stale one
-        # the runner image still lists (a dropped .deb 404s and aborts install).
-        run: sudo apt-get update
 
       - name: Install extra dependencies
-        uses: awalsh128/cache-apt-pkgs-action@v1
+        uses: ./.github/actions/apt-packages
         with:
           packages: >-
             libdrm-dev libgbm-dev
             libinput-dev libudev-dev libseat-dev libxcursor-dev
             libsystemd-dev libpugixml-dev libcurl4-openssl-dev
-          version: 1.0-extra
 
       - name: Setup libdisplay-info
         uses: ./.github/actions/setup-libdisplay-info
@@ -577,10 +527,9 @@ jobs:
         run: ninja -C .
 
       - name: Install unit test deps
-        uses: awalsh128/cache-apt-pkgs-action@v1
+        uses: ./.github/actions/apt-packages
         with:
           packages: lcov
-          version: 1.0-unit_test
 
       - name: Run unit tests (CTest)
         working-directory: ${{github.workspace}}/build/unit-tests

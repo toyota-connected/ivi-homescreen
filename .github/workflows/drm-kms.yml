@@ -35,17 +35,8 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Update apt package index
-        # cache-apt-pkgs-action resolves package versions before it runs its
-        # own apt update, so it pins whatever the runner image's stale index
-        # lists. When Ubuntu supersedes a revision and drops the old .deb from
-        # the mirror (e.g. libinput 1.25.0-1ubuntu3.4), that pinned fetch 404s
-        # and aborts the whole install. Refresh the index up front so it pins
-        # the version currently on the mirror.
-        run: sudo apt-get update
-
       - name: Install dependencies
-        uses: awalsh128/cache-apt-pkgs-action@v1
+        uses: ./.github/actions/apt-packages
         with:
           packages: >-
             ninja-build
@@ -55,7 +46,6 @@ jobs:
             libxcursor-dev
             libglib2.0-dev
             ${{ matrix.extra_pkgs }}
-          version: 1.0
 
       - name: Setup libdisplay-info (system or from-source)
         uses: ./.github/actions/setup-libdisplay-info
@@ -96,17 +86,8 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Update apt package index
-        # cache-apt-pkgs-action resolves package versions before it runs its
-        # own apt update, so it pins whatever the runner image's stale index
-        # lists. When Ubuntu supersedes a revision and drops the old .deb from
-        # the mirror (e.g. libinput 1.25.0-1ubuntu3.4), that pinned fetch 404s
-        # and aborts the whole install. Refresh the index up front so it pins
-        # the version currently on the mirror.
-        run: sudo apt-get update
-
       - name: Install dependencies
-        uses: awalsh128/cache-apt-pkgs-action@v1
+        uses: ./.github/actions/apt-packages
         with:
           packages: >-
             ninja-build
@@ -116,7 +97,6 @@ jobs:
             libxcursor-dev
             libglib2.0-dev
             clang-19 llvm-19 lld-19 libc++-19-dev libc++abi-19-dev
-          version: 1.0
 
       - name: Setup libdisplay-info (system or from-source)
         uses: ./.github/actions/setup-libdisplay-info
