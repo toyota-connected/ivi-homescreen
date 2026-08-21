@@ -370,6 +370,12 @@ else()
 endif ()
 
 #
+# Packaging
+#
+
+option(ENABLE_DEB_SHLIBDEPS "Enable DEB shared library dependencies for packaging" OFF)
+
+#
 # watchdog
 #
 option(BUILD_WATCHDOG "Build Watchdog" OFF)
