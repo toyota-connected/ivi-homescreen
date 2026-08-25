@@ -2574,6 +2574,14 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       // not-yet-ready producer on the plane path to avoid startup flicker.
       if (!is_new &&
           db_state == ICompositorSurface::DmabufState::kNotScanoutCapable) {
+        // Rare by construction -- a producer that submits a frame the plane
+        // path cannot carry. Log it: without this the fallback is
+        // indistinguishable from any other GL present, and this branch is the
+        // one a producer-side regression would silently stop reaching.
+        ihs::log::debug(
+            "[DrmCompositor] pv {}: new frame is not scanout-capable; "
+            "compositing this present through GL",
+            static_cast<const void*>(surface.get()));
         return PresentViaGlFallback(layers, layer_count);
       }
       if (is_new && !have_db) {
