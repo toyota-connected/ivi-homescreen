@@ -42,6 +42,29 @@ if (BUILD_BACKEND_WAYLAND_EGL)
     pkg_check_modules(WAYLAND_CXX_EGL REQUIRED IMPORTED_TARGET wayland-egl)
 endif ()
 
+# pkg_get_variable() hands back the variable exactly as the .pc file spells it.
+# Unlike the -I/-L flags in the cflags/libs, it is never sysroot-prefixed, so
+# when cross-compiling a pkgdatadir such as /usr/share/wayland resolves against
+# the *build host* rather than the sysroot. Feeding host XML to the scanner
+# generates bindings for the host's libwayland while the code links the
+# sysroot's, and the *_SINCE_VERSION guards in the shell then test one version's
+# macros against the other version's structs.
+#
+# Prefer the sysroot copy whenever there is one. The host path usually exists
+# too -- that is precisely the failure -- so this cannot be an "only if missing"
+# fallback; under CMAKE_SYSROOT the sysroot wins. When the value already points
+# inside the sysroot (pkg-config does apply PKG_CONFIG_SYSROOT_DIR when it finds
+# the .pc there) the prefixed path does not exist and the value is left alone.
+function(_wlcxx_prefer_sysroot var subpath)
+    if (NOT CMAKE_SYSROOT)
+        return()
+    endif ()
+    set(_candidate "${CMAKE_SYSROOT}${${var}}")
+    if (EXISTS "${_candidate}/${subpath}")
+        set(${var} "${_candidate}" PARENT_SCOPE)
+    endif ()
+endfunction()
+
 # Protocol XML base — xdg-shell + presentation-time ship with wayland-protocols.
 #
 # Surface builds only: a lease-only build reads nothing from wayland-protocols.
@@ -54,14 +77,20 @@ endif ()
 if (IVI_WAYLAND_SURFACE_BACKENDS)
     pkg_check_modules(WAYLAND_PROTOCOLS REQUIRED wayland-protocols>=1.20)
     pkg_get_variable(_wlcxx_proto_base wayland-protocols pkgdatadir)
+    _wlcxx_prefer_sysroot(_wlcxx_proto_base "stable/xdg-shell/xdg-shell.xml")
     set(IVI_WL_PROTOCOLS_BASE "${_wlcxx_proto_base}" CACHE INTERNAL "wayland-protocols pkgdatadir")
 endif ()
 
 # Core Wayland protocol XML (wl_seat / wl_keyboard / …) ships with
 # wayland-scanner. The generated wayland_client.hpp backs wl::KeyboardHandler;
 # its core wl_interface tables come from libwayland (no --emit-interface-tables).
+# Settable: an integrator whose sysroot layout defeats the probe above can point
+# this straight at the right XML. It must describe the libwayland actually being
+# linked -- a mismatch is silent when the XML is older (events are compiled out
+# with no diagnostic) and a compile error when it is newer.
 pkg_get_variable(_wlcxx_core_base wayland-scanner pkgdatadir)
-set(IVI_WL_CORE_XML "${_wlcxx_core_base}/wayland.xml" CACHE INTERNAL "core wayland.xml")
+_wlcxx_prefer_sysroot(_wlcxx_core_base "wayland.xml")
+set(IVI_WL_CORE_XML "${_wlcxx_core_base}/wayland.xml" CACHE FILEPATH "core wayland.xml")
 
 # --- Shell client options --------------------------------------------------
 # xdg + agl on by default; ivi + simple are opt-in.
