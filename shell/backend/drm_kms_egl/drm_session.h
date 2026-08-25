@@ -25,6 +25,8 @@
 #include <thread>
 #include <vector>
 
+#include "input/wake_event_fd.h"
+
 #include <drm-cxx/display/hotplug_monitor.hpp>
 #include <drm-cxx/input/seat.hpp>
 #include <drm-cxx/session/seat.hpp>
@@ -126,6 +128,10 @@ class DrmSession {
   std::vector<ResumeFn> resume_handlers_;
   std::thread thread_;
   std::atomic<bool> stop_{false};
+  // Breaks the dispatch loop out of its indefinite poll at teardown. Without
+  // it the loop needs a timeout purely to re-check stop_, which costs a wakeup
+  // several times a second on a system that is doing nothing.
+  input::WakeEventFd waker_;
 };
 
 }  // namespace homescreen

@@ -120,6 +120,10 @@ DrmSession::DrmSession(drm::session::Seat seat) : seat_(std::move(seat)) {
 
 DrmSession::~DrmSession() {
   stop_.store(true, std::memory_order_release);
+  // Store the flag, then wake. That order closes the lost-wake window: the
+  // eventfd stays readable across the dispatcher's check/block boundary, so a
+  // Wake() landing between its stop_ check and its poll() is still seen.
+  waker_.Wake();
   if (thread_.joinable()) {
     thread_.join();
   }
@@ -172,17 +176,33 @@ void DrmSession::DispatchLoop() {
     return;
   }
   int hp_fd = hotplug_ ? hotplug_->fd() : -1;
+  const int wake_fd = waker_.fd();
   constexpr short kErr = POLLERR | POLLHUP | POLLNVAL;
 
+  // Block indefinitely. Both the seat and the hotplug fd are readable exactly
+  // when there is something to dispatch, so a timeout would only serve to
+  // re-check stop_ -- and stop_ changes once, at teardown, where the
+  // destructor wakes us instead. Degraded mode (eventfd() unavailable, fd()
+  // is -1) keeps the old cap so teardown is still observed promptly.
+  const int timeout_ms = wake_fd >= 0 ? -1 : kPollTimeoutMs;
+
   while (!stop_.load(std::memory_order_acquire)) {
-    pollfd pfds[2];
-    pfds[0] = {seat_fd, POLLIN, 0};
-    nfds_t nfds = 1;
+    // Indices rather than fixed slots: hotplug can be dropped mid-loop on a
+    // bad fd, and the waker is absent in degraded mode, so the set is rebuilt
+    // each iteration and the slots move.
+    pollfd pfds[3];
+    nfds_t nfds = 0;
+    const int seat_idx = static_cast<int>(nfds);
+    pfds[nfds++] = {seat_fd, POLLIN, 0};
+    const int hp_idx = hp_fd >= 0 ? static_cast<int>(nfds) : -1;
     if (hp_fd >= 0) {
-      pfds[1] = {hp_fd, POLLIN, 0};
-      nfds = 2;
+      pfds[nfds++] = {hp_fd, POLLIN, 0};
     }
-    const int r = poll(pfds, nfds, kPollTimeoutMs);
+    const int wake_idx = wake_fd >= 0 ? static_cast<int>(nfds) : -1;
+    if (wake_fd >= 0) {
+      pfds[nfds++] = {wake_fd, POLLIN, 0};
+    }
+    const int r = poll(pfds, nfds, timeout_ms);
     if (r < 0) {
       if (errno == EINTR) {
         continue;
@@ -191,25 +211,31 @@ void DrmSession::DispatchLoop() {
       break;
     }
     if (r > 0) {
-      if ((pfds[0].revents & kErr) != 0) {
+      // Drain first: the only writer is the destructor, so a readable waker
+      // means stop_ is already set and the loop condition will end us. Drain
+      // regardless so a spurious wake cannot spin the loop.
+      if (wake_idx >= 0 && (pfds[wake_idx].revents & POLLIN) != 0) {
+        waker_.Drain();
+      }
+      if ((pfds[seat_idx].revents & kErr) != 0) {
         ihs::log::error("[DrmSession] seat fd error (revents={:#x}); exiting",
-                        static_cast<unsigned>(pfds[0].revents));
+                        static_cast<unsigned>(pfds[seat_idx].revents));
         break;
       }
-      if ((pfds[0].revents & POLLIN) != 0) {
+      if ((pfds[seat_idx].revents & POLLIN) != 0) {
         seat_.dispatch();
       }
-      if (nfds == 2) {
-        if ((pfds[1].revents & kErr) != 0) {
+      if (hp_idx >= 0) {
+        if ((pfds[hp_idx].revents & kErr) != 0) {
           // Drop the hotplug monitor and keep serving the seat. A bad
           // hotplug fd shouldn't silently busy-loop the seat dispatcher.
           ihs::log::warn(
               "[DrmSession] hotplug fd error (revents={:#x}); disabling "
               "monitor",
-              static_cast<unsigned>(pfds[1].revents));
+              static_cast<unsigned>(pfds[hp_idx].revents));
           hotplug_.reset();
           hp_fd = -1;
-        } else if ((pfds[1].revents & POLLIN) != 0) {
+        } else if ((pfds[hp_idx].revents & POLLIN) != 0) {
           if (auto rc = hotplug_->dispatch(); !rc) {
             ihs::log::warn("[DrmSession] hotplug dispatch: {}",
                            rc.error().message());
