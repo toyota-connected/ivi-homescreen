@@ -418,19 +418,25 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   // correct, just not zero-copy) until it resubmits. Retaining the dma-buf
   // across a GL import so a static producer returns to scanout is part of the
   // dynamic-producer follow-up.
-  [[nodiscard]] bool GetDmabuf(Dmabuf* out) const override {
+  [[nodiscard]] DmabufState GetDmabuf(Dmabuf* out) const override {
     const std::lock_guard<std::mutex> lock(mutex);
+    // Nothing submitted yet. Not "cannot scan out" -- this producer is simply
+    // not ready, and its plane lights up on its first submit.
     if (out == nullptr || !pending_egl.valid) {
-      return false;
+      return DmabufState::kNoNewFrame;
     }
     // Hand each submitted frame to the scanout path at most once — the reuse
     // branch polls this every present but only wants a fresh buffer.
     if (dmabuf_delivered_seq == submit_seq) {
-      return false;
+      return DmabufState::kNoNewFrame;
     }
     const IhsFrame& f = pending_egl.frame;
+    // From here on there *is* a new frame, so every remaining bail-out is a
+    // frame that cannot be scanned out rather than an absent one. Saying so
+    // lets the compositor GL-composite the new content instead of holding the
+    // plane on the last scannable frame.
     if (f.plane_count == 0 || f.plane_fd[0] < 0) {
-      return false;
+      return DmabufState::kNotScanoutCapable;
     }
     // Per-plane fds. A single-handle frame (v4l2/libcamera/Chromium) repeats
     // one fd across planes with distinct offsets; a multi-handle frame (e.g.
@@ -441,7 +447,8 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     const uint32_t np = f.plane_count < 4 ? f.plane_count : 4;
     for (uint32_t i = 0; i < np; ++i) {
       if (f.plane_fd[i] < 0) {
-        return false;  // a plane without a handle can't be scanned out
+        // A plane without a handle can't be scanned out.
+        return DmabufState::kNotScanoutCapable;
       }
     }
     int duped[4] = {-1, -1, -1, -1};
@@ -451,7 +458,12 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
         for (uint32_t j = 0; j < i; ++j) {
           ::close(duped[j]);
         }
-        return false;
+        // Transient (fd exhaustion), not a property of the frame -- and the
+        // frame is not marked delivered, so the next present retries the dup on
+        // the same buffer. Report it as "no new frame" so the plane holds for
+        // one present and self-heals, rather than dropping the whole frame to
+        // GL over a failure that is likely gone by the next commit.
+        return DmabufState::kNoNewFrame;
       }
     }
     for (uint32_t i = 0; i < np; ++i) {
@@ -493,7 +505,7 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
       }
     }
     dmabuf_delivered_seq = submit_seq;
-    return true;
+    return DmabufState::kFrame;
   }
 #endif
 

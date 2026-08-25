@@ -2559,7 +2559,23 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       ICompositorSurface::Dmabuf db{};
       const bool is_new =
           scene_->find_by_identity_tag(surface.get()) == nullptr;
-      const bool have_db = surface->GetDmabuf(&db);
+      const auto db_state = surface->GetDmabuf(&db);
+      const bool have_db = db_state == ICompositorSurface::DmabufState::kFrame;
+      // A reused layer with new content that cannot be scanned out. Holding the
+      // plane here -- which is what a bare "no dma-buf" answer used to mean --
+      // freezes the view on its last scannable frame while the producer goes on
+      // emitting content the plane path cannot carry (a format switch, or a
+      // producer that moved to a GL-only surface). Composite the frame through
+      // GL instead; the view returns to its plane on the next frame the plane
+      // can take.
+      //
+      // Only for a reused layer: an is_new view has nothing latched in the
+      // scene to go stale, and the branch below deliberately keeps a
+      // not-yet-ready producer on the plane path to avoid startup flicker.
+      if (!is_new &&
+          db_state == ICompositorSurface::DmabufState::kNotScanoutCapable) {
+        return PresentViaGlFallback(layers, layer_count);
+      }
       if (is_new && !have_db) {
         // New platform view with no dma-buf to place this present.
         //
