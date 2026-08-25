@@ -405,10 +405,16 @@ typedef struct IhsPvGrant {
  *                                    for crisp output. Position and z-order come
  *                                    from the Flutter layer, not a callback.
  *   on_touch                         a pointer/touch sequence hit the view;
- *                                    @pointer_data is @point_count contacts of
- *                                    @pointer_data_size doubles, coordinates in
- *                                    view-local logical pixels (a plugin remaps
- *                                    to its own space, e.g. a CarPlay dongle's).
+ *                                    @pointer_data holds @point_count contacts
+ *                                    in @pointer_data_size doubles *in total*,
+ *                                    so one contact's stride is
+ *                                    @pointer_data_size / @point_count -- the
+ *                                    size is the whole buffer, not the stride.
+ *                                    Within a contact, x sits at offset 7 and y
+ *                                    at offset 8 (raw Flutter PointerCoords
+ *                                    order), in view-local logical pixels (a
+ *                                    plugin remaps to its own space, e.g. a
+ *                                    CarPlay dongle's).
  *   accept_gesture/reject_gesture    gesture-arena arbitration for a sequence
  *                                    already delivered to the view.
  *   set_suspended                    the view left (1) or re-entered (0) the
@@ -432,6 +438,8 @@ typedef struct IhsPvGrant {
 typedef struct IhsPvCallbacks {
   size_t struct_size;
   void (*resize)(void* user_data, double width, double height);
+  /* pointer_data_size is the total number of doubles in pointer_data across
+   * all contacts, not a per-contact stride; divide by point_count for that. */
   void (*on_touch)(void* user_data,
                    int32_t action,
                    int32_t point_count,
