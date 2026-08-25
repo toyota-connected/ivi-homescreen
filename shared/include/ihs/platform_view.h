@@ -25,11 +25,13 @@
  * Lifecycle of one view:
  *   0. The plugin asks which surface kinds the active backend can grant
  *      (ihs_pv_query_capabilities) and picks its render strategy. The available
- *      set is backend-dependent: a DRM backend offers DRM_PLANE (direct
- *      scanout), every backend offers TEXTURE_DMABUF_IMPORT and SOFTWARE_SHM,
- *      and so on (see the kind matrix in docs/PLATFORM_VIEW_NEGOTIATION.md).
- * Every backend offers SOFTWARE_SHM, so a plugin that handles the floor always
- *      has a path.
+ *      set is backend-dependent and is offered from what the active backend
+ *      exposes: SOFTWARE_SHM always, TEXTURE_DMABUF_IMPORT when there is a
+ *      Vulkan or EGL context, DRM_PLANE only when that EGL context also has a
+ *      GBM device (see the kind matrix in
+ *      docs/PLATFORM_VIEW_NEGOTIATION.md). Only SOFTWARE_SHM is universal, so
+ *      a plugin that handles the floor always has a path -- but one that needs
+ *      dma-buf import must query for it rather than assume it.
  *   1. At load, the plugin installs a factory for its view type
  *      (ihs_pv_register_factory). Registration is process-global.
  *   2. When Flutter creates a view of that type, the registry invokes the
