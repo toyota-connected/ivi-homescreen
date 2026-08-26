@@ -18,6 +18,8 @@
 
 #include <future>
 #include <memory>
+#include <string>
+#include <vector>
 
 #include "asio/executor_work_guard.hpp"
 #include "asio/io_context.hpp"

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 
 #include "flutter_desktop_view.h"
 #include "keyboard_hook_handler.h"

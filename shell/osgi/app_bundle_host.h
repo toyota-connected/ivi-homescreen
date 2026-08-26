@@ -18,6 +18,7 @@
 
 #include <map>
 #include <mutex>
+#include <string>
 
 #include "bundle_host.h"
 #include "vsync_coordinator.h"

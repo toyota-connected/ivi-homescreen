@@ -19,9 +19,11 @@
 #include <EGL/egl.h>
 #include <chrono>
 #include <memory>
+#include <string>
 #include <string_view>
 
 #include <unordered_map>
+#include <vector>
 #include "config/common.h"  // ENABLE_DLT — keep before logger.hpp / member decl
 
 #include "configuration/configuration.h"

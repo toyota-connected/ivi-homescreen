@@ -7,6 +7,7 @@
 
 #include <EGL/egl.h>
 #include <wayland-client.h>
+#include <string>
 
 #include "compositor_surface_api.h"
 #include "config/common.h"

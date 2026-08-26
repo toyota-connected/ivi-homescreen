@@ -17,6 +17,7 @@
 #pragma once
 
 #include <flutter/encodable_value.h>
+#include <vector>
 
 #include "engine.h"
 

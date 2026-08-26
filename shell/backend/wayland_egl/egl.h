@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <array>
 #include <vector>
 
 #include <EGL/egl.h>

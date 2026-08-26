@@ -17,6 +17,7 @@
 #include "config/common.h"
 
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -33,6 +34,7 @@
 #endif
 
 #include <flutter_homescreen.h>
+#include <vector>
 
 #ifdef ENABLE_PLUGIN_COMP_SURF
 #include "compositor_surface.h"
