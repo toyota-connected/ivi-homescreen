@@ -21,6 +21,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <ctime>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <vector>

@@ -11,8 +11,10 @@
 #include <unistd.h>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 
 #include <flutter/encodable_value.h>
+#include <vector>
 
 #include "config/common.h"
 #include "logging/logging.h"

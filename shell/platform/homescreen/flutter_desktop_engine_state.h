@@ -1,6 +1,7 @@
 #pragma once
 
 #include <asio/io_context_strand.hpp>
+#include <string>
 
 #include "config/common.h"
 
