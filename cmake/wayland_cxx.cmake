@@ -56,13 +56,24 @@ endif ()
 # inside the sysroot (pkg-config does apply PKG_CONFIG_SYSROOT_DIR when it finds
 # the .pc there) the prefixed path does not exist and the value is left alone.
 function(_wlcxx_prefer_sysroot var subpath)
-    if (NOT CMAKE_SYSROOT)
-        return()
-    endif ()
-    set(_candidate "${CMAKE_SYSROOT}${${var}}")
-    if (EXISTS "${_candidate}/${subpath}")
-        set(${var} "${_candidate}" PARENT_SCOPE)
-    endif ()
+    # CMAKE_SYSROOT is the obvious root, but a cross toolchain need not set it.
+    # OpenEmbedded's cmake class began emitting it in 4.0 (kirkstone); 3.1
+    # (dunfell) names the sysroot through CMAKE_FIND_ROOT_PATH alone. Returning
+    # early there left the caller holding an unprefixed pkg-config path -- the
+    # build host's copy -- with no diagnostic, which for the core wayland.xml
+    # means generating bindings against a libwayland that is not the one being
+    # linked. Try every root that could name a sysroot, most specific first.
+    set(_roots "${CMAKE_SYSROOT}" ${CMAKE_FIND_ROOT_PATH} "${CMAKE_STAGING_PREFIX}")
+    foreach (_root IN LISTS _roots)
+        if (NOT _root)
+            continue()
+        endif ()
+        set(_candidate "${_root}${${var}}")
+        if (EXISTS "${_candidate}/${subpath}")
+            set(${var} "${_candidate}" PARENT_SCOPE)
+            return()
+        endif ()
+    endforeach ()
 endfunction()
 
 # Protocol XML base — xdg-shell + presentation-time ship with wayland-protocols.
