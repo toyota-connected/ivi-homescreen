@@ -19,6 +19,7 @@ on:
       - 'cmake/cxx_compat.cmake'
       - 'cmake/logging_helpers.cmake'
       - 'shell/logging/**'
+      - 'shared/src/logging/**'
       - '.github/workflows/ihs-logging-compat-matrix.yml'
   push:
     branches:
@@ -28,6 +29,7 @@ on:
       - 'cmake/cxx_compat.cmake'
       - 'cmake/logging_helpers.cmake'
       - 'shell/logging/**'
+      - 'shared/src/logging/**'
       - '.github/workflows/ihs-logging-compat-matrix.yml'
   workflow_dispatch:
 
