@@ -37,6 +37,39 @@ project(ivi-homescreen
 include(git)
 include(options)
 
+#
+# Runtime layout: the shell binary sits beside a lib/ holding the shared
+# libraries it links, and finds them through an $ORIGIN-relative RPATH. That
+# is the layout a deployed bundle already has, so a build tree and an install
+# resolve identically and neither needs LD_LIBRARY_PATH.
+#
+# Worth stating because CMake's automatic build-tree RPATH -- absolute paths
+# into each target's build directory -- hides a layout mismatch rather than
+# fixing it: everything resolves in the build tree and only breaks once the
+# binary moves. A build driven with an explicit RPATH gets no such help. emb
+# passes $ORIGIN/lib:$ORIGIN, and against the default layout, which leaves
+# libihs_shared.so in shared/, the shell then cannot start at all:
+#
+#     homescreen: error while loading shared libraries: libihs_shared.so.1:
+#         cannot open shared object file: No such file or directory
+#
+# The executable's own location is load-bearing (workflows, scripts and docs
+# all name build/shell/homescreen), so lib/ is placed relative to it rather
+# than the other way round.
+#
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/shell/lib")
+
+# Guarded so an integrator keeps the last word: emb passes a wider
+# $ORIGIN/lib:$ORIGIN, and a distro build that wants no RPATH at all passes an
+# empty one. Both are explicit choices, and both already satisfy the layout
+# above -- overriding them here would only narrow a decision made outside.
+if(NOT DEFINED CMAKE_BUILD_RPATH)
+    set(CMAKE_BUILD_RPATH "\$ORIGIN/lib")
+endif()
+if(NOT DEFINED CMAKE_INSTALL_RPATH)
+    set(CMAKE_INSTALL_RPATH "\$ORIGIN/lib")
+endif()
+
 # Backend selection is no longer mutually exclusive: every BUILD_BACKEND_* may
 # be ON together and all selected backends link into one binary. The active
 # backend is resolved at runtime via backend::ShellRegistry (see
