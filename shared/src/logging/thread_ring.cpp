@@ -3,8 +3,10 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <memory>
 
 namespace {
 
@@ -17,9 +19,74 @@ std::uint64_t now_realtime_ns() noexcept {
          static_cast<std::uint64_t>(ts.tv_nsec);
 }
 
+// Smallest power of two at or above v, never below kMinRingCapacity.
+std::size_t round_up_pow2(const std::size_t v) noexcept {
+  std::size_t p = ihs::dlt::kMinRingCapacity;
+  while (p < v) {
+    p <<= 1;
+  }
+  return p;
+}
+
+std::size_t resolve_ring_capacity() noexcept {
+  const char* spec = std::getenv("IHS_LOG_RING_CAPACITY");
+  if (spec == nullptr || *spec == '\0') {
+    return ihs::dlt::kDefaultRingCapacity;
+  }
+  // strtoull silently wraps a leading '-' (so "-1" would read as the maximum,
+  // i.e. the largest allocation this accepts). Reject it before parsing.
+  if (*spec == '-') {
+    std::fprintf(stderr,
+                 "[ihs_log] IHS_LOG_RING_CAPACITY=\"%s\" is not a positive "
+                 "integer; using %zu slots\n",
+                 spec, ihs::dlt::kDefaultRingCapacity);
+    return ihs::dlt::kDefaultRingCapacity;
+  }
+  char* end = nullptr;
+  const unsigned long long v = std::strtoull(spec, &end, 10);
+  if (end == nullptr || *end != '\0' || v == 0) {
+    std::fprintf(stderr,
+                 "[ihs_log] IHS_LOG_RING_CAPACITY=\"%s\" is not a positive "
+                 "integer; using %zu slots\n",
+                 spec, ihs::dlt::kDefaultRingCapacity);
+    return ihs::dlt::kDefaultRingCapacity;
+  }
+
+  std::size_t want =
+      v > static_cast<unsigned long long>(ihs::dlt::kMaxRingCapacity)
+          ? ihs::dlt::kMaxRingCapacity
+          : static_cast<std::size_t>(v);
+  want = std::max(want, ihs::dlt::kMinRingCapacity);
+  const std::size_t capacity = round_up_pow2(want);
+
+  // Say so when the value in force is not the value asked for. A ring silently
+  // one power of two off from the request is exactly the kind of thing that
+  // gets read back out of a log as evidence.
+  if (static_cast<unsigned long long>(capacity) != v) {
+    std::fprintf(stderr,
+                 "[ihs_log] IHS_LOG_RING_CAPACITY=%s adjusted to %zu slots "
+                 "(power of two within [%zu, %zu])\n",
+                 spec, capacity, ihs::dlt::kMinRingCapacity,
+                 ihs::dlt::kMaxRingCapacity);
+  }
+  return capacity;
+}
+
 }  // namespace
 
 namespace ihs::dlt {
+
+std::size_t ring_capacity() noexcept {
+  // Function-local static: resolved on first use, which is the first ring
+  // construction, and thread-safe without a lock of our own.
+  static const std::size_t capacity = resolve_ring_capacity();
+  return capacity;
+}
+
+ThreadRing::ThreadRing()
+    : capacity_(static_cast<std::uint32_t>(ring_capacity())),
+      mask_(capacity_ - 1),
+      slots_(std::make_unique<RingSlot[]>(capacity_)) {}
 
 bool ThreadRing::push(std::uint32_t ctx_index,
                       std::uint8_t level,
@@ -29,12 +96,12 @@ bool ThreadRing::push(std::uint32_t ctx_index,
   const std::uint32_t head = head_.load(std::memory_order_relaxed);
   const std::uint32_t tail = tail_.load(std::memory_order_acquire);
 
-  if (head - tail >= kRingCapacity) {
+  if (head - tail >= capacity_) {
     dropped_.fetch_add(1, std::memory_order_relaxed);
     return false;
   }
 
-  RingSlot& slot = slots_[head & kMask];
+  RingSlot& slot = slots_[head & mask_];
   slot.ctx_index = ctx_index;
   slot.level = level;
   slot.flags = flags;
@@ -83,7 +150,7 @@ const RingSlot* ThreadRing::peek() const noexcept {
   if (head == tail) {
     return nullptr;
   }
-  return &slots_[tail & kMask];
+  return &slots_[tail & mask_];
 }
 
 void ThreadRing::pop() noexcept {

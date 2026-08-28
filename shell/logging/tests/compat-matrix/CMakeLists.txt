@@ -76,3 +76,10 @@ target_compile_options(compat_smoke PRIVATE -Wall -Wextra -Werror)
 
 enable_testing()
 add_test(NAME compat_smoke COMMAND compat_smoke)
+
+# Same binary, ring depth configured. Has to be a separate process: the depth
+# is resolved once per process, on first use, so it cannot be exercised from
+# within the default-depth run.
+add_test(NAME compat_smoke_ring_capacity COMMAND compat_smoke)
+set_tests_properties(compat_smoke_ring_capacity PROPERTIES
+    ENVIRONMENT "IHS_LOG_RING_CAPACITY=1024")

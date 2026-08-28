@@ -9,6 +9,9 @@
 //      macros that switch the backend inside ihs::format_to.
 //   3. The direct DltBridge::log() path (pre-formatted strings).
 //   4. The per-thread SPSC ring: push N messages, flush, confirm zero drops.
+//   5. Ring depth: within bounds, a power of two, and equal to
+//      IHS_LOG_RING_CAPACITY when that asks for a legal depth. The CMake side
+//      registers this binary twice, once with that variable set.
 //
 // The logging surface (ihs_log_* + the console/file sinks) is always compiled
 // in; ENABLE_DLT only adds the DLT sink. So the same body runs in both
@@ -25,6 +28,7 @@
 #include "thread_ring.hpp"
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -71,12 +75,14 @@ int main() {
       std::string_view{"pre-formatted message"});
   check(pushed, "direct log push");
 
-  // 4. Ring push stress: stay well under kRingCapacity so the worker drains
-  // between bursts without any drops.
+  // 4. Ring push stress: stay well under the ring depth so the worker drains
+  // between bursts without any drops. Derived from ring_capacity() rather than
+  // hardcoded, so the burst stays proportional when the depth is configured.
   auto& ring = ihs::dlt::RingRegistry::thread_local_ring();
   const std::uint64_t dropped_before = ring.dropped();
+  const int burst = static_cast<int>(ihs::dlt::ring_capacity() / 2);
 
-  for (int i = 0; i < 128; ++i) {
+  for (int i = 0; i < burst; ++i) {
     IHS_LOG_INFO(kCtx,
 #if defined(IHS_HAS_FORMAT_TO_N)
                  "burst {}",
@@ -90,6 +96,28 @@ int main() {
 
   check(ring.dropped() == dropped_before,
         "ring should not drop within capacity");
+
+  // 5. Ring depth. The invariants the index mask depends on, plus the one that
+  // makes the knob worth having: a depth that is read but not applied would
+  // leave a diagnostic run shedding records while the operator believes it
+  // raised the ceiling.
+  const std::size_t capacity = ihs::dlt::ring_capacity();
+  check(capacity >= ihs::dlt::kMinRingCapacity &&
+            capacity <= ihs::dlt::kMaxRingCapacity,
+        "ring capacity within bounds");
+  check((capacity & (capacity - 1)) == 0, "ring capacity is a power of two");
+
+  if (const char* asked = std::getenv("IHS_LOG_RING_CAPACITY");
+      asked != nullptr && *asked != '\0') {
+    const unsigned long long want = std::strtoull(asked, nullptr, 10);
+    // Only a legal request must be honored exactly; anything else is clamped
+    // or rounded on purpose, and the bounds checks above already cover it.
+    if (want != 0 && (want & (want - 1)) == 0 &&
+        want >= ihs::dlt::kMinRingCapacity &&
+        want <= ihs::dlt::kMaxRingCapacity) {
+      check(capacity == want, "configured ring capacity is honored");
+    }
+  }
 
   IHS_LOGGING_FLUSH();
   IHS_LOGGING_STOP();

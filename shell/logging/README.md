@@ -119,7 +119,11 @@ Log calls are safe from any thread. The producer side (this directory) does the
 fmt formatting on the calling thread, then hands off to a **wait-free enqueue**
 into a **per-thread single-producer/single-consumer ring** inside `ihs_shared`.
 When a ring is full the record is dropped and a per-ring counter is bumped —
-`ihs_log` never blocks the caller. Formatting-to-I/O happens on a separate drain
+`ihs_log` never blocks the caller. The ring is 256 slots deep by default
+(~80 KiB per logging thread); `IHS_LOG_RING_CAPACITY` raises that for a run
+whose bursts are shedding records. Note what dropping means for a reader:
+absence of a record is not evidence that the event did not happen, so a log
+being mined for what is *missing* wants a depth the burst fits inside. Formatting-to-I/O happens on a separate drain
 worker thread. `ihs_log_flush()` (via `IHS_LOGGING_FLUSH()` or the error-level
 auto-flush) is synchronous.
 
@@ -157,8 +161,10 @@ from the environment at `ihs_log_start` time.
 ### Env vars
 
 These are read by the `ihs_shared` sink set (see
-[`shared/src/logging/sink_set.cpp`](../../shared/src/logging/sink_set.cpp)); the
-shell logging surface honors them transparently.
+[`shared/src/logging/sink_set.cpp`](../../shared/src/logging/sink_set.cpp)) —
+except `IHS_LOG_RING_CAPACITY`, which the ring itself resolves (see
+[`shared/src/logging/thread_ring.cpp`](../../shared/src/logging/thread_ring.cpp)).
+The shell logging surface honors them transparently.
 
 | Env | Default | Effect |
 |------|---------|--------|
@@ -167,6 +173,7 @@ shell logging surface honors them transparently.
 | `IHS_LOG_FILE` | — | Output path when `IHS_LOG_SINK=file`. Unset with `file` warns and uses console. |
 | `IHS_LOG_FILE_MAX_BYTES` | — | Rotation size threshold for the file sink. |
 | `IHS_LOG_FILE_MAX_FILES` | — | Number of rotated files to keep. |
+| `IHS_LOG_RING_CAPACITY` | `256` | Per-thread SPSC ring depth, in slots. Rounded up to a power of two and clamped to `[16, 65536]`; anything adjusted or unparseable is reported on stderr. Each slot is a cache-line padded 240-byte record, so the default is ~80 KiB per logging thread and the ceiling ~20 MiB. Resolved once, at first use. Raise it when a burst is dropping records. |
 | `IHS_DLT_LIBRARY` | `libdlt.so.2` | Soname/path override for the DLT library the bridge `dlopen`s (also used by the load test to point at the stub). |
 
 ### DLT sink
