@@ -6,21 +6,48 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
 
 namespace ihs::dlt {
 
-inline constexpr std::size_t kRingCapacity = 256;  // power of two
-static_assert((kRingCapacity & (kRingCapacity - 1)) == 0,
-              "kRingCapacity must be a power of two");
+// Ring depth, in slots. A RingSlot is cache-line padded around a 240-byte
+// text buffer, so the default costs ~80 KiB per logging thread.
+//
+// The default is a footprint/loss compromise tuned for steady-state logging,
+// and a diagnostic run is not steady-state: a burst that outruns the drain
+// worker -- scene load, asset streaming, anything that logs per item at debug
+// or verbose level -- sheds records, and what survives reads like a complete
+// log rather than one with holes in it. Depth is therefore configurable, so
+// such a run can pay memory the shipped configuration does not have to.
+inline constexpr std::size_t kDefaultRingCapacity = 256;
+inline constexpr std::size_t kMinRingCapacity = 16;
+// 64 Ki slots is ~20 MiB per logging thread -- already generous for a
+// diagnostic run, and having a ceiling keeps a fat-fingered value from turning
+// the first log call into an allocation failure.
+inline constexpr std::size_t kMaxRingCapacity = 64 * 1024;
+
+// Ring depth for this process: IHS_LOG_RING_CAPACITY when set, otherwise
+// kDefaultRingCapacity. Always a power of two -- a requested value is clamped
+// to [kMinRingCapacity, kMaxRingCapacity] and then rounded up -- so the index
+// mask stays valid.
+//
+// Resolved once, on first use, and constant for the life of the process.
+// Rings are pooled and reused across threads, so a depth that could change
+// under a running process would leave rings of assorted depths behind and make
+// "how much can this thread buffer" unanswerable.
+[[nodiscard]] std::size_t ring_capacity() noexcept;
 
 // Single-producer (owning thread), single-consumer (worker) ring.
 // Producer writes are lock-free and wait-free; the consumer drains by peeking
 // and advancing the tail. Overflows are counted, not blocked.
 class ThreadRing {
  public:
-  ThreadRing() noexcept = default;
+  // Allocates its slot array, so unlike the old inline-array ring this can
+  // throw. Rings are only ever created through RingRegistry::acquire_ring(),
+  // which already reaches the caller through a throwing `new ThreadRing()`.
+  ThreadRing();
 
   ThreadRing(const ThreadRing&) = delete;
   ThreadRing& operator=(const ThreadRing&) = delete;
@@ -41,7 +68,7 @@ class ThreadRing {
     const std::uint32_t head = head_.load(std::memory_order_relaxed);
     const std::uint32_t tail = tail_.load(std::memory_order_acquire);
     const std::uint32_t used = head - tail;
-    return used >= kRingCapacity ? 0 : kRingCapacity - used;
+    return used >= capacity_ ? 0 : capacity_ - used;
   }
 
   // Consumer side — called only from the worker thread.
@@ -129,13 +156,24 @@ class ThreadRing {
 
  public:
  private:
-  static constexpr std::uint32_t kMask = kRingCapacity - 1;
+  // Depth and index mask for this ring, fixed at construction from
+  // ring_capacity(). Members rather than constants because the depth is now a
+  // process setting resolved at runtime. Both are read-only afterwards, so
+  // sharing a cache line with in_use_ costs nothing: in_use_ is written only
+  // when a thread claims or releases the ring.
+  const std::uint32_t capacity_;
+  const std::uint32_t mask_;
 
   std::atomic<bool> in_use_{true};  // born claimed by its creating thread
   alignas(64) std::atomic<std::uint32_t> head_{0};  // producer writes
   alignas(64) std::atomic<std::uint32_t> tail_{0};  // consumer reads
   alignas(64) std::atomic<std::uint64_t> dropped_{0};
-  alignas(64) RingSlot slots_[kRingCapacity]{};
+  // Heap-allocated rather than an inline array so the depth can be chosen at
+  // runtime. RingSlot is alignas(64), so array new returns cache-line aligned
+  // storage and the inline array's false-sharing property is preserved. In
+  // practice never freed -- rings outlive their owning thread by design (see
+  // RingRegistry) -- but owned here so the type stays honest.
+  std::unique_ptr<RingSlot[]> slots_;
 };
 
 }  // namespace ihs::dlt
