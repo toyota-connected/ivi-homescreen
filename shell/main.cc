@@ -40,7 +40,7 @@
 #include "main_loop_waker.h"
 
 #if BUILD_CRASH_HANDLER
-#include "crash_handler.h"
+#include "crash_handler/crash_handler.h"
 #endif
 
 #if BUILD_WATCHDOG

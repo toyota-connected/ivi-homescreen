@@ -39,8 +39,8 @@ every other module (each `shell/` subdirectory, plus `shared/`, `test/`, and
 5. [Platform Channels & Embedder API](#5-platform-channels--embedder-api) — `shell/platform/homescreen/`
    - 5.1. [Compositor Mode and Platform Views](#51-compositor-mode-and-platform-views)
 6. [Optional Features](#6-optional-features)
-   - 6.1. [Watchdog](#61-watchdog) — `shell/watchdog.{h,cc}`
-   - 6.2. [Crash Handler](#62-crash-handler) — `shell/crash_handler.{h,cc}`
+   - 6.1. [Watchdog](#61-watchdog) — `shell/watchdog/`
+   - 6.2. [Crash Handler](#62-crash-handler) — `shell/crash_handler/`
    - 6.3. [Accessibility](#63-accessibility) — `shell/accessibility/`
    - 6.4. [Logging and Tracing](#64-logging-and-tracing) — `shell/logging/`
 7. [Plugins](#7-plugins)
@@ -203,9 +203,9 @@ Threading summary:
   merge it onto the platform thread for single-thread FFI aliasing.
 - **DRM/software displays** self-drive their own present threads.
 
-Other loose files under `shell/` covered by this section: `crash_handler.{h,cc}`
-(§6.2), `watchdog.{h,cc}` (§6.1), `main_loop_waker.{h,cc}` and `shutdown_flag.h`
-(§3.1), `stats.{h,cc}` and `timer.{h,cc}` (profiling helpers, §4.4.5),
+Other loose files under `shell/` covered by this section:
+`main_loop_waker.{h,cc}` and `shutdown_flag.h` (§3.1),
+`stats.{h,cc}` and `timer.{h,cc}` (profiling helpers, §4.4.5),
 `libflutter_engine.{h,cc}` and `shared_library.h` (engine `.so` loader, §3.3),
 `cursor_kind.h`, `hexdump.h`, `handler_priority_queue.h`, and `utils.h`.
 
@@ -342,12 +342,13 @@ Included via `BUILD_WATCHDOG=ON` CMake option. (default: `OFF`)
 
 ### 6.2. Crash Handler
 
-A `sentry-native` integration optionally available for crash reporting.
+A `sentry-native` integration optionally available for crash reporting: [`shell/crash_handler/crash_handler.{h,cc}`](../../shell/crash_handler/crash_handler.h)
 
-[`shell/crash_handler.{h,cc}`](../../shell/crash_handler.h) provides Sentry-native crash handling: it uploads a crash report for triage. It is configured via the `SENTRY_DSN` environment variable
-and the `[sentry]` config table (`release`, `env`, `tags`, `attachments`).
+It uploads a crash report for triage.
 
 Included via `BUILD_CRASH_HANDLER=ON` CMake option. (default: `OFF`)
+
+Details: [`shell/crash_handler/README.md`](../../shell/crash_handler/README.md).
 
 ### 6.3. Accessibility
 
