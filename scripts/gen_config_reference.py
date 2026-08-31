@@ -25,7 +25,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CFG = ROOT / "shell/configuration/configuration.cc"
-CRASH = ROOT / "shell/crash_handler.cc"
+CRASH = ROOT / "shell/crash_handler/crash_handler.cc"
 REFTOML = ROOT / "docs/config-examples/reference.toml"
 # The CLI + config-reference tables live with the configuration subsystem docs.
 README = ROOT / "shell/configuration/README.md"
@@ -175,7 +175,7 @@ def extract():
         if key == "view":
             continue
         keys.setdefault(key, TYPE.get(t, t))
-    # [sentry] keys (different parse style in crash_handler.cc)
+    # [sentry] keys (different parse style in crash_handler/crash_handler.cc)
     crash = CRASH.read_text()
     sentry_section = crash[crash.find('get("sentry")'):]
     for m in re.finditer(r'get\("([^"]+)"\)', sentry_section):

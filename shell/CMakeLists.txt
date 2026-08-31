@@ -498,7 +498,7 @@ endif ()
 ihs_target_add_logging(${PROJECT_NAME})
 
 if (BUILD_CRASH_HANDLER)
-    target_sources(${PROJECT_NAME} PRIVATE crash_handler.cc)
+    target_sources(${PROJECT_NAME} PRIVATE crash_handler/crash_handler.cc)
 endif ()
 
 # OSGi multi-bundle framework. Strictly additive: nothing here is compiled
