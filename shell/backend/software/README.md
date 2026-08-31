@@ -202,6 +202,14 @@ Sink / input sub-options:
 - **libinput + libudev + xkbcommon** present → `BUILD_SOFTWARE_INPUT_LIBINPUT`
   auto-on, `SoftwareSeat` compiled in; absent → no CPU-backend input.
 
+### Toolchain compatibility
+
+`drm_dumb_sink.h` explicitly includes `<array>` rather than relying on a
+transitive include. This is required on Yocto dunfell (riscv64 / armv7),
+where older toolchains do not expose `std::array` transitively through
+`<atomic>` or `<functional>` and the build otherwise stops with
+`implicit instantiation of undefined template 'std::array<…>'`.
+
 ---
 
 ## Running
@@ -534,6 +542,14 @@ push the histogram toward wayland_egl's profile.
   `[X,R,G,B]` on BE rather than `[B,G,R,X]` — `FbDevSink` would
   need a dedicated helper. Not implemented since all shipping
   targets are LE; flagged for the day a BE target appears.
+- **Headers rely on transitive includes for some std:: types.** As of
+  v3.0 the tree-wide sweep in commit `24e01fe3` added `#include <array>`
+  to `drm_dumb_sink.h` (the backend's headers are now self-sufficient
+  for `std::vector`, `std::string`, `std::map`, `std::array`, and
+  `std::function`). This is the sort of latent dependency that breaks
+  Yocto dunfell toolchains on riscv64/armv7 — the new toolchain
+  includes enough for it to compile, but the explicit include is the
+  durable fix.
 
 ---
 

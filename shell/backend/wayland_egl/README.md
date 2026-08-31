@@ -150,6 +150,14 @@ ninja -C build
 | + platform-view compositor | `BUILD_BACKEND_WAYLAND_EGL=ON BUILD_COMPOSITOR=ON` | adds `egl_backing_store.cc`, `gl_caps.cc`, `gl_compositor.cc` |
 | + debug HUD | `... BUILD_COMPOSITOR=ON BUILD_HUD=ON` | adds the imgui GL HUD (`GlHud`) |
 
+### Toolchain compatibility
+
+`egl.h` explicitly includes `<array>` rather than relying on a transitive
+include. This is required on Yocto dunfell (riscv64 / armv7), where older
+toolchains do not expose `std::array` transitively through `<vector>` or
+`<EGL/egl.h>` and the build otherwise stops with
+`implicit instantiation of undefined template 'std::array<…>'`.
+
 ---
 
 ## Running
@@ -403,6 +411,12 @@ the bundle stayed stable for much longer.
    drop the mutex on `feedback_in_flight_`, but it's a fleet-wide
    change to all Wayland event handling and is deferred to a separate
    change.
+4. **Headers rely on transitive includes for some std:: types.** As of
+   v3.0 the tree-wide sweep in commit `24e01fe3` added `#include <array>`
+   to `egl.h`. The backend's headers are now self-sufficient for
+   `std::vector`, `std::string`, `std::map`, `std::array`, and
+   `std::function` — the explicit include is the durable fix for toolchains
+   that don't pull `<array>` in transitively (e.g. Yocto dunfell).
 ---
 
 ## References

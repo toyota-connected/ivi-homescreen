@@ -175,6 +175,14 @@ ninja -C build
 | + platform-view compositor | `BUILD_BACKEND_WAYLAND_VULKAN=ON BUILD_COMPOSITOR=ON` | adds `vulkan_backing_store.cc`, `wl_layer_compositor.cc`, `wl_dmabuf_present.cc`, `wl_explicit_sync.cc` (enables `IVI_VK_DMABUF`) |
 | + debug HUD | `... BUILD_COMPOSITOR=ON BUILD_HUD=ON` | adds the imgui Vulkan HUD (`VulkanHud`) |
 
+### Toolchain compatibility
+
+`wayland_vulkan.h` explicitly includes `<functional>` rather than relying on a
+transitive include. This is required on Yocto dunfell (riscv64 / armv7), where
+older toolchains do not expose `std::function` transitively through
+`<condition_variable>`, `<mutex>`, or `<vector>` and the build otherwise stops
+with `implicit instantiation of undefined template 'std::function<…>'`.
+
 ---
 
 ## Running
