@@ -535,61 +535,7 @@ void main() {
 
 Sentry-native support is available for Crash Handling. This pushes a mini-dump to the cloud for triage and tracking.
 
-> To create user account and get a DSN
-> see https://sentry.io/welcome/
-
-### Configuration
-
-1. Specify your DSN via environment variable `SENTRY_DSN`
-
-2. Add the following sections to your `config.toml` file with the following structure:
-
-```toml
-[sentry]
-release = "homescreen-1.0.0"
-env = "production"
-attachments = [
-    "/path/to/crash.log",
-    "/path/to/config.toml"
-]
-
-[sentry.tags]
-platform = "linux"
-device = "ivi"
-```
-
-### CMake Variables
-
-To enable crash handler support:
-
-    -DBUILD_CRASH_HANDLER=ON
-    -DSENTRY_NATIVE_LIBDIR="directory where sentry native is installed, will look in CMAKE_INSTALL_PREFIX directory if not defined"
-    -DCRASHPAD_BINARY_DIR="directory where crashpad_handler executable is installed, will look in CMAKE_INSTALL_PREFIX directory if not defined"
-
-To resolve crash dump stack trace, debug binaries and symbols need to be uploaded to Sentry via sentry-cli tool: https://docs.sentry.io/cli/installation/
-
-Required source repo:  https://github.com/getsentry/sentry-native
-
-### Example Build steps
-
-sentry build
-
-```bash
-git clone https://github.com/getsentry/sentry-native
-mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_STAGING_PREFIX=`pwd`/out/usr
-make install
-```
-
-ivi-homescreen build
-
-```bash
-git clone https://github.com/toyota-connected/ivi-homescreen
-mkdir build && cd build
-cmake .. -DBUILD_CRASH_HANDLER=ON -DSENTRY_NATIVE_LIBDIR=`pwd`/../sentry-native/build/out/usr/lib -DCRASHPAD_BINARY_DIR=`pwd`/../sentry-native/build/out/usr/bin
-make -j
-SENTRY_DSN=<your DSN> homescreen --b=<your bundle folder> --f
-```
+Full documentation — architecture, build options, configuration reference, and the self-crash integration test — lives in [`shell/crash_handler/README.md`](shell/crash_handler/README.md).
 
 ## Yocto recipes
 
