@@ -12,7 +12,6 @@ Flutter Linux CPP Embedder
     * Flutter Pigeon CPP compatible
     * Plugins modeled after Window CPP
     * Plugins enabled/disabled via CMake
-    * Firestore first party compatible
 * Desktop Texture Registry
     * Camera first party compatible
     * Video Player first party compatible
@@ -191,15 +190,9 @@ See the [configuration docs](shell/configuration/README.md) for the complete opt
 
 `BUILD_PLUGIN_CAMERA` - Include Camera plugin. Defaults to OFF
 
-`BUILD_PLUGIN_CLOUD_FIRESTORE` - Plugin Cloud Firestore. Defaults to OFF
-
 `BUILD_PLUGIN_DESKTOP_WINDOW_LINUX` - Includes Desktop Window Linux Plugin. Defaults to OFF
 
 `BUILD_PLUGIN_FILE_SELECTOR` - Include File Selector plugin. Defaults to OFF
-
-`BUILD_PLUGIN_FIREBASE_AUTH` - Plugin Firebase Auth. Defaults to OFF
-
-`BUILD_PLUGIN_FIREBASE_STORAGE` - Plugin Firebase Storage. Defaults to OFF
 
 `BUILD_PLUGIN_GO_ROUTER` - Includes Go Router Plugin. Defaults to ON
 
