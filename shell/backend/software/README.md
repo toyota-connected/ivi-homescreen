@@ -25,6 +25,7 @@ Two intended use cases:
 | `FileSink` — write each frame as a NetPBM PAM (P7) golden | ✓ | `IVI_SW_SINK=file:<pattern>`; always compiled in |
 | `FbDevSink` — mmap `/dev/fb*`, auto-detect 32-bpp BGRA/BGRX or 16-bpp RGB565 | ✓ | `IVI_SW_SINK=fbdev[:<dev>]`; `BUILD_SOFTWARE_SINK_FBDEV` (ON) |
 | `DrmDumbSink` — DRM dumb buffer, page-flip, kernel-timestamped vsync | ✓ | `IVI_SW_SINK=drm-dumb[:<dev>]`; `BUILD_SOFTWARE_SINK_DRM` (auto/libdrm) |
+| `EncoderSink` — CPU BGRA→NV12 into a dma-buf ring, V4L2 hardware H.264 encode | ✓ | `IVI_SW_SINK=encoder:file:<path>`; `BUILD_SOFTWARE_SINK_ENCODER` (OFF) |
 | Page-flip-locked Flutter vsync (drm-dumb only) | ✓ | `IVI_SW_VSYNC=0` for wall-clock fallback |
 | RGB565 scanout format for drm-dumb | ✓ | `IVI_SW_DRM_FORMAT=rgb565` |
 | Bayer 4×4 ordered dithering on RGB565 pack path | ✓ | `IVI_SW_DRM_DITHER=1` (drm-dumb + fbdev) |
@@ -49,9 +50,13 @@ flowchart LR
     SINK --> FILE["FileSink<br/>(write PAM)"]
     SINK --> FB["FbDevSink<br/>(mmap + swizzle)"]
     SINK --> DRM["DrmDumbSink<br/>(page-flip + vsync)"]
+    SINK --> ENC["EncoderSink<br/>(BGRA→NV12 → dma-buf ring)"]
 
     DRM -->|PAGE_FLIP_EVENT| VS["vsync_callback<br/>(kernel scanout timestamp)"]
     VS -.->|FlutterEngineOnVsync| FE
+    ENC -->|"dma-buf fd"| CONS["INv12Consumer"]
+    CONS --> FEH["V4L2 HW H.264 encoder"]
+    FEH --> OUT["file:<path>"]
 ```
 
 `SoftwareBackend` is the Flutter-facing surface — it implements
@@ -85,13 +90,22 @@ how `DrmDisplay` owns `DrmSeat`).
   `FileSink` ([file_sink.cc](file_sink.cc), [file_sink.h](file_sink.h)),
   `FbDevSink` ([fbdev_sink.cc](fbdev_sink.cc), [fbdev_sink.h](fbdev_sink.h)),
   `DrmDumbSink` ([drm_dumb_sink.cc](drm_dumb_sink.cc),
-  [drm_dumb_sink.h](drm_dumb_sink.h)). See the Sinks table below.
+  [drm_dumb_sink.h](drm_dumb_sink.h)),
+  `EncoderSink` ([encoder_sink.cc](encoder_sink.cc),
+  [encoder_sink.h](encoder_sink.h)). See the Sinks table below.
 - **`SinkFactory`** ([sink_factory.cc](sink_factory.cc),
   [sink_factory.h](sink_factory.h)) — parses the `IVI_SW_SINK` spec and
   builds the active sink; unrecognized specs warn and fall back to `NoneSink`.
 - **`pixel_swizzle.h`** ([pixel_swizzle.h](pixel_swizzle.h)) — the pack
   helpers: `FlutterToBGRX8888` (XRGB, single-pass memcpy + alpha-force),
   `FlutterToRGB565` / `FlutterToRGB565_BayerDither`.
+- **`INv12Consumer`** ([nv12_consumer.h](nv12_consumer.h),
+  [nv12_consumer.cc](nv12_consumer.cc)) — the NV12 consumer seam shared by
+  the `EncoderSink` and the `headless_egl` backend: `MakeNv12Consumer(spec)`
+  builds a `FileEncoderConsumer` (V4L2 M2M H.264) from `file:<path>`, and a
+  `WebRtcConsumer` from `webrtc:<host>:<port>` when
+  `BUILD_SOFTWARE_SINK_ENCODER_WEBRTC` is on. The consumer owns its encode /
+  send thread.
 - **`SoftwareSeat`** ([input/software_seat.cc](input/software_seat.cc),
   [input/software_seat.h](input/software_seat.h),
   [input/libinput_log_bridge.h](input/libinput_log_bridge.h)) — libinput
@@ -109,6 +123,7 @@ how `DrmDisplay` owns `DrmSeat`).
 | **FileSink** | `file:<path-pattern>` | Writes each frame as a NetPBM PAM (P7) file. Pattern with `%d` / `%05d` interpolates the frame index. Pattern without `%` writes the first frame only. Parent directories auto-created. | — |
 | **FbDevSink** | `fbdev[:<device>]` | Opens `/dev/fb0` (or operator path), mmaps, packs each Present. Auto-detects 32-bpp BGRA/BGRX or 16-bpp RGB565 from the driver's `FBIOGET_VSCREENINFO` offsets; refuses palettized / `nonstd != 0` / other layouts with a clear error. | — |
 | **DrmDumbSink** | `drm-dumb[:<device>]` | Opens `/dev/dri/card0`, picks first connected connector + its CRTC + preferred mode, allocates 2 dumb buffers (XRGB8888 by default, RGB565 via `IVI_SW_DRM_FORMAT=rgb565` when the plane advertises it), modesets onto buffer 0. Per-frame: pack into the back buffer, `drmModePageFlip`. PAGE_FLIP_EVENT drives Flutter's `vsync_callback` with the kernel-provided scanout timestamp. | ✓ |
+| **EncoderSink** | `encoder:file:<path>` | Packs each Flutter present from BGRA into a 4-slot dma-buf ring as NV12; hands each slot's dma-buf fd to the `INv12Consumer` (today, the V4L2 hardware H.264 encoder). When the ring is full the present is dropped — latency over a growing queue. The encoder thread owns the encode; the consumer's release callback returns the slot. | — |
 
 `drm-dumb` is the only sink that advertises `SupportsVsync()`;
 `SoftwareBackend::GetVsyncCallback()` returns a trampoline iff the
@@ -124,6 +139,9 @@ scheduler.
 - [file_sink.cc](file_sink.cc), [file_sink.h](file_sink.h) — `FileSink` (PAM goldens).
 - [fbdev_sink.cc](fbdev_sink.cc), [fbdev_sink.h](fbdev_sink.h) — `FbDevSink` (fbdev mmap + swizzle).
 - [drm_dumb_sink.cc](drm_dumb_sink.cc), [drm_dumb_sink.h](drm_dumb_sink.h) — `DrmDumbSink` (dumb buffer page-flip + vsync).
+- [encoder_sink.cc](encoder_sink.cc), [encoder_sink.h](encoder_sink.h) — `EncoderSink` (CPU BGRA→NV12 pack into a dma-buf ring; hands slots to an `INv12Consumer`).
+- [nv12_consumer.cc](nv12_consumer.cc), [nv12_consumer.h](nv12_consumer.h) — `INv12Consumer` seam + `FileEncoderConsumer` (V4L2 M2M H.264) + WebRTC consumer.
+- [webrtc_consumer.cc](webrtc_consumer.cc) — WebRTC send consumer (only TU that links libwebrtc; gated by `BUILD_SOFTWARE_SINK_ENCODER_WEBRTC`).
 - [sink_factory.cc](sink_factory.cc), [sink_factory.h](sink_factory.h) — `IVI_SW_SINK` spec parse → sink build.
 - [pixel_swizzle.h](pixel_swizzle.h) — BGRA→XRGB / RGB565 pack helpers (+ Bayer dither).
 - [software_cursor.cc](software_cursor.cc), [software_cursor.h](software_cursor.h) — shared cursor bitmap composited by the dumb sink.
@@ -138,6 +156,11 @@ scheduler.
   rasterizer (via `FlutterEngineDeinitialize` + `Shutdown`) before dropping
   the sink. `FlutterView`'s dtor enforces this by calling `StopVsyncMonitor`
   before `m_flutter_engine` destructs.
+- **`EncoderSink` consumer thread**: the `INv12Consumer` owns its encode /
+  send thread. The rasterizer thread only does the BGRA→NV12 pack and hands
+  the dma-buf fd to the consumer; the consumer's release callback (invoked
+  from its own thread) returns the ring slot. The ring is mutex-guarded for
+  the `in_flight` bit so the two threads don't collide on a slot.
 - **Platform task runner**: `DrmDumbSink`'s PAGE_FLIP_EVENT arrives on the
   platform task runner via asio `async_wait` on the drm fd (mirrors
   `drm_kms_egl`'s pattern); the handler exchanges the parked vsync baton and
@@ -160,6 +183,13 @@ scheduler.
 - `linux/fb.h` — ships with every libc (fbdev sink needs no library dep).
 - `libinput` + `libudev` + `xkbcommon` (pkg-config) — optional, only for the
   `SoftwareSeat`.
+- `v4l2-webrtc-codec` checkout — required for the `EncoderSink`. CMake
+  validates that `${V4L2WC_DIR}/src/v4l2_m2m_encoder.cc` and `log.cc` exist
+  at configure time; the default is a sibling of this repo. Pass
+  `-DV4L2WC_DIR=<path>` to point elsewhere.
+- `libwebrtc` (flat C ABI headers + prebuilt `.so`) — optional, only for the
+  WebRTC send consumer behind `BUILD_SOFTWARE_SINK_ENCODER_WEBRTC`. CMake
+  validates `${LIBWEBRTC_DIR}/include/c/lw_c_api.h` and `LIBWEBRTC_SO`.
 
 ### Configure + build
 
@@ -184,6 +214,8 @@ CMakeLists.
 | + fbdev panel | `-DBUILD_SOFTWARE_SINK_FBDEV=ON` (default) | `FbDevSink` (`/dev/fb*` mmap) |
 | + DRM dumb buffer | `-DBUILD_SOFTWARE_SINK_DRM=ON` (auto if libdrm) | `DrmDumbSink` (page-flip + vsync) |
 | + libinput input | `-DBUILD_SOFTWARE_INPUT_LIBINPUT=ON` (auto if deps) | `SoftwareSeat` |
+| + V4L2 encoder | `-DBUILD_SOFTWARE_SINK_ENCODER=ON` | `EncoderSink` (`encoder:file:<path>`) |
+| + WebRTC send | `-DBUILD_SOFTWARE_SINK_ENCODER=ON -DBUILD_SOFTWARE_SINK_ENCODER_WEBRTC=ON` | adds the WebRTC consumer |
 
 Sink / input sub-options:
 
@@ -192,6 +224,8 @@ Sink / input sub-options:
 | `BUILD_SOFTWARE_SINK_DRM` | auto-on if pkg-config finds `libdrm`, else off | Pulls in `libdrm` for the drm-dumb sink. Force-on without libdrm is a fatal configure error. |
 | `BUILD_SOFTWARE_SINK_FBDEV` | ON | No library dep — `linux/fb.h` ships with every libc. |
 | `BUILD_SOFTWARE_INPUT_LIBINPUT` | auto-on if pkg-config finds `libinput` + `libudev` + `xkbcommon`, else off | Pulls in the libinput stack for the `SoftwareSeat`. Force-on without deps is a fatal configure error. |
+| `BUILD_SOFTWARE_SINK_ENCODER` | OFF | Compiles `encoder_sink.cc` + `nv12_consumer.cc` + the V4L2 M2M encoder from `v4l2-webrtc-codec`. Requires the V4L2 checkout at `V4L2WC_DIR`. |
+| `BUILD_SOFTWARE_SINK_ENCODER_WEBRTC` | OFF | Adds the WebRTC send consumer. Implies `BUILD_SOFTWARE_SINK_ENCODER`. Requires `LIBWEBRTC_DIR` (headers) and `LIBWEBRTC_SO` (prebuilt libwebrtc.so). |
 
 `NoneSink`, `MemorySink`, and `FileSink` are always compiled in.
 
@@ -201,6 +235,11 @@ Sink / input sub-options:
   compiled in; absent → sink omitted (`drm-dumb` specs fall back to `NoneSink`).
 - **libinput + libudev + xkbcommon** present → `BUILD_SOFTWARE_INPUT_LIBINPUT`
   auto-on, `SoftwareSeat` compiled in; absent → no CPU-backend input.
+- **v4l2-webrtc-codec checkout** — `BUILD_SOFTWARE_SINK_ENCODER` is
+  user-opted-in; when ON, CMake fatally errors at configure time if
+  `V4L2WC_DIR` does not contain the expected sources. There is no
+  pkg-config auto-detection for this feature — it is a target-only
+  feature that needs a V4L2 M2M encoder node at runtime.
 
 ### Toolchain compatibility
 
@@ -327,6 +366,35 @@ A `SetVsyncBaton` idle-kick drains the baton inline when no flip is
 in flight so Flutter never sits forever on the first frame or
 post-resume.
 
+### Encoder sink (V4L2 hardware H.264)
+
+```sh
+IVI_SW_SINK=encoder:file:out.h264 \
+IVI_SW_STOP_AFTER_FRAMES=300 \
+  ./homescreen -b bundle
+```
+
+The `EncoderSink` requires a target with a V4L2 M2M encoder node (e.g.
+`/dev/video11` on a Jetson, or any VPU exposing a V4L2 M2M encoder). The
+default node is `/dev/video11`; override with `IVI_ENC_DEVICE`. The sink:
+
+* opens the V4L2 M2M encoder from the `v4l2-webrtc-codec` checkout;
+* allocates a 4-slot dma-buf ring sized for the configured resolution;
+* per present: packs Flutter's BGRA into the back slot as NV12 on the CPU,
+  calls `DMA_BUF_IOCTL_SYNC` to flush caches, and hands the dma-buf fd to the
+  consumer; when the ring is full the present is dropped (latency over a
+  growing queue);
+* the consumer's encode thread calls back with a release when it has
+  consumed the frame, returning the slot to the ring.
+
+The encoder produces H.264 Annex-B access units appended to the output
+file. The first frame after each configure is forced to be a keyframe (IDR)
+so the stream is always decodable from the start.
+
+The `webrtc:` consumer variant (behind
+`BUILD_SOFTWARE_SINK_ENCODER_WEBRTC`) sends each dma-buf frame to a remote
+peer via libwebrtc's V4L2 encoder factory instead of writing to a file.
+
 ### Env vars
 
 | Env | Default | Effect |
@@ -339,6 +407,9 @@ post-resume.
 | `IVI_SW_INPUT` | `auto` | Wires the libinput-backed `SoftwareSeat` for device targets. Set to `none` to skip — useful for CI runs that lack `/dev/input/event*` or want pure engine-only smoke. |
 | `IVI_SW_DRM_FORMAT` | `xrgb8888` | Pick the `DrmDumbSink` buffer format. `rgb565` halves framebuffer footprint and CRTC scanout bandwidth (the real bottleneck on legacy SoCs like TI AM335x / STM32MP1). If the picked CRTC's planes don't advertise RGB565, the sink warns and falls back to XRGB. Unrecognized values warn and fall back. Has no effect on `fbdev:` (auto-detected from the panel) or the other sinks. |
 | `IVI_SW_DRM_DITHER` | `0` (off) | `1` enables Bayer 4×4 ordered dithering on the RGB565 pack path in both `drm-dumb` and `fbdev` sinks. Hides the banding that pure truncation produces on smooth gradients at the cost of bit-exact goldens. No-op when the active sink's format is BGRX8888 — there's no precision loss to hide. |
+| `IVI_ENC_DEVICE` | `/dev/video11` | V4L2 M2M encoder node for `EncoderSink`. Override for targets where the encoder sits on a different node. |
+| `IVI_ENC_BITRATE` | `4000000` | Target bitrate in bits/s for the V4L2 encoder. |
+| `IVI_ENC_FPS` | `30` | Encoder framerate; also sets the rate ceiling for the consumer-paced vsync. |
 
 ---
 
@@ -542,6 +613,19 @@ push the histogram toward wayland_egl's profile.
   `[X,R,G,B]` on BE rather than `[B,G,R,X]` — `FbDevSink` would
   need a dedicated helper. Not implemented since all shipping
   targets are LE; flagged for the day a BE target appears.
+- **`EncoderSink` is target-only.** The V4L2 M2M encoder path assumes
+  a kernel driver exposing a V4L2 M2M encoder node (typically on Jetson
+  or other VPU-equipped boards). On a desktop without a VPU the
+  configure-time dependency check still passes (the checkout is
+  present), but the sink will fail at runtime when it tries to open
+  the default node — there is no in-tree encoder fallback. Use the
+  `file:` sink for desktop / CI golden capture.
+- **`EncoderSink` ring is fixed at 4 slots.** The `kRingSize = 4`
+  constant in `encoder_sink.h` is sized for the consumer's encode
+  budget, not user-tunable. A faster consumer (WebRTC at high
+  resolution) could overflow the ring more often; a slower consumer
+  wastes dma-buf memory. The ring size is a target-only tuning
+  knob, not exposed through `IVI_SW_SINK`.
 - **Headers rely on transitive includes for some std:: types.** As of
   v3.0 the tree-wide sweep in commit `24e01fe3` added `#include <array>`
   to `drm_dumb_sink.h` (the backend's headers are now self-sufficient
@@ -559,7 +643,9 @@ push the histogram toward wayland_egl's profile.
 - [shell/backend/README.md](../README.md) — backend selection overview.
 - [drm_kms_egl](../drm_kms_egl/README.md) — the drm fd / asio page-flip pattern `DrmDumbSink` mirrors.
 - [wayland_vulkan](../wayland_vulkan/README.md) — the FIFO / strict-vblank-gating finding cross-referenced in Benchmarks.
+- [headless_egl](../headless_egl/README.md) — the GPU-side sibling that reuses the same `INv12Consumer` / `FileEncoderConsumer` stack from `encoder_sink.cc`.
 - [shell/vsync](../../vsync/README.md) — the shared `IVsyncProvider` baton lifecycle.
 - [shell/profiling](../../profiling/README.md) — `FrameProfile` and the `IVI_*_PROFILE` cadence histograms.
 - [shell/input](../../input/README.md) — the sibling `DrmSeat` libinput/xkb stack `SoftwareSeat` parallels.
 - Linux `linux/fb.h` (fbdev), `libdrm` / `drm_fourcc.h` (dumb buffers), `libinput` + `xkbcommon` (input), `vkms` / `vfb` kernel modules (test harness).
+- `v4l2-webrtc-codec` checkout — V4L2 M2M encoder sources (`src/v4l2_m2m_encoder.cc`, `src/log.cc`) and the flat-C `INv12Consumer` contract shared with the headless-EGL backend.
