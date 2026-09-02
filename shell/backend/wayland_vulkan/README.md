@@ -6,7 +6,58 @@ README covers the parts that aren't obvious from the source — the
 compositor-mediated vsync path, the present-mode lever, and the
 profiler used to characterize them.
 
-## Vsync via `wp_presentation_feedback`
+## Features
+
+| Capability | Status | Toggle / scope |
+|---|---|---|
+| Vulkan presenter on `VK_KHR_wayland_surface` WSI swapchain | Built-in | `BUILD_BACKEND_WAYLAND_VULKAN` (default on) |
+| Compositor-mediated vsync via `wp_presentation_feedback` | Built-in | `IVI_VK_VSYNC` (default on); needs `wp_presentation` + `CLOCK_MONOTONIC` |
+| Wall-clock scheduler fallback | Built-in | Auto when vsync unusable / `IVI_VK_VSYNC=0` |
+| Selectable swapchain present mode (`fifo`/`fifo_relaxed`/`mailbox`/`immediate`) | Built-in | `IVI_VK_PRESENT_MODE` (default `fifo`); falls back to FIFO if unadvertised |
+| Vulkan compositor for platform-view layers | Opt-in | `BUILD_COMPOSITOR` |
+| Zero-copy dma-buf present path (bypasses WSI swapchain) | Experimental | `IVI_VK_DMABUF`; needs `zwp_linux_dmabuf_v1` v4 + renderable modifier |
+| Explicit sync on the dma-buf path via `wp_linux_drm_syncobj` | Experimental | Auto when advertised + timeline semaphores; `IVI_VK_NO_EXPLICIT_SYNC` forces CPU fence |
+| VkQueue host-access serialization (queue interposer) | Built-in | Always (embedder proc-address swap) |
+| Vulkan share-context export to plugins (`GetVulkanContext`) | Built-in | Always once device is created |
+| Per-frame cadence profiling (incl. `pipeline_*` beginFrame-to-present) | Opt-in | `IVI_VK_PROFILE` |
+| Motion-to-photon profiling | Opt-in | `IVI_M2P_PROFILE` / `IVI_PROFILE` |
+
+---
+
+## Architecture
+
+The `WaylandVulkanBackend` derives from the abstract [Backend](../backend.h)
+interface. It brings up a Vulkan instance + device with the
+`VK_KHR_wayland_surface` WSI, creates a swapchain against the view's
+`wl_surface`, and drives `vkQueuePresentKHR` from the rasterizer thread. When
+`BUILD_COMPOSITOR` is set it additionally owns a Vulkan `LayerCompositor` plus
+backing-store pools for platform-view layers, and can optionally present via a
+zero-copy dma-buf path that bypasses the WSI swapchain entirely.
+
+The compositor — not the application — owns the scanout schedule on Wayland.
+The vsync hook is the `wp_presentation_time` extension: a
+`wp_presentation_feedback` object is minted before every commit and the
+compositor returns the realized scanout timestamp. The `wp_presentation`
+machinery lives in a Display-owned
+[WaylandVsyncProvider](../../vsync/wayland_vsync_provider.h); the backend
+forwards to it (gate, baton submit, feedback request, stop).
+
+```mermaid
+sequenceDiagram
+    participant R as Flutter raster thread
+    participant E as Display event_thread_
+    R->>R: PresentCallback / PresentLayersImpl
+    R->>E: RequestPresentationFeedback()
+    R->>R: vkQueuePresentKHR (commits)
+    Note over E: compositor scans out
+    E->>E: on_feedback_presented(tv_ns, refresh)
+    E->>E: update last_refresh_ns_
+    E->>E: exchange vsync_baton_
+    E->>E: store last_begin_frame_ns_
+    E->>R: asio::post(strand, [&]{ OnVsync() })
+```
+
+### Vsync via `wp_presentation_feedback`
 
 Architecturally identical to `wayland_egl`'s wiring — same baton dance,
 same Display event-thread dispatch — but with two practical differences
@@ -28,27 +79,14 @@ that turn out to matter:
    that wasn't already in play. What our wiring *does* add is delivering
    the timestamps to the Flutter Engine — Mesa keeps them to itself.
 
-```
-Flutter raster thread                Display event_thread_
-─────────────────────                ────────────────────
-PresentCallback / PresentLayersImpl
-  RequestPresentationFeedback()      ───┐
-  vkQueuePresentKHR (commits)           │  compositor scans out
-  …                                     │
-                                        ▼
-                                     on_feedback_presented(tv_ns, refresh)
-                                        ├─ update last_refresh_ns_
-                                        ├─ exchange vsync_baton_
-                                        ├─ store last_begin_frame_ns_
-                                        └─ asio::post(strand, [&]{ OnVsync() })
-```
+The baton flow is shown in the Mermaid sequence diagram above.
 
 `SetVsyncBaton` includes the same idle-wake kick as the EGL backend —
 if no feedback is in flight (first frame, post-idle wake from input)
 it drains the baton inline so Flutter doesn't sit forever waiting on
 a commit that hasn't been scheduled.
 
-## When `vsync_callback` is wired
+### When `vsync_callback` is wired
 
 `WaylandVulkanBackend::GetVsyncCallback()` returns `&VsyncTrampoline`
 iff all three of:
@@ -60,7 +98,106 @@ iff all three of:
 Otherwise it returns `nullptr` and the engine falls back to its
 internal wall-clock scheduler. The decision is logged once at startup.
 
-## Env vars
+### Module responsibilities
+
+- **Presentation.** `WaylandVulkanBackend` builds the `FlutterRendererConfig`
+  (Vulkan), creates the `VK_KHR_wayland_surface` WSI swapchain against the
+  view's `wl_surface`, and drives `vkQueuePresentKHR` from the rasterizer
+  thread (`PresentCallback` for non-compositor builds, `PresentLayersImpl`
+  under `BUILD_COMPOSITOR`).
+- **Vsync.** The backend forwards to the Display-owned `WaylandVsyncProvider`:
+  `GetVsyncCallback` gates on the three conditions above; `VsyncTrampoline` →
+  `SetVsyncBaton`; `RequestPresentationFeedback` mints a per-commit feedback
+  object; `StopVsyncMonitor` cancels outstanding objects before engine
+  teardown.
+- **Queue serialization.** `wayland_vulkan::VulkanQueueInterposer` serializes
+  host access to the single `VkQueue` shared between the Flutter raster thread
+  and the platform thread, via the embedder's
+  `get_instance_proc_address_callback` proc-swap contract.
+- **Compositor (`BUILD_COMPOSITOR`).** `wl_vulkan::LayerCompositor`
+  src-over-blends the Flutter layer stack into a slot image so platform-view
+  layers under transparent Flutter overlays compose correctly;
+  `VulkanBackingStore` (pooled via `BackingStorePool`) holds the engine's
+  `VkImage` render targets and tracks their layout.
+- **dma-buf present (`IVI_VK_DMABUF`).** `wl_vulkan::DmabufImage` /
+  `WlDmabufBuffer` (`wl_dmabuf_present`) allocate modifier-tiled,
+  dma-buf-exported `VkImage` slots wrapped as `wl_buffer`s;
+  `NegotiateModifiers` intersects GPU-exportable modifiers with the
+  compositor's advertised set; `wl_vulkan::ExplicitSync` (`wl_explicit_sync`)
+  provides `wp_linux_drm_syncobj` producer/consumer sync.
+
+### File map
+
+| Path | Responsibility |
+|------|----------------|
+| [wayland_vulkan.h](wayland_vulkan.h) / [wayland_vulkan.cc](wayland_vulkan.cc) | `WaylandVulkanBackend` — Vulkan/WSI bring-up, swapchain present, vsync forwarding, present-mode selection, profiling, compositor + dma-buf present paths |
+| [vulkan_queue_interposer.h](vulkan_queue_interposer.h) / [vulkan_queue_interposer.cc](vulkan_queue_interposer.cc) | `VulkanQueueInterposer` — externally-synchronized host access to the shared `VkQueue` via the embedder proc-address swap |
+| [vulkan_backing_store.h](vulkan_backing_store.h) / [vulkan_backing_store.cc](vulkan_backing_store.cc) | `VulkanBackingStore` — device-local `VkImage` render target (optionally dma-buf-exported), layout tracking (`BUILD_COMPOSITOR`) |
+| [wl_layer_compositor.h](wl_layer_compositor.h) / [wl_layer_compositor.cc](wl_layer_compositor.cc) | `LayerCompositor` — premultiplied src-over layer composition into a slot image (`BUILD_COMPOSITOR`) |
+| [wl_dmabuf_present.h](wl_dmabuf_present.h) / [wl_dmabuf_present.cc](wl_dmabuf_present.cc) | `DmabufImage` / `WlDmabufBuffer` + `NegotiateModifiers` — modifier-tiled dma-buf slots and modifier negotiation (`IVI_VK_DMABUF`) |
+| [wl_explicit_sync.h](wl_explicit_sync.h) / [wl_explicit_sync.cc](wl_explicit_sync.cc) | `ExplicitSync` — `wp_linux_drm_syncobj` producer/consumer timeline sync for the dma-buf path |
+| [shaders/](shaders/) | GLSL/SPIR-V shaders for the `LayerCompositor` blend pipeline |
+
+### Threading model
+
+Same as `wayland_egl`: the `on_feedback_presented` / `on_feedback_discarded`
+listeners fire on [Display](../../wayland/display.h)'s `event_thread_`, so
+`feedback_in_flight_` is guarded by a mutex and `OnVsync` is always posted via
+the platform runner's strand (never inline). `RequestPresentationFeedback` runs
+on the rasterizer thread. The `pipeline_*` profile is accumulated on the
+rasterizer thread, kept separate from the event-thread cadence profile to avoid
+a cross-thread race. The future refactor of moving Wayland dispatch onto the
+platform task runner via asio applies here too. See the
+[Architectural notes](#architectural-notes) for the per-commit feedback-object
+lifecycle and the Mesa-internal-feedback duplication detail.
+
+---
+
+## Build steps
+
+### Configure + build
+
+The backend compiles when `BUILD_BACKEND_WAYLAND_VULKAN` is enabled (default
+on). Platform-view composition (the `LayerCompositor` / backing-store sources)
+and the experimental dma-buf present path additionally require
+`BUILD_COMPOSITOR`.
+
+```sh
+cmake -B build -G Ninja -DBUILD_BACKEND_WAYLAND_VULKAN=ON
+ninja -C build
+```
+
+### Build matrix
+
+| Config | CMake flags | Present path compiled in |
+|--------|-------------|--------------------------|
+| Base Vulkan presenter | `BUILD_BACKEND_WAYLAND_VULKAN=ON` | `wayland_vulkan.cc`, `vulkan_queue_interposer.cc` (WSI swapchain present) |
+| + platform-view compositor | `BUILD_BACKEND_WAYLAND_VULKAN=ON BUILD_COMPOSITOR=ON` | adds `vulkan_backing_store.cc`, `wl_layer_compositor.cc`, `wl_dmabuf_present.cc`, `wl_explicit_sync.cc` (enables `IVI_VK_DMABUF`) |
+| + debug HUD | `... BUILD_COMPOSITOR=ON BUILD_HUD=ON` | adds the imgui Vulkan HUD (`VulkanHud`) |
+
+### Toolchain compatibility
+
+`wayland_vulkan.h` explicitly includes `<functional>` rather than relying on a
+transitive include. This is required on Yocto dunfell (riscv64 / armv7), where
+older toolchains do not expose `std::function` transitively through
+`<condition_variable>`, `<mutex>`, or `<vector>` and the build otherwise stops
+with `implicit instantiation of undefined template 'std::function<…>'`.
+
+---
+
+## Running
+
+Runtime requires a Wayland compositor. For the compositor-mediated vsync path,
+the compositor must advertise the `wp_presentation` global with a
+`CLOCK_MONOTONIC` clock. When it does not, the backend logs the reason once and
+falls back to Flutter's internal wall-clock scheduler. Mesa's Vulkan WSI
+additionally requires `zwp_linux_dmabuf_v1` or `wl_drm` to allocate swapchain
+images at all (see Known limitations).
+
+Read logs on stderr; the vsync-wiring decision and profiling summaries are
+emitted at `info` level.
+
+### Env vars
 
 | Env | Default | Effect |
 |------|---------|--------|
@@ -70,6 +207,8 @@ internal wall-clock scheduler. The decision is logged once at startup.
 | `IVI_VK_PRESENT_MODE` | `fifo` | One of `fifo`, `fifo_relaxed`, `mailbox`, `immediate`. Selects the swapchain present mode if the compositor advertises it; otherwise falls back to FIFO with a warn. See "Present-mode interaction" below — `mailbox` is the only setting where `vsync_callback`'s contribution becomes large. |
 | `IVI_VK_DMABUF` | (off) | **Experimental** zero-copy dma-buf present path (see below). When set, and the compositor advertises a DRM format modifier this GPU can render into, the compositor path bypasses the WSI swapchain entirely: it blits the engine's frame into a modifier-tiled, dma-buf-exported `VkImage` and commits it as a `wl_buffer` (via `zwp_linux_dmabuf_v1`) directly on the `wl_surface`, so the compositor can promote the surface to a hardware plane. Off by default; falls back to the swapchain when unset or when no renderable modifier is shared. |
 | `IVI_VK_NO_EXPLICIT_SYNC` | (off) | On the dma-buf path, force the CPU-fence producer sync instead of `wp_linux_drm_syncobj` explicit sync (see below). For bisecting / A-B'ing the timeline path; no effect on the swapchain path. |
+
+---
 
 ## Experimental: zero-copy dma-buf present (`IVI_VK_DMABUF`)
 
@@ -226,6 +365,29 @@ configurations, not for precise per-frame attribution.
 
 ---
 
+## Diagnostics/Debug
+
+- **`IVI_VK_PROFILE=1`** adds a log line every 60 presented frames with
+  fps, mean/max interval, present failures, compositor discards, the
+  compositor-reported refresh, a flag OR (`VSYNC|HW_CLOCK|HW_COMPLETION`),
+  the `pipeline_*` beginFrame-to-present latency, and the 5-bucket histogram
+  (matches the `wayland_egl` bucket thresholds). On clean shutdown the
+  backend's dtor emits a one-line session summary covering the whole run.
+- **`IVI_M2P_PROFILE=1`** (or `IVI_PROFILE=1`) enables the motion-to-photon
+  profiler described in the Env vars table — frame-accurate and floor
+  input-to-scanout latencies every 120 presents plus a teardown summary.
+- **`WAYLAND_DEBUG=client`** gives the raw protocol trace. Expect **two**
+  `wp_presentation_feedback` objects per commit (one from the embedder, one
+  from Mesa's WSI) — see Architectural notes.
+- **Vulkan synchronization validation layer** — the explicit-sync dma-buf
+  path (`IVI_VK_DMABUF`) has been validated hazard-free under it on
+  mutter/RADV.
+- **Startup decision** — the `vsync_callback` wiring decision (`wp_presentation`
+  advertised, `clock_id`, `IVI_VK_VSYNC`) and the dmabuf pre-flight warning are
+  logged once at `info`/`warn` level.
+
+---
+
 ## Benchmarks
 
 Measured on KWin Wayland (Fedora 43, kernel 6.19, AMD RADV
@@ -341,3 +503,18 @@ gives up backpressure for input latency — different operating point.
    `CollectBackingStore` predate this work. The lint CI doesn't
    catch them because the lint workflow's build dir uses the EGL
    backend; left for a separate cleanup PR.
+
+---
+
+## References
+
+- [Backend interface](../backend.h) — display-target abstraction
+- [Backend overview README](../README.md)
+- [WaylandVsyncProvider](../../vsync/wayland_vsync_provider.h) — `wp_presentation` vsync source
+- [wayland_egl backend README](../wayland_egl/README.md) — EGL comparison baseline / shared vsync wiring
+- [drm_kms_egl backend README](../drm_kms_egl/README.md) — DRM comparison baseline
+- [drm_kms_vulkan backend README](../drm_kms_vulkan/README.md) — Vulkan zero-copy KMS sibling
+- [Display](../../wayland/display.h) — owns `event_thread_` and the vsync provider
+- `VK_KHR_wayland_surface`, `VK_KHR_swapchain` — Vulkan WSI
+- `wp_presentation_time`, `zwp_linux_dmabuf_v1`, `wp_linux_drm_syncobj`, `zwp_input_timestamps_v1` — Wayland protocol extensions
+- wayland-cxx-scanner `skia-vulkan-dmabuf` example — dma-buf present path reference

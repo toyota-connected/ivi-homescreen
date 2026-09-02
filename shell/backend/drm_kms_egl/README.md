@@ -51,7 +51,16 @@ This document is the architecture + operations guide for the backend.
   Opens `/dev/dri/cardN` and `/dev/input/event*` through the seat
   provider so the fds are master-capable and revocable on VT switch.
   Owns the dispatch thread that pumps `Seat::dispatch()` and the udev
-  `HotplugMonitor`. Open() returns nullptr when no seat backend exists
+  `HotplugMonitor`. The dispatch loop blocks indefinitely on a
+  `WakeEventFd` (reusing `shell/input/wake_event_fd.h`) rather than
+  polling every 200 ms — both watched fds (libseat fd, hotplug fd) are
+  readable only when there is something to dispatch, so the old timeout
+  existed solely to re-evaluate the `stop_` flag, which changes exactly
+  once at teardown. The eventfd is written once in the destructor after
+  `stop_` is set, closing the lost-wake window across the check/block
+  boundary. When the eventfd is unavailable (`fd() == -1`) the loop
+  degrades to a 200 ms cap as fallback.
+  Open() returns nullptr when no seat backend exists
   (no logind/seatd/builtin); callers fall back to a direct-open path
   with foreground-VT and `drmSetMaster` guards.
 

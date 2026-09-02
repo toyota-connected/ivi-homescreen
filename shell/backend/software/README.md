@@ -15,34 +15,106 @@ Two intended use cases:
    without a render-capable GPU). The CPU does both Flutter's raster
    work and the present-side memcpy / swizzle.
 
+## Features
+
+| Capability | Status | Toggle / scope |
+|---|---|---|
+| CPU `kSoftware` renderer → pluggable `ISurfaceSink` | ✓ | `-DBUILD_BACKEND_SOFTWARE=ON` |
+| `NoneSink` — discards every frame (CI engine-only smoke) | ✓ | `IVI_SW_SINK=none` (default); always compiled in |
+| `MemorySink` — mutex-guarded latest-frame snapshot for in-process fixtures | ✓ | `IVI_SW_SINK=memory`; always compiled in |
+| `FileSink` — write each frame as a NetPBM PAM (P7) golden | ✓ | `IVI_SW_SINK=file:<pattern>`; always compiled in |
+| `FbDevSink` — mmap `/dev/fb*`, auto-detect 32-bpp BGRA/BGRX or 16-bpp RGB565 | ✓ | `IVI_SW_SINK=fbdev[:<dev>]`; `BUILD_SOFTWARE_SINK_FBDEV` (ON) |
+| `DrmDumbSink` — DRM dumb buffer, page-flip, kernel-timestamped vsync | ✓ | `IVI_SW_SINK=drm-dumb[:<dev>]`; `BUILD_SOFTWARE_SINK_DRM` (auto/libdrm) |
+| `EncoderSink` — CPU BGRA→NV12 into a dma-buf ring, V4L2 hardware H.264 encode | ✓ | `IVI_SW_SINK=encoder:file:<path>`; `BUILD_SOFTWARE_SINK_ENCODER` (OFF) |
+| Page-flip-locked Flutter vsync (drm-dumb only) | ✓ | `IVI_SW_VSYNC=0` for wall-clock fallback |
+| RGB565 scanout format for drm-dumb | ✓ | `IVI_SW_DRM_FORMAT=rgb565` |
+| Bayer 4×4 ordered dithering on RGB565 pack path | ✓ | `IVI_SW_DRM_DITHER=1` (drm-dumb + fbdev) |
+| libinput `SoftwareSeat` — pointer / keyboard / key-repeat / multi-touch | ✓ | `IVI_SW_INPUT` (auto); `BUILD_SOFTWARE_INPUT_LIBINPUT` (auto) |
+| Frame-count-bounded runtime for CI | ✓ | `IVI_SW_STOP_AFTER_FRAMES=<N>` |
+| Present-call + vsync cadence profiling | ✓ | `IVI_SW_PROFILE` / `IVI_VSYNC_PROFILE` |
+| Platform-view software compositor | ✗ deferred | `GetCompositorConfig()` returns all-null callbacks |
+| fbdev vsync (`FBIO_WAITFORVSYNC`) | ✗ | Broadly broken/non-standard across drivers; use drm-dumb |
+
+---
+
 ## Architecture
 
+```mermaid
+flowchart LR
+    FE["Flutter Engine<br/>software.surface_present_callback(buf, rb, h)"]
+    FE -->|kSoftware present| PT["SoftwareBackend::PresentTrampoline()"]
+    PT -->|Present(buf, row_bytes, height)| SINK{{ISurfaceSink}}
+
+    SINK --> NONE["NoneSink<br/>(drop)"]
+    SINK --> MEM["MemorySink<br/>(memcpy → vector)"]
+    SINK --> FILE["FileSink<br/>(write PAM)"]
+    SINK --> FB["FbDevSink<br/>(mmap + swizzle)"]
+    SINK --> DRM["DrmDumbSink<br/>(page-flip + vsync)"]
+    SINK --> ENC["EncoderSink<br/>(BGRA→NV12 → dma-buf ring)"]
+
+    DRM -->|PAGE_FLIP_EVENT| VS["vsync_callback<br/>(kernel scanout timestamp)"]
+    VS -.->|FlutterEngineOnVsync| FE
+    ENC -->|"dma-buf fd"| CONS["INv12Consumer"]
+    CONS --> FEH["V4L2 HW H.264 encoder"]
+    FEH --> OUT["file:<path>"]
 ```
-Flutter Engine                SoftwareBackend                 ISurfaceSink
-──────────────                ───────────────                 ────────────
-software.surface_present_     PresentTrampoline() ───▶        Present(buf, rb, h)
-  callback(buf, rb, h)                                          ├─ NoneSink     (drop)
-                                                                ├─ MemorySink   (memcpy → vector)
-                                                                ├─ FileSink     (write PAM)
-                                                                ├─ FbDevSink    (mmap + swizzle)
-                                                                └─ DrmDumbSink  (page-flip + vsync)
-```
 
-* `SoftwareBackend` is the Flutter-facing surface — implements
-  `GetRenderConfig` with `type=kSoftware` plus a static present
-  trampoline. Owns the sink.
-* `ISurfaceSink` is the abstraction: one `Present(const void*,
-  size_t row_bytes, size_t height)` plus optional vsync hooks. Sinks
-  are picked at startup from the `IVI_SW_SINK` env var.
-* Sinks are single-file and small: no threading, no buffer pooling.
-  The callback runs on Flutter's rasterizer thread; the sink either
-  copies / writes / mmaps synchronously and returns.
+`SoftwareBackend` is the Flutter-facing surface — it implements
+`GetRenderConfig` with `type=kSoftware` plus a static present trampoline,
+and owns the sink. `ISurfaceSink` is the abstraction: one
+`Present(const void*, size_t row_bytes, size_t height)` plus optional
+vsync hooks. Sinks are picked at startup from the `IVI_SW_SINK` env var.
+Sinks are single-file and small: no threading, no buffer pooling. The
+callback runs on Flutter's rasterizer thread; the sink either copies /
+writes / mmaps synchronously and returns.
 
-`SoftwareDisplay` is a no-op `IDisplay` so `App::Loop`'s sleep math
-has a refresh-rate denominator. Defaults to 60 Hz; nothing else
-interesting lives there.
+`SoftwareDisplay` is a no-op `IDisplay` so `App::Loop`'s sleep math has a
+refresh-rate denominator. It defaults to 60 Hz; nothing else interesting
+lives there. It also owns the libinput-backed `SoftwareSeat` (parallel to
+how `DrmDisplay` owns `DrmSeat`).
 
-## Sinks
+### Module responsibilities
+
+- **`SoftwareBackend`** ([software_backend.cc](software_backend.cc),
+  [software_backend.h](software_backend.h)) — the Flutter-facing `Backend`.
+  Implements `GetRenderConfig` (`type=kSoftware`) plus the static
+  `PresentTrampoline`, owns the active sink, resolves the framebuffer extent
+  from the sink's `NativeSize()`, gates `GetVsyncCallback()` on the sink
+  advertising a real vblank source, and emits the `IVI_SW_PROFILE` session
+  summary on clean dtor.
+- **`ISurfaceSink`** ([surface_sink.h](surface_sink.h)) — the present
+  abstraction: `Present(buf, row_bytes, height)` plus optional vsync /
+  cursor / task-runner hooks.
+- **Sinks** — one translation unit each: `NoneSink`
+  ([none_sink.h](none_sink.h)), `MemorySink` ([memory_sink.h](memory_sink.h)),
+  `FileSink` ([file_sink.cc](file_sink.cc), [file_sink.h](file_sink.h)),
+  `FbDevSink` ([fbdev_sink.cc](fbdev_sink.cc), [fbdev_sink.h](fbdev_sink.h)),
+  `DrmDumbSink` ([drm_dumb_sink.cc](drm_dumb_sink.cc),
+  [drm_dumb_sink.h](drm_dumb_sink.h)),
+  `EncoderSink` ([encoder_sink.cc](encoder_sink.cc),
+  [encoder_sink.h](encoder_sink.h)). See the Sinks table below.
+- **`SinkFactory`** ([sink_factory.cc](sink_factory.cc),
+  [sink_factory.h](sink_factory.h)) — parses the `IVI_SW_SINK` spec and
+  builds the active sink; unrecognized specs warn and fall back to `NoneSink`.
+- **`pixel_swizzle.h`** ([pixel_swizzle.h](pixel_swizzle.h)) — the pack
+  helpers: `FlutterToBGRX8888` (XRGB, single-pass memcpy + alpha-force),
+  `FlutterToRGB565` / `FlutterToRGB565_BayerDither`.
+- **`INv12Consumer`** ([nv12_consumer.h](nv12_consumer.h),
+  [nv12_consumer.cc](nv12_consumer.cc)) — the NV12 consumer seam shared by
+  the `EncoderSink` and the `headless_egl` backend: `MakeNv12Consumer(spec)`
+  builds a `FileEncoderConsumer` (V4L2 M2M H.264) from `file:<path>`, and a
+  `WebRtcConsumer` from `webrtc:<host>:<port>` when
+  `BUILD_SOFTWARE_SINK_ENCODER_WEBRTC` is on. The consumer owns its encode /
+  send thread.
+- **`SoftwareSeat`** ([input/software_seat.cc](input/software_seat.cc),
+  [input/software_seat.h](input/software_seat.h),
+  [input/libinput_log_bridge.h](input/libinput_log_bridge.h)) — libinput
+  `ISeat` driving pointer / keyboard / key-repeat / multi-touch into Flutter.
+- **`SoftwareCursor`** ([software_cursor.cc](software_cursor.cc),
+  [software_cursor.h](software_cursor.h)) — shared cursor bitmap composited
+  by the dumb sink.
+
+### Sinks
 
 | Sink | Spec syntax | What it does | Vsync |
 |---|---|---|---|
@@ -51,26 +123,75 @@ interesting lives there.
 | **FileSink** | `file:<path-pattern>` | Writes each frame as a NetPBM PAM (P7) file. Pattern with `%d` / `%05d` interpolates the frame index. Pattern without `%` writes the first frame only. Parent directories auto-created. | — |
 | **FbDevSink** | `fbdev[:<device>]` | Opens `/dev/fb0` (or operator path), mmaps, packs each Present. Auto-detects 32-bpp BGRA/BGRX or 16-bpp RGB565 from the driver's `FBIOGET_VSCREENINFO` offsets; refuses palettized / `nonstd != 0` / other layouts with a clear error. | — |
 | **DrmDumbSink** | `drm-dumb[:<device>]` | Opens `/dev/dri/card0`, picks first connected connector + its CRTC + preferred mode, allocates 2 dumb buffers (XRGB8888 by default, RGB565 via `IVI_SW_DRM_FORMAT=rgb565` when the plane advertises it), modesets onto buffer 0. Per-frame: pack into the back buffer, `drmModePageFlip`. PAGE_FLIP_EVENT drives Flutter's `vsync_callback` with the kernel-provided scanout timestamp. | ✓ |
+| **EncoderSink** | `encoder:file:<path>` | Packs each Flutter present from BGRA into a 4-slot dma-buf ring as NV12; hands each slot's dma-buf fd to the `INv12Consumer` (today, the V4L2 hardware H.264 encoder). When the ring is full the present is dropped — latency over a growing queue. The encoder thread owns the encode; the consumer's release callback returns the slot. | — |
 
 `drm-dumb` is the only sink that advertises `SupportsVsync()`;
 `SoftwareBackend::GetVsyncCallback()` returns a trampoline iff the
 active sink advertises it. Everyone else runs on Flutter's wall-clock
 scheduler.
 
-## Env vars
+### File map
 
-| Env | Default | Effect |
-|---|---|---|
-| `IVI_SW_SINK` | `none` | Pick the active sink at startup. Syntax above. Unrecognized specs log a warn and fall back to `NoneSink` so a CI typo never refuses to start. |
-| `IVI_SW_STOP_AFTER_FRAMES` | (off) | Raise `SIGTERM` after N successful presents. Lets CI bound runtime by frame count instead of wall-clock. Bare integer ≥ 1; leading `-`/`+` is rejected and logged. First crosser latches via `compare_exchange` so the signal fires exactly once. |
-| `IVI_SW_VSYNC` | `1` (on) | `0` forces Flutter onto its wall-clock scheduler regardless of whether the active sink advertises `SupportsVsync()`. Useful for A/B benchmarking the vsync_callback contribution (see benchmarks section). |
-| `IVI_SW_PROFILE` | (off) | Enable `SoftwareBackend` **present-call** cadence profiling (when Flutter hands the backend a rendered frame). Every 60 frames logs `[SoftwareBackend] profile (n=60): fps=X mean_interval=Yus max_interval=Zus discarded=N buckets[60Hz/30Hz/20Hz/slow/idle]=…`. Session summary on clean dtor. Same shape as `IVI_VK_PROFILE` / `IVI_WL_PROFILE` for cross-backend comparison. |
-| `IVI_VSYNC_PROFILE` | (off) | Enable **vsync/scanout** cadence profiling for the shared `IVsyncProvider` (drm-dumb sink: from the kernel page-flip timestamp). Logs under the `[SoftwareVsync]` label, same window/bucket shape. Display-side companion to `IVI_SW_PROFILE`'s rasterizer-side numbers; the same var also gates `[WaylandVsync]` / `[DrmVsync]` on those backends. |
-| `IVI_SW_INPUT` | `auto` | Wires the libinput-backed `SoftwareSeat` for device targets. Set to `none` to skip — useful for CI runs that lack `/dev/input/event*` or want pure engine-only smoke. |
-| `IVI_SW_DRM_FORMAT` | `xrgb8888` | Pick the `DrmDumbSink` buffer format. `rgb565` halves framebuffer footprint and CRTC scanout bandwidth (the real bottleneck on legacy SoCs like TI AM335x / STM32MP1). If the picked CRTC's planes don't advertise RGB565, the sink warns and falls back to XRGB. Unrecognized values warn and fall back. Has no effect on `fbdev:` (auto-detected from the panel) or the other sinks. |
-| `IVI_SW_DRM_DITHER` | `0` (off) | `1` enables Bayer 4×4 ordered dithering on the RGB565 pack path in both `drm-dumb` and `fbdev` sinks. Hides the banding that pure truncation produces on smooth gradients at the cost of bit-exact goldens. No-op when the active sink's format is BGRX8888 — there's no precision loss to hide. |
+- [software_backend.cc](software_backend.cc), [software_backend.h](software_backend.h) — the `SoftwareBackend` `Backend`: kSoftware render config, present trampoline, sink ownership, extent resolution, vsync gate, profile summary.
+- [surface_sink.h](surface_sink.h) — the `ISurfaceSink` present abstraction.
+- [none_sink.h](none_sink.h) — `NoneSink` (drop).
+- [memory_sink.h](memory_sink.h) — `MemorySink` (latest-frame snapshot).
+- [file_sink.cc](file_sink.cc), [file_sink.h](file_sink.h) — `FileSink` (PAM goldens).
+- [fbdev_sink.cc](fbdev_sink.cc), [fbdev_sink.h](fbdev_sink.h) — `FbDevSink` (fbdev mmap + swizzle).
+- [drm_dumb_sink.cc](drm_dumb_sink.cc), [drm_dumb_sink.h](drm_dumb_sink.h) — `DrmDumbSink` (dumb buffer page-flip + vsync).
+- [encoder_sink.cc](encoder_sink.cc), [encoder_sink.h](encoder_sink.h) — `EncoderSink` (CPU BGRA→NV12 pack into a dma-buf ring; hands slots to an `INv12Consumer`).
+- [nv12_consumer.cc](nv12_consumer.cc), [nv12_consumer.h](nv12_consumer.h) — `INv12Consumer` seam + `FileEncoderConsumer` (V4L2 M2M H.264) + WebRTC consumer.
+- [webrtc_consumer.cc](webrtc_consumer.cc) — WebRTC send consumer (only TU that links libwebrtc; gated by `BUILD_SOFTWARE_SINK_ENCODER_WEBRTC`).
+- [sink_factory.cc](sink_factory.cc), [sink_factory.h](sink_factory.h) — `IVI_SW_SINK` spec parse → sink build.
+- [pixel_swizzle.h](pixel_swizzle.h) — BGRA→XRGB / RGB565 pack helpers (+ Bayer dither).
+- [software_cursor.cc](software_cursor.cc), [software_cursor.h](software_cursor.h) — shared cursor bitmap composited by the dumb sink.
+- [input/software_seat.cc](input/software_seat.cc), [input/software_seat.h](input/software_seat.h) — libinput `SoftwareSeat`.
+- [input/libinput_log_bridge.h](input/libinput_log_bridge.h) — libinput → project log bridge.
 
-## Build
+### Threading model
+
+- **Single rasterizer thread**: every sink's `Present()` is called from
+  Flutter's rasterizer. `FbDevSink` and `DrmDumbSink` rely on that for
+  lock-free hot paths; the dtor contract is that the embedder must join the
+  rasterizer (via `FlutterEngineDeinitialize` + `Shutdown`) before dropping
+  the sink. `FlutterView`'s dtor enforces this by calling `StopVsyncMonitor`
+  before `m_flutter_engine` destructs.
+- **`EncoderSink` consumer thread**: the `INv12Consumer` owns its encode /
+  send thread. The rasterizer thread only does the BGRA→NV12 pack and hands
+  the dma-buf fd to the consumer; the consumer's release callback (invoked
+  from its own thread) returns the ring slot. The ring is mutex-guarded for
+  the `in_flight` bit so the two threads don't collide on a slot.
+- **Platform task runner**: `DrmDumbSink`'s PAGE_FLIP_EVENT arrives on the
+  platform task runner via asio `async_wait` on the drm fd (mirrors
+  `drm_kms_egl`'s pattern); the handler exchanges the parked vsync baton and
+  posts `FlutterEngineOnVsync` onto the engine's strand with the
+  kernel-provided scanout timestamp. A `SetVsyncBaton` idle-kick drains the
+  baton inline when no flip is in flight so Flutter never sits forever on the
+  first frame or post-resume.
+- **`SoftwareSeat`**: libinput fd + key-repeat timerfd polled on the
+  `SoftwareDisplay` input path, started/stopped via
+  `IDisplay::StartEvents()` / `StopEvents()`.
+
+---
+
+## Build steps
+
+### Dependencies
+
+- CMake + Ninja + a C++ toolchain (no GPU, no Wayland, no Mesa runtime).
+- `libdrm` (pkg-config) — optional, only for the `drm-dumb` sink.
+- `linux/fb.h` — ships with every libc (fbdev sink needs no library dep).
+- `libinput` + `libudev` + `xkbcommon` (pkg-config) — optional, only for the
+  `SoftwareSeat`.
+- `v4l2-webrtc-codec` checkout — required for the `EncoderSink`. CMake
+  validates that `${V4L2WC_DIR}/src/v4l2_m2m_encoder.cc` and `log.cc` exist
+  at configure time; the default is a sibling of this repo. Pass
+  `-DV4L2WC_DIR=<path>` to point elsewhere.
+- `libwebrtc` (flat C ABI headers + prebuilt `.so`) — optional, only for the
+  WebRTC send consumer behind `BUILD_SOFTWARE_SINK_ENCODER_WEBRTC`. CMake
+  validates `${LIBWEBRTC_DIR}/include/c/lw_c_api.h` and `LIBWEBRTC_SO`.
+
+### Configure + build
 
 ```sh
 cmake -B build -G Ninja \
@@ -85,42 +206,62 @@ Backend selection is mutually exclusive — `BUILD_BACKEND_SOFTWARE`
 must be on with everything else off, enforced by the top-level
 CMakeLists.
 
-### Sink sub-options
+### Build matrix
+
+| Config | CMake flags | Present path compiled in |
+|--------|-------------|--------------------------|
+| Headless / CI (always) | `-DBUILD_BACKEND_SOFTWARE=ON` | `NoneSink`, `MemorySink`, `FileSink` — always compiled in |
+| + fbdev panel | `-DBUILD_SOFTWARE_SINK_FBDEV=ON` (default) | `FbDevSink` (`/dev/fb*` mmap) |
+| + DRM dumb buffer | `-DBUILD_SOFTWARE_SINK_DRM=ON` (auto if libdrm) | `DrmDumbSink` (page-flip + vsync) |
+| + libinput input | `-DBUILD_SOFTWARE_INPUT_LIBINPUT=ON` (auto if deps) | `SoftwareSeat` |
+| + V4L2 encoder | `-DBUILD_SOFTWARE_SINK_ENCODER=ON` | `EncoderSink` (`encoder:file:<path>`) |
+| + WebRTC send | `-DBUILD_SOFTWARE_SINK_ENCODER=ON -DBUILD_SOFTWARE_SINK_ENCODER_WEBRTC=ON` | adds the WebRTC consumer |
+
+Sink / input sub-options:
 
 | CMake flag | Default | Notes |
 |---|---|---|
 | `BUILD_SOFTWARE_SINK_DRM` | auto-on if pkg-config finds `libdrm`, else off | Pulls in `libdrm` for the drm-dumb sink. Force-on without libdrm is a fatal configure error. |
 | `BUILD_SOFTWARE_SINK_FBDEV` | ON | No library dep — `linux/fb.h` ships with every libc. |
 | `BUILD_SOFTWARE_INPUT_LIBINPUT` | auto-on if pkg-config finds `libinput` + `libudev` + `xkbcommon`, else off | Pulls in the libinput stack for the `SoftwareSeat`. Force-on without deps is a fatal configure error. |
+| `BUILD_SOFTWARE_SINK_ENCODER` | OFF | Compiles `encoder_sink.cc` + `nv12_consumer.cc` + the V4L2 M2M encoder from `v4l2-webrtc-codec`. Requires the V4L2 checkout at `V4L2WC_DIR`. |
+| `BUILD_SOFTWARE_SINK_ENCODER_WEBRTC` | OFF | Adds the WebRTC send consumer. Implies `BUILD_SOFTWARE_SINK_ENCODER`. Requires `LIBWEBRTC_DIR` (headers) and `LIBWEBRTC_SO` (prebuilt libwebrtc.so). |
 
 `NoneSink`, `MemorySink`, and `FileSink` are always compiled in.
 
-## Input
+### Optional features detected at configure time
 
-`SoftwareSeat` is a libinput-backed `homescreen::ISeat` that drives
-keyboard, pointer, and multi-touch events into Flutter from
-`/dev/input/event*`. Owned by `SoftwareDisplay` (parallel to how
-`DrmDisplay` owns `DrmSeat`) and started/stopped via the existing
-`IDisplay::StartEvents()` / `StopEvents()` lifecycle.
+- **libdrm** present → `BUILD_SOFTWARE_SINK_DRM` auto-on, `DrmDumbSink`
+  compiled in; absent → sink omitted (`drm-dumb` specs fall back to `NoneSink`).
+- **libinput + libudev + xkbcommon** present → `BUILD_SOFTWARE_INPUT_LIBINPUT`
+  auto-on, `SoftwareSeat` compiled in; absent → no CPU-backend input.
+- **v4l2-webrtc-codec checkout** — `BUILD_SOFTWARE_SINK_ENCODER` is
+  user-opted-in; when ON, CMake fatally errors at configure time if
+  `V4L2WC_DIR` does not contain the expected sources. There is no
+  pkg-config auto-detection for this feature — it is a target-only
+  feature that needs a V4L2 M2M encoder node at runtime.
 
-Devices are opened under the calling process's credentials via raw
-`::open` — no libseat dependency. The operator must be in the
-`input` group (universal on systemd distros) or running as root.
+### Toolchain compatibility
 
-Coverage:
+`drm_dumb_sink.h` explicitly includes `<array>` rather than relying on a
+transitive include. This is required on Yocto dunfell (riscv64 / armv7),
+where older toolchains do not expose `std::array` transitively through
+`<atomic>` or `<functional>` and the build otherwise stops with
+`implicit instantiation of undefined template 'std::array<…>'`.
 
-| Source | What it does |
-|---|---|
-| Pointer | Relative + absolute motion clamped to the viewport, BTN_LEFT / RIGHT / MIDDLE / SIDE / EXTRA buttons, horizontal + vertical scroll axes. |
-| Keyboard | evdev keycode + 8 → xkb scancode via `xkb_state_key_get_one_sym`; system-default RMLVO (`XKB_DEFAULT_*` env vars honoured). Delivered through the project-wide `KeyCallback`. |
-| Key repeat | timerfd polled alongside libinput's fd; armed on press of an `xkb_keymap_key_repeats`-positive key at 500 ms / 33 ms (~30 Hz) cadence, disarmed on release of the currently-repeating key. Most-recently-pressed wins when a second repeating key arrives. |
-| Touch | libinput slots → Flutter per-finger `device` ids. Per slot: `kAdd + kDown` on touch-down, `kMove` on motion, `kUp + kRemove` on release, `kCancel + kRemove` on libinput cancellation. Bounded to 16 slots. |
-
-Not yet implemented: gesture events (`LIBINPUT_EVENT_GESTURE_*`),
-switch events (`LIBINPUT_EVENT_SWITCH_*`), tablet/pen, hot keymap
-reload, libseat session integration.
+---
 
 ## Running
+
+The backend needs no display server and no GPU. Sinks that touch device
+nodes need group membership:
+
+- `fbdev` → the `video` group (or whatever owns `/dev/fb*` on the target).
+- `drm-dumb` → the `video` (or distro-specific) group; needs DRM master on
+  the card.
+- `SoftwareSeat` input → the `input` group (universal on systemd distros) or
+  root; devices are opened directly under the calling process's credentials
+  via raw `::open`, no libseat dependency.
 
 ### CI / engine-only smoke
 
@@ -225,7 +366,89 @@ A `SetVsyncBaton` idle-kick drains the baton inline when no flip is
 in flight so Flutter never sits forever on the first frame or
 post-resume.
 
-## Lifecycle + safety
+### Encoder sink (V4L2 hardware H.264)
+
+```sh
+IVI_SW_SINK=encoder:file:out.h264 \
+IVI_SW_STOP_AFTER_FRAMES=300 \
+  ./homescreen -b bundle
+```
+
+The `EncoderSink` requires a target with a V4L2 M2M encoder node (e.g.
+`/dev/video11` on a Jetson, or any VPU exposing a V4L2 M2M encoder). The
+default node is `/dev/video11`; override with `IVI_ENC_DEVICE`. The sink:
+
+* opens the V4L2 M2M encoder from the `v4l2-webrtc-codec` checkout;
+* allocates a 4-slot dma-buf ring sized for the configured resolution;
+* per present: packs Flutter's BGRA into the back slot as NV12 on the CPU,
+  calls `DMA_BUF_IOCTL_SYNC` to flush caches, and hands the dma-buf fd to the
+  consumer; when the ring is full the present is dropped (latency over a
+  growing queue);
+* the consumer's encode thread calls back with a release when it has
+  consumed the frame, returning the slot to the ring.
+
+The encoder produces H.264 Annex-B access units appended to the output
+file. The first frame after each configure is forced to be a keyframe (IDR)
+so the stream is always decodable from the start.
+
+The `webrtc:` consumer variant (behind
+`BUILD_SOFTWARE_SINK_ENCODER_WEBRTC`) sends each dma-buf frame to a remote
+peer via libwebrtc's V4L2 encoder factory instead of writing to a file.
+
+### Env vars
+
+| Env | Default | Effect |
+|---|---|---|
+| `IVI_SW_SINK` | `none` | Pick the active sink at startup. Syntax above. Unrecognized specs log a warn and fall back to `NoneSink` so a CI typo never refuses to start. |
+| `IVI_SW_STOP_AFTER_FRAMES` | (off) | Raise `SIGTERM` after N successful presents. Lets CI bound runtime by frame count instead of wall-clock. Bare integer ≥ 1; leading `-`/`+` is rejected and logged. First crosser latches via `compare_exchange` so the signal fires exactly once. |
+| `IVI_SW_VSYNC` | `1` (on) | `0` forces Flutter onto its wall-clock scheduler regardless of whether the active sink advertises `SupportsVsync()`. Useful for A/B benchmarking the vsync_callback contribution (see benchmarks section). |
+| `IVI_SW_PROFILE` | (off) | Enable `SoftwareBackend` **present-call** cadence profiling (when Flutter hands the backend a rendered frame). Every 60 frames logs `[SoftwareBackend] profile (n=60): fps=X mean_interval=Yus max_interval=Zus discarded=N buckets[60Hz/30Hz/20Hz/slow/idle]=…`. Session summary on clean dtor. Same shape as `IVI_VK_PROFILE` / `IVI_WL_PROFILE` for cross-backend comparison. |
+| `IVI_VSYNC_PROFILE` | (off) | Enable **vsync/scanout** cadence profiling for the shared `IVsyncProvider` (drm-dumb sink: from the kernel page-flip timestamp). Logs under the `[SoftwareVsync]` label, same window/bucket shape. Display-side companion to `IVI_SW_PROFILE`'s rasterizer-side numbers; the same var also gates `[WaylandVsync]` / `[DrmVsync]` on those backends. |
+| `IVI_SW_INPUT` | `auto` | Wires the libinput-backed `SoftwareSeat` for device targets. Set to `none` to skip — useful for CI runs that lack `/dev/input/event*` or want pure engine-only smoke. |
+| `IVI_SW_DRM_FORMAT` | `xrgb8888` | Pick the `DrmDumbSink` buffer format. `rgb565` halves framebuffer footprint and CRTC scanout bandwidth (the real bottleneck on legacy SoCs like TI AM335x / STM32MP1). If the picked CRTC's planes don't advertise RGB565, the sink warns and falls back to XRGB. Unrecognized values warn and fall back. Has no effect on `fbdev:` (auto-detected from the panel) or the other sinks. |
+| `IVI_SW_DRM_DITHER` | `0` (off) | `1` enables Bayer 4×4 ordered dithering on the RGB565 pack path in both `drm-dumb` and `fbdev` sinks. Hides the banding that pure truncation produces on smooth gradients at the cost of bit-exact goldens. No-op when the active sink's format is BGRX8888 — there's no precision loss to hide. |
+| `IVI_ENC_DEVICE` | `/dev/video11` | V4L2 M2M encoder node for `EncoderSink`. Override for targets where the encoder sits on a different node. |
+| `IVI_ENC_BITRATE` | `4000000` | Target bitrate in bits/s for the V4L2 encoder. |
+| `IVI_ENC_FPS` | `30` | Encoder framerate; also sets the rate ceiling for the consumer-paced vsync. |
+
+---
+
+## Input
+
+`SoftwareSeat` is a libinput-backed `homescreen::ISeat` that drives
+keyboard, pointer, and multi-touch events into Flutter from
+`/dev/input/event*`. Owned by `SoftwareDisplay` (parallel to how
+`DrmDisplay` owns `DrmSeat`) and started/stopped via the existing
+`IDisplay::StartEvents()` / `StopEvents()` lifecycle.
+
+Devices are opened under the calling process's credentials via raw
+`::open` — no libseat dependency. The operator must be in the
+`input` group (universal on systemd distros) or running as root.
+
+Coverage:
+
+| Source | What it does |
+|---|---|
+| Pointer | Relative + absolute motion clamped to the viewport, BTN_LEFT / RIGHT / MIDDLE / SIDE / EXTRA buttons, horizontal + vertical scroll axes. |
+| Keyboard | evdev keycode + 8 → xkb scancode via `xkb_state_key_get_one_sym`; system-default RMLVO (`XKB_DEFAULT_*` env vars honoured). Delivered through the project-wide `KeyCallback`. |
+| Key repeat | timerfd polled alongside libinput's fd; armed on press of an `xkb_keymap_key_repeats`-positive key at 500 ms / 33 ms (~30 Hz) cadence, disarmed on release of the currently-repeating key. Most-recently-pressed wins when a second repeating key arrives. |
+| Touch | libinput slots → Flutter per-finger `device` ids. Per slot: `kAdd + kDown` on touch-down, `kMove` on motion, `kUp + kRemove` on release, `kCancel + kRemove` on libinput cancellation. Bounded to 16 slots. |
+
+Not yet implemented: gesture events (`LIBINPUT_EVENT_GESTURE_*`),
+switch events (`LIBINPUT_EVENT_SWITCH_*`), tablet/pen, hot keymap
+reload, libseat session integration.
+
+---
+
+## Diagnostics/Debug
+
+Present-side and scanout-side cadence are observable via the profilers:
+`IVI_SW_PROFILE=1` logs the rasterizer-side present cadence under
+`[SoftwareBackend]`, and `IVI_VSYNC_PROFILE=1` logs the drm-dumb kernel
+page-flip cadence under `[SoftwareVsync]` (see Env vars for the line shape
+and bucket thresholds).
+
+### Lifecycle + safety
 
 * **Single rasterizer thread**: every sink's `Present()` is called
   from Flutter's rasterizer. `FbDevSink` and `DrmDumbSink` rely on
@@ -248,6 +471,8 @@ post-resume.
   The existing `main.cc` handler flips a `sig_atomic_t` flag, the
   trampoline unwinds, `App::Loop` observes the flag and returns
   normally — no hard exit, no torn destructor state.
+
+---
 
 ## Benchmarks (DrmDumbSink, vkms @ 60 Hz)
 
@@ -272,8 +497,9 @@ configuration. Steady-state windows reported (windows dominated by
 content-load stalls — see "vkms quirk" below — are excluded for the
 typical-case table).
 
-### Steady-state, vsync ON
+### Results summary
 
+**Steady-state, vsync ON** —
 `IVI_SW_SINK=drm-dumb IVI_SW_PROFILE=1 IVI_SW_STOP_AFTER_FRAMES=240`:
 
 | Run | fps | mean interval | 60Hz (≤17 ms) | 30Hz (18-33 ms) | 20Hz | slow | idle |
@@ -282,10 +508,9 @@ typical-case table).
 | r2 w1 | 57.15 | 17.50 ms | 39 | 20 | 0 | 0 | 0 |
 | r3 w1 | 55.96 | 17.87 ms | 37 | 22 | 0 | 0 | 0 |
 
-### Steady-state, vsync OFF
-
-Same workload, `IVI_SW_VSYNC=0` forcing Flutter to wall-clock
-scheduling regardless of the sink's `SupportsVsync()`:
+**Steady-state, vsync OFF** — same workload, `IVI_SW_VSYNC=0` forcing
+Flutter to wall-clock scheduling regardless of the sink's
+`SupportsVsync()`:
 
 | Run | fps | mean interval | 60Hz (≤17 ms) | 30Hz (18-33 ms) | 20Hz | slow | idle |
 |---|---:|---:|---:|---:|---:|---:|---:|
@@ -294,16 +519,14 @@ scheduling regardless of the sink's `SupportsVsync()`:
 | r3 w1 | 54.26 | 18.43 ms | 30 | 27 | 2 | 0 | 0 |
 | r3 w4 | 58.34 | 17.14 ms | 50 | 10 | 0 | 0 | 0 |
 
-### Reading
-
-The two configurations are **statistically indistinguishable** at
-the histogram layer — ~50-83 % on-vblank, ~17-50 % one-vblank-late,
-mean interval within ~0.3 ms of the 16.67 ms vblank period in both
-cases. The DrmDumbSink's spin-wait on `flip_pending_` paces the
-rasterizer thread to the kernel's PAGE_FLIP_EVENT cadence
-*regardless* of whether Flutter's `vsync_callback` is also wired —
-the sink's natural backpressure dominates the present-interval
-metric.
+**Reading.** The two configurations are **statistically
+indistinguishable** at the histogram layer — ~50-83 % on-vblank,
+~17-50 % one-vblank-late, mean interval within ~0.3 ms of the 16.67 ms
+vblank period in both cases. The DrmDumbSink's spin-wait on
+`flip_pending_` paces the rasterizer thread to the kernel's
+PAGE_FLIP_EVENT cadence *regardless* of whether Flutter's
+`vsync_callback` is also wired — the sink's natural backpressure
+dominates the present-interval metric.
 
 This matches the wayland_vulkan FIFO finding documented in
 `shell/backend/wayland_vulkan/README.md`: when the sink (or WSI)
@@ -315,12 +538,10 @@ or from a wall-clock estimate. Animation-timing precision and
 input-to-photon latency may differ in ways this profiler doesn't
 measure; the present-interval rate doesn't.
 
-### vkms quirk worth knowing
-
-Longer runs occasionally show a window with `fps≈3` and a
-`max_interval` north of 10 seconds (vsync-off r3 w2 in the matrix
-above hit ~18 s). This is the kernel's vkms module pausing the
-writeback queue when no consumer is reading from the
+**vkms quirk worth knowing.** Longer runs occasionally show a window
+with `fps≈3` and a `max_interval` north of 10 seconds (vsync-off r3 w2
+in the matrix above hit ~18 s). This is the kernel's vkms module
+pausing the writeback queue when no consumer is reading from the
 `card0-Writeback-2` connector — PAGE_FLIP_EVENT stops arriving,
 the rasterizer parks on `flip_pending_`, and the spin-wait
 eventually trips its 5×-refresh deadline and force-clears the flag.
@@ -330,9 +551,8 @@ see the same artefact. Not a regression — same behaviour with
 vsync wiring off. On a real panel with a connected scanout
 consumer this doesn't occur.
 
-### Cross-backend comparison
-
-Per-vblank hit rate on the wonderous bundle at 60 Hz:
+**Cross-backend comparison.** Per-vblank hit rate on the wonderous
+bundle at 60 Hz:
 
 | Backend | 60Hz on-vblank | Mean interval | Notes |
 |---|---:|---:|---|
@@ -353,41 +573,79 @@ or 32-byte AVX2), so 1024×768 BGRA→XRGB is well under 1 ms on a
 modern host. A panel with a faster CPU or smaller dimensions would
 push the histogram toward wayland_egl's profile.
 
+---
+
 ## Known limitations
 
-1. **No platform-view compositor.** `GetCompositorConfig()` returns
-   a struct with all callbacks null, so the engine uses the
-   non-compositor `surface_present_callback` path for the entire
-   scene. Layer interleaving with platform views would need a
-   software compositor (one CPU-allocated buffer per layer + blend
-   on the rasterizer). Doable, not done.
-2. **fbdev / DRM pixel formats** are limited to 32-bpp BGRA/BGRX
-   and 16-bpp RGB565. RGB555, packed-YUV, 10-bpc (XRGB2101010), and
-   palettized layouts would each need a dedicated pack helper in
-   `pixel_swizzle.h`. RGB555 is the closest existing case
-   (`FlutterToRGB565` is the template; mask widths shift by one bit
-   on R/B and G drops from 6 to 5).
-3. **`DrmDumbSink` picks the first connected connector** and its
-   currently-bound CRTC. Multi-output panels, choosing by name
-   (`HDMI-A-1`), or explicit mode selection aren't yet exposed.
-   The sink-spec syntax has room — `drm-dumb:/dev/dri/card0,connector=HDMI-A-1,mode=1920x1080@60`
-   would parse cleanly when the use case shows up.
-4. **Input coverage is partial.** `SoftwareSeat` (see *Input* above)
-   handles pointer, keyboard, key-repeat, and multi-touch via
-   libinput. Not yet wired: gesture events (`LIBINPUT_EVENT_GESTURE_*`),
-   switch events, tablet/pen, hot keymap reload, libseat session
-   integration (devices are opened directly under the calling
-   process's credentials).
-5. **fbdev has no vsync**. `FBIO_WAITFORVSYNC` is broadly broken
-   across drivers and not standardized; the sink doesn't expose it.
-   For real vsync on a CPU-only SoC, use `drm-dumb` instead.
-6. **`DrmDumbSink` refresh from `vrefresh`** is integer Hz; modes
-   that report 59.94 round to 60 and Flutter's deadline drifts
-   ~one frame per 17 minutes. If drift matters, switch to
-   `mode.clock * 1000 / (htotal * vtotal)`.
-7. **BE host (big-endian)** isn't tested. `pixel_swizzle.h` keeps a
-   correct branch for DRM XRGB (byte order is endian-invariant per
-   drm_fourcc.h), but fbdev with `red.offset=16` lands at memory
-   `[X,R,G,B]` on BE rather than `[B,G,R,X]` — `FbDevSink` would
-   need a dedicated helper. Not implemented since all shipping
-   targets are LE; flagged for the day a BE target appears.
+- **No platform-view compositor.** `GetCompositorConfig()` returns
+  a struct with all callbacks null, so the engine uses the
+  non-compositor `surface_present_callback` path for the entire
+  scene. Layer interleaving with platform views would need a
+  software compositor (one CPU-allocated buffer per layer + blend
+  on the rasterizer). Doable, not done.
+- **fbdev / DRM pixel formats** are limited to 32-bpp BGRA/BGRX
+  and 16-bpp RGB565. RGB555, packed-YUV, 10-bpc (XRGB2101010), and
+  palettized layouts would each need a dedicated pack helper in
+  `pixel_swizzle.h`. RGB555 is the closest existing case
+  (`FlutterToRGB565` is the template; mask widths shift by one bit
+  on R/B and G drops from 6 to 5).
+- **`DrmDumbSink` picks the first connected connector** and its
+  currently-bound CRTC. Multi-output panels, choosing by name
+  (`HDMI-A-1`), or explicit mode selection aren't yet exposed.
+  The sink-spec syntax has room — `drm-dumb:/dev/dri/card0,connector=HDMI-A-1,mode=1920x1080@60`
+  would parse cleanly when the use case shows up.
+- **Input coverage is partial.** `SoftwareSeat` (see *Input* above)
+  handles pointer, keyboard, key-repeat, and multi-touch via
+  libinput. Not yet wired: gesture events (`LIBINPUT_EVENT_GESTURE_*`),
+  switch events, tablet/pen, hot keymap reload, libseat session
+  integration (devices are opened directly under the calling
+  process's credentials).
+- **fbdev has no vsync**. `FBIO_WAITFORVSYNC` is broadly broken
+  across drivers and not standardized; the sink doesn't expose it.
+  For real vsync on a CPU-only SoC, use `drm-dumb` instead.
+- **`DrmDumbSink` refresh from `vrefresh`** is integer Hz; modes
+  that report 59.94 round to 60 and Flutter's deadline drifts
+  ~one frame per 17 minutes. If drift matters, switch to
+  `mode.clock * 1000 / (htotal * vtotal)`.
+- **BE host (big-endian)** isn't tested. `pixel_swizzle.h` keeps a
+  correct branch for DRM XRGB (byte order is endian-invariant per
+  drm_fourcc.h), but fbdev with `red.offset=16` lands at memory
+  `[X,R,G,B]` on BE rather than `[B,G,R,X]` — `FbDevSink` would
+  need a dedicated helper. Not implemented since all shipping
+  targets are LE; flagged for the day a BE target appears.
+- **`EncoderSink` is target-only.** The V4L2 M2M encoder path assumes
+  a kernel driver exposing a V4L2 M2M encoder node (typically on Jetson
+  or other VPU-equipped boards). On a desktop without a VPU the
+  configure-time dependency check still passes (the checkout is
+  present), but the sink will fail at runtime when it tries to open
+  the default node — there is no in-tree encoder fallback. Use the
+  `file:` sink for desktop / CI golden capture.
+- **`EncoderSink` ring is fixed at 4 slots.** The `kRingSize = 4`
+  constant in `encoder_sink.h` is sized for the consumer's encode
+  budget, not user-tunable. A faster consumer (WebRTC at high
+  resolution) could overflow the ring more often; a slower consumer
+  wastes dma-buf memory. The ring size is a target-only tuning
+  knob, not exposed through `IVI_SW_SINK`.
+- **Headers rely on transitive includes for some std:: types.** As of
+  v3.0 the tree-wide sweep in commit `24e01fe3` added `#include <array>`
+  to `drm_dumb_sink.h` (the backend's headers are now self-sufficient
+  for `std::vector`, `std::string`, `std::map`, `std::array`, and
+  `std::function`). This is the sort of latent dependency that breaks
+  Yocto dunfell toolchains on riscv64/armv7 — the new toolchain
+  includes enough for it to compile, but the explicit include is the
+  durable fix.
+
+---
+
+## References
+
+- [backend/backend.h](../backend.h) — the `Backend` interface `SoftwareBackend` implements.
+- [shell/backend/README.md](../README.md) — backend selection overview.
+- [drm_kms_egl](../drm_kms_egl/README.md) — the drm fd / asio page-flip pattern `DrmDumbSink` mirrors.
+- [wayland_vulkan](../wayland_vulkan/README.md) — the FIFO / strict-vblank-gating finding cross-referenced in Benchmarks.
+- [headless_egl](../headless_egl/README.md) — the GPU-side sibling that reuses the same `INv12Consumer` / `FileEncoderConsumer` stack from `encoder_sink.cc`.
+- [shell/vsync](../../vsync/README.md) — the shared `IVsyncProvider` baton lifecycle.
+- [shell/profiling](../../profiling/README.md) — `FrameProfile` and the `IVI_*_PROFILE` cadence histograms.
+- [shell/input](../../input/README.md) — the sibling `DrmSeat` libinput/xkb stack `SoftwareSeat` parallels.
+- Linux `linux/fb.h` (fbdev), `libdrm` / `drm_fourcc.h` (dumb buffers), `libinput` + `xkbcommon` (input), `vkms` / `vfb` kernel modules (test harness).
+- `v4l2-webrtc-codec` checkout — V4L2 M2M encoder sources (`src/v4l2_m2m_encoder.cc`, `src/log.cc`) and the flat-C `INv12Consumer` contract shared with the headless-EGL backend.
