@@ -68,8 +68,10 @@ other thread.
 - **`WaylandVsyncProvider`**
   ([wayland_vsync_provider.{h,cc}](wayland_vsync_provider.h)) — owns
   `wp_presentation`, turns its per-commit `wp_presentation_feedback.presented`
-  events into `OnVsync` calls. One `WpFeedbackHandler` per commit; in-flight
-  feedback objects are destroyed race-safely with `Stop()`.
+  events into `OnVsync` calls. Presentation feedback corresponds to the
+  `wl_surface.commit` made by either the EGL (`eglSwapBuffers`) or Vulkan
+  rendering path. One `WpFeedbackHandler` per commit; in-flight feedback
+  objects are destroyed race-safely with `Stop()`.
 - **`ConsumerPacedVsyncSource`**
   ([consumer_paced_vsync.{h,cc}](consumer_paced_vsync.h)) — drives vsync from
   downstream consumer completion instead of a wall clock. A **credit** is one
@@ -86,7 +88,10 @@ other thread.
 - **Platform task-runner thread** — the only place `FlutterEngineOnVsync` is
   invoked. `PostOnVsync` posts there via the runner's strand.
 - **Any thread** — `SubmitBaton`, `AddCredit`, `SetFreeRun`, `SetParked`.
-  All state hops to the strand.
+  State is lock-free atomics; `SubmitBaton` and `SetParked` update atomics on
+  the caller's thread, and only the callback delivery (`PostOnVsync`) is
+  posted. `ConsumerPacedVsyncSource` additionally posts its mutable
+  scheduling state (credits, ceiling timer) to the strand.
 
 ---
 
@@ -112,14 +117,14 @@ Wayland provider is gated:
 
 ## Running
 
-### Vsync sources and when they fire
+### Vsync sources and completion signals
 
-| Source | Fires `OnPresented` when… |
-|--------|--------------------------|
-| `WaylandVsyncProvider` | the compositor's `wp_presentation_feedback.presented` event arrives (after `eglSwapBuffers`). |
-| DRM page-flip | the kernel delivers `PAGE_FLIP_EVENT` on the card fd. |
-| Software page-flip | the sink's page-flip completes. |
-| `ConsumerPacedVsyncSource` | the consumer releases a frame slot (`AddCredit`). |
+| Source | Completion / pacing signal |
+|--------|----------------------------|
+| `WaylandVsyncProvider` | `OnPresented` fires when the compositor's `wp_presentation_feedback.presented` event arrives. |
+| DRM page-flip | `DeliverVsync` is called when the kernel delivers `PAGE_FLIP_EVENT` on the card fd. |
+| Software page-flip | `DeliverVsync` is called when the sink's page-flip completes. |
+| `ConsumerPacedVsyncSource` | A parked baton becomes deliverable when the consumer releases a frame slot (`AddCredit`); no present is recorded. |
 
 ### Vsync profiling
 
@@ -157,18 +162,15 @@ should do. `SetParked(false)` unparks and delivers any parked baton.
   no source event will fire to return the baton (a VT resume, a post-modeset
   drain). Unlike `DeliverDiscard` it records no profile discard.
 - **Consumer-paced free-run** — `SetFreeRun(true)` paces on the ceiling alone,
-  ignoring credits, for when no consumer is attached (a detached export pool,
-  or a consumer that hitched — a watchdog flips this on until frame release
-  edges resume).
+  ignoring credits, for when no consumer is attached. Headless EGL enables it
+  from the `IVI_HEADLESS_FREERUN` env var; headless Vulkan flips it on and off
+  as export consumers attach and detach. Turning it back off resets the credit
+  count to the full pipeline depth.
 
 ---
 
 ## Known limitations
 
-- `IVsyncProvider` tracks a single engine. OSGi forward-compat requires a
-  register/unregister set for the VsyncCoordinator (one source → many bundle
-  engines). The source and baton fan-out are deliberately separable here so
-  that extension is additive.
 - `ConsumerPacedVsyncSource::SetFreeRun` resets the credit count to the full
   pipeline depth. A consumer that hitched and re-established the pool must
   start with that invariant.

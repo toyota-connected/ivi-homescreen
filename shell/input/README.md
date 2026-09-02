@@ -1,14 +1,17 @@
 # input/
 
 The input subsystem: the single place raw device input is turned into Flutter
-input. It consumes host input (`libinput` on DRM, Wayland seats otherwise),
-does the keyboard translation (xkb) and auto-repeat, and forwards events to
-the running Flutter engine as `FlutterKeyEvent` / `FlutterPointerEvent`.
+input. It consumes host input (e.g. `libinput` on DRM), does the keyboard
+translation (xkb) and auto-repeat, and forwards events to the running Flutter
+engine as `FlutterKeyEvent` / `FlutterPointerEvent`.
 
-The `ISeat` interface is the seam: each backend pairs with a concrete seat
-(`DrmSeat` for DRM-KMS, `SoftwareSeat` for the software backend, a
-Wayland seat for Wayland). The backend-shared keyboard core (xkb translation
-+ key-repeat) lives here so every libinput-backed seat behaves identically.
+`ISeat` is an abstract interface to be implemented by backends that need a
+libinput-driven seat. The DRM-KMS backends use the in-tree `DrmSeat`; the
+software backend has its own `SoftwareSeat` (under `shell/backend/software/input/`);
+a future `WaylandSeat` could plug in here when a Wayland-client + DRM-rendering
+combination wants a `wl_seat`-backed input source. The backend-shared keyboard
+core (xkb translation + key-repeat) lives here so every libinput-backed seat
+behaves identically.
 
 ---
 
@@ -40,7 +43,6 @@ flowchart TD
 
     IS --> DS["DrmSeat<br/>libinput + drm::input::Seat"]
     IS --> SS["SoftwareSeat<br/>(backend/software)"]
-    IS --> WS["Wayland seat<br/>(shell/wayland)"]
 
     DS --> KB["XkbKeyboard<br/>(xkbcommon)"]
     DS --> KR["KeyRepeater<br/>(timerfd)"]
@@ -143,10 +145,10 @@ substring); touches from that panel route to that view instead of the primary.
 
 ### VT switch
 
-`Ctrl+Alt+F<n>` is intercepted from libinput's stream before it reaches the
-kernel's keymap-layer handler. `DrmSeat::SetVtSwitchHandler` installs the
-handler; returning `true` consumes the event so it does not also reach
-Flutter.
+On the direct-open path, `K_OFF` disables the kernel console keymap handler, so
+`DrmSeat` detects `Ctrl+Alt+F<n>` in libinput's stream. A handler installed with
+`DrmSeat::SetVtSwitchHandler` performs the switch; returning `true` consumes the
+event so it does not also reach Flutter.
 
 ### Keyboard LEDs
 
@@ -160,12 +162,9 @@ pushes this to the physical LEDs at startup and on every device-add.
 - **`IVI_M2P_PROFILE=1`** (or `IVI_PROFILE=1`) — enables the motion-to-photon
   profiler. Input batches are fed from `DrmSeat::HandleEvent` and
   `SoftwareSeat` via the shared `MotionToPhoton::RecordInput`.
-- **`HOMESCREEN_DRM_NO_SEAT=1`** — bypass libseat. `DrmSeat` then opens
-  `/dev/input/event*` directly and applies the legacy `K_OFF` TTY keyboard-mode
-  hack.
-- **`--drm-no-seat` / `HOMESCREEN_DRM_NO_SEAT`** — skip the libseat session
-  entirely. The seat's `InputDeviceOpener` is empty, and the seat falls back
-  to direct evdev.
+- **`--drm-no-seat` / `HOMESCREEN_DRM_NO_SEAT=1`** — bypass the libseat
+  session. `DrmSeat` opens `/dev/input/event*` directly and applies the legacy
+  `K_OFF` TTY keyboard-mode handling.
 - **Degraded poll mode** — when `eventfd()` fails at construction, the seat
   degrades to a 100 ms `poll` timeout. A warning is logged once.
 

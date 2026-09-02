@@ -1,6 +1,6 @@
 # display/
 
-The display abstraction layer for the Flutter embedder. A `IDisplay` is the
+The display abstraction layer for the Flutter embedder. An `IDisplay` is the
 event / output source a view runs against — either a Wayland compositor
 connection or a DRM card — and is the seam that makes "one master domain, N
 named outputs" uniform across backends, which is what lets a single process
@@ -18,7 +18,7 @@ scale math).
 | Capability | Status | Toggle / scope |
 |---|---|---|
 | `IDisplay` abstraction (event pump + output provider) | ✓ | Always compiled |
-| `SoftwareDisplay` — no-op display for the software backend | ✓ | `-DBUILD_BACKEND_SOFTWARE=ON` |
+| `SoftwareDisplay` — no-op display for the software backend | ✓ | `-DBUILD_BACKEND_SOFTWARE=ON`, `-DBUILD_BACKEND_HEADLESS_EGL=ON`, or `-DBUILD_BACKEND_HEADLESS_VULKAN=ON` |
 | `DrmDisplay` — DRM master + libseat session + hotplug monitor | ✓ | `-DBUILD_BACKEND_DRM_KMS_EGL=ON` or `-DBUILD_BACKEND_DRM_KMS_VULKAN=ON` |
 | `DrmDisplay` adopted-fd constructor (wayland-leased-drm) | ✓ | `-DBUILD_BACKEND_WAYLAND_LEASED_DRM=ON` |
 | `DrmOutputProvider` — enumerates card connectors as outputs | ✓ | DRM backends |
@@ -135,7 +135,7 @@ These sources build only when the corresponding backend is enabled:
 | Source | Gate |
 |--------|------|
 | `display/output.{h,cc}`, `display/output_manager.{h,cc}` | Always |
-| `display/software_display.{h,cc}` | `BUILD_BACKEND_SOFTWARE` |
+| `display/software_display.{h,cc}` | `BUILD_BACKEND_SOFTWARE`, `BUILD_BACKEND_HEADLESS_EGL`, or `BUILD_BACKEND_HEADLESS_VULKAN` |
 | `display/drm_display.{h,cc}`, `display/connector_edid.{h,cc}`, `display/drm_device_resolver.{h,cc}`, `display/drm_mode_list.{h,cc}`, `display/output_identity.{h,cc}`, `display/drm_output_provider.{h,cc}` | `BUILD_BACKEND_DRM_KMS_EGL` or `BUILD_BACKEND_DRM_KMS_VULKAN` |
 
 Example:
@@ -181,7 +181,7 @@ specific set field wins:
 | 3 | `drm_connector` / `wl_name` | Per backend | Connector / `wl_output` name. |
 | 4 | `index` | All | Deprecated, unstable. |
 
-A `output_id` that matches more than one output **parks the view** rather than
+An `output_id` that matches more than one output **parks the view** rather than
 falling through — naming a role is a deliberate statement about which display
 a view belongs on.
 
@@ -211,9 +211,10 @@ Key prefixes:
 - **`HOMESCREEN_DRM_NO_SEAT=1`** — bypass libseat; the display opens
   `/dev/dri` directly and self-acquires DRM master. Useful when debugging the
   master-acquisition path without a logind / seatd running.
-- **`IHS_OUTPUT_NAME` udev rule** — to debug role-name binding, check that the
-  property is set on the connector's sysfs node:
-  `cat /sys/class/drm/<card>-<connector>/IHS_OUTPUT_NAME`.
+- **`IHS_OUTPUT_NAME` udev rule** — to debug role-name binding, verify that the
+  udev environment property is set on the connector:
+  `udevadm info --query=property --path=/sys/class/drm/<card>-<connector>`.
+  Note: this is a udev *environment property*, not a sysfs attribute.
 
 ---
 
