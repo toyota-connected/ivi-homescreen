@@ -248,11 +248,10 @@ Consumer                           Bridge (HeadlessVulkanBackend)
 
 ## Known limitations / follow-ups
 
-1. **No scanout path yet** — the render-target ring is opaque. Frames are
-   composited and discarded. The dma-buf / opaque-fd export machinery is in
-   place but no socket consumer exists in-tree; the bridge plugin (e.g.
-   CARLA/Unreal) is responsible for connecting to the Unix SEQPACKET socket
-   and consuming the exported images.
+1. **No in-tree socket bridge yet** — frames are discarded unless export is
+   enabled and a bridge consumes the C ABI. The export machinery and standalone
+   socket consumer are in-tree, but a downstream bridge plugin must expose the
+   backend's C ABI over the Unix SEQPACKET socket.
 2. **Geometry changes are ignored** — `Resize()` logs a warning and keeps the
    initial pool extent. The pool can only be rebuilt at a new size via
    `RebuildExportPool` (consumer-driven), not by a Flutter view resize.
@@ -280,7 +279,7 @@ Consumer                           Bridge (HeadlessVulkanBackend)
 - [headless_egl backend README](../headless_egl/README.md) — the EGL sibling with the same no-display architecture
 - [wayland_vulkan backend README](../wayland_vulkan/README.md) — Vulkan/WSI comparison baseline
 - [drm_kms_vulkan backend README](../drm_kms_vulkan/README.md) — Vulkan zero-copy KMS sibling
-- [ihs/vk_export.h](../../../shared/abi/ihs/vk_export.h) — exported C ABI header
+- [ihs/vk_export.h](../../../shared/include/ihs/vk_export.h) — exported C ABI header
 - `VK_KHR_external_memory`, `VK_KHR_external_memory_fd` — opaque-fd export extensions
 - `VK_EXT_external_memory_dma_buf`, `VK_EXT_image_drm_format_modifier` — dma-buf export extensions
 - `VK_KHR_external_semaphore`, `VK_KHR_external_semaphore_fd` — semaphore export extensions

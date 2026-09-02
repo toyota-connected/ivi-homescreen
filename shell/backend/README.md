@@ -25,7 +25,7 @@ own README.
 | Vulkan handle export to plugins (`GetVulkanContext`) | Opt-in per backend | Vulkan backends only |
 | Reusable backing-store pool (`BackingStorePool`) | Built-in header | Used by EGL / Vulkan backends |
 | GL/EGL symbol resolver (`GlProcessResolver`) | Built-in | EGL-based backends |
-| Motion-to-photon profiler hook (`GetMotionToPhoton`) | Opt-in per backend | DRM/KMS backends, `IVI_M2P_PROFILE` |
+| Motion-to-photon profiler hook (`GetMotionToPhoton`) | Opt-in per backend | DRM/KMS, software, and Wayland backends; `IVI_M2P_PROFILE` |
 | Compositor-surface registration (platform views) | Opt-in per backend | `BUILD_COMPOSITOR` |
 | Debug HUD config plumbing (`SetHudConfig`) | Opt-in per backend | `BUILD_HUD` |
 | `--drm-list-modes` hook per backend | Per backend | DRM + software (DRM sink) backends |
@@ -79,8 +79,9 @@ on).
   so a plugin renders a platform view into a `VkImage` on the same device the
   engine uses). Under `BUILD_COMPOSITOR` it adds the compositor-surface
   registration hooks for platform views, and under `BUILD_HUD` the `SetHudConfig`
-  plumbing. It owns a `profiling::MotionToPhoton` that only the DRM/KMS backends
-  opt into via `InitMotionToPhoton()` (gated on `IVI_M2P_PROFILE`).
+  plumbing. DRM/KMS and software backends own a `profiling::MotionToPhoton`
+  instance on `Backend`; Wayland owns its instance on `Display`. All are gated by
+  `IVI_M2P_PROFILE`.
 - **`backend_registry.h` / `.cc` — the registry.** `BackendDescriptor` is one
   compiled-in backend's runtime identity: a string `key`, a `make_display`
   callable, a `make_backend` callable (which expects the `IDisplay` its own
@@ -145,6 +146,8 @@ shell/backend/
 ├── drm_kms_egl/           # DRM/KMS + EGL backend            (see drm_kms_egl/README.md)
 ├── drm_kms_vulkan/        # DRM/KMS + Vulkan backend         (see drm_kms_vulkan/README.md)
 ├── software/              # CPU (software) backend + sinks   (see software/README.md)
+├── headless_egl/          # Headless EGL encoder             (see headless_egl/README.md)
+├── headless_vulkan/       # Headless Vulkan encoder + export consumer (see headless_vulkan/README.md)
 ├── wayland_egl/           # Wayland client + EGL backend     (see wayland_egl/README.md)
 ├── wayland_vulkan/        # Wayland client + Vulkan backend  (see wayland_vulkan/README.md)
 ├── wayland_leased_drm/    # drm-lease-v1 client (leased tiers) (see wayland_leased_drm/README.md)
@@ -202,6 +205,8 @@ Options are declared in [`cmake/options.cmake`](../../cmake/options.cmake):
 - `BUILD_BACKEND_DRM_KMS_EGL` (default OFF) — direct KMS scanout + EGL/GLES.
 - `BUILD_BACKEND_DRM_KMS_VULKAN` (default OFF) — direct KMS scanout + Vulkan (zero-copy dma-buf).
 - `BUILD_BACKEND_SOFTWARE` (default OFF) — CPU rendering; `BUILD_SOFTWARE_SINK_DRM` / `BUILD_SOFTWARE_SINK_FBDEV` / `BUILD_SOFTWARE_INPUT_LIBINPUT` select its scanout sinks and input.
+- `BUILD_BACKEND_HEADLESS_EGL` (default OFF) — GPU-EGL encoder (GPU render → NV12 → HW encode; needs EGL/GLES/gbm + `v4l2-webrtc-codec`).
+- `BUILD_BACKEND_HEADLESS_VULKAN` (default OFF) — headless Vulkan encoder (no display / scanout).
 - `BUILD_BACKEND_WAYLAND_LEASED_DRM` (default OFF) — the `drm-lease-v1` client; combine with one or more renderer stacks to enable the leased tiers.
 - `BUILD_COMPOSITOR` (default OFF) — enables the `FlutterCompositor` backing-store API (required for platform-view layers and `BUILD_HUD`).
 - `BUILD_HUD` (default ON, forced OFF without `BUILD_COMPOSITOR`) — the Dear ImGui debug overlay.
@@ -215,6 +220,8 @@ Options are declared in [`cmake/options.cmake`](../../cmake/options.cmake):
 | DRM/KMS EGL | `-DBUILD_BACKEND_DRM_KMS_EGL=ON` | `drm-kms-egl` |
 | DRM/KMS Vulkan | `-DBUILD_BACKEND_DRM_KMS_VULKAN=ON` | `drm-kms-vulkan` |
 | Software | `-DBUILD_BACKEND_SOFTWARE=ON` | `software` |
+| Headless EGL encoder | `-DBUILD_BACKEND_HEADLESS_EGL=ON` | `headless-egl` |
+| Headless Vulkan encoder | `-DBUILD_BACKEND_HEADLESS_VULKAN=ON` | `headless-vulkan` |
 | Leased DRM (EGL renderer) | `-DBUILD_BACKEND_WAYLAND_LEASED_DRM=ON -DBUILD_BACKEND_DRM_KMS_EGL=ON` | `drm-kms-egl`, `wayland-leased-drm-egl` |
 | Leased DRM (Vulkan renderer) | `-DBUILD_BACKEND_WAYLAND_LEASED_DRM=ON -DBUILD_BACKEND_DRM_KMS_VULKAN=ON` | `drm-kms-vulkan`, `wayland-leased-drm-vulkan` |
 | Leased DRM (software) | `-DBUILD_BACKEND_WAYLAND_LEASED_DRM=ON -DBUILD_BACKEND_SOFTWARE=ON -DBUILD_SOFTWARE_SINK_DRM=ON` | `software`, `wayland-leased-drm-software` |
@@ -293,6 +300,8 @@ configuration surface and layering order.
   - [`wayland_leased_drm/README.md`](wayland_leased_drm/README.md)
   - [`drm_kms_egl/README.md`](drm_kms_egl/README.md)
   - [`drm_kms_vulkan/README.md`](drm_kms_vulkan/README.md)
+  - [`headless_egl/README.md`](headless_egl/README.md)
+  - [`headless_vulkan/README.md`](headless_vulkan/README.md)
   - [`software/README.md`](software/README.md)
   - [`hud/`](hud/) — compositor debug HUD (Dear ImGui overlay).
 - [`../configuration/README.md`](../configuration/README.md) — `[view.backend]` / `--backend` parsing and layering.

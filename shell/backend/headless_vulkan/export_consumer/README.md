@@ -120,15 +120,15 @@ on the socket until the bridge sends a `FramePresent`.
 ### Configure + build
 
 ```sh
-cmake -B build -G Ninja
-ninja -C build ihs-vk-export-consumer
+cmake -B build -G Ninja -DBUILD_BACKEND_HEADLESS_VULKAN=ON
+ninja -C build ihs_vk_export_consumer
 ```
 
 ### Build matrix
 
 | Config | CMake flags | Output |
 |--------|-------------|--------|
-| Export consumer (default) | (none) | `ihs-vk-export-consumer` binary |
+| Export consumer (default) | (none) | `ihs_vk_export_consumer` binary |
 
 ### Optional features detected at configure time
 
@@ -144,7 +144,7 @@ on the SEQPACKET socket. It connects, imports, consumes frames, then exits
 cleanly when the frame budget is reached or on SIGINT.
 
 ```sh
-./build/shell/backend/headless_vulkan/export_consumer/ihs-vk-export-consumer
+./build/shell/backend/headless_vulkan/export_consumer/ihs_vk_export_consumer
 ```
 
 ### CLI Flags

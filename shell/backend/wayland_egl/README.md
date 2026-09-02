@@ -14,7 +14,7 @@ compositor-mediated vsync path in particular.
 | Wall-clock scheduler fallback | Built-in | Auto when vsync unusable / `IVI_WL_VSYNC=0` |
 | Partial repaint (buffer-age + `eglSetDamageRegionKHR` + `eglSwapBuffersWithDamageKHR`) | Built-in (Skia GL only) | Auto-disabled under Impeller (`--enable-impeller`) |
 | GL compositor for platform views | Opt-in | `BUILD_COMPOSITOR` |
-| Debug HUD (imgui GL) | Opt-in | `BUILD_HUD` + `BUILD_COMPOSITOR`; `IVI_HUD` / F12 |
+| Debug HUD (imgui GL) | Opt-in | `BUILD_HUD` + `BUILD_COMPOSITOR`; `IVI_HUD` / `[hud].enable` |
 | Per-frame cadence profiling | Opt-in | `IVI_WL_PROFILE` |
 | Motion-to-photon profiling | Opt-in | `IVI_M2P_PROFILE` / `IVI_PROFILE` |
 | EGL share-context export to plugins (`GetEglContext`) | Built-in | Always |

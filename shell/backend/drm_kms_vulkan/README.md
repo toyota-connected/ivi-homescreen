@@ -227,9 +227,9 @@ cmake -GNinja -B cmake-build-debug-clang \
 ninja -C cmake-build-debug-clang
 ```
 
-`BUILD_BACKEND_DRM_KMS_VULKAN` is mutually exclusive with the EGL and Wayland
-backends. `BUILD_COMPOSITOR=ON` is **required** — the present path is only
-reachable through the Flutter compositor callbacks.
+`BUILD_BACKEND_DRM_KMS_VULKAN` can be enabled alongside other backends and
+selected per view through the backend registry. `BUILD_COMPOSITOR=ON` is
+**required** because presentation is reachable only through compositor callbacks.
 
 ### Build matrix
 

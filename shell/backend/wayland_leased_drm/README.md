@@ -280,6 +280,7 @@ nothing to fall back to:
 | `--lease-device` | Which `wp_drm_lease_device_v1` when several are advertised (one per DRM node): index or node path. TOML: `[view.backend.lease] device` |
 | `--lease-timeout-ms` | Bound on the whole negotiation (default 5000). TOML: `[view.backend.lease] timeout_ms` |
 | `--lease-list-connectors` | Read-only probe of what the compositor will lease; prints offers and exits with a scriptable code. No bundle required |
+| `--lease-input` | Raw-evdev input policy: `auto` (enabled only without a host Wayland session), `on`, or `off`. TOML: `[view.backend.lease] input` |
 
 The timeout is load-bearing, not cosmetic: the spec lets a compositor defer the
 DRM fd until it regains DRM master, so without a bound a VT-switched-away
@@ -293,6 +294,7 @@ bounded by it, including the roundtrips.
 | `HOMESCREEN_LEASE_CONNECTOR` | unset | Same as `--lease-connector` |
 | `HOMESCREEN_LEASE_DEVICE` | unset | Same as `--lease-device` |
 | `HOMESCREEN_LEASE_TIMEOUT_MS` | `5000` | Same as `--lease-timeout-ms` |
+| `HOMESCREEN_LEASE_INPUT` | `auto` | Same as `--lease-input` |
 
 The `drm_*` tuning knobs pass through unchanged for the egl tier, and
 `IVI_SW_DRM_MODE` / format / dither for the software tier — those describe how to
@@ -313,9 +315,9 @@ the same reason.
 
 Revocation causes are logged distinctly because they demand different operator
 actions (`RevokeCause`): `kFinished` (`wp_drm_lease_v1.finished` — VT switch away
-or hot-unplug, routine and self-healing on VT return), `kConnectionLost` (the
-compositor exited or crashed), and `kMonitorFailure` (poll error on the monitor
-thread; the lease's true state is unknown, treated as lost).
+or hot-unplug; commits remain gated until process restart), `kConnectionLost`
+(the compositor exited or crashed), and `kMonitorFailure` (poll error on the
+monitor thread; the lease's true state is unknown, treated as lost).
 
 Negotiation failures surface as `LeaseError` values, each a distinct operator
 signal: `kNoWaylandSession`, `kConnectFailed`, `kNoLeaseDevice`,

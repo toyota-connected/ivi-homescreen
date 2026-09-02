@@ -130,6 +130,7 @@ Three threads are involved:
 
 - GBM (`libgbm`) — provided by the system Mesa
 - EGL / GLES 3 — provided by the system Mesa
+- `v4l2-webrtc-codec` checkout — supplies the V4L2 encoder sources; set `-DV4L2WC_DIR=<path>` if it is not a sibling of this repository
 - `Nv12GlPacker` and `INv12Consumer` — compiled from `backend/software/`
 
 ### Configure + build
