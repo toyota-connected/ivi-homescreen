@@ -1193,11 +1193,16 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
 // ─── Cursor staging + shared commit settle ──────────────────────────────
 
 bool DrmCompositor::StageCursorInto(drm::AtomicRequest& req) {
+#if HAVE_DRM_CURSOR
   bool needs_modeset = false;
   if (cursor_ != nullptr) {
     (void)cursor_->Stage(req, &needs_modeset);
   }
   return needs_modeset;
+#else
+  (void)req;
+  return false;
+#endif
 }
 
 void DrmCompositor::SettleAtomicCommit(const bool blocking) {
@@ -3065,9 +3070,11 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   // cursor plane in its own commit would avoid this separate commit (which
   // reintroduces the flip contention on nvidia-drm in fullscreen scene
   // mode). No-op when no cursor is staged.
+#if HAVE_DRM_CURSOR
   if (cursor_ != nullptr) {
     cursor_->CommitPending();
   }
+#endif
 
   // Rotate every BS pool that participated. Same slot-pipeline
   // bookkeeping as the legacy path — the scene path does not touch
