@@ -30,6 +30,19 @@
 #ifndef FMT_HEADER_ONLY
 #define FMT_HEADER_ONLY
 #endif
+// fmt/format.h defines detail::allocator, which calls malloc and free
+// without declaring them. It relied on some other header providing
+// <cstdlib> transitively; libc++ 23 no longer does, and the calls are
+// then neither visible at the point of definition nor reachable by ADL:
+//
+//   fmt/format.h:747:28: error: use of undeclared identifier 'malloc'
+//   fmt/format.h:752:35: error: call to function 'free' that is neither
+//     visible in the template definition nor found by argument-dependent lookup
+//
+// Include it before fmt so the declarations are in scope there. Upstream
+// fmt has since dropped that allocator, but no released version has.
+#include <cstdlib>
+
 #include <fmt/format.h>
 
 #include "ihs/logging.h"
