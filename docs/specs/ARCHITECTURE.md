@@ -31,7 +31,7 @@ every other module (each `shell/` subdirectory, plus `shared/`, `test/`, and
     - 4.2. [Views](#42-views) — `shell/view/`
     - 4.3. [Backends (Rendering & Presentation)](#43-backends-rendering--presentation) — `shell/backend/`
     - 4.4. [Displays and I/O](#44-displays-and-io)
-        - 4.4.1. [Displays and Output Management](#444-displays-and-output-management) — `shell/display/`
+        - 4.4.1. [Displays and Output Management](#441-displays-and-output-management) — `shell/display/`
         - 4.4.2. [Wayland Integration and Compositor-Protocol Shells](#442-wayland-integration-and-compositor-protocol-shells) — `shell/wayland/`, `shell/wayland-protocols/`
         - 4.4.3. [Input](#443-input) — `shell/input/`
         - 4.4.4. [Vsync](#444-vsync) — `shell/vsync/`
@@ -219,6 +219,10 @@ The subsystems that build on the core machinery to present a Flutter application
 per-view configuration, the view object, the rendering backends, and the
 displays / I/O they scan out to. Each has its own README; the summaries below
 say only *why* the feature exists and *how* it fits in.
+
+Implementation details, configuration options, and subsystem-specific usage
+belong in the linked README files. This document is the system-level map of how
+those components work together.
 
 ### 4.1. Configuration
 

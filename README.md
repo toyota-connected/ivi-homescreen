@@ -26,6 +26,16 @@ Flutter embedder for Embedded Linux (C++)
 
 **Discord Server: https://discord.gg/V5uWD9fvws**
 
+## Documentation
+
+The documentation is organized around the system architecture and the
+subsystems that implement it:
+
+- [Read the documentation on Read the Docs](https://ivi-homescreen.readthedocs.io/en/latest/)
+- [Architecture document](docs/specs/ARCHITECTURE.md)
+- [Plugin ABI](docs/PLUGIN_ABI.md)
+- [Subsystem documentation](https://github.com/toyota-connected/ivi-homescreen/blob/main/docs/specs/ARCHITECTURE.md#4-features)
+
 </div>
 
 ### Use cases
