@@ -48,6 +48,7 @@ every other module (each `shell/` subdirectory, plus `shared/`, `test/`, and
     - 7.2. [The `ihs_shared` Library (Plugin C ABI)](#72-the-ihs_shared-library-plugin-c-abi) — `shared/`
 8. [Testing](#8-testing) — `test/`
 9. [Build System](#9-build-system) — `scripts/`, `cmake/`
+   - 9.1. [Sanitizer Support](#91-sanitizer-support)
 
 ---
 
@@ -436,3 +437,12 @@ codegen, packaging, options, docs). Key structural points:
 The generated CLI and configuration reference tables in the README are produced
 by [`scripts/gen_config_reference.py`](../../scripts/gen_config_reference.py) from
 the binary's `--help` and the parser, and must not be hand-edited.
+
+### 9.1. Sanitizer support
+
+You can enable the sanitizers with `SANITIZE_ADDRESS`, `SANITIZE_MEMORY`, `SANITIZE_THREAD` or `SANITIZE_UNDEFINED` options in
+your CMake configuration. You can do this by passing e.g. `-DSANITIZE_ADDRESS=ON` on your command line.
+
+If sanitizers are supported by your compiler, the specified targets will be built with sanitizer support. If your
+compiler has no sanitizing capabilities you'll get a warning but CMake will continue processing and sanitizing will
+simply just be ignored.
