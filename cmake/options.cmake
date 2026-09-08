@@ -72,6 +72,18 @@ endif ()
 #
 option(BUILD_BACKEND_WAYLAND_EGL "Build Backend for EGL" ON)
 if (BUILD_BACKEND_WAYLAND_EGL)
+    # Platform-view producers need an allocator whose buffers the compositor
+    # can import. gbm on the EGL display's own render node is that allocator;
+    # without it a producer can only export a GL texture, which not every
+    # driver permits. Probed here rather than in shell/ because the config
+    # header is generated before that directory is added.
+    find_package(PkgConfig)
+    pkg_check_modules(GBM QUIET IMPORTED_TARGET GLOBAL gbm)
+    if (TARGET PkgConfig::GBM)
+        set(BUILD_BACKEND_WAYLAND_EGL_GBM ON)
+    else ()
+        message(STATUS "wayland-egl: no libgbm; platform views fall back to GL texture export")
+    endif ()
     option(BUILD_EGL_TRANSPARENCY "Build with EGL Transparency Enabled" ON)
     option(BUILD_EGL_ENABLE_3D "Build with EGL Stencil, Depth, and Stencil config Enabled" ON)
     option(BUILD_EGL_ENABLE_MULTISAMPLE "Build with EGL Sample set to 4" OFF)

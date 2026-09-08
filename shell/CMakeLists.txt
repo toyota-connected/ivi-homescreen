@@ -134,6 +134,9 @@ if (BUILD_BACKEND_WAYLAND_EGL)
             backend/wayland_egl/egl.cc
             backend/gl_process_resolver.cc
     )
+    if (TARGET PkgConfig::GBM)
+        target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::GBM)
+    endif ()
     if (BUILD_COMPOSITOR)
         target_sources(${PROJECT_NAME} PRIVATE
                 backend/wayland_egl/egl_backing_store.cc
