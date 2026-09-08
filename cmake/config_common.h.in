@@ -27,6 +27,12 @@
 #ifndef BUILD_BACKEND_WAYLAND_VULKAN
 #cmakedefine01 BUILD_BACKEND_WAYLAND_VULKAN
 #endif
+// Set when libgbm was found alongside the Wayland EGL backend. Gates the
+// render-node allocator the backend hands to platform-view producers; without
+// it they fall back to exporting a GL texture, which not every driver allows.
+#ifndef BUILD_BACKEND_WAYLAND_EGL_GBM
+#cmakedefine01 BUILD_BACKEND_WAYLAND_EGL_GBM
+#endif
 // Spelled to match the option in cmake/options.cmake. It previously read
 // BUILD_BACKEND_WAYLAND_DRM_LEASED, which matched no CMake variable, so
 // #cmakedefine01 always emitted 0 — every gate on it would have been silently

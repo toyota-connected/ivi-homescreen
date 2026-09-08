@@ -34,6 +34,7 @@
 #include "egl.h"
 
 struct wl_output;
+struct gbm_device;
 class Display;
 class TaskRunner;
 
@@ -81,11 +82,10 @@ class WaylandEglBackend : public Egl, public Backend {
                     bool enable_impeller,
                     int buffer_size = kEglBufferSize);
 
-#if BUILD_HUD
   // Out-of-line so the GlHud unique_ptr (incomplete here) is destroyed where
-  // GlHud is complete; also tears the HUD down with the GL context current.
+  // GlHud is complete; also tears the HUD down with the GL context current,
+  // and closes the render node opened for platform-view allocation.
   ~WaylandEglBackend() override;
-#endif
 
   /**
    * @brief Resize Flutter engine Window size
@@ -221,6 +221,27 @@ class WaylandEglBackend : public Egl, public Backend {
 #endif
 
  private:
+#if BUILD_BACKEND_WAYLAND_EGL_GBM
+  // Allocator handed to platform-view producers so they can hand the
+  // compositor a dma-buf. Producers can otherwise only render into a GL
+  // texture and export its storage, which panfrost refuses
+  // (drmPrimeHandleToFD EINVAL) even though it imports gbm buffers happily.
+  // Opened on first use from GetEglContext, which is const.
+  mutable int m_gbm_fd{-1};
+  mutable struct gbm_device* m_gbm_device{nullptr};
+  mutable bool m_gbm_probed{false};
+
+  /**
+   * @brief Open the DRM render node behind the EGL display and wrap it in a
+   * gbm_device. Idempotent; leaves m_gbm_device null when unavailable, which
+   * puts producers back on the GL-texture path.
+   * @return void
+   * @relation
+   * wayland, egl
+   */
+  void EnsureGbmDevice() const;
+#endif
+
   struct wl_egl_window* m_egl_window{};
   // wl_surface backing m_egl_window. We stash it from CreateSurface so
   // wp_presentation_feedback() can mint a feedback object per commit.

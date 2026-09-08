@@ -42,6 +42,22 @@
 #include <GLES2/gl2.h>
 #endif
 
+#if BUILD_BACKEND_WAYLAND_EGL_GBM
+#include <dirent.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+#include <gbm.h>
+
+#include <string>
+
+// eglext.h may predate EGL_EXT_device_query; the value is fixed by the
+// extension registry.
+#ifndef EGL_DEVICE_EXT
+#define EGL_DEVICE_EXT 0x322C
+#endif
+#endif
+
 #if BUILD_HUD
 #include "backend/hud/gl_hud.h"
 #endif
@@ -79,16 +95,131 @@ WaylandEglBackend::WaylandEglBackend(Display* shell_display,
   }
 }
 
-#if BUILD_HUD
 WaylandEglBackend::~WaylandEglBackend() {
+#if BUILD_HUD
   // Tear the HUD down with the GL context current so imgui's glDelete* land on
   // a live context (the Egl base — destroyed after this — still owns it).
   if (hud_) {
     MakeCurrent();
     hud_.reset();
   }
+#endif
+#if BUILD_BACKEND_WAYLAND_EGL_GBM
+  if (m_gbm_device != nullptr) {
+    gbm_device_destroy(m_gbm_device);
+    m_gbm_device = nullptr;
+  }
+  if (m_gbm_fd >= 0) {
+    close(m_gbm_fd);
+    m_gbm_fd = -1;
+  }
+#endif
 }
 
+#if BUILD_BACKEND_WAYLAND_EGL_GBM
+namespace {
+
+// EGL_EXT_device_query / EGL_EXT_device_drm{,_render_node}. Spelled out here so
+// the backend builds against an egl.h that predates them; the entry points are
+// resolved at runtime and absence just means the scan below runs instead.
+constexpr EGLint kDrmDeviceFileExt = 0x3233;
+constexpr EGLint kDrmRenderNodeFileExt = 0x3377;
+using QueryDisplayAttribFn = EGLBoolean (*)(EGLDisplay, EGLint, intptr_t*);
+using QueryDeviceStringFn = const char* (*)(void*, EGLint);
+
+// The node the EGL display renders on, or an empty string. Asking EGL rather
+// than guessing keeps the allocator and the GL context on one device; a buffer
+// from the wrong node imports as garbage or not at all.
+std::string EglRenderNode(EGLDisplay display) {
+  const auto query_attrib = reinterpret_cast<QueryDisplayAttribFn>(
+      eglGetProcAddress("eglQueryDisplayAttribEXT"));
+  const auto query_string = reinterpret_cast<QueryDeviceStringFn>(
+      eglGetProcAddress("eglQueryDeviceStringEXT"));
+  if (query_attrib == nullptr || query_string == nullptr) {
+    return {};
+  }
+  intptr_t device = 0;
+  if (query_attrib(display, EGL_DEVICE_EXT, &device) == EGL_FALSE ||
+      device == 0) {
+    return {};
+  }
+  auto* dev = reinterpret_cast<void*>(device);
+  // Prefer the render node: the primary node needs DRM master or an
+  // authenticated fd, neither of which a Wayland client has.
+  for (const EGLint name : {kDrmRenderNodeFileExt, kDrmDeviceFileExt}) {
+    const char* path = query_string(dev, name);
+    if (path != nullptr && path[0] != '\0') {
+      return path;
+    }
+  }
+  return {};
+}
+
+// Last resort when EGL will not name its device: the lowest-numbered render
+// node. Right on a single-GPU board, a coin flip on anything else — hence the
+// warning.
+std::string FirstRenderNode() {
+  DIR* dir = opendir("/dev/dri");
+  if (dir == nullptr) {
+    return {};
+  }
+  std::string best;
+  while (const dirent* ent = readdir(dir)) {
+    const std::string_view name(ent->d_name);
+    if (name.rfind("renderD", 0) != 0) {
+      continue;
+    }
+    if (best.empty() || name < std::string_view(best)) {
+      best.assign(name);
+    }
+  }
+  closedir(dir);
+  return best.empty() ? std::string() : "/dev/dri/" + best;
+}
+
+}  // namespace
+
+void WaylandEglBackend::EnsureGbmDevice() const {
+  if (m_gbm_probed) {
+    return;
+  }
+  m_gbm_probed = true;
+
+  std::string node = EglRenderNode(GetDisplay());
+  if (node.empty()) {
+    node = FirstRenderNode();
+    if (!node.empty()) {
+      ihs::log::warn(
+          "[WaylandEglBackend] EGL would not name its DRM device; guessing {} "
+          "for platform-view allocation",
+          node);
+    }
+  }
+  if (node.empty()) {
+    ihs::log::info(
+        "[WaylandEglBackend] no DRM render node — platform views fall back to "
+        "GL texture export");
+    return;
+  }
+
+  m_gbm_fd = open(node.c_str(), O_RDWR | O_CLOEXEC);
+  if (m_gbm_fd < 0) {
+    ihs::log::warn("[WaylandEglBackend] open({}) failed: {}", node,
+                   strerror(errno));
+    return;
+  }
+  m_gbm_device = gbm_create_device(m_gbm_fd);
+  if (m_gbm_device == nullptr) {
+    ihs::log::warn("[WaylandEglBackend] gbm_create_device({}) failed", node);
+    close(m_gbm_fd);
+    m_gbm_fd = -1;
+    return;
+  }
+  ihs::log::info("[WaylandEglBackend] platform-view allocator on {}", node);
+}
+#endif  // BUILD_BACKEND_WAYLAND_EGL_GBM
+
+#if BUILD_HUD
 void WaylandEglBackend::MaybeRenderHud(const FlutterLayer** layers,
                                        size_t count) {
   if (!hud_checked_) {
@@ -630,9 +761,16 @@ bool WaylandEglBackend::GetEglContext(BackendEglContext* out) const {
   // share_context transitively shares GL objects with Flutter's raster
   // context.
   out->share_context = GetTextureContext();
-  // No gbm on a Wayland EGL backend — platform views present via wl_surface /
-  // GL texture, not a KMS plane, so there is no scanout buffer to export.
+  // Not a scanout allocator — there is no KMS plane here — but producers need
+  // some way to mint dma-bufs the compositor can import, and exporting a GL
+  // texture is not portable (panfrost rejects it). A gbm device on the render
+  // node EGL is already using gives them one.
+#if BUILD_BACKEND_WAYLAND_EGL_GBM
+  EnsureGbmDevice();
+  out->gbm_device = m_gbm_device;
+#else
   out->gbm_device = nullptr;
+#endif
   return out->display != EGL_NO_DISPLAY && out->share_context != EGL_NO_CONTEXT;
 }
 
