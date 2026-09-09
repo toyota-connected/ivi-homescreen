@@ -25,18 +25,8 @@ Flutter embedder for Embedded Linux (C++)
 [![Discord](https://img.shields.io/discord/1259897607531003945?style=plastic&logo=discord&label=Discord&color=%239656ce)
 ](https://discord.gg/V5uWD9fvws)
 <!-- /template:out -->
-
-## Documentation
-
-The documentation is organized around the system architecture and the
-subsystems that implement it:
-
-- [Read the documentation on Read the Docs](https://ivi-homescreen.readthedocs.io/en/latest/)
-- [Architecture document](docs/specs/ARCHITECTURE.md)
-- [Plugin ABI](docs/PLUGIN_ABI.md)
-- [Subsystem documentation](https://github.com/toyota-connected/ivi-homescreen/blob/main/docs/specs/ARCHITECTURE.md#4-features)
-
 </div>
+
 
 ### Use cases
 - **Industrial deployments**: built for embedded environments requiring robustness and reliability (eg. automotive)
@@ -61,6 +51,18 @@ subsystems that implement it:
 - **Accessibility support** <- [docs](docs/specs/ARCHITECTURE.md#63-accessibility)
 - **Logging/tracing**: with optional DLT support <- [docs](shell/logging/README.md), [DLT docs](shared/README.md#dlt-sink)
 - **C Plugin ABI** <- [docs](shared/README.md)
+
+---
+
+## 📚 Documentation
+
+The documentation is organized around the system architecture and the
+subsystems that implement it:
+
+- [Read the documentation on Read the Docs](https://ivi-homescreen.readthedocs.io/en/latest/)
+- [Architecture document](docs/specs/ARCHITECTURE.md)
+- [Plugin ABI](docs/PLUGIN_ABI.md)
+- [Subsystem documentation](https://github.com/toyota-connected/ivi-homescreen/blob/main/docs/specs/ARCHITECTURE.md#4-features)
 
 ---
 
