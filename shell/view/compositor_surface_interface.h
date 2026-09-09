@@ -250,20 +250,54 @@ class ICompositorSurface {
   };
 
   /**
+   * @brief Why a present has no dma-buf for the plane, or that it has one.
+   *
+   * @c GetDmabuf used to answer with a bool, which conflated three cases the
+   * compositor has to treat differently. @c kNoNewFrame means keep whatever is
+   * already on the plane; @c kNotScanoutCapable means there *is* new content
+   * but it cannot go on a plane, so GL-composite it rather than leaving the
+   * plane showing a stale frame.
+   */
+  enum class DmabufState : uint8_t {
+    /// No fresh content this present. A reused layer keeps its current source;
+    /// a view whose producer has not delivered its first frame yet is simply
+    /// not ready. Nothing to do.
+    kNoNewFrame = 0,
+    /// New content exists but is not expressible as a scanout dma-buf -- a
+    /// GL-only surface, a frame with per-plane handles the layout cannot carry,
+    /// or a transient failure to dup the producer's fds. The compositor must
+    /// route this view through GL for the present; holding the plane would
+    /// freeze it on the last scannable frame.
+    kNotScanoutCapable,
+    /// @p out is filled and the caller owns every populated @c fd.
+    kFrame,
+  };
+
+  /**
    * @brief Expose the surface's latest frame as a dma-buf for direct scanout.
    *
-   * A surface that produced a frame into a dma-buf (a video decoder, a camera,
-   * a Vulkan/GL plugin that exported its image) fills @p out and returns true;
-   * the compositor then routes it onto a KMS overlay plane (the FlutterLayer
-   * geometry drives the Layer Crtc and Src rects, which drive the plane)
-   * instead of GL-compositing it. Returns false (default) for GL-only surfaces,
-   * or when no dma-buf frame is ready this present — the compositor falls back
-   * to the @c GetGlTextureName / @c GetVulkanImage path. The returned @c fd is
-   * owned by the caller (an implementation may dup its internal handle to make
-   * it robust against a concurrent producer superseding the frame); the caller
-   * closes it once it has imported the buffer.
+   * Fills @p out and returns @c kFrame when a fresh frame is ready to be placed
+   * on a KMS overlay plane; the compositor then routes it onto a plane (the
+   * FlutterLayer geometry drives the Layer Crtc and Src rects) instead of
+   * GL-compositing it. Otherwise nothing is written to @p out and the state
+   * says which of the two no-frame cases applies -- see @c DmabufState, and
+   * note that only @c kNoNewFrame is safe to answer by keeping the plane as it
+   * is.
+   *
+   * Deliver-once: a frame is handed to the scanout path at most once, so a
+   * reused layer polling every present sees @c kNoNewFrame until the producer
+   * submits again. The returned @c fd is owned by the caller (an implementation
+   * may dup its internal handle to make it robust against a concurrent producer
+   * superseding the frame); the caller closes each one once it has imported the
+   * buffer.
+   *
+   * The default is @c kNotScanoutCapable: a surface that does not override this
+   * has no dma-buf path at all, and its content only reaches the screen through
+   * @c GetGlTextureName / @c GetVulkanImage.
    */
-  [[nodiscard]] virtual bool GetDmabuf(Dmabuf* /*out*/) const { return false; }
+  [[nodiscard]] virtual DmabufState GetDmabuf(Dmabuf* /*out*/) const {
+    return DmabufState::kNotScanoutCapable;
+  }
 
   /**
    * @brief The surface's current HDR static metadata, if its content is HDR.
