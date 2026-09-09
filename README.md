@@ -22,9 +22,9 @@ Flutter embedder for Embedded Linux (C++)
 [![build](https://github.com/toyota-connected/ivi-homescreen/actions/workflows/oss-ivi-homescreen.yml/badge.svg)](https://github.com/toyota-connected/ivi-homescreen/actions/workflows/oss-ivi-homescreen.yml)
 [![docs](https://readthedocs.org/projects/ivi-homescreen/badge/?version=latest)](https://ivi-homescreen.readthedocs.io/en/latest/?badge=latest)
 [![stars](https://img.shields.io/github/stars/toyota-connected/ivi-homescreen.svg)](https://github.com/toyota-connected/ivi-homescreen/stargazers)
+[![Discord](https://img.shields.io/discord/1259897607531003945?style=plastic&logo=discord&label=Discord&color=%239656ce)
+](https://discord.gg/V5uWD9fvws)
 <!-- /template:out -->
-
-**Discord Server: https://discord.gg/V5uWD9fvws**
 
 ## Documentation
 
