@@ -63,9 +63,10 @@ D-Bus signal, the next line of a capture). Nothing polls.
 
 Without a filter, the Manager stores each fix whole and atomically
 (`PublishFix`), so a consumer never sees a half-updated position. With a
-filter, each fix becomes one position measurement (`SubmitPositionFix`) routed
-to the filter's `update()`, and every read asks the filter to `estimate()` the
-state at the time of the read. `ihs_location_start()` is the unfiltered case.
+filter, each fix becomes a position measurement, plus a speed measurement when
+the fix carries one (`SubmitPositionFix`), routed to the filter's `update()`,
+and every read asks the filter to `estimate()` the state at the time of the
+read. `ihs_location_start()` is the unfiltered case.
 
 Consumers poll (`latest2`, with `generation` to notice a new fix) or subscribe
 (`set_callback`). Subscribe first, then read the current fix: that order cannot
@@ -105,7 +106,7 @@ miss an update.
 | Key | Model and state | Corrects from | `filter_config` |
 |---|---|---|---|
 | `kalman.cv` | Constant velocity, `[e, n, v_e, v_n]`; linear | GNSS position | `q=<value>` process-noise density; default `1.0` |
-| `kalman.ctrv` | Constant turn rate and velocity EKF, `[e, n, ψ, v, ω]`; follows an arc, so a turning vehicle does not lag the corner | GNSS position; ground speed and yaw rate from a source that provides them | `qa=<σ>` acceleration, m/s², default `2.0`; `qw=<σ>` yaw acceleration, rad/s², default `0.15` |
+| `kalman.ctrv` | Constant turn rate and velocity EKF, `[e, n, ψ, v, ω]`; follows an arc, so a turning vehicle does not lag the corner | GNSS position, and ground speed when the source reports it; yaw rate from a source that provides one | `qa=<σ>` acceleration, m/s², default `2.0`; `qw=<σ>` yaw acceleration, rad/s², default `0.15` |
 
 Both run in a local east/north tangent plane in meters, anchored at the first
 fix and re-anchored past 10 km, on fixed-size matrix code with no Eigen. Both
@@ -292,9 +293,9 @@ position noise. Each test uses its own track and seed, so compare within a row.
 - A source registered with `ihs_location_register_source()` is never bound: the
   start calls build the Manager from the built-in sources only. Registered
   filters do work.
-- With the built-in sources a filter sees GNSS position only. `kalman.ctrv`'s
-  speed and yaw-rate updates need a CAN or gyro source, which needs the item
-  above; today only the unit tests exercise them.
+- With the built-in sources a filter sees position and ground speed.
+  `kalman.ctrv`'s yaw-rate update still needs a CAN or gyro source, which needs
+  the item above; today only the unit tests exercise it.
 - gpsd `config` takes a numeric IPv4 address; host names are not resolved.
 - geoclue needs `libsystemd.so.0` at runtime and the `DesktopId` `ihs-location` to be
   allowed; geoclue-only fixes usually carry no speed.
