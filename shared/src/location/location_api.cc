@@ -367,4 +367,17 @@ void ihs_location_stop(IhsLocationService* service) {
   delete service;
 }
 
+int ihs_location_filter_active(IhsLocationService* service) {
+  if (service == nullptr || service->manager == nullptr) {
+    return 0;
+  }
+  // No exception may cross the C ABI; the accessor takes the Manager's mutex,
+  // which throws only on a system error.
+  try {
+    return service->manager->filter_active() ? 1 : 0;
+  } catch (...) {
+    return 0;
+  }
+}
+
 }  // extern "C"

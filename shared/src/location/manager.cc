@@ -17,6 +17,7 @@
 
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 #include <utility>
 
@@ -138,10 +139,28 @@ bool Manager::Start() {
       void* const inst = fe.ops.create(
           fe.user_data,
           filter_config_.empty() ? nullptr : filter_config_.c_str());
-      const std::lock_guard<std::mutex> lock(mutex_);
-      filter_ops_ = fe.ops;
-      filter_user_data_ = fe.user_data;
-      filter_instance_ = inst;
+      {
+        const std::lock_guard<std::mutex> lock(mutex_);
+        filter_ops_ = fe.ops;
+        filter_user_data_ = fe.user_data;
+        filter_instance_ = inst;
+      }
+      // Report outside the lock: create() rejecting its config is the caller's
+      // to know about, and an unfiltered service looks exactly like a working
+      // filtered one from the outside.
+      if (inst == nullptr) {
+        std::fprintf(stderr,
+                     "[ihs.location] filter \"%s\" failed to initialize; "
+                     "continuing unfiltered\n",
+                     filter_key_.c_str());
+      }
+    } else {
+      // Not registered: a typo, or a build without that filter. Name it rather
+      // than run unfiltered in silence.
+      std::fprintf(stderr,
+                   "[ihs.location] filter \"%s\" is not registered; "
+                   "continuing unfiltered\n",
+                   filter_key_.c_str());
     }
     // A configured-but-missing (or create-failed) filter leaves
     // filter_instance_ null, so the built-in passthrough is used instead of
@@ -169,6 +188,11 @@ bool Manager::Start() {
   // re-queried, so registering one after Start() has no effect.
   started_ = true;
   return true;
+}
+
+bool Manager::filter_active() const {
+  const std::lock_guard<std::mutex> lock(mutex_);
+  return filter_instance_ != nullptr;
 }
 
 void Manager::Stop() {

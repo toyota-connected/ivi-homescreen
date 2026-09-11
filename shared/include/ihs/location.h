@@ -182,6 +182,19 @@ IHS_EXPORT void ihs_location_set_callback(IhsLocationService* service,
 IHS_EXPORT void ihs_location_stop(IhsLocationService* service);
 
 /*
+ * Whether @service is running a filter (ABI 1.6): 1 when the filter_key given
+ * to ihs_location_start_filtered() resolved and its create() returned an
+ * instance, 0 otherwise -- an unknown key, a create() that failed, no key at
+ * all, or a NULL service.
+ *
+ * ihs_location_start_filtered() degrades to the unfiltered path rather than
+ * failing, so a non-NULL handle does not mean the named filter is running, and
+ * this is how a caller tells the two apart. The library also names the key on
+ * stderr when it cannot bind it. Settled once the service has started.
+ */
+IHS_EXPORT int ihs_location_filter_active(IhsLocationService* service);
+
+/*
  * --- Measurement source / filter registry ----------------------------------
  *
  * A second, composable way to build the service, mirroring ihs_pv's factory
