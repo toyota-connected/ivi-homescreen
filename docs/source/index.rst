@@ -15,45 +15,45 @@ Architecture
 
 The main architectural overview is maintained with the source documentation:
 
-* `Architecture document <https://github.com/toyota-connected/ivi-homescreen/blob/main/docs/specs/ARCHITECTURE.md>`_
-* `Plugin ABI <https://github.com/toyota-connected/ivi-homescreen/blob/main/docs/PLUGIN_ABI.md>`_
+* :gh:`Architecture document <docs/specs/ARCHITECTURE.md>`
+* :gh:`Plugin ABI <docs/PLUGIN_ABI.md>`
 
 Core subsystems
 ---------------
 
-* `Configuration <https://github.com/toyota-connected/ivi-homescreen/blob/main/shell/configuration/README.md>`_
-* `Views <https://github.com/toyota-connected/ivi-homescreen/blob/main/shell/view/README.md>`_
-* `Displays <https://github.com/toyota-connected/ivi-homescreen/blob/main/shell/display/README.md>`_
-* `Input <https://github.com/toyota-connected/ivi-homescreen/blob/main/shell/input/README.md>`_
-* `Vsync <https://github.com/toyota-connected/ivi-homescreen/blob/main/shell/vsync/README.md>`_
-* `Frame profiling <https://github.com/toyota-connected/ivi-homescreen/blob/main/shell/profiling/README.md>`_
-* `Wayland integration <https://github.com/toyota-connected/ivi-homescreen/blob/main/shell/wayland/README.md>`_
-* `Logging and tracing <https://github.com/toyota-connected/ivi-homescreen/blob/main/shell/logging/README.md>`_
+* :gh:`Configuration <shell/configuration/README.md>`
+* :gh:`Views <shell/view/README.md>`
+* :gh:`Displays <shell/display/README.md>`
+* :gh:`Input <shell/input/README.md>`
+* :gh:`Vsync <shell/vsync/README.md>`
+* :gh:`Frame profiling <shell/profiling/README.md>`
+* :gh:`Wayland integration <docs/specs/ARCHITECTURE.md#442-wayland-integration-and-compositor-protocol-shells>`
+* :gh:`Logging and tracing <shell/logging/README.md>`
 
 Rendering and presentation backends
 -----------------------------------
 
-* `Backend overview <https://github.com/toyota-connected/ivi-homescreen/blob/main/shell/backend/README.md>`_
-* `Wayland EGL <https://github.com/toyota-connected/ivi-homescreen/blob/main/shell/backend/wayland_egl/README.md>`_
-* `Wayland Vulkan <https://github.com/toyota-connected/ivi-homescreen/blob/main/shell/backend/wayland_vulkan/README.md>`_
-* `DRM/KMS EGL <https://github.com/toyota-connected/ivi-homescreen/blob/main/shell/backend/drm_kms_egl/README.md>`_
-* `DRM/KMS Vulkan <https://github.com/toyota-connected/ivi-homescreen/blob/main/shell/backend/drm_kms_vulkan/README.md>`_
-* `Software backend <https://github.com/toyota-connected/ivi-homescreen/blob/main/shell/backend/software/README.md>`_
-* `HUD overlay <https://github.com/toyota-connected/ivi-homescreen/blob/main/shell/backend/hud/README.md>`_
+* :gh:`Backend overview <shell/backend/README.md>`
+* :gh:`Wayland EGL <shell/backend/wayland_egl/README.md>`
+* :gh:`Wayland Vulkan <shell/backend/wayland_vulkan/README.md>`
+* :gh:`DRM/KMS EGL <shell/backend/drm_kms_egl/README.md>`
+* :gh:`DRM/KMS Vulkan <shell/backend/drm_kms_vulkan/README.md>`
+* :gh:`Software backend <shell/backend/software/README.md>`
+* :gh:`HUD overlay <shell/backend/hud/README.md>`
 
 Platform integration
 --------------------
 
-* `Platform channels and embedder API <https://github.com/toyota-connected/ivi-homescreen/blob/main/shell/platform/homescreen/README.md>`_
-* `Platform views <https://github.com/toyota-connected/ivi-homescreen/blob/main/shell/platform/homescreen/platform_views/README.md>`_
-* `Accessibility <https://github.com/toyota-connected/ivi-homescreen/blob/main/shell/accessibility/README.md>`_
-* `Shared plugin ABI library <https://github.com/toyota-connected/ivi-homescreen/blob/main/shared/README.md>`_
+* :gh:`Platform channels and embedder API <docs/specs/ARCHITECTURE.md#5-platform-channels--embedder-api>`
+* :gh:`Platform views <shell/platform/homescreen/platform_views/README.md>`
+* :gh:`Accessibility <docs/specs/ARCHITECTURE.md#63-accessibility>`
+* :gh:`Shared plugin ABI library <shared/README.md>`
 
 Optional features
 -----------------
 
-* `Watchdog <https://github.com/toyota-connected/ivi-homescreen/blob/main/shell/watchdog/README.md>`_
-* `Crash handler <https://github.com/toyota-connected/ivi-homescreen/blob/main/shell/crash_handler/README.md>`_
+* :gh:`Watchdog <shell/watchdog/README.md>`
+* :gh:`Crash handler <shell/crash_handler/README.md>`
 
 Generated references
 --------------------
