@@ -161,9 +161,12 @@ void TestFileThroughCtrv() {
   std::filesystem::remove(path);
   if (c.count() > 0) {
     const IhsPosition p = c.last();
-    Check(std::isfinite(p.latitude) && std::isfinite(p.longitude) &&
-              p.speed_mps > 15.0 * 0.5,
-          "ctrv delivers a finite fix with recovered speed");
+    Check(std::isfinite(p.latitude) && std::isfinite(p.longitude),
+          "ctrv delivers a finite fix");
+    // The capture reports speed, which now reaches the filter as a scalar
+    // measurement rather than being re-derived from position differences.
+    Check(std::abs(p.speed_mps - 15.0) < 1.5,
+          "ctrv tracks the speed the source reported");
   }
 }
 

@@ -116,6 +116,27 @@ void Manager::SubmitPositionFix(const Position& fix) {
   m.variance[1] = fix.sigma_n_m >= 0.0 ? fix.sigma_n_m * fix.sigma_n_m : -1.0;
   m.variance[2] = -1.0;
   OnMeasurement(m);
+
+  // The source's ground speed, when it reported one. A position-only filter
+  // (kalman.cv) ignores this kind; kalman.ctrv corrects its speed state from
+  // the measurement instead of re-deriving speed from position differences.
+  //
+  // After the position, never before: a scalar that reaches a filter with no
+  // position anchor is dropped (KalmanCtrv::UpdateScalar returns while
+  // have_state_ is false). Same timestamp, so the filter predicts dt = 0 for
+  // it. OnMeasurement counts a generation for a position only, so this second
+  // submission neither bumps it nor fires the notify twice.
+  if (fix.speed_mps >= 0.0) {
+    IhsMeasurement s{};
+    s.struct_size = sizeof(s);
+    s.kind = IHS_MEAS_SPEED;
+    s.t_monotonic_ns = fix.t_monotonic_ns;
+    s.value_count = 1;
+    s.value[0] = fix.speed_mps;
+    s.variance[0] =
+        fix.sigma_v_mps >= 0.0 ? fix.sigma_v_mps * fix.sigma_v_mps : -1.0;
+    OnMeasurement(s);
+  }
 }
 
 void Manager::SetFixNotify(std::function<void()> notify) {

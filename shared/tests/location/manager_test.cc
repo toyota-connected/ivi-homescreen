@@ -110,9 +110,20 @@ struct FakeFilter {
   double lat = 0.0;
   double lon = 0.0;
   int updates = 0;
+  int position_updates = 0;
+  int speed_updates = 0;
+  double last_speed = -1.0;
+  double last_speed_variance = 0.0;
 };
+
+// The most recently created fake filter, so a test can inspect what the Manager
+// handed it (this file already reaches filter state through a global).
+FakeFilter* g_last_filter = nullptr;
+
 void* FakeFilterCreate(void* /*ud*/, const char* /*config*/) {
-  return new FakeFilter();
+  auto* f = new FakeFilter();
+  g_last_filter = f;
+  return f;
 }
 void FakeFilterDestroy(void* inst) {
   delete static_cast<FakeFilter*>(inst);
@@ -123,6 +134,12 @@ void FakeFilterUpdate(void* inst, const IhsMeasurement* m) {
   if (m->kind == IHS_MEAS_POSITION_LLA && m->value_count >= 2) {
     f->lat = m->value[0];
     f->lon = m->value[1];
+    ++f->position_updates;
+  }
+  if (m->kind == IHS_MEAS_SPEED && m->value_count >= 1) {
+    f->last_speed = m->value[0];
+    f->last_speed_variance = m->variance[0];
+    ++f->speed_updates;
   }
   ++f->updates;
 }
@@ -357,6 +374,48 @@ int main() {
           "estimate carries the measurement");
     Check(pos.mode == 3, "estimate mode from the filter");
     m.Stop();  // destroys the filter instance (no leak)
+  }
+
+  // --- filter route: a whole fix also submits its speed as a measurement ----
+  {
+    IhsLocationFilterOps fops{};
+    fops.struct_size = sizeof(fops);
+    fops.create = &FakeFilterCreate;
+    fops.destroy = &FakeFilterDestroy;
+    fops.update = &FakeFilterUpdate;
+    fops.estimate = &FakeFilterEstimate;
+    ihs_location_register_filter("kalman.speed", &fops, nullptr);
+
+    Manager m({}, "kalman.speed", "");
+    Check(m.Start(), "Start with a filter (no sources; fixes submitted here)");
+    FakeFilter* const f = g_last_filter;
+    Check(f != nullptr, "filter instance created");
+
+    Position fix;
+    fix.latitude = 48.75;
+    fix.longitude = -122.48;
+    fix.mode = 3;
+    fix.t_monotonic_ns = 1000;
+    fix.speed_mps = 12.5;
+    fix.sigma_v_mps = 2.0;
+    m.SubmitPositionFix(fix);
+    Check(f->position_updates == 1, "the position reached the filter");
+    Check(f->speed_updates == 1, "the speed reached the filter too");
+    Check(f->last_speed == 12.5, "speed value carried");
+    Check(f->last_speed_variance == 4.0, "speed variance is sigma squared");
+    Check(m.generation() == 1, "one generation per fix, not one per component");
+
+    // A source that reported no speed submits the position alone.
+    Position no_speed;
+    no_speed.latitude = 48.76;
+    no_speed.longitude = -122.49;
+    no_speed.mode = 2;
+    no_speed.t_monotonic_ns = 2000;
+    m.SubmitPositionFix(no_speed);
+    Check(f->position_updates == 2, "second position reached the filter");
+    Check(f->speed_updates == 1, "no speed measurement when none was reported");
+    Check(m.generation() == 2, "the second fix bumps the generation once");
+    m.Stop();
   }
 
   // --- filter route: Latest() and generation() stay consistent — no fix is
