@@ -140,6 +140,17 @@ int main(void) {
     const char line[] = "consumer smoke line";
     api->logging->log(ctx, IHS_LEVEL_INFO, line, sizeof(line) - 1);
     api->logging->flush();
+    /* Ring stats (ABI 1.5 table fields), read only when struct_size covers
+     * them, as a consumer must against an older library. */
+    if (api->logging->struct_size >=
+        offsetof(IhsLoggingApi, dropped) + sizeof(api->logging->dropped)) {
+      const uint32_t cap = api->logging->ring_capacity();
+      CHECK(cap >= 16u && cap <= 65536u && (cap & (cap - 1u)) == 0u,
+            "ring_capacity is a power of two in [16, 65536]");
+      CHECK(cap == ihs_log_ring_capacity(),
+            "table and flat ring_capacity agree");
+      CHECK(api->logging->dropped() == 0u, "no drops after one line");
+    }
     api->logging->stop();
   }
 

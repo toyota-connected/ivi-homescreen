@@ -17,7 +17,7 @@ registered plugins — `ihs_shared` exposes neither a registrar nor a messenger.
 
 | Capability | Status | Toggle / scope |
 |---|---|---|
-| Logging (generic `ihs_log_*` surface: ring registry, drain worker, console + file + level-floor sinks) | Built-in | Always compiled; `IhsApi::logging` always present |
+| Logging (generic `ihs_log_*` surface: ring registry, drain worker, console + file + level-floor sinks, ring depth and drop count) | Built-in | Always compiled; `IhsApi::logging` always present |
 | DLT logging sink | Optional | `ENABLE_DLT` (default `ON`); adds `dlt` as an `IHS_LOG_SINK` value, `dlopen`s `libdlt` at runtime |
 | Tracing (`ihs_trace_*`: duration / instant / counter / flow) | Built-in | Always; engine trace procs → kernel `trace_marker` → nop |
 | Platform-view surface negotiation (`ihs_pv_*`) | Built-in | Always; inert until the shell installs an `IhsPvHost` |
@@ -237,6 +237,7 @@ The logging sinks are selected from the environment at `ihs_log_start()`:
 | `IHS_LOG_FILE` | — | Path for the `file` sink |
 | `IHS_LOG_FILE_MAX_BYTES` | — | Rotation size for the `file` sink |
 | `IHS_LOG_FILE_MAX_FILES` | — | Rotation count for the `file` sink |
+| `IHS_LOG_RING_CAPACITY` | `256` | Per-thread ring depth, in slots; clamped to `[16, 65536]` and rounded up to a power of two. Read back with `ihs_log_ring_capacity()` |
 
 ### DLT sink
 
@@ -289,9 +290,12 @@ dlt-receive -a localhost
   running build (e.g. logging in a hypothetical build without it) — check for
   `NULL` rather than assuming presence.
 - **Logging drops.** If records go missing under load, the per-thread ring
-  overflowed (records drop silently and bump a per-ring counter); reduce volume
-  or gate with `ihs_log_enabled()` before formatting. Use `ihs_log_flush()` to
-  force pending records out before inspecting a sink.
+  overflowed. `ihs_log_dropped()` is the cumulative count across all rings, and
+  `ihs_log_ring_capacity()` the depth in force for this run, so a consumer can
+  assert on drops in a test build or warn when the depth is too small. Raise
+  `IHS_LOG_RING_CAPACITY`, reduce volume, or gate with `ihs_log_enabled()`
+  before formatting. Use `ihs_log_flush()` to force pending records out before
+  inspecting a sink.
 - **Tracing sink.** `ihs_trace_enabled()` reports whether *any* sink is active.
   With no engine procs installed, traces go to the kernel `trace_marker`
   (`/sys/kernel/tracing/trace_marker`); if neither is available, emits are nops.

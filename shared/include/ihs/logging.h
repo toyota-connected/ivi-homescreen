@@ -52,9 +52,12 @@ typedef enum IhsLogLevel {
 } IhsLogLevel;
 
 /*
- * Maximum text length carried in one log record; longer messages are
- * truncated. A convenience wrapper sizing a stack buffer for a formatted line
- * should use this.
+ * Bytes of text one ring slot carries, NUL included. ihs_log() takes a message
+ * of any length: a longer one is split across slots of
+ * IHS_LOG_TEXT_CAPACITY - 1 bytes and reassembled by the drain, so a message
+ * costs one slot per piece. It is clipped, and marked as clipped, only when the
+ * ring lacks room for every piece or the message passes 64 KiB. A convenience
+ * wrapper sizing a stack buffer for a formatted line may use this.
  */
 #define IHS_LOG_TEXT_CAPACITY 240
 
@@ -114,6 +117,24 @@ IHS_EXPORT int ihs_log(int32_t ctx_index,
                        size_t text_len);
 
 /*
+ * Per-thread ring depth, in slots (ABI 1.5). Each logging thread buffers at
+ * most this many slots between drains. Set by IHS_LOG_RING_CAPACITY (clamped to
+ * [16, 65536] and rounded up to a power of two; default 256), resolved once at
+ * first use, and fixed for the life of the process: read it once and cache it.
+ * Valid before ihs_log_start().
+ */
+IHS_EXPORT uint32_t ihs_log_ring_capacity(void);
+
+/*
+ * Records dropped because a thread's ring was full, summed over every ring
+ * since process start (ABI 1.5). Monotonic, so report the difference between
+ * two reads. Each ihs_log() call refused for a full ring adds exactly one.
+ * Counts ring overflow only: not records below the IHS_LOG_LEVEL floor, and not
+ * a message clipped to fit.
+ */
+IHS_EXPORT uint64_t ihs_log_dropped(void);
+
+/*
  * The logging capability sub-table reachable through IhsApi::logging. The
  * function pointers alias the flat entry points above; a consumer may use
  * either. Grows additively behind struct_size.
@@ -127,6 +148,9 @@ typedef struct IhsLoggingApi {
   int (*log)(int32_t ctx_index, uint8_t level, const char* text, size_t len);
   /* Appended after log (additive; guarded by struct_size). */
   int (*enabled)(int32_t ctx_index, uint8_t level);
+  /* Appended in ABI 1.5 (additive; guarded by struct_size). */
+  uint32_t (*ring_capacity)(void);
+  uint64_t (*dropped)(void);
 } IhsLoggingApi;
 
 #ifdef __cplusplus
