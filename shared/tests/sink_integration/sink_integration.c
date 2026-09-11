@@ -24,6 +24,8 @@
  *   sink_integration level     -- IHS_LOG_LEVEL floor drops verbose records
  *   sink_integration fallback  -- IHS_LOG_SINK=dlt with no libdlt warns + falls
  *                                 back to console (missing-list #17 contract)
+ *   sink_integration drops     -- a burst into a 16-slot ring: capacity reads
+ *                                 back, and the drop count matches refusals
  *
  * The scenarios that inspect console output redirect stderr to a temp file,
  * flush, then read it back.
@@ -250,9 +252,61 @@ static int scenario_fallback(void) {
   return 0;
 }
 
+static int scenario_drops(void) {
+  const char* cap = capture_stderr(); /* keep the flood out of the test log */
+  if (!cap) {
+    FAILF("could not capture stderr");
+  }
+  /* Ring depth resolves at first use, so set it before anything logs. 16 is
+   * the floor: one thread flooding it outruns the drain and has to shed. */
+  setenv("IHS_LOG_SINK", "console", 1);
+  setenv("IHS_LOG_RING_CAPACITY", "16", 1);
+  const uint32_t capacity = ihs_log_ring_capacity();
+  if (ihs_log_start("SINK", "sink integration") != 1) {
+    FAILF("ihs_log_start");
+  }
+  const int32_t ctx = ihs_log_context_open("DROP", NULL);
+  if (ctx < 0) {
+    FAILF("context_open");
+  }
+  const uint64_t before = ihs_log_dropped();
+  uint64_t refused = 0;
+  for (int i = 0; i < 20000; ++i) {
+    char line[32];
+    const int n = snprintf(line, sizeof(line), "drop-line-%05d", i);
+    if (ihs_log(ctx, IHS_LEVEL_INFO, line, (size_t)n) == 0) {
+      ++refused;
+    }
+  }
+  const uint64_t after = ihs_log_dropped();
+  ihs_log_flush();
+  ihs_log_stop();
+  const uint64_t later = ihs_log_dropped();
+  remove(cap);
+
+  if (capacity != 16) {
+    FAILF("ring capacity %u, want 16", (unsigned)capacity);
+  }
+  if (refused == 0) {
+    FAILF("a 20000-record burst into a 16-slot ring was never refused");
+  }
+  /* Exact, however fast the drain ran: every refusal is one overflow. */
+  if (after - before != refused) {
+    FAILF("dropped delta %llu != refused %llu",
+          (unsigned long long)(after - before), (unsigned long long)refused);
+  }
+  if (later < after) {
+    FAILF("drop count went backward: %llu -> %llu", (unsigned long long)after,
+          (unsigned long long)later);
+  }
+  printf("OK drops (capacity=%u refused=%llu)\n", (unsigned)capacity,
+         (unsigned long long)refused);
+  return 0;
+}
+
 int main(int argc, char** argv) {
   if (argc < 2) {
-    fprintf(stdout, "usage: %s console|file|level|fallback\n", argv[0]);
+    fprintf(stdout, "usage: %s console|file|level|fallback|drops\n", argv[0]);
     return 2;
   }
   if (strcmp(argv[1], "console") == 0) {
@@ -266,6 +320,9 @@ int main(int argc, char** argv) {
   }
   if (strcmp(argv[1], "fallback") == 0) {
     return scenario_fallback();
+  }
+  if (strcmp(argv[1], "drops") == 0) {
+    return scenario_drops();
   }
   fprintf(stdout, "unknown scenario: %s\n", argv[1]);
   return 2;

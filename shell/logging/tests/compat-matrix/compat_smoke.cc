@@ -119,6 +119,11 @@ int main() {
     }
   }
 
+  // 6. The C ABI reports the same depth, and a drop count that covers this
+  // thread's ring (it sums every ring, so it can only be larger).
+  check(ihs_log_ring_capacity() == capacity, "ihs_log_ring_capacity matches");
+  check(ihs_log_dropped() >= ring.dropped(), "ihs_log_dropped covers the ring");
+
   IHS_LOGGING_FLUSH();
   IHS_LOGGING_STOP();
 

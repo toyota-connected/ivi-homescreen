@@ -32,6 +32,6 @@ set_target_properties(sink_integration PROPERTIES
 target_link_libraries(sink_integration PRIVATE ivi_homescreen::ihs_shared)
 
 enable_testing()
-foreach (scenario console file level fallback)
+foreach (scenario console file level fallback drops)
     add_test(NAME sink_${scenario} COMMAND sink_integration ${scenario})
 endforeach ()

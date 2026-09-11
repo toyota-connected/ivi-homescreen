@@ -191,8 +191,10 @@ DLT is implemented via [`ihs_shared`](../../shared/src/logging/sink_dlt.cpp) and
   level.
 - **A line was dropped under load.** `ihs_log` is wait-free and drops on ring
   overflow (producer outrunning the drain worker), bumping a per-ring counter.
-  The load test ([`tests/load/`](tests/load/)) reports drops; keep bursts under
-  the ring capacity or reduce rate.
+  `ihs_log_dropped()` returns the process-wide total and
+  `ihs_log_ring_capacity()` the depth in force, so a run can report drops
+  against capacity. The load test ([`tests/load/`](tests/load/)) reports drops
+  too; raise `IHS_LOG_RING_CAPACITY`, keep bursts under it, or reduce rate.
 - **An error line didn't survive a crash.** Error/fatal records auto-flush
   (`level ≤ IHS_LEVEL_ERROR`); info/debug/verbose are async. Call
   `IHS_LOGGING_FLUSH()` before a controlled exit if you need pending records

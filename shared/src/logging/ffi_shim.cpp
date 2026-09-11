@@ -18,12 +18,19 @@
 
 #include "bridge.hpp"
 #include "log_level.hpp"
+#include "ring_registry.hpp"
+#include "ring_slot.hpp"
+#include "thread_ring.hpp"
 
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <string_view>
+
+// The public header documents the slot size; keep it the size the ring uses.
+static_assert(ihs::dlt::kSlotTextCapacity == IHS_LOG_TEXT_CAPACITY,
+              "IHS_LOG_TEXT_CAPACITY must match the ring slot text size");
 
 namespace {
 
@@ -122,14 +129,32 @@ extern "C" int ihs_log(int32_t ctx_index,
              : 0;
 }
 
+extern "C" uint32_t ihs_log_ring_capacity() {
+  return static_cast<uint32_t>(ihs::dlt::ring_capacity());
+}
+
+extern "C" uint64_t ihs_log_dropped() {
+  // Rings are pooled and never freed, and each counter only grows, so the sum
+  // is cumulative for the process and never decreases between reads. The list
+  // is push-front with next set before publication, as the worker walks it.
+  uint64_t total = 0;
+  for (const ihs::dlt::ThreadRing* ring =
+           ihs::dlt::RingRegistry::instance().head();
+       ring != nullptr; ring = ring->next) {
+    total += ring->dropped();
+  }
+  return total;
+}
+
 namespace ihs::dlt {
 
 // The logging capability sub-table, wired into IhsApi::logging by
 // ihs_get_api(). Function pointers alias the flat entry points above.
 const IhsLoggingApi* logging_api() noexcept {
   static const IhsLoggingApi api = {
-      sizeof(IhsLoggingApi), &ihs_log_start, &ihs_log_stop,    &ihs_log_flush,
-      &ihs_log_context_open, &ihs_log,       &ihs_log_enabled,
+      sizeof(IhsLoggingApi), &ihs_log_start,         &ihs_log_stop,
+      &ihs_log_flush,        &ihs_log_context_open,  &ihs_log,
+      &ihs_log_enabled,      &ihs_log_ring_capacity, &ihs_log_dropped,
   };
   return &api;
 }
