@@ -93,9 +93,9 @@ _wlcxx_prefer_sysroot(_wlcxx_core_base "wayland.xml")
 set(IVI_WL_CORE_XML "${_wlcxx_core_base}/wayland.xml" CACHE FILEPATH "core wayland.xml")
 
 # --- Shell client options --------------------------------------------------
-# xdg + agl on by default; ivi + simple are opt-in.
+# xdg on by default; agl, ivi, and simple are opt-in.
 option(ENABLE_XDG_CLIENT          "Enable XDG shell client"               ON)
-option(ENABLE_AGL_SHELL_CLIENT    "Enable AGL shell client"               ON)
+option(ENABLE_AGL_SHELL_CLIENT    "Enable AGL shell client"               OFF)
 option(ENABLE_IVI_SHELL_CLIENT    "Enable ivi-shell client"               OFF)
 option(ENABLE_SIMPLE_SHELL_CLIENT "Enable RDK/Westeros simple_shell client" OFF)
 
