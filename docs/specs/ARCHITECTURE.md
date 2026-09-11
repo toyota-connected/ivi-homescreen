@@ -3,7 +3,7 @@
 > `ivi-homescreen` is a Flutter embedder (a native "shell" host for the Flutter
 > engine) targeting Embedded Linux systems. It loads a Flutter application
 > bundle, runs the Flutter engine against a chosen rendering/presentation
-> backend (Wayland, DRM/KMS, or software), and bridges the engine to the host's
+> backend (Wayland, DRM/KMS, headless, or software), and bridges the engine to the host's
 > displays, input devices, platform channels, and native plugins.
 
 This document describes the *structure* of the code base: the major
@@ -23,16 +23,16 @@ every other module (each `shell/` subdirectory, plus `shared/`, `test/`, and
 2. [Repository Layout](#2-repository-layout)
 3. [Core Subsystems](#3-core-subsystems) — loose files under `shell/`
    - 3.1. [Process Lifecycle and Startup (`main.cc`)](#31-process-lifecycle-and-startup-maincc)
-   - 3.2. [The `App` and the Shared Reactor](#32-the-app-and-the-shared-reactor)
-   - 3.3. [The `Engine` Wrapper](#33-the-engine-wrapper)
-   - 3.4. [Task Runner and Threading Model](#34-task-runner-and-threading-model)
+   - 3.2. [The `App` and the Shared Reactor](#32-the-app-and-the-shared-reactor-apphcc)
+   - 3.3. [The `Engine` Wrapper](#33-the-engine-wrapper-enginehcc)
+   - 3.4. [Task Runner and Threading Model](#34-task-runner-and-threading-model-task_runnerhcc)
 4. [Features](#4-features)
     - 4.1. [Configuration](#41-configuration) — `shell/configuration/`
     - 4.2. [Views](#42-views) — `shell/view/`
     - 4.3. [Backends (Rendering & Presentation)](#43-backends-rendering--presentation) — `shell/backend/`
     - 4.4. [Displays and I/O](#44-displays-and-io)
         - 4.4.1. [Displays and Output Management](#441-displays-and-output-management) — `shell/display/`
-        - 4.4.2. [Wayland Integration and Compositor-Protocol Shells](#442-wayland-integration-and-compositor-protocol-shells) — `shell/wayland/`, `shell/wayland-protocols/`
+        - 4.4.2. [Wayland Integration and Compositor-Protocol Shells](#442-wayland-integration-and-compositor-protocol-shells) — `shell/wayland/`
         - 4.4.3. [Input](#443-input) — `shell/input/`
         - 4.4.4. [Vsync](#444-vsync) — `shell/vsync/`
         - 4.4.5. [Frame Profiling](#445-frame-profiling) — `shell/profiling/`
@@ -42,10 +42,14 @@ every other module (each `shell/` subdirectory, plus `shared/`, `test/`, and
    - 6.1. [Watchdog](#61-watchdog) — `shell/watchdog/`
    - 6.2. [Crash Handler](#62-crash-handler) — `shell/crash_handler/`
    - 6.3. [Accessibility](#63-accessibility) — `shell/accessibility/`
+      - 6.3.1. [AccessKit](#631-accesskit)
+      - 6.3.2. [MCP Surface](#632-mcp-surface)
    - 6.4. [Logging and Tracing](#64-logging-and-tracing) — `shell/logging/`
+   - 6.5. [OSGi Multi-Bundle Framework](#65-osgi-multi-bundle-framework) — `shell/osgi/`
 7. [Plugins](#7-plugins)
     - 7.1. [Out-of-tree Plugins](#71-out-of-tree-plugins)
     - 7.2. [The `ihs_shared` Library (Plugin C ABI)](#72-the-ihs_shared-library-plugin-c-abi) — `shared/`
+    - 7.3. [Location Service](#73-location-service) — `shared/src/location/`
 8. [Testing](#8-testing) — `test/`
 9. [Build System](#9-build-system) — `scripts/`, `cmake/`
    - 9.1. [Sanitizer Support](#91-sanitizer-support)
@@ -56,12 +60,13 @@ every other module (each `shell/` subdirectory, plus `shared/`, `test/`, and
 
 `ivi-homescreen` embeds the Flutter engine (`libflutter_engine.so`) into a
 native C++ host process. The same source runs unchanged on desktop Linux
-(Ubuntu 18+, Fedora 33+) and on embedded Yocto images. Its distinguishing
+(Ubuntu 20.04+, Fedora 42+) and on embedded Yocto images. Its distinguishing
 characteristics are:
 
 - **Multiple presentation backends compiled into one binary.** Wayland (EGL or
-  Vulkan), DRM/KMS direct-to-display (EGL or Vulkan), a CPU software renderer,
-  and leased-DRM variants can all be compiled in together. Exactly one backend
+  Vulkan), DRM/KMS direct-to-display (EGL or Vulkan), headless (EGL or Vulkan,
+  no display), a CPU software renderer, and leased-DRM variants can all be
+  compiled in together. Exactly one backend
   is *selected at runtime* — process-wide via `--backend`, or per view via
   `[view.backend]` — rather than being fixed at compile time.
 - **Multiple views across multiple displays from a single process.** One view
@@ -91,28 +96,38 @@ flowchart TD
 | Path | Contents |
 |---|---|
 | `shell/` | Core subsystems (see below). |
-| `shell/accessibility/` | Semantics tree and translation to platform accessibility. |
+| `shell/accessibility/` | Per-view semantics tree, semantics action encoding, AccessKit consumer. |
 | `shell/backend/` | Backend registry, factory and base classes. |
 | `shell/backend/wayland_egl/` | Wayland-EGL backend. |
 | `shell/backend/wayland_vulkan/` | Wayland-Vulkan backend. |
 | `shell/backend/wayland_leased_drm/` | drm-lease-v1 client. |
 | `shell/backend/drm_kms_egl/` | DRM/KMS-EGL backend. |
 | `shell/backend/drm_kms_vulkan/` | DRM/KMS-Vulkan backend. |
+| `shell/backend/headless_egl/` | Headless EGL backend (no display; NV12 dma-buf out). |
+| `shell/backend/headless_vulkan/` | Headless Vulkan backend (no display; dma-buf export). |
 | `shell/backend/software/` | Software-renderer backend. |
 | `shell/backend/hud/` | Optional debug HUD overlay. |
 | `shell/configuration/` | `config.toml` / CLI parsing and per-view config layering. |
+| `shell/crash_handler/` | Sentry crash handler. |
 | `shell/display/` | Display abstraction, DRM/software displays, output management. |
 | `shell/input/` | Seat, keyboard (xkb), key repeat, DRM/libinput input. |
 | `shell/logging/` | Process-wide default context for shell log lines. |
+| `shell/osgi/` | OSGi multi-bundle framework. |
 | `shell/platform/homescreen/` | Flutter embedder client API and platform-channel handlers. |
 | `shell/profiling/` | Frame profiling, motion-to-photon / present-to-vsync latency. |
 | `shell/view/` | Per-view object, compositor surfaces, layer sequencing. |
 | `shell/vsync/` | Backend-spanning vsync baton machinery. |
+| `shell/watchdog/` | Main and render thread hang watchdog. |
 | `shell/wayland/` | Wayland client (`display`, `window`) and compositor-protocol shells. |
-| `shell/wayland-protocols/` | Generated Wayland protocol bindings. |
+| `shell/wayland/protocols/` | Vendored Wayland protocol XML; the rest comes from the system `wayland-protocols` package. |
 | `shared/src/` | `ihs_shared` — the C-ABI shared library for out-of-tree FFI plugins. |
+| `shared/src/location/` | Location service (§7.3). |
+| `packages/` | Dart packages (`ihs_mcp_app_tools`). |
+| `examples/` | Example applications (`cockpit_demo`). |
+| `docs/` | Plugin ABI, platform-view negotiation and MCP docs; Sphinx sources. |
 | `test/` | Test harnesses and golden baselines. |
 | `scripts/` | Build helpers, config-reference generation, integration test drivers. |
+| `cmake/` | CMake modules (§9). |
 
 ## 3. Core Subsystems
 
@@ -248,13 +263,16 @@ A backend is the unified display-target interface: one instance owns surface
 lifecycle, the Flutter renderer/compositor config, and vsync for a single
 target. Backends are isolated so heterogeneous targets can run concurrently, and
 the active one is chosen at runtime from the compiled-in set — which is what lets
-Wayland, DRM/KMS, and software support all ship in one binary (§9).
+Wayland, DRM/KMS, headless and software support all ship in one binary (§9).
 
 **Backends:**
 - [wayland_egl](../../shell/backend/wayland_egl/README.md)
 - [wayland_vulkan](../../shell/backend/wayland_vulkan/README.md)
+- [wayland_leased_drm](../../shell/backend/wayland_leased_drm/README.md)
 - [drm_kms_egl](../../shell/backend/drm_kms_egl/README.md)
 - [drm_kms_vulkan](../../shell/backend/drm_kms_vulkan/README.md)
+- [headless_egl](../../shell/backend/headless_egl/README.md)
+- [headless_vulkan](../../shell/backend/headless_vulkan/README.md)
 - [software](../../shell/backend/software/README.md)
 
 Also, a [HUD overlay](../../shell/backend/hud/README.md) backend is available for debugging and profiling.
@@ -275,11 +293,14 @@ Details: [`shell/display/README.md`](../../shell/display/README.md).
 The Wayland client code the Wayland backends use to connect, create a surface,
 and have the compositor assign it a role. The role is selected by the `--shell`
 option (`auto|xdg|agl|ivi|simple`) so the same binary runs under a desktop
-compositor, an AGL/ivi automotive compositor, or a minimal one. Generated
-protocol bindings live in
-[`shell/wayland-protocols/`](../../shell/wayland-protocols/) (built from XML; see §9).
+compositor, an AGL/ivi automotive compositor, or a minimal one. Vendored
+protocol XML lives in [`shell/wayland/protocols/`](../../shell/wayland/protocols/);
+the rest comes from the system `wayland-protocols` package, and
+`wayland-cxx-scanner` generates the C++ bindings into the build tree (§9).
 
-Details: [`shell/wayland/README.md`](../../shell/wayland/README.md).
+Code: [`shell/wayland/`](../../shell/wayland/) (client) and
+[`shell/wayland/shell/`](../../shell/wayland/shell/) (compositor-protocol shells);
+no README yet.
 
 #### 4.4.3. Input
 
@@ -310,19 +331,18 @@ Details: [`shell/profiling/README.md`](../../shell/profiling/README.md).
 Flutter *embedder client API* (the `FlutterDesktop*` surface) plus the standard
 platform-channel handlers. The plugin registry is desktop-style and Pigeon-compatible; a texture registry supports first-party camera/video plugins.
 
-Details: [`shell/platform/homescreen/README.md`](../../shell/platform/homescreen/README.md).
-
 ### 5.1. Compositor Mode and Platform Views
 
 Platform views let a plugin-owned native surface be interleaved *between*
 Flutter-rendered layers. Without compositor mode the engine runs single-surface and platform views fall
 back to full-screen overlays; existing `wl_subsurface`-based plugins keep working.
 
-Included via `BUILD_COMPOSITOR_MODE=ON` CMake option. (default: `OFF`)
+Included via `BUILD_COMPOSITOR=ON` CMake option. (default: `OFF`)
 
 Details:
 - Compositor: [`shell/view/README.md`](../../shell/view/README.md)
 - Platform views: [`shell/platform/homescreen/platform_views/README.md`](../../shell/platform/homescreen/platform_views/README.md)
+- Surface kinds and renegotiation: [`docs/PLATFORM_VIEW_NEGOTIATION.md`](../PLATFORM_VIEW_NEGOTIATION.md)
 
 ## 6. Optional Features
 
@@ -330,7 +350,7 @@ Below you will find optional, individually build-gated subsystems:
 
 ### 6.1. Watchdog
 
-[`shell/watchdog.{h,cc}`](../../shell/watchdog.h) monitors the main thread and the Flutter render thread for hangs. If a monitored
+[`shell/watchdog/`](../../shell/watchdog/watchdog.h) monitors the main thread and the Flutter render thread for hangs. If a monitored
 source fails to check in within the timeout (default 5 s), the process `abort()`s
 to produce a core dump — or, with `BUILD_SYSTEMD_WATCHDOG=ON`, integrates with
 systemd via `sd_notify` (`READY=1`, `WATCHDOG=1`, `STOPPING=1`).
@@ -345,6 +365,8 @@ optional `[watchdog]` config table.
 
 Included via `BUILD_WATCHDOG=ON` CMake option. (default: `OFF`)
 
+Details: [`shell/watchdog/README.md`](../../shell/watchdog/README.md).
+
 ### 6.2. Crash Handler
 
 A `sentry-native` integration optionally available for crash reporting: [`shell/crash_handler/crash_handler.{h,cc}`](../../shell/crash_handler/crash_handler.h)
@@ -358,11 +380,39 @@ Details: [`shell/crash_handler/README.md`](../../shell/crash_handler/README.md).
 ### 6.3. Accessibility
 
 The accessibility subsystem translates the Flutter semantics tree
-(`FlutterEngineUpdateSemantics`) into a platform-native accessibility tree.
+(`FlutterEngineUpdateSemantics`) into an in-process accessibility tree per view
+and publishes it through the semantics hub in `ihs_shared` (`ihs_semantics.h`).
+The hub feeds the two consumers below.
 
 Included via `BUILD_ACCESSIBILITY=ON` CMake option. (default: `OFF`)
 
-Details: [`shell/accessibility/README.md`](../../shell/accessibility/README.md).
+Code: [`shell/accessibility/`](../../shell/accessibility/); no README yet.
+
+#### 6.3.1. AccessKit
+
+Exposes every application's semantics to screen readers over AT-SPI, through
+AccessKit's Unix adapter. The build does not fetch the AccessKit C bindings;
+point CMake at an unpacked `accesskit-c` release.
+
+Included via `BUILD_ACCESSKIT=ON` CMake option, which requires
+`BUILD_ACCESSIBILITY=ON`. (default: `OFF`)
+
+#### 6.3.2. MCP Surface
+
+Lets an external agent (an LLM, a test harness) read the semantics tree of every
+running application and act on it over the Model Context Protocol: generic verbs
+over the tree (`ui_query`, `ui_tap`, `ui_set_text`, `ui_scroll_to`, `ui_tap_at`,
+…) plus typed tools an application declares from Dart
+([`ihs_mcp_app_tools`](../../packages/ihs_mcp_app_tools/README.md)). The server
+lives in `ihs_shared` and listens on a Unix domain socket only, checked with
+`SO_PEERCRED`.
+
+Off unless enabled twice: `BUILD_MCP=ON` at build time, which requires
+`BUILD_ACCESSIBILITY=ON` (default: `OFF`), and `global.enable_mcp` at runtime.
+
+Details: [`docs/mcp-security.md`](../mcp-security.md),
+[`docs/mcp-remote-access.md`](../mcp-remote-access.md). Example:
+[`examples/cockpit_demo/`](../../examples/cockpit_demo/README.md).
 
 ### 6.4. Logging and Tracing
 
@@ -372,6 +422,20 @@ exactly one place at runtime — the `ihs_shared` `.so` (§7.2) — so the proce
 never ends up with two copies of that state.
 
 Details: [`shell/logging/README.md`](../../shell/logging/README.md).
+
+### 6.5. OSGi Multi-Bundle Framework
+
+Runs several Flutter bundles in one process as independently managed bundles,
+with an OSGi lifecycle, a shared service registry and a Dart-side framework
+isolate. A startup orchestrator brings bundles up as views in priority order,
+critical bundles first; a bundle reports itself ready by completing the
+`dev.osgi/bridge` handshake. Bundles are declared in the `[osgi]` /
+`[[osgi.bundles]]` config tables. Requires the dynamically linked Dart API
+(`dart_api_dl`). With `ENABLE_OSGI=OFF` no OSGi code is compiled.
+
+Included via `ENABLE_OSGI=ON` CMake option. (default: `OFF`)
+
+Code: [`shell/osgi/`](../../shell/osgi/); no README yet.
 
 ## 7. Plugins
 
@@ -385,7 +449,7 @@ framework (§5.1).
 The first-party plugin set lives in a separate repository,
 [`toyota-connected/ivi-homescreen-plugins`](https://github.com/toyota-connected/ivi-homescreen-plugins),
 not in this tree. Plugins are pulled into the build by cloning that repo into the
-ivi-homescreen root or by pointing `-DPLUGIN_DIR=<path>` at it, and each is
+ivi-homescreen root or by pointing `-DPLUGINS_DIR=<path>` at it, and each is
 enabled by its own `BUILD_PLUGIN_*` CMake option (`DISABLE_PLUGINS=ON` turns the
 whole set off). They are Pigeon/CPP-compatible and model themselves after the
 desktop plugin registry (§5).
@@ -393,14 +457,33 @@ desktop plugin registry (§5).
 ### 7.2. The `ihs_shared` Library (Plugin C ABI)
 
 [`shared/`](../../shared/) builds `ihs_shared`, a C-ABI shared library that
-fronts logging, tracing, platform-view surface negotiation, and configuration
-read-back for out-of-tree Dart FFI plugins. Its public headers live in
-[`shared/include/ihs/`](../../shared/include/ihs/) (`config.h`, `ihs.h`,
-`logging.h`, `platform_view.h`, `platform_view_host.h`, `trace.h`, `format.h`,
-`ihs_version.h`); the boundary contract is documented in
-[`docs/PLUGIN_ABI.md`](../PLUGIN_ABI.md).
+fronts logging, tracing, platform-view surface negotiation, configuration
+read-back, the semantics hub, the MCP provider registry and the location service
+(§7.3) for out-of-tree Dart FFI plugins.
+
+Installed headers, from [`shared/include/ihs/`](../../shared/include/ihs/):
+`ihs.h`, `ihs_version.h`, `config.h`, `format.h`, `logging.h`, `trace.h`,
+`platform_view.h`, `location.h`, `vk_export.h`, and the generated
+`ihs_export.h`; plus `ihs_semantics.h` with `BUILD_ACCESSIBILITY`, and
+`ihs_mcp_provider.h` / `ihs_mcp_app_tools.h` with `BUILD_MCP`. The rest of that
+directory is shell-only and not installed: `platform_view_host.h`,
+`ihs_semantics_host.h`, `ihs_mcp_registry.h`, `ihs_mcp_transport.h`,
+`ihs_mcp_semantics.h`, `flutter_desktop_bridge.h`.
+
+The boundary contract is documented in [`docs/PLUGIN_ABI.md`](../PLUGIN_ABI.md).
 
 Details: [`shared/README.md`](../../shared/README.md).
+
+### 7.3. Location Service
+
+`ihs_location_*` in `ihs_shared`: one position service that any consumer polls
+or subscribes to, instead of each plugin re-implementing acquisition. Sources
+are gpsd, geoclue (sd-bus loaded from `libsystemd` at runtime), gpsd with
+geoclue fallback, or a replayed gpsd capture. Fixes are reported as received or
+fused through a constant-velocity (`kalman.cv`) or CTRV (`kalman.ctrv`) Kalman
+filter. Always compiled in.
+
+Details: [`shared/src/location/README.md`](../../shared/src/location/README.md).
 
 ## 8. Testing
 
@@ -410,6 +493,10 @@ images live under `test/baselines/`). Unit tests build with `BUILD_UNIT_TESTS=ON
 and run via `ctest`.
 
 `UNIT_TEST_SAVE_GOLDENS=ON` regenerates the goldens.
+
+Coverage-guided fuzz targets for the surfaces that parse external input build
+with `BUILD_FUZZERS=ON` (clang only); see
+[`test/fuzz/README.md`](../../test/fuzz/README.md).
 
 ## 9. Build System
 
@@ -427,13 +514,14 @@ codegen, packaging, options, docs). Key structural points:
   its own renderer config (`Backend::GetRenderConfig` → `kOpenGL`/`kVulkan`/
   `kSoftware`) and loop mode.
 - **Feature gating via CMake options.** Compositor mode, DMA-BUF export, crash
-  handler, watchdog (+ systemd), accessibility, DLT, LTO, sanitizers, docs, unit
-  tests, and each individual plugin are all CMake toggles. See the README for the
+  handler, watchdog (+ systemd), accessibility, AccessKit, MCP, OSGi, debug HUD,
+  DLT, LTO, sanitizers, fuzzers, docs, unit tests, and each individual plugin
+  are all CMake toggles. See the README for the
   full option list.
 - **Compositor-protocol shells** are gated separately (`ENABLE_XDG_CLIENT`,
   `ENABLE_AGL_SHELL_CLIENT`, `ENABLE_IVI_SHELL_CLIENT`, `ENABLE_SIMPLE_SHELL_CLIENT`).
 - **Plugins** are out-of-tree (§7.1), referenced by cloning into the repo root
-  or via `-DPLUGIN_DIR`.
+  or via `-DPLUGINS_DIR`.
 - **`shared/`** builds independently as `ihs_shared` (§7.2).
 - **Sanitizers** (`SANITIZE_ADDRESS`/`MEMORY`/`THREAD`/`UNDEFINED`) are wired
   through `third_party/sanitizers-cmake`.
