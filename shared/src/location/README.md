@@ -30,6 +30,7 @@ The header is the normative reference for each call's contract.
 | Fix time on `CLOCK_MONOTONIC` and 1-sigma accuracy | Built-in | `ihs_location_latest2` |
 | Polling: latest fix, generation counter | Built-in | `ihs_location_latest`, `_latest2`, `_generation` |
 | Push callback on each fix | Built-in | `ihs_location_set_callback` |
+| Filter binding is visible: named on stderr when it fails, queryable after | Built-in | `ihs_location_filter_active()` |
 | Caller-registered filters | Built-in | `ihs_location_register_filter` |
 | Caller-registered measurement sources | Partial | `ihs_location_register_source`; not yet bound by a start call (see [Known limitations](#known-limitations)) |
 
@@ -233,6 +234,11 @@ required; `destroy` is optional. Registering an existing key, `kalman.cv`
 included, replaces it. Ops structs are copied bounded by `struct_size`, so a
 caller built against an older header is never over-read.
 
+A key that does not resolve, or a `create` that returns NULL, leaves the
+service running unfiltered rather than failing the start. The library names the
+key on stderr when that happens, and `ihs_location_filter_active()` reports
+whether a filter is bound, so the degrade is visible either way.
+
 ---
 
 ## Diagnostics/Debug
@@ -247,8 +253,10 @@ caller built against an older header is never over-read.
   geoclue's configuration allows the `DesktopId` `ihs-location`. geoclue fixes often
   report `speed_mps` < 0 (unknown).
 - **Filter seems inactive:** an unknown filter key, or a filter whose `create`
-  fails, degrades to passthrough without an error. A non-NULL handle does not
-  prove the filter is running.
+  fails, degrades to passthrough. The library names the key on stderr
+  (`[ihs.location] filter "..." is not registered`), and
+  `ihs_location_filter_active()` answers it directly. A non-NULL handle on its
+  own does not prove the filter is running.
 - **Accuracy:** `sigma_e_m` / `sigma_n_m` come from gpsd `epx`/`epy` (or `eph`)
   and geoclue `Accuracy`. With a filter they are the filter's own estimate,
   which grows while coasting.
@@ -287,8 +295,6 @@ position noise. Each test uses its own track and seed, so compare within a row.
 - With the built-in sources a filter sees GNSS position only. `kalman.ctrv`'s
   speed and yaw-rate updates need a CAN or gyro source, which needs the item
   above; today only the unit tests exercise them.
-- An unknown filter key, or a failing `create`, degrades to passthrough without
-  an error.
 - gpsd `config` takes a numeric IPv4 address; host names are not resolved.
 - geoclue needs `libsystemd.so.0` at runtime and the `DesktopId` `ihs-location` to be
   allowed; geoclue-only fixes usually carry no speed.

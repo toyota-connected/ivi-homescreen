@@ -29,7 +29,7 @@
  * ihs_get_api().
  */
 #define IHS_SHARED_ABI_MAJOR 1u
-#define IHS_SHARED_ABI_MINOR 5u
+#define IHS_SHARED_ABI_MINOR 6u
 #define IHS_SHARED_ABI_VERSION \
   ((IHS_SHARED_ABI_MAJOR << 16) | IHS_SHARED_ABI_MINOR)
 

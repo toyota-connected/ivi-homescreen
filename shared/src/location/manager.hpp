@@ -101,6 +101,11 @@ class Manager : public ILocationProvider {
   // Returns false until a fix exists. Thread-safe.
   bool Estimate(Position& out, uint64_t at_monotonic_ns);
 
+  // Whether a registered filter is actually bound: true only when the
+  // configured key resolved and its create() returned an instance. False for
+  // the built-in passthrough, including the degrade cases. Thread-safe.
+  [[nodiscard]] bool filter_active() const;
+
  private:
   // C sink trampoline: sink_user_data is the Manager*.
   static void SinkThunk(void* sink_user_data, const IhsMeasurement* m);

@@ -122,6 +122,7 @@ void TestFileThroughKalman() {
 
   // Wait for most of the track to replay (realtime, ~1 s).
   Check(c.WaitFor(30, std::chrono::seconds(5)), "filtered fixes delivered");
+  Check(ihs_location_filter_active(svc) == 1, "kalman.cv reports active");
 
   ihs_location_stop(svc);
   std::filesystem::remove(path);
@@ -241,7 +242,11 @@ void TestBadPathAndKeys() {
       IHS_LOCATION_FILE, path.string().c_str(), "no.such.filter", nullptr);
   Check(svc2 != nullptr,
         "unknown filter key still starts (degrades to passthrough)");
+  Check(ihs_location_filter_active(nullptr) == 0,
+        "filter_active(NULL) is safe");
   if (svc2 != nullptr) {
+    Check(ihs_location_filter_active(svc2) == 0,
+          "unknown filter key reports no active filter");
     ihs_location_set_callback(svc2, &Collector::Thunk, &c);
     Check(c.WaitFor(10, std::chrono::seconds(5)),
           "degraded path delivers fixes");

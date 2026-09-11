@@ -172,6 +172,10 @@ int main(void) {
   ihs_location_set_callback(loc, smoke_location_cb, NULL);
   ihs_location_set_callback(loc, NULL, NULL);               /* clear */
   ihs_location_set_callback(NULL, smoke_location_cb, NULL); /* NULL is safe */
+  /* No filter was requested, so none is active (ABI 1.6). */
+  CHECK(ihs_location_filter_active(loc) == 0,
+        "no filter requested, none active");
+  CHECK(ihs_location_filter_active(NULL) == 0, "filter_active(NULL) is safe");
   ihs_location_stop(loc);
   CHECK(ihs_location_latest(NULL, &pos) == 0, "latest(NULL) is safe");
   CHECK(ihs_location_latest2(NULL, &pos, sizeof(pos)) == 0,
