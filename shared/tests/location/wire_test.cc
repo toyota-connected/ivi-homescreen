@@ -42,6 +42,46 @@ void Check(bool cond, const char* what) {
   }
 }
 
+// A registered measurement source, standing in for a CAN / gyro feed. start()
+// keeps the sink so the test can push on its own thread, deterministically.
+struct FakeMeasSource {
+  IhsMeasSink sink = nullptr;
+  void* sink_ud = nullptr;
+  int starts = 0;
+};
+int FakeMeasStart(void* ud, IhsMeasSink sink, void* sink_ud) {
+  auto* s = static_cast<FakeMeasSource*>(ud);
+  s->sink = sink;
+  s->sink_ud = sink_ud;
+  ++s->starts;
+  return 1;
+}
+void FakeMeasStop(void* ud) {
+  static_cast<FakeMeasSource*>(ud)->sink = nullptr;
+}
+IhsLocationSourceOps FakeMeasOps() {
+  IhsLocationSourceOps ops{};
+  ops.struct_size = sizeof(ops);
+  ops.start = &FakeMeasStart;
+  ops.stop = &FakeMeasStop;
+  return ops;
+}
+void PushPosition(const FakeMeasSource& s,
+                  double lat,
+                  double lon,
+                  uint64_t t_ns) {
+  IhsMeasurement m{};
+  m.struct_size = sizeof(m);
+  m.kind = IHS_MEAS_POSITION_LLA;
+  m.t_monotonic_ns = t_ns;
+  m.value_count = 2;
+  m.value[0] = lat;
+  m.value[1] = lon;
+  m.variance[0] = -1.0;
+  m.variance[1] = -1.0;
+  s.sink(s.sink_ud, &m);
+}
+
 constexpr double kLat0 = 48.0;
 constexpr double kLon0 = -122.0;
 constexpr double kMetersPerDegLat = 111320.0;
@@ -262,6 +302,113 @@ void TestBadPathAndKeys() {
   std::filesystem::remove(path);
 }
 
+// A built-in source and a registered one in a single service, fused by one
+// filter: what ihs_location_start_options() exists for (#516).
+void TestOptionsFusedSources() {
+  const auto path = WriteTrackFixture("ihs_wire_options.jsonl", 12.0, 30, 0.02);
+  const std::string path_str = path.string();  // outlives the options struct
+
+  FakeMeasSource can;
+  IhsLocationSourceOps sops = FakeMeasOps();
+  Check(ihs_location_register_source("can.fused", &sops, &can) == 1,
+        "register can.fused");
+
+  const char* keys[] = {"can.fused"};
+  IhsLocationStartOptions o{};
+  o.struct_size = sizeof(o);
+  o.source = IHS_LOCATION_FILE;
+  o.source_config = path_str.c_str();
+  o.source_keys = keys;
+  o.source_key_count = 1;
+  o.filter_key = "kalman.ctrv";
+
+  Collector c;
+  IhsLocationService* svc = ihs_location_start_options(&o);
+  Check(svc != nullptr,
+        "start_options with a built-in and a registered source");
+  if (svc == nullptr) {
+    std::filesystem::remove(path);
+    return;
+  }
+  ihs_location_set_callback(svc, &Collector::Thunk, &c);
+  Check(can.starts == 1, "the registered source was bound and started");
+  Check(can.sink != nullptr, "the registered source holds a sink");
+  Check(ihs_location_filter_active(svc) == 1, "kalman.ctrv is active");
+  Check(c.WaitFor(20, std::chrono::seconds(5)), "fused service delivers fixes");
+
+  // A yaw rate from the registered source reaches the filter alongside the
+  // file's positions. It must not disturb delivery.
+  if (can.sink != nullptr) {
+    IhsMeasurement m{};
+    m.struct_size = sizeof(m);
+    m.kind = IHS_MEAS_YAW_RATE;
+    m.t_monotonic_ns = 0;
+    m.value_count = 1;
+    m.value[0] = 0.05;
+    m.variance[0] = -1.0;
+    can.sink(can.sink_ud, &m);
+  }
+  Check(c.WaitFor(25, std::chrono::seconds(5)),
+        "fixes continue after a yaw-rate measurement");
+  ihs_location_stop(svc);
+  std::filesystem::remove(path);
+}
+
+// No built-in source at all: positions come from a registered source.
+void TestOptionsRegisteredOnly() {
+  FakeMeasSource gnss;
+  IhsLocationSourceOps sops = FakeMeasOps();
+  Check(ihs_location_register_source("gnss.only", &sops, &gnss) == 1,
+        "register gnss.only");
+
+  const char* keys[] = {"gnss.only"};
+  IhsLocationStartOptions o{};
+  o.struct_size = sizeof(o);
+  o.source = IHS_LOCATION_NONE;
+  o.source_keys = keys;
+  o.source_key_count = 1;
+
+  IhsLocationService* svc = ihs_location_start_options(&o);
+  Check(svc != nullptr, "start_options with NONE + a registered source");
+  if (svc == nullptr) {
+    return;
+  }
+  Check(gnss.sink != nullptr, "registry-only source started");
+  IhsPosition p{};
+  Check(ihs_location_latest2(svc, &p, sizeof(p)) == 0, "no fix before a push");
+  if (gnss.sink != nullptr) {
+    PushPosition(gnss, 48.5, -122.5, 1000);
+  }
+  Check(ihs_location_latest2(svc, &p, sizeof(p)) == 1, "fix after a push");
+  Check(p.latitude == 48.5 && p.longitude == -122.5, "the pushed fix is read");
+  Check(ihs_location_generation(svc) == 1, "one generation for one position");
+  ihs_location_stop(svc);
+}
+
+// Rejections that keep a malformed options struct from being guessed at.
+void TestOptionsRejections() {
+  Check(ihs_location_start_options(nullptr) == nullptr,
+        "start_options(NULL) is safe");
+
+  IhsLocationStartOptions small{};
+  small.struct_size = sizeof(size_t);  // too short to carry `source`
+  Check(ihs_location_start_options(&small) == nullptr,
+        "a struct_size below `source` is rejected");
+
+  IhsLocationStartOptions bad_source{};
+  bad_source.struct_size = sizeof(bad_source);
+  bad_source.source = 99;
+  Check(ihs_location_start_options(&bad_source) == nullptr,
+        "an unknown source is rejected");
+
+  IhsLocationStartOptions bad_keys{};
+  bad_keys.struct_size = sizeof(bad_keys);
+  bad_keys.source = IHS_LOCATION_NONE;
+  bad_keys.source_key_count = 2;  // with source_keys NULL
+  Check(ihs_location_start_options(&bad_keys) == nullptr,
+        "a key count with no keys is rejected");
+}
+
 }  // namespace
 
 int main() {
@@ -271,6 +418,9 @@ int main() {
   TestFileFastPacing();
   TestFileLoop();
   TestBadPathAndKeys();
+  TestOptionsFusedSources();
+  TestOptionsRegisteredOnly();
+  TestOptionsRejections();
 
   if (g_failures == 0) {
     std::printf("wire_test: all %d checks passed\n", g_tests);

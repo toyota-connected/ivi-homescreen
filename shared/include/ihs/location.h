@@ -69,6 +69,7 @@ typedef enum IhsLocationSource {
   IHS_LOCATION_GEOCLUE = 1, /* geoclue over D-Bus */
   IHS_LOCATION_AUTO = 2,    /* gpsd primary, geoclue fallback */
   IHS_LOCATION_FILE = 3,    /* replay a captured gpsd file (@config below) */
+  IHS_LOCATION_NONE = 4,    /* no built-in source; registered keys only (1.7) */
 } IhsLocationSource;
 /* @config for IHS_LOCATION_FILE is a captured gpsd JSON path, optionally
  * followed by "?" and one or more replay flags separated by ',' or '&':
@@ -116,6 +117,42 @@ IHS_EXPORT IhsLocationService* ihs_location_start_filtered(
     const char* config,
     const char* filter_key,
     const char* filter_config);
+
+/*
+ * How to build a service (ABI 1.7). The general form of the two calls above:
+ * a built-in source, measurement sources registered with
+ * ihs_location_register_source(), or both fused through one filter -- which is
+ * what lets GNSS position and a CAN/gyro yaw rate reach kalman.ctrv together.
+ *
+ * ABI: struct_size-first, fields only ever APPENDED. The library reads
+ * min(struct_size, its own sizeof), so a caller built against an older header
+ * is never over-read. Zero the struct, set struct_size = sizeof, then the
+ * fields you need.
+ */
+typedef struct IhsLocationStartOptions {
+  size_t struct_size;
+  uint32_t source; /* IhsLocationSource; NONE = registered keys only */
+  const char* source_config; /* @config for `source`; NULL for none/ignored */
+  const char* const* source_keys; /* registered source keys to bind, or NULL */
+  size_t source_key_count;        /* entries in source_keys */
+  const char* filter_key;         /* registered filter, or NULL for none */
+  const char* filter_config;      /* filter tuning string, or NULL */
+} IhsLocationStartOptions;
+
+/*
+ * Start a service per @options. Returns NULL when @options is NULL, its
+ * struct_size is too small to carry `source`, `source` is not an
+ * IhsLocationSource, source_keys is NULL with a non-zero count, or the built-in
+ * source cannot start. A key that is not registered is skipped, and an
+ * unusable filter degrades to the passthrough (see
+ * ihs_location_filter_active), so a returned handle does not promise every
+ * requested part bound.
+ *
+ * A service with no source at all (NONE and no registered keys) is legal and
+ * simply never reports a fix.
+ */
+IHS_EXPORT IhsLocationService* ihs_location_start_options(
+    const IhsLocationStartOptions* options);
 
 /*
  * Copy the most recent fix into @out, filling only the original six fields

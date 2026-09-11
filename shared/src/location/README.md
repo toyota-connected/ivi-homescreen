@@ -32,7 +32,8 @@ The header is the normative reference for each call's contract.
 | Push callback on each fix | Built-in | `ihs_location_set_callback` |
 | Filter binding is visible: named on stderr when it fails, queryable after | Built-in | `ihs_location_filter_active()` |
 | Caller-registered filters | Built-in | `ihs_location_register_filter` |
-| Caller-registered measurement sources | Partial | `ihs_location_register_source`; not yet bound by a start call (see [Known limitations](#known-limitations)) |
+| Caller-registered measurement sources | Built-in | `ihs_location_register_source`, bound by `ihs_location_start_options()` |
+| A built-in source and registered sources fused in one service | Built-in | `ihs_location_start_options()` |
 
 ---
 
@@ -67,6 +68,10 @@ filter, each fix becomes a position measurement, plus a speed measurement when
 the fix carries one (`SubmitPositionFix`), routed to the filter's `update()`,
 and every read asks the filter to `estimate()` the state at the time of the
 read. `ihs_location_start()` is the unfiltered case.
+
+`ihs_location_start_options()` is the general form: it takes a built-in source,
+registered source keys, or both, so GNSS position and a CAN or gyro yaw rate
+reach one filter together. The two older calls are that call with no keys.
 
 Consumers poll (`latest2`, with `generation` to notice a new fix) or subscribe
 (`set_callback`). Subscribe first, then read the current fix: that order cannot
@@ -223,8 +228,32 @@ built against an older header.
 | `IHS_LOCATION_GEOCLUE` | GeoClue2 | D-Bus address, or `user` for the session bus; default the system bus |
 | `IHS_LOCATION_AUTO` | gpsd; geoclue after 5 s of gpsd silence | Ignored |
 | `IHS_LOCATION_FILE` | A captured gpsd JSON stream | `<path>[?<flags>]`; flags `fast`, `realtime` (default), `loop`, separated by `,` or `&` |
+| `IHS_LOCATION_NONE` | Nothing built in; registered sources only | Ignored |
 
 Examples: `drive.jsonl`, `drive.jsonl?fast`, `drive.jsonl?loop,fast`.
+
+### Custom sources
+
+Register an `IhsLocationSourceOps` under a key with
+`ihs_location_register_source()`, then name that key in
+`ihs_location_start_options()`. `start` is required; `stop` is optional. The
+source pushes `IhsMeasurement` records into the sink it is handed, on whatever
+thread it likes.
+
+```c
+const char* keys[] = {"can.yaw"};
+IhsLocationStartOptions o = {0};
+o.struct_size = sizeof(o);
+o.source = IHS_LOCATION_GPSD;   /* position from gpsd ... */
+o.source_keys = keys;           /* ... yaw rate from CAN */
+o.source_key_count = 1;
+o.filter_key = "kalman.ctrv";   /* fused by one filter */
+IhsLocationService* svc = ihs_location_start_options(&o);
+```
+
+Keys are bound once, at start: registering a source afterwards has no effect on
+a running service, and a key that is not registered is skipped rather than
+failing the start.
 
 ### Custom filters
 
@@ -290,12 +319,11 @@ position noise. Each test uses its own track and seed, so compare within a row.
 
 ## Known limitations
 
-- A source registered with `ihs_location_register_source()` is never bound: the
-  start calls build the Manager from the built-in sources only. Registered
-  filters do work.
-- With the built-in sources a filter sees position and ground speed.
-  `kalman.ctrv`'s yaw-rate update still needs a CAN or gyro source, which needs
-  the item above; today only the unit tests exercise it.
+- A built-in source feeds a filter position and ground speed only.
+  `kalman.ctrv`'s yaw-rate update needs a CAN or gyro source registered and
+  named in `ihs_location_start_options()`; no built-in source produces one.
+- Source keys bind once at start. A source registered later is not picked up by
+  a running service.
 - gpsd `config` takes a numeric IPv4 address; host names are not resolved.
 - geoclue needs `libsystemd.so.0` at runtime and the `DesktopId` `ihs-location` to be
   allowed; geoclue-only fixes usually carry no speed.
