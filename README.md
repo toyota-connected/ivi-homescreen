@@ -1,150 +1,188 @@
+<div align="center">
+
+<!-- template:in
+# ${package_name}
+${package_description}
+ /template:in -->
+<!-- template:out -->
 # ivi-homescreen
+Flutter embedder for Embedded Linux (C++)
+<!-- /template:out -->
 
-Flutter Linux CPP Embedder
+<!-- Badges -->
 
-[![Documentation Status](https://readthedocs.org/projects/ivi-homescreen/badge/?version=latest)](https://ivi-homescreen.readthedocs.io/en/latest/?badge=latest)
+<!-- template:in
+[![License: MPL 2.0](https://img.shields.io/badge/License-MPL_2.0-brightgreen.svg)](LICENSE)
+[![build](https://github.com/${github_username}/${repo_name}/actions/workflows/package.yaml/badge.svg)](https://github.com/${github_username}/${repo_name}/actions/workflows/package.yaml)
+[![example](https://github.com/${github_username}/${repo_name}/actions/workflows/example.yaml/badge.svg)](https://github.com/${github_username}/${repo_name}/actions/workflows/example.yaml)
+[![stars](https://img.shields.io/github/stars/${github_username}/${repo_name}.svg)](https://github.com/${github_username}/${repo_name}/stargazers)
+ /template:in -->
+<!-- template:out -->
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-brightgreen.svg)](LICENSE)
+[![build](https://github.com/toyota-connected/ivi-homescreen/actions/workflows/oss-ivi-homescreen.yml/badge.svg)](https://github.com/toyota-connected/ivi-homescreen/actions/workflows/oss-ivi-homescreen.yml)
+[![docs](https://readthedocs.org/projects/ivi-homescreen/badge/?version=latest)](https://ivi-homescreen.readthedocs.io/en/latest/?badge=latest)
+[![stars](https://img.shields.io/github/stars/toyota-connected/ivi-homescreen.svg)](https://github.com/toyota-connected/ivi-homescreen/stargazers)
+[![Discord](https://img.shields.io/discord/1259897607531003945?style=plastic&logo=discord&label=Discord&color=%239656ce)
+](https://discord.gg/V5uWD9fvws)
+<!-- /template:out -->
+</div>
 
-#### Discord Server https://discord.gg/V5uWD9fvws
 
-## Highlights
+### Use cases
+- **Industrial deployments**: built for embedded environments requiring robustness and reliability (eg. automotive)
+- **Consumer electronics**: embedded devices in consumer applications
+- **Research and prototyping**: for experimental projects and proof-of-concept implementations
 
-* Desktop Plugin Registry
-    * Flutter Pigeon CPP compatible
-    * Plugins modeled after Window CPP
-    * Plugins enabled/disabled via CMake
-* Desktop Texture Registry
-    * Camera first party compatible
-    * Video Player first party compatible
-* Platform View Framework
-    * AndroidView widget compatible
-* Backend Support (any subset builds into one binary; the active backend is
-  selected at runtime — process-wide via `--backend`, or per view via
-  `[view.backend]`)
-    * Wayland EGL
-    * Wayland Vulkan
-    * DRM/KMS EGL (direct-to-display, no compositor)
-    * DRM/KMS Vulkan (zero-copy dma-buf scanout)
-    * Software (CPU renderer, no GPU or display-server dependency)
-    * Leased DRM, EGL / Vulkan / software (drm-lease-v1: own a connector leased
-      from a compositor while it keeps the rest of the card)
-* Multi-display
-    * Multiple views across multiple outputs from one process
-    * Per-view output binding by connector / `wl_output` name (`[view.output]`)
-    * Combined-space pointer routing, per-display touch, and a single cursor
-      that follows the pointer across displays
-* Same source code runs on Desktop and embedded Linux image
-    * Ubuntu 18+
-    * Fedora 33+
-    * Yocto Dunfell/Kirkstone/Scarthgap
 
-## Plugins
+## Features
+- Supports major desktop/embedded Linux platforms
+    - **Yocto** Dunfell/Kirkstone/Scarthgap
+    - **Ubuntu** 20.04, 22.04, 24.04
+    - **Fedora** 42, 43, 44
+    - **RaspberryPi OS** Bookworm, Trixie
+- **Multiple backend support**: Wayland/DRM-KMS, Vulkan/EGL/Software <- [docs](shell/backend/README.md)
+  - **Wayland integration & Compositor-Protocol shells** <- [docs](docs/specs/ARCHITECTURE.md#442-wayland-integration-and-compositor-protocol-shells)
+- **Multi-display**: Multiple views across multiple outputs from one process <- [docs](shell/display/README.md)
+- **`PlatformView` framework and compositor** <- [docs](docs/specs/ARCHITECTURE.md#51-compositor-mode-and-platform-views)
+  - Supports interleaving plugin-owned native surfaces with Flutter-rendered layers
+  - First party camera & video player plugins available at [`ivi-homescreen-plugins`](https://github.com/toyota-connected/ivi-homescreen-plugins/)
+- **Watchdog** (optional): with optional SystemD support <- [docs](shell/watchdog/README.md)
+- **Sentry-based crash handler** (optional) <- [docs](shell/crash_handler/README.md)
+- **Accessibility support** <- [docs](docs/specs/ARCHITECTURE.md#63-accessibility)
+- **Logging/tracing**: with optional DLT support <- [docs](shell/logging/README.md), [DLT docs](shared/README.md#dlt-sink)
+- **C Plugin ABI** <- [docs](shared/README.md)
 
-ivi-homescreen plugins are located at https://github.com/toyota-connected/ivi-homescreen-plugins
+---
 
-There are two ways to reference this repo:
+## 📚 Documentation
 
-1. Clone plugins repo to root of ivi-homescreen folder
-2. Set PLUGIN_DIR to repo path. -DPLUGIN_DIR=<my path>
+The documentation is organized around the system architecture and the
+subsystems that implement it:
 
-## Logging
+- [Read the documentation on Read the Docs](https://ivi-homescreen.readthedocs.io/en/latest/)
+- [Architecture document](docs/specs/ARCHITECTURE.md)
+- [Plugin ABI](docs/PLUGIN_ABI.md)
+- [Subsystem documentation](https://github.com/toyota-connected/ivi-homescreen/blob/main/docs/specs/ARCHITECTURE.md#4-features)
 
-Homescreen provides a built-in logging framework and supports DLT logging.
+---
 
-See [Logging](shell/logging/README.md) for details on and log levels and logging
-and [DLT logging](shared/README.md#dlt-sink) for details on enabling DLT logging and configuring the DLT daemon.
+## 🔮 Usage Guide
 
-## Sanitizer Support
+### Setup & Build
 
-You can enable the sanitizers with SANITIZE_ADDRESS, SANITIZE_MEMORY, SANITIZE_THREAD or SANITIZE_UNDEFINED options in
-your CMake configuration. You can do this by passing e.g. -DSANITIZE_ADDRESS=On on your command line.
+Building via `emb_cli` is currently the recommended approach. `emb` will also automatically install the necessary dependencies for your host system.
 
-If sanitizers are supported by your compiler, the specified targets will be built with sanitizer support. If your
-compiler has no sanitizing capabilities you'll get a warning but CMake will continue processing and sanitizing will
-simply just be ignored.
+See docs below for legacy instructions.
 
-## Backend Support
+[Install `emb_cli`](https://github.com/toyota-connected/emb_cli#install) before proceeding with the build.
 
-Any subset of backends can be compiled into a single binary; they are no longer
-mutually exclusive. The active backend is resolved at runtime — process-wide via
-`--backend`, or per view via `[view.backend] type` in the bundle's config.toml
-(CLI overrides config). A single-backend build simply registers one backend and
-uses it.
+```bash
+# Clone the repository
+git clone --recurse-submodules -j8 https://github.com/toyota-connected/ivi-homescreen.git
 
-| Backend | Registry key | CMake option | Notes |
-|---|---|---|---|
-| Wayland EGL | `wayland-egl` | `BUILD_BACKEND_WAYLAND_EGL` | GL renderer on a Wayland compositor (default ON) |
-| Wayland Vulkan | `wayland-vulkan` | `BUILD_BACKEND_WAYLAND_VULKAN` | Vulkan renderer on a Wayland compositor |
-| DRM/KMS EGL | `drm-kms-egl` | `BUILD_BACKEND_DRM_KMS_EGL` | Direct-to-display GL on bare KMS (no compositor) |
-| DRM/KMS Vulkan | `drm-kms-vulkan` | `BUILD_BACKEND_DRM_KMS_VULKAN` | Zero-copy dma-buf scanout on bare KMS |
-| Software | `software` | `BUILD_BACKEND_SOFTWARE` | CPU renderer; no GPU or display server |
-| Leased DRM (EGL) | `wayland-leased-drm-egl` | `BUILD_BACKEND_WAYLAND_LEASED_DRM` + `BUILD_BACKEND_DRM_KMS_EGL` | GL on a connector leased from a compositor via drm-lease-v1 |
-| Leased DRM (Vulkan) | `wayland-leased-drm-vulkan` | `BUILD_BACKEND_WAYLAND_LEASED_DRM` + `BUILD_BACKEND_DRM_KMS_VULKAN` | Zero-copy dma-buf scanout on a leased connector |
-| Leased DRM (software) | `wayland-leased-drm-software` | `BUILD_BACKEND_WAYLAND_LEASED_DRM` + `BUILD_BACKEND_SOFTWARE` | CPU renderer on a leased connector |
-
-With no explicit selection, the resolver is environment-aware: a live Wayland
-session picks `wayland-egl`, otherwise `drm-kms-egl`.
-
-The `wayland-leased-drm-*` backends acquire a connector from a running Wayland
-compositor rather than opening a card, so one process can own a panel while the
-compositor owns the rest of the GPU. They are never selected implicitly, and a
-leased key is refused rather than substituted if unavailable — falling back to an
-unleased backend would grab hardware the operator did not ask for. The bare
-family name `wayland-leased-drm` picks the first available tier. Note that a
-compositor implementing drm-lease-v1 is necessary but **not** sufficient: the
-wlroots family only offers connectors flagged non-desktop in EDID, so an ordinary
-panel is not leasable without intervention. See
-[shell/backend/wayland_leased_drm/README.md](shell/backend/wayland_leased_drm/README.md).
-
-Running a Vulkan backend requires an engine build that supports Vulkan.
-
-## Bundle File Override Logic
-
-If an override file is not present, it gets loaded from a default location.
-
-### Optional override files
-
-#### icudtl.dat
-
-Bundle Override
-
-    {bundle path}/data/icudtl.dat
-
-Yocto Default
-
-    /usr/share/flutter/icudtl.dat
-
-Desktop Default
-
-    /usr/local/share/flutter/icudtl.dat
-
-#### libflutter_engine.so
-
-Bundle Override
-
-    {bundle path}/lib/libflutter_engine.so
-
-Yocto/Desktop Default - https://tldp.org/HOWTO/Program-Library-HOWTO/shared-libraries.html
-
-## Command Line Options and Configuration
-
-All CLI flags, the full `config.toml` reference, the schema walkthrough, the parameter loading order, and multi-display examples now live with the configuration subsystem's documentation:
-[`shell/configuration/README.md`](shell/configuration/README.md).
-
-That document holds the generated CLI and configuration-reference tables, kept in sync with the parser by [`scripts/gen_config_reference.py`](scripts/gen_config_reference.py) (do not edit `CLI-REFERENCE` sections by hand).
-
-A bundle (`-b`) directory has this structure:
-
-```
-  Flutter Application (bundle folder)
-    data/flutter_assets
-    data/icudtl.dat (optional - overrides system path)
-    lib/libapp.so
-    lib/libflutter_engine.so (optional - overrides system path)
+# Build the project
+cd ivi-homescreen
+emb cross . --target local --build
 ```
 
-See the [configuration docs](shell/configuration/README.md) for the complete option list, `config.toml` schema, and examples.
+#### Build with plugins
 
-## CMake Build flags
+To include first-party out-of-tree plugins available via [`ivi-homescreen-plugins`](https://github.com/toyota-connected/ivi-homescreen-plugins), clone the repository in a sibling folder and configure the necessary CMake variables:
+
+```bash
+cd ..
+git clone https://github.com/toyota-connected/ivi-homescreen-plugins
+cd ivi-homescreen
+
+cmake -S . -B build \
+-DDISABLE_PLUGINS=OFF \
+-DPLUGINS_DIR=../ivi-homescreen-plugins
+```
+
+Alternatively, create an extended `emb` config that configures the plugin inclusion:
+
+```yaml
+cross:
+  targets:
+    rpi5-bookworm:
+      extends: '../ivi-homescreen#rpi5-bookworm'   # ← project target (→ board)
+      defines: { DISABLE_PLUGINS: 'OFF', PLUGINS_DIR: '../ivi-homescreen-plugins/plugins' }
+      sysroot: { dev_packages: [ libnl-3-dev ] }
+```
+
+Then run the `emb cross` command again to build the project with the plugins included.
+
+More info in `emb_cli` docs: https://github.com/toyota-connected/emb_cli#layered-manifests-extends-board--project--app
+
+
+<details>
+<summary>Legacy build instructions</summary>
+
+### GCC/libstdc++ Build
+
+Without plugins:
+
+```bash
+git clone --recurse-submodules -j8 https://github.com/toyota-connected/ivi-homescreen.git
+mkdir build && cd build
+cmake ../ivi-homescreen -DCMAKE_STAGING_PREFIX=`pwd`/out/usr/local
+make install -j
+```
+
+With plugins:
+
+```bash
+git clone --recurse-submodules -j8 https://github.com/toyota-connected/ivi-homescreen.git
+git clone https://github.com/toyota-connected/ivi-homescreen-plugins.git
+mkdir build && cd build
+cmake ../ivi-homescreen -DCMAKE_STAGING_PREFIX=`pwd`/out/usr/local -DPLUGINS_DIR=`pwd`/ivi-homescreen-plugins
+make install -j
+```
+
+### Clang/libc++ Build
+
+Toolchain setup:
+
+```bash
+wget https://apt.llvm.org/llvm.sh
+chmod +x llvm.sh
+sudo ./llvm.sh 19
+sudo apt-get install -y libc++-19-dev libc++abi-19-dev libunwind-dev
+```
+
+Without plugins:
+
+```bash
+git clone --recurse-submodules -j8 https://github.com/toyota-connected/ivi-homescreen.git
+mkdir build && cd build
+CC=/usr/bin/clang CXX=/usr/bin/clang++ cmake ../ivi-homescreen -DCMAKE_STAGING_PREFIX=`pwd`/out/usr/local
+make install -j
+```
+
+With plugins:
+
+```bash
+git clone --recurse-submodules -j8 https://github.com/toyota-connected/ivi-homescreen.git
+git clone https://github.com/toyota-connected/ivi-homescreen-plugins.git
+mkdir build && cd build
+CC=/usr/bin/clang CXX=/usr/bin/clang++ cmake ../ivi-homescreen -DCMAKE_STAGING_PREFIX=`pwd`/out/usr/local -DPLUGINS_DIR=`pwd`/ivi-homescreen-plugins
+make install -j
+```
+</details>
+
+<details>
+<summary>CMAKE dependency paths</summary>
+
+Path prefix used to determine required files is determined at build.
+
+For desktop `CMAKE_INSTALL_PREFIX` defaults to `/usr/local`
+For target Yocto builds `CMAKE_INSTALL_PREFIX` defaults to `/usr`
+</details>
+
+<details>
+<summary>CMake build flags</summary>
+
+Below are some of the flags available for configuring the CMake build. Please note the most detailed & up-to-date doucumentation can be found via [`ARCHITECTURE.md`](docs/specs/ARCHITECTURE.md).
 
 `ENABLE_XDG_CLIENT` - Enable XDG Client. Defaults to ON
 
@@ -222,157 +260,28 @@ See the [configuration docs](shell/configuration/README.md) for the complete opt
 
 Each `BUILD_BACKEND_*` option gates whether that backend is compiled in; any
 subset may be enabled together and the active one is chosen at runtime (see
-[Backend Support](#backend-support)).
+[Backend Support](shell/backend/README.md)).
+</details>
 
-## Platform View Plugins
+<details>
+<summary>Build as .deb package</summary>
 
-When `-DBUILD_COMPOSITOR=ON`, the EGL and Vulkan backends wire the `FlutterCompositor` backing-store API so that a plugin-owned native surface can be interleaved between Flutter-rendered layers — what the Flutter framework calls a `PlatformViewLayer`. Without this flag the engine runs in single-surface mode and platform views fall back to full-screen overlays.
-
-A plugin participates by implementing `ICompositorSurface` (`shell/view/compositor_surface_interface.h`) and registering the instance with `FlutterView` when the Dart widget is created:
-
-```cpp
-#include "view/compositor_surface_interface.h"
-#include "view/flutter_view.h"
-
-class MyPlatformView : public ICompositorSurface {
- public:
-  explicit MyPlatformView(FlutterPlatformViewIdentifier id) : id_(id) {}
-
-  bool OnCreateBackingStore(const FlutterBackingStoreConfig* config,
-                            FlutterBackingStore* out) override {
-    // Fill `out` with a backing store your plugin renders into. Most
-    // plugins delegate to the engine-provided backing store and only
-    // override if they need a specific image/format (e.g. DMA-BUF).
-    return false;
-  }
-  bool OnCollectBackingStore(const FlutterBackingStore*) override { return true; }
-  bool OnPresent(const FlutterLayer* layer) override {
-    // Draw / swap your native surface here. The compositor has already
-    // reconciled the Wayland subsurface Z-order before this call.
-    return true;
-  }
-  FlutterPlatformViewIdentifier GetIdentifier() const override { return id_; }
-  void OnResize(int32_t w, int32_t h) override { /* re-size native surface */ }
-
- private:
-  FlutterPlatformViewIdentifier id_;
-};
-
-// On the flutter/platform_views "create" message:
-flutter_view->RegisterCompositorSurface(
-    id, std::make_shared<MyPlatformView>(id));
-
-// On "dispose":
-flutter_view->UnregisterCompositorSurface(id);
+```bash
+make package -j
+sudo apt install ./ivi-homescreen-1.0.0-Release-beta-Linux-x86_64.deb
 ```
+</details>
 
-`PlatformViewsHandler` calls `UnregisterCompositorSurface` automatically on `dispose` and routes `resize` messages to `ICompositorSurface::OnResize`, so plugins only need to register on create.
+### Run Flutter apps
 
-Key details:
+<details>
+<summary>Bundle structure & overrides</summary>
 
-- `OnPresent` runs on the engine's rasterizer thread. If your plugin renders on its own thread, marshal work there.
-- The Vulkan backend hands the engine a `VkImage` in `VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL`. The compositor records all layout transitions — plugins that *consume* the image via `ICompositorSurface::OnPresent` should be prepared to sample in `VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL` (compositor transitions it to `TRANSFER_SRC_OPTIMAL` during the blit; see `WaylandVulkanBackend::BlitStoreToSwapchain`).
-- With `-DBUILD_COMPOSITOR_DMABUF_EXPORT=ON`, a plugin can query `WaylandVulkanBackend::HasDmaBufExport()` to know whether the store exposes a DMA-BUF fd for zero-copy import into EGL/KMS/Filament.
-- On pure GLES2 drivers, the EGL compositor falls back to a textured-quad program instead of `glBlitFramebuffer`; no plugin action required.
-
-Compositor mode is opt-in. The default (`BUILD_COMPOSITOR=OFF`) build is unchanged, so existing plugins that draw via a legacy `wl_subsurface` path keep working as before.
-
-## x86_64 Desktop development notes
-
-### NVidia GL errors
-
-Running EGL backend on a Lenovo Thinkpad with NVidia drivers may generate many GL runtime errors.
-This should resolve it:
+A bundle (`-b`) directory has this structure:
 
 ```
-export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json
-```
+Flutter Application
 
-## Ubuntu 16-18
-
-### Logging in
-
-Log out if logged in Login screen
-Click on username field
-Right-click on the gear icon below username field, and select "Ubuntu on Wayland"
-Enter password and login
-
-## Ubuntu 20+ / Fedora 33+
-
-Defaults to Wayland, no need to do anything special
-
-## Build steps
-
-### Required Packages
-
-    sudo add-apt-repository ppa:kisak/kisak-mesa
-    sudo apt-get update -y
-    sudo apt-get -y install libwayland-dev wayland-protocols \
-    mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils \
-    libxkbcommon-dev
-
-### Optional Packages
-
-    # To build doxygen documentation
-    sudo apt-get -y install doxygen
-
-### GCC/libstdc++ Build
-
-Without plugins
-
-    git clone --recurse-submodules -j8 https://github.com/toyota-connected/ivi-homescreen.git
-    mkdir build && cd build
-    cmake ../ivi-homescreen -DCMAKE_STAGING_PREFIX=`pwd`/out/usr/local
-    make install -j
-
-With plugins
-
-    git clone --recurse-submodules -j8 https://github.com/toyota-connected/ivi-homescreen.git
-    git clone https://github.com/toyota-connected/ivi-homescreen-plugins.git
-    mkdir build && cd build
-    cmake ../ivi-homescreen -DCMAKE_STAGING_PREFIX=`pwd`/out/usr/local -DPLUGINS_DIR=`pwd`/ivi-homescreen-plugins
-    make install -j
-
-### Clang/libc++ Build
-
-Without plugins
-
-    git clone --recurse-submodules -j8 https://github.com/toyota-connected/ivi-homescreen.git
-    mkdir build && cd build
-    CC=/usr/bin/clang CXX=/usr/bin/clang++ cmake ../ivi-homescreen -DCMAKE_STAGING_PREFIX=`pwd`/out/usr/local
-    make install -j
-
-With plugins
-
-    git clone --recurse-submodules -j8 https://github.com/toyota-connected/ivi-homescreen.git
-    git clone https://github.com/toyota-connected/ivi-homescreen-plugins.git
-    mkdir build && cd build
-    CC=/usr/bin/clang CXX=/usr/bin/clang++ cmake ../ivi-homescreen -DCMAKE_STAGING_PREFIX=`pwd`/out/usr/local -DPLUGINS_DIR=`pwd`/ivi-homescreen-plugins
-    make install -j
-
-#### Clang Toolchain Setup
-
-    wget https://apt.llvm.org/llvm.sh
-    chmod +x llvm.sh
-    sudo ./llvm.sh 14
-    sudo apt-get install -y libc++-14-dev libc++abi-14-dev libunwind-dev
-
-## CI Example
-
-    https://github.com/toyota-connected-na/ivi-homescreen/blob/main/.github/workflows/ivi-homescreen-linux.yml
-
-## Debian Package
-
-    make package -j
-    sudo apt install ./ivi-homescreen-1.0.0-Release-beta-Linux-x86_64.deb
-
-## Flutter Application
-
-### Running an app
-
-Release Bundle Folder layout
-
-```
 .desktop-homescreen/
 ├── data
 │ ├── flutter_assets
@@ -384,162 +293,77 @@ Release Bundle Folder layout
     └── libflutter_engine.so
 ```
 
-Running the bundle above would be
+Running the bundle above would be:
 
-```
-homescreen --b=`pwd`/.desktop-homescreen --w=1024 --h=768
-```
-
-## workspace-automation provides a flutter workspace setup tool
-
-https://github.com/meta-flutter/workspace-automation
-
-Example usage to run gallery application on Linux desktop
-
-Run once
-
-```
-git clone https://github.com/meta-flutter/workspace-automation
-cd workspace_automation
-sudo ./flutter_workspace.py
+```bash
+homescreen --b=`pwd`/.desktop-homescreen
 ```
 
-Run for each development session, or new terminal window opened
+If an override file is not present, it gets loaded from a default location.
 
-```
-source ./setup_env.sh
-cd app/gallery
-flutter run -d desktop-homescreen
-```
+##### `icudtl.dat`
 
-flutter_workspace.py installs runtime packages, patches source files, compiles projects, etc.
+Bundle Override
 
-_Note: `sudo` is required to install runtime packages_
+> `{bundle path}/data/icudtl.dat`
 
-## CMAKE dependency paths
+Yocto Default
 
-Path prefix used to determine required files is determined at build.
+> `/usr/share/flutter/icudtl.dat`
 
-For desktop `CMAKE_INSTALL_PREFIX` defaults to `/usr/local`
-For target Yocto builds `CMAKE_INSTALL_PREFIX` defaults to `/usr`
+Desktop Default
 
-## Watchdog
+> `/usr/local/share/flutter/icudtl.dat`
 
-The watchdog monitors the main thread and Flutter render thread for hangs. If either thread fails to check in within the timeout window (default 5 seconds), the process calls `abort()` to generate a core dump — or triggers `sd_notify(WATCHDOG=trigger)` when built with systemd support.
+##### `libflutter_engine.so`
 
-### CMake Variables
+Bundle Override
 
-To enable watchdog support:
+> `{bundle path}/lib/libflutter_engine.so`
 
-    -DBUILD_WATCHDOG=ON
+Yocto/Desktop Default - https://tldp.org/HOWTO/Program-Library-HOWTO/shared-libraries.html
+</details>
 
-To additionally integrate with the systemd service watchdog:
+Running via `emb_cli` is currently the recommended approach.
+First, [install Flutter via `emb`](https://github.com/toyota-connected/emb_cli#emb-flutter).
 
-    -DBUILD_WATCHDOG=ON -DBUILD_SYSTEMD_WATCHDOG=ON
+Then, [create a bundle](https://github.com/toyota-connected/emb_cli#emb-bundle) and run it:
 
-With systemd integration enabled, the embedder reads the `WatchdogSec=` interval from the service unit, sends `READY=1` on startup, `WATCHDOG=1` each ping, and `STOPPING=1` on clean shutdown.
-
-### Watchdog sources
-
-The watchdog tracks named integer source IDs (`WatchdogSource`, a `typedef int64_t`). The built-in sources are:
-
-| Constant | Value | Thread monitored |
-|---|---|---|
-| `WATCHDOG_SOURCE_MAIN_THREAD` | 0 | Application main loop |
-| `WATCHDOG_SOURCE_RENDER_THREAD` | 1 | Flutter rasterizer thread |
-
-Source IDs 3–255 are available for Dart-side registration via the platform channel.
-
-#### Source name and timeout configuration
-
-The `[watchdog]` table in `config.toml` is optional and accepts:
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `timeout_ms` | integer | `5000` | Watchdog timeout in milliseconds. Ignored when `BUILD_SYSTEMD_WATCHDOG=ON` (the `WatchdogSec=` unit interval takes precedence). |
-| `source_names` | table | — | Maps source IDs (decimal string keys) to human-readable names used in log output. |
-
-```toml
-[watchdog]
-timeout_ms = 10000
-
-[watchdog.source_names]
-1 = 'MyFlutterApp'
-2 = 'BackgroundSync'
+```bash
+<path to ivi-homescreen>/build/shell/homescreen -b <path to bundle>
 ```
 
-Source names can also be set or overridden at runtime by passing the optional `name` argument to the `start` platform channel method. The runtime value takes precedence over any config-defined name.
+<details>
+<summary>NVidia GL errors</summary>
 
+Running EGL backend on a Lenovo Thinkpad with NVidia drivers may generate many GL runtime errors.
+This should resolve it:
 
-### Platform channel
-
-When `BUILD_WATCHDOG=ON`, a `"watchdog"` platform channel is registered and available to Flutter apps via `StandardMethodCodec`. Methods:
-
-| Method | Arguments | Description |
-|---|---|---|
-| `get_callbacks` | — | Returns a map of `start`, `pet`, `stop` native function pointers (FFI callable from Dart) |
-| `start` | `{"source": int64, "name": string?}` | Register and begin monitoring source ID; optional `name` overrides any config-defined name for logging |
-| `pet` | `{"source": int64}` | Reset the timeout for source ID |
-| `stop` | `{"source": int64}` | Deregister source ID |
-
-Source IDs passed from Dart must be non-negative. There is no upper-bound restriction.
-
-
-### Example (Dart)
-
-Use `get_callbacks` to retrieve native function pointers and call them directly from Dart FFI for zero-overhead petting on hot paths:
-
-```dart
-import 'dart:ffi';
-import 'package:ffi/ffi.dart';
-
-// Use method channels to get callbacks from the native watchdog implementation
-NativeFunction<Void Function(Int64)>>? startCallback;
-NativeFunction<Void Function(Int64)>>? petCallback;
-NativeFunction<Void Function(Int64)>>? stopCallback;
-
-void initWatchdog() async {
-  final channel = MethodChannel('watchdog');
-  final callbacks = await channel.invokeMethod<Map>('get_callbacks');
-
-  final startCallbackPtr = Pointer.fromAddress(callbacks['start']);
-  startCallback = startCallbackPtr.asFunction<void Function(int64)>();
-  final petCallbackPtr = Pointer.fromAddress(callbacks['pet']);
-  petCallback = petCallbackPtr.asFunction<void Function(int64)>();
-  final stopCallbackPtr = Pointer.fromAddress(callbacks['stop']);
-  stopCallback = stopCallbackPtr.asFunction<void Function(int64)>();
-}
-
-// example usage
-const int WATCHDOG_SOURCE_APP = 123;
-
-void main() {
-  initWatchdog();
-  // Start monitoring the main thread
-  startCallback?.call(WATCHDOG_SOURCE_APP);
-  // In your main loop, periodically pet the watchdog
-  petCallback?.call(WATCHDOG_SOURCE_APP);
-  // On shutdown, stop monitoring
-  stopCallback?.call(WATCHDOG_SOURCE_APP);
-}
+```bash
+export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json
 ```
+</details>
 
-## Crash Handler
+#### CLI opts and configuration
 
-Sentry-native support is available for Crash Handling. This pushes a mini-dump to the cloud for triage and tracking.
+All CLI flags, the full `config.toml` reference, the schema walkthrough, the parameter loading order, and multi-display examples now live with the configuration subsystem's documentation:
+[`shell/configuration/README.md`](shell/configuration/README.md).
 
-Full documentation — architecture, build options, configuration reference, and the self-crash integration test — lives in [`shell/crash_handler/README.md`](shell/crash_handler/README.md).
 
-## Yocto recipes
 
-### Scarthgap
+---
 
-    https://github.com/meta-flutter/meta-flutter/tree/scarthgap/recipes-graphics/toyota
+## 📄 License
 
-### Kirkstone
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
 
-    https://github.com/meta-flutter/meta-flutter/tree/kirkstone/recipes-graphics/toyota
+## Contributors 🧑‍💻💙📝
 
-### Dunfell
+This package is developed/maintained by the following people
 
-    https://github.com/meta-flutter/meta-flutter/tree/dunfell/recipes-graphics/toyota
+<!-- template:in
+![contributors badge](https://readme-contribs.as93.net/contributors/${github_username}/${repo_name}?textColor=888888)
+ /template:in -->
+<!-- template:out -->
+![contributors badge](https://readme-contribs.as93.net/contributors/toyota-connected/ivi-homescreen?textColor=888888)
+<!-- /template:out -->

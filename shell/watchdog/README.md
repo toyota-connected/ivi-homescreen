@@ -96,7 +96,7 @@ The watchdog is gated by CMake options:
 
 The watchdog is initialized at startup in `main.cc` and runs automatically if compiled in.
 
-### Config.toml
+### `config.toml`
 
 The watchdog is configured via the `[watchdog]` table:
 
@@ -104,6 +104,57 @@ The watchdog is configured via the `[watchdog]` table:
   - *Note*: If `BUILD_SYSTEMD_WATCHDOG=ON` and the systemd daemon provides an interval, the systemd value takes precedence.
 - **`[watchdog.source_names]`**: A table mapping source IDs to human-readable names for better log clarity.
   - Example: `"-1" = "Main Thread"`
+
+### Example (Dart)
+
+
+When `BUILD_WATCHDOG=ON`, a `"watchdog"` platform channel is registered and available to Flutter apps via `StandardMethodCodec`. Methods:
+
+| Method | Arguments | Description |
+|---|---|---|
+| `get_callbacks` | — | Returns a map of `start`, `pet`, `stop` native function pointers (FFI callable from Dart) |
+| `start` | `{"source": int64, "name": string?}` | Register and begin monitoring source ID; optional `name` overrides any config-defined name for logging |
+| `pet` | `{"source": int64}` | Reset the timeout for source ID |
+| `stop` | `{"source": int64}` | Deregister source ID |
+
+Source IDs passed from Dart must be non-negative. There is no upper-bound restriction.
+
+Use `get_callbacks` to retrieve native function pointers and call them directly from Dart FFI for zero-overhead petting on hot paths:
+
+```dart
+import 'dart:ffi';
+import 'package:ffi/ffi.dart';
+
+// Use method channels to get callbacks from the native watchdog implementation
+NativeFunction<Void Function(Int64)>>? startCallback;
+NativeFunction<Void Function(Int64)>>? petCallback;
+NativeFunction<Void Function(Int64)>>? stopCallback;
+
+void initWatchdog() async {
+  final channel = MethodChannel('watchdog');
+  final callbacks = await channel.invokeMethod<Map>('get_callbacks');
+
+  final startCallbackPtr = Pointer.fromAddress(callbacks['start']);
+  startCallback = startCallbackPtr.asFunction<void Function(int64)>();
+  final petCallbackPtr = Pointer.fromAddress(callbacks['pet']);
+  petCallback = petCallbackPtr.asFunction<void Function(int64)>();
+  final stopCallbackPtr = Pointer.fromAddress(callbacks['stop']);
+  stopCallback = stopCallbackPtr.asFunction<void Function(int64)>();
+}
+
+// example usage
+const int WATCHDOG_SOURCE_APP = 123;
+
+void main() {
+  initWatchdog();
+  // Start monitoring the main thread
+  startCallback?.call(WATCHDOG_SOURCE_APP);
+  // In your main loop, periodically pet the watchdog
+  petCallback?.call(WATCHDOG_SOURCE_APP);
+  // On shutdown, stop monitoring
+  stopCallback?.call(WATCHDOG_SOURCE_APP);
+}
+```
 
 ### Logs
 

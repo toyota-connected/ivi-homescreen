@@ -31,7 +31,7 @@ every other module (each `shell/` subdirectory, plus `shared/`, `test/`, and
     - 4.2. [Views](#42-views) — `shell/view/`
     - 4.3. [Backends (Rendering & Presentation)](#43-backends-rendering--presentation) — `shell/backend/`
     - 4.4. [Displays and I/O](#44-displays-and-io)
-        - 4.4.1. [Displays and Output Management](#444-displays-and-output-management) — `shell/display/`
+        - 4.4.1. [Displays and Output Management](#441-displays-and-output-management) — `shell/display/`
         - 4.4.2. [Wayland Integration and Compositor-Protocol Shells](#442-wayland-integration-and-compositor-protocol-shells) — `shell/wayland/`, `shell/wayland-protocols/`
         - 4.4.3. [Input](#443-input) — `shell/input/`
         - 4.4.4. [Vsync](#444-vsync) — `shell/vsync/`
@@ -48,6 +48,7 @@ every other module (each `shell/` subdirectory, plus `shared/`, `test/`, and
     - 7.2. [The `ihs_shared` Library (Plugin C ABI)](#72-the-ihs_shared-library-plugin-c-abi) — `shared/`
 8. [Testing](#8-testing) — `test/`
 9. [Build System](#9-build-system) — `scripts/`, `cmake/`
+   - 9.1. [Sanitizer Support](#91-sanitizer-support)
 
 ---
 
@@ -218,6 +219,10 @@ The subsystems that build on the core machinery to present a Flutter application
 per-view configuration, the view object, the rendering backends, and the
 displays / I/O they scan out to. Each has its own README; the summaries below
 say only *why* the feature exists and *how* it fits in.
+
+Implementation details, configuration options, and subsystem-specific usage
+belong in the linked README files. This document is the system-level map of how
+those components work together.
 
 ### 4.1. Configuration
 
@@ -436,3 +441,12 @@ codegen, packaging, options, docs). Key structural points:
 The generated CLI and configuration reference tables in the README are produced
 by [`scripts/gen_config_reference.py`](../../scripts/gen_config_reference.py) from
 the binary's `--help` and the parser, and must not be hand-edited.
+
+### 9.1. Sanitizer support
+
+You can enable the sanitizers with `SANITIZE_ADDRESS`, `SANITIZE_MEMORY`, `SANITIZE_THREAD` or `SANITIZE_UNDEFINED` options in
+your CMake configuration. You can do this by passing e.g. `-DSANITIZE_ADDRESS=ON` on your command line.
+
+If sanitizers are supported by your compiler, the specified targets will be built with sanitizer support. If your
+compiler has no sanitizing capabilities you'll get a warning but CMake will continue processing and sanitizing will
+simply just be ignored.
