@@ -9,8 +9,8 @@ name: ihs-logging-compat-matrix
 #
 # The harnesses are tiny (a dozen source files), so the toolchain setup used to
 # dominate. The runner images already ship clang-14/17 + cmake + ninja, so
-# those legs install nothing; clang-12 (not on the images) runs in the official
-# clang-12 container instead of a ~45s apt install. libc++ is never pulled (the
+# those legs install nothing; clang-12 (not on the images) is apt-installed on
+# ubuntu-22.04, which still packages it (~45s). libc++ is never pulled (the
 # build uses libstdc++).
 
 on:
@@ -108,26 +108,23 @@ jobs:
             ctest --test-dir "$b" --output-on-failure
           done
 
-  # C++17 floor. clang-12 is not on the runner images, and apt-installing it
-  # costs ~45s, so run this leg in the official clang-12 image (clang + cmake
-  # baked in) and add only git (for checkout) + ninja (~2s).
+  # C++17 floor. clang-12 is not on the runner images; ubuntu-22.04 still
+  # packages it, so install it there (~45s). This leg used to run in the
+  # silkeh/clang:12 container, but that image's Debian 11 base is past end of
+  # life: apt-get update fails on the expired bullseye-security Release file.
   compat-clang12:
     if: ${{ github.server_url == 'https://github.com' }}
     runs-on: ubuntu-22.04
-    container: silkeh/clang:12
     name: "Clang-12 C++17"
     steps:
-      - name: Add git + ninja
-        # Inline, not ./.github/actions/apt-packages: this runs before the
-        # checkout, because it is what installs the git that does the checkout,
-        # so a local action is not on disk yet.
-        run: |
-          set -eux
-          apt-get update
-          apt-get install -y --no-install-recommends git ninja-build
-
       - name: Checkout
         uses: actions/checkout@v7
+
+      - name: Install build deps
+        # cmake is preinstalled on 22.04.
+        uses: ./.github/actions/apt-packages
+        with:
+          packages: clang-12 ninja-build
 
       - name: Build + run compat_smoke
         run: |
