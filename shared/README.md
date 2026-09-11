@@ -22,6 +22,7 @@ registered plugins — `ihs_shared` exposes neither a registrar nor a messenger.
 | Tracing (`ihs_trace_*`: duration / instant / counter / flow) | Built-in | Always; engine trace procs → kernel `trace_marker` → nop |
 | Platform-view surface negotiation (`ihs_pv_*`) | Built-in | Always; inert until the shell installs an `IhsPvHost` |
 | Config read-back (`ihs_config_*` snapshots) | Built-in | Always; shell publishes, plugins read |
+| Location service (`ihs_location_*`: gpsd / geoclue / capture replay, `kalman.cv` / `kalman.ctrv` filters) | Built-in | Always; geoclue `dlopen`s `libsystemd` at runtime. See [src/location/README.md](src/location/README.md) |
 | Versioned ABI handshake (`ihs_get_api`) | Built-in | Always; `IHS_SHARED_ABI_VERSION` |
 
 ---

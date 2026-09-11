@@ -61,12 +61,13 @@ Flutter embedder for Embedded Linux (C++)
     - Off unless enabled at build time and at runtime; Unix socket only, peer-credential checked
     - [Cockpit demo](examples/cockpit_demo/README.md) for driving the shell from an LLM
 - **OSGi multi-bundle framework** (optional): several Flutter bundles in one process with an OSGi lifecycle, priority-ordered startup and a shared service registry
+- **Location service**: gpsd, geoclue or a replayed gpsd capture, optionally fused through a constant-velocity or CTRV Kalman filter; poll or subscribe from C or Dart FFI <- [docs](shared/src/location/README.md)
 - **Debug HUD**: Dear ImGui overlay with frame stats and each platform view's present path <- [docs](shell/backend/hud/README.md)
 - **Frame profiling**: frame timing and motion-to-photon latency <- [docs](shell/profiling/README.md)
 - **Watchdog** (optional): with optional SystemD support <- [docs](shell/watchdog/README.md)
 - **Sentry-based crash handler** (optional) <- [docs](shell/crash_handler/README.md)
 - **Logging/tracing**: with optional DLT support <- [docs](shell/logging/README.md), [DLT docs](shared/README.md#dlt-sink)
-- **C Plugin ABI**: logging, tracing, platform views, semantics and MCP for out-of-tree plugins <- [docs](shared/README.md), [ABI contract](docs/PLUGIN_ABI.md)
+- **C Plugin ABI**: logging, tracing, platform views, semantics, MCP and location for out-of-tree plugins <- [docs](shared/README.md), [ABI contract](docs/PLUGIN_ABI.md)
 - **Fuzzing**: coverage-guided fuzz targets for the surfaces that parse external input <- [docs](test/fuzz/README.md)
 
 ---
