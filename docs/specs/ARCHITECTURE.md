@@ -431,7 +431,7 @@ codegen, packaging, options, docs). Key structural points:
   tests, and each individual plugin are all CMake toggles. See the README for the
   full option list.
 - **Compositor-protocol shells** are gated separately (`ENABLE_XDG_CLIENT`,
-  `ENABLE_AGL_SHELL_CLIENT`, `ENABLE_IVI_SHELL_CLIENT`, `ENABLE_DRM_LEASE_CLIENT`).
+  `ENABLE_AGL_SHELL_CLIENT`, `ENABLE_IVI_SHELL_CLIENT`, `ENABLE_SIMPLE_SHELL_CLIENT`).
 - **Plugins** are out-of-tree (§7.1), referenced by cloning into the repo root
   or via `-DPLUGIN_DIR`.
 - **`shared/`** builds independently as `ihs_shared` (§7.2).
