@@ -48,6 +48,7 @@ Platform integration
 * :gh:`Platform views <shell/platform/homescreen/platform_views/README.md>`
 * :gh:`Accessibility <docs/specs/ARCHITECTURE.md#63-accessibility>`
 * :gh:`Shared plugin ABI library <shared/README.md>`
+* :gh:`Location service <shared/src/location/README.md>`
 
 Optional features
 -----------------

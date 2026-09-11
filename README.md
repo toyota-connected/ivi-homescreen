@@ -36,21 +36,39 @@ Flutter embedder for Embedded Linux (C++)
 
 ## Features
 - Supports major desktop/embedded Linux platforms
-    - **Yocto** Dunfell/Kirkstone/Scarthgap
+    - **Yocto** master/Wrynose/Scarthgap/Kirkstone/Dunfell
     - **Ubuntu** 20.04, 22.04, 24.04
     - **Fedora** 42, 43, 44
     - **RaspberryPi OS** Bookworm, Trixie
-- **Multiple backend support**: Wayland/DRM-KMS, Vulkan/EGL/Software <- [docs](shell/backend/README.md)
-  - **Wayland integration & Compositor-Protocol shells** <- [docs](docs/specs/ARCHITECTURE.md#442-wayland-integration-and-compositor-protocol-shells)
-- **Multi-display**: Multiple views across multiple outputs from one process <- [docs](shell/display/README.md)
+- **Multiple backends**: any subset compiled in, one chosen at runtime <- [docs](shell/backend/README.md)
+  - **Wayland**: EGL or Vulkan, with `xdg`, `agl`, `ivi` and RDK `simple` shell roles <- [docs](docs/specs/ARCHITECTURE.md#442-wayland-integration-and-compositor-protocol-shells)
+  - **DRM/KMS**: EGL or Vulkan, direct scanout with no compositor <- [EGL](shell/backend/drm_kms_egl/README.md), [Vulkan](shell/backend/drm_kms_vulkan/README.md)
+  - **Wayland leased DRM**: owns one connector leased from a running compositor (drm-lease-v1), e.g. a cluster panel beside an IVI compositor <- [docs](shell/backend/wayland_leased_drm/README.md)
+  - **Headless**: EGL or Vulkan with no display, frames handed out as dma-buf to an encoder, WebRTC or an external consumer <- [EGL](shell/backend/headless_egl/README.md), [Vulkan](shell/backend/headless_vulkan/README.md)
+  - **Software**: CPU rendering for CI and GPU-less boards; fbdev, DRM dumb buffer, PAM goldens or V4L2 encode <- [docs](shell/backend/software/README.md)
+- **Multi-display**: multiple views across multiple outputs from one process; outputs matched by udev role name, EDID serial or connector, with hotplug <- [docs](shell/display/README.md)
+- **Input**: libinput on DRM, Wayland seats otherwise; touch, keyboard, pointer routing across displays <- [docs](shell/input/README.md)
+- **Configuration**: CLI flags layered over `config.toml` <- [docs](shell/configuration/README.md)
 - **`PlatformView` framework and compositor** <- [docs](docs/specs/ARCHITECTURE.md#51-compositor-mode-and-platform-views)
-  - Supports interleaving plugin-owned native surfaces with Flutter-rendered layers
+  - Interleaves plugin-owned native surfaces with Flutter-rendered layers
+  - Shared memory, zero-copy dma-buf import, or direct KMS overlay-plane scanout, with explicit sync <- [docs](docs/PLATFORM_VIEW_NEGOTIATION.md)
   - First party camera & video player plugins available at [`ivi-homescreen-plugins`](https://github.com/toyota-connected/ivi-homescreen-plugins/)
+- **Accessibility** (optional): Flutter semantics for every running application, mirrored into an in-process tree that feeds the consumers below <- [docs](docs/specs/ARCHITECTURE.md#63-accessibility)
+  - **AccessKit** (optional): exposes every application to screen readers over AT-SPI
+  - **MCP** (optional): lets an agent (LLM, test harness) read and drive the UI over the Model Context Protocol <- [security](docs/mcp-security.md), [remote access](docs/mcp-remote-access.md)
+    - Generic verbs over the semantics tree (`ui_query`, `ui_tap`, `ui_set_text`, `ui_scroll_to`, `ui_tap_at`); no app changes needed
+    - Typed tools an app declares from Dart via [`ihs_mcp_app_tools`](packages/ihs_mcp_app_tools/README.md)
+    - Off unless enabled at build time and at runtime; Unix socket only, peer-credential checked
+    - [Cockpit demo](examples/cockpit_demo/README.md) for driving the shell from an LLM
+- **OSGi multi-bundle framework** (optional): several Flutter bundles in one process with an OSGi lifecycle, priority-ordered startup and a shared service registry
+- **Location service**: gpsd, geoclue or a replayed gpsd capture, optionally fused through a constant-velocity or CTRV Kalman filter; poll or subscribe from C or Dart FFI <- [docs](shared/src/location/README.md)
+- **Debug HUD**: Dear ImGui overlay with frame stats and each platform view's present path <- [docs](shell/backend/hud/README.md)
+- **Frame profiling**: frame timing and motion-to-photon latency <- [docs](shell/profiling/README.md)
 - **Watchdog** (optional): with optional SystemD support <- [docs](shell/watchdog/README.md)
 - **Sentry-based crash handler** (optional) <- [docs](shell/crash_handler/README.md)
-- **Accessibility support** <- [docs](docs/specs/ARCHITECTURE.md#63-accessibility)
 - **Logging/tracing**: with optional DLT support <- [docs](shell/logging/README.md), [DLT docs](shared/README.md#dlt-sink)
-- **C Plugin ABI** <- [docs](shared/README.md)
+- **C Plugin ABI**: logging, tracing, platform views, semantics, MCP and location for out-of-tree plugins <- [docs](shared/README.md), [ABI contract](docs/PLUGIN_ABI.md)
+- **Fuzzing**: coverage-guided fuzz targets for the surfaces that parse external input <- [docs](test/fuzz/README.md)
 
 ---
 
