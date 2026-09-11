@@ -148,11 +148,13 @@ See the [configuration docs](shell/configuration/README.md) for the complete opt
 
 `ENABLE_XDG_CLIENT` - Enable XDG Client. Defaults to ON
 
-`ENABLE_AGL_SHELL_CLIENT` - Enable AGL Client. Defaults to OFF
+`ENABLE_AGL_SHELL_CLIENT` - Enable AGL Client. Defaults to ON
 
 `ENABLE_IVI_SHELL_CLIENT` - Enable ivi-shell Client. Defaults to OFF
 
-`ENABLE_DRM_LEASE_CLIENT` - Enable drm lease Client. Defaults to OFF
+`ENABLE_SIMPLE_SHELL_CLIENT` - Enable RDK/Westeros simple_shell Client. Defaults to OFF
+
+`BUILD_BACKEND_WAYLAND_LEASED_DRM` - Build the Wayland leased-DRM backend (drm-lease-v1). Must be paired with a renderer tier - see [Backend Support](#backend-support). Defaults to OFF
 
 `ENABLE_LTO` - Enable Link Time Optimization. Defaults to OFF
 
@@ -164,9 +166,9 @@ See the [configuration docs](shell/configuration/README.md) for the complete opt
 
 `BUILD_EGL_ENABLE_3D` - Build with EGL Stencil, Depth, and Stencil config Enabled. Defaults to ON
 
-`BUILD_EGL_ENABLE_MULTISAMPLE` - Build with EGL Sample set to 4. Defaults to ON
+`BUILD_EGL_ENABLE_MULTISAMPLE` - Build with EGL Sample set to 4. Defaults to OFF
 
-`BUILD_BACKEND_WAYLAND_VULKAN` - Build Backed for Vulkan. Defaults to OFF
+`BUILD_BACKEND_WAYLAND_VULKAN` - Build Backend for Vulkan. Declared only when `BUILD_BACKEND_WAYLAND_EGL=OFF`, and defaults to ON in that case; with the default `BUILD_BACKEND_WAYLAND_EGL=ON` it is not declared
 
 `BUILD_COMPOSITOR` - Enable the `FlutterCompositor` backing-store API so platform-view layers can be interleaved with Flutter UI. See [Platform View Plugins](#platform-view-plugins). Defaults to OFF.
 
