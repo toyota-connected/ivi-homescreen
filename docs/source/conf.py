@@ -3,9 +3,17 @@
 # For the full list of built-in configuration values, see the documentation:
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 import os
+import re
 
 # Check if we're running on Read the Docs' servers
 read_the_docs_build = os.environ.get('READTHEDOCS', None) == 'True'
+
+# Links into the source tree. On Read the Docs, pin to the commit being built
+# so every version, branch or PR build links to files that exist in it.
+github_ref = os.environ.get('READTHEDOCS_GIT_COMMIT_HASH', 'v3.0')
+github_blob = ('https://github.com/toyota-connected/ivi-homescreen/blob/'
+               + github_ref)
+extlinks = {'gh': (github_blob + '/%s', '%s')}
 
 breathe_projects = {}
 
@@ -26,6 +34,7 @@ release = '"0.1"'
 extensions = [
     'myst_parser',
     'sphinx_rtd_theme',
+    'sphinx.ext.extlinks',
     'breathe'
 ]
 
@@ -48,3 +57,17 @@ html_static_path = ['../sphinx/_static']
 
 # Breathe Configuration
 breathe_default_project = "ivi-homescreen"
+
+# readme.md is a symlink to the top-level README, whose links are relative to
+# the repo root. Rewrite them to GitHub so they resolve here too.
+_relative_link = re.compile(r'\]\((?!https?:|mailto:|#)([^)\s]+)\)')
+
+
+def _rewrite_readme_links(app, docname, source):
+    if docname == 'readme':
+        source[0] = _relative_link.sub(
+            lambda m: '](' + github_blob + '/' + m.group(1) + ')', source[0])
+
+
+def setup(app):
+    app.connect('source-read', _rewrite_readme_links)

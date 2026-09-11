@@ -62,7 +62,7 @@ subsystems that implement it:
 - [Read the documentation on Read the Docs](https://ivi-homescreen.readthedocs.io/en/latest/)
 - [Architecture document](docs/specs/ARCHITECTURE.md)
 - [Plugin ABI](docs/PLUGIN_ABI.md)
-- [Subsystem documentation](https://github.com/toyota-connected/ivi-homescreen/blob/main/docs/specs/ARCHITECTURE.md#4-features)
+- [Subsystem documentation](docs/specs/ARCHITECTURE.md#4-features)
 
 ---
 
@@ -192,7 +192,7 @@ Below are some of the flags available for configuring the CMake build. Please no
 
 `ENABLE_SIMPLE_SHELL_CLIENT` - Enable RDK/Westeros simple_shell Client. Defaults to OFF
 
-`BUILD_BACKEND_WAYLAND_LEASED_DRM` - Build the Wayland leased-DRM backend (drm-lease-v1). Must be paired with a renderer tier - see [Backend Support](#backend-support). Defaults to OFF
+`BUILD_BACKEND_WAYLAND_LEASED_DRM` - Build the Wayland leased-DRM backend (drm-lease-v1). Must be paired with a renderer tier - see the [build matrix](shell/backend/README.md#build-matrix). Defaults to OFF
 
 `ENABLE_LTO` - Enable Link Time Optimization. Defaults to OFF
 
@@ -208,7 +208,7 @@ Below are some of the flags available for configuring the CMake build. Please no
 
 `BUILD_BACKEND_WAYLAND_VULKAN` - Build Backend for Vulkan. Declared (default ON) only when `BUILD_BACKEND_WAYLAND_EGL=OFF`; can still be set explicitly alongside EGL
 
-`BUILD_COMPOSITOR` - Enable the `FlutterCompositor` backing-store API so platform-view layers can be interleaved with Flutter UI. See [Platform View Plugins](#platform-view-plugins). Defaults to OFF.
+`BUILD_COMPOSITOR` - Enable the `FlutterCompositor` backing-store API so platform-view layers can be interleaved with Flutter UI. See [Compositor Mode and Platform Views](docs/specs/ARCHITECTURE.md#51-compositor-mode-and-platform-views). Defaults to OFF.
 
 `BUILD_COMPOSITOR_DMABUF_EXPORT` - When the Vulkan backend is active and `BUILD_COMPOSITOR=ON`, export each `VulkanBackingStore`'s memory as a DMA-BUF fd so plugins can import it zero-copy (requires `VK_KHR_external_memory_fd` at runtime; silently falls back to a plain allocation if unavailable). Defaults to OFF.
 
