@@ -16,6 +16,8 @@
 
 #include "bridge_registry.h"
 
+#include <utility>
+
 #include "dart_api_dl.h"
 
 #include "logging/logging.h"
@@ -145,6 +147,22 @@ std::optional<int64_t> BridgeRegistry::framework_port() const {
   return framework_port_;
 }
 
+void BridgeRegistry::SetDeclaredBundles(
+    std::vector<std::string> symbolic_names) {
+  std::set<std::string> declared;
+  for (std::string& name : symbolic_names) {
+    declared.insert(std::move(name));
+  }
+  std::lock_guard lock(mutex_);
+  declared_ = std::move(declared);
+}
+
+bool BridgeRegistry::IsDeclared(const std::string& symbolic_name) const {
+  std::lock_guard lock(mutex_);
+  return !declared_.has_value() ||
+         declared_->find(symbolic_name) != declared_->end();
+}
+
 bool BridgeRegistry::RegisterBundle(const std::string& symbolic_name,
                                     const int64_t port) {
   std::lock_guard lock(mutex_);
@@ -157,6 +175,18 @@ bool BridgeRegistry::RegisterBundle(const std::string& symbolic_name,
   }
   if (symbolic_name.empty()) {
     ihs::log::error("[osgi] bridge: bundle registered with an empty name");
+    return false;
+  }
+  // A name the configuration does not declare is refused here rather than
+  // accepted and dropped later by the orchestrator. The likeliest cause is a
+  // typo on one side or the other, and the failure it would otherwise produce
+  // -- some *other* bundle's deadline expiring -- points nowhere near it.
+  if (declared_.has_value() &&
+      declared_->find(symbolic_name) == declared_->end()) {
+    ihs::log::error(
+        "[osgi] bridge: bundle '{}' is not declared in [[osgi.bundles]]; "
+        "refusing registration",
+        symbolic_name);
     return false;
   }
   if (port == 0) {
@@ -253,6 +283,7 @@ void BridgeRegistry::ResetForTesting() {
   std::lock_guard lock(mutex_);
   bundles_.clear();
   framework_port_.reset();
+  declared_.reset();
   observer_ = nullptr;
 }
 

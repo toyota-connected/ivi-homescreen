@@ -20,6 +20,7 @@
 #include <map>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -111,6 +112,27 @@ class BridgeRegistry {
 
   [[nodiscard]] std::optional<int64_t> framework_port() const;
 
+  // Record the symbolic names the configuration declares, so a registration
+  // naming anything else is refused. Installed once at OSGi bring-up, before
+  // any bundle engine is spawned.
+  //
+  // Until it is installed the registry accepts any name, which is what keeps a
+  // build with no [osgi] table -- and every test that does not care about
+  // configuration -- behaving as it did. Installing an *empty* set therefore
+  // means "nothing is declared" and refuses everything; that is not the same
+  // state as never installing one.
+  //
+  // Without this a name absent from [[osgi.bundles]] completes the whole
+  // handshake and is then dropped by the orchestrator, so a typo surfaces as
+  // the correctly named bundle's deadline expiring rather than as an error at
+  // the call that made it. Gating registration gates the lifecycle reports
+  // too: ReportActive already requires a registration.
+  void SetDeclaredBundles(std::vector<std::string> symbolic_names);
+
+  // Whether @symbolic_name may register: true when no declarations are
+  // installed, otherwise whether the declared set contains it.
+  [[nodiscard]] bool IsDeclared(const std::string& symbolic_name) const;
+
   // Record a bundle's receive port. When the framework port is already known it
   // is delivered immediately; otherwise the bundle is served by the next
   // SetFrameworkPort. Returns false on a duplicate symbolic name, an invalid
@@ -152,6 +174,9 @@ class BridgeRegistry {
   mutable std::mutex mutex_;
   bool dart_api_ready_{false};
   std::optional<int64_t> framework_port_;
+  // nullopt until the shell installs the configured set; see
+  // SetDeclaredBundles for why that is permissive rather than empty.
+  std::optional<std::set<std::string>> declared_;
   IBundleLifecycleObserver* observer_{nullptr};
 
   struct Bundle {

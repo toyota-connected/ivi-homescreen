@@ -204,6 +204,39 @@ TEST_F(BridgeRegistryTest, RejectsInvalidPortAndEmptyName) {
   EXPECT_FALSE(registry_->RegisterBundle("", 7));
 }
 
+// --- Declared bundles -------------------------------------------------------
+//
+// The configuration is the authority on which bundles exist. Without it the
+// bridge accepts any name and the orchestrator quietly drops what it does not
+// recognize, so a typo is reported as some *other* bundle's deadline expiring
+// -- a symptom pointing nowhere near the cause.
+
+// The no-[osgi]-table build, and every test that does not care about
+// configuration: nothing is declared, so nothing is filtered.
+TEST_F(BridgeRegistryTest, AcceptsAnyNameUntilDeclarationsAreInstalled) {
+  EXPECT_TRUE(registry_->IsDeclared("com.ivi.anything"));
+  EXPECT_TRUE(registry_->RegisterBundle("com.ivi.anything", 7));
+}
+
+TEST_F(BridgeRegistryTest, RefusesANameTheConfigurationDoesNotDeclare) {
+  registry_->SetDeclaredBundles({"com.ivi.cluster", "com.ivi.navigation"});
+  EXPECT_TRUE(registry_->IsDeclared("com.ivi.cluster"));
+  EXPECT_FALSE(registry_->IsDeclared("com.ivi.clustre"));
+
+  EXPECT_TRUE(registry_->RegisterBundle("com.ivi.cluster", 7));
+  // One transposition away from a declared name, which is the realistic case.
+  EXPECT_FALSE(registry_->RegisterBundle("com.ivi.clustre", 8));
+  EXPECT_FALSE(registry_->PortFor("com.ivi.clustre").has_value());
+}
+
+// Installing an empty set means "nothing is declared", which is deliberately
+// not the same state as never installing one.
+TEST_F(BridgeRegistryTest, AnEmptyDeclarationSetRefusesEverything) {
+  registry_->SetDeclaredBundles({});
+  EXPECT_FALSE(registry_->IsDeclared("com.ivi.cluster"));
+  EXPECT_FALSE(registry_->RegisterBundle("com.ivi.cluster", 7));
+}
+
 // A restart re-registers the same symbolic name, which requires an explicit
 // unregister first.
 TEST_F(BridgeRegistryTest, UnregisterAllowsReRegistration) {
@@ -283,6 +316,18 @@ TEST_F(BridgeRegistryTest, ForwardsActiveAndStoppedToTheObserver) {
 TEST_F(BridgeRegistryTest, RejectsActiveFromAnUnregisteredBundle) {
   RecordingObserver observer;
   registry_->SetLifecycleObserver(&observer);
+  EXPECT_FALSE(registry_->ReportActive("com.ivi.ghost"));
+  EXPECT_TRUE(observer.active.empty());
+}
+
+// An undeclared bundle is stopped at registration, so the report it would have
+// sent has nothing to advance. Gating the one path gates both.
+TEST_F(BridgeRegistryTest, AnUndeclaredBundleCannotReportActive) {
+  RecordingObserver observer;
+  registry_->SetLifecycleObserver(&observer);
+  registry_->SetDeclaredBundles({"com.ivi.cluster"});
+
+  EXPECT_FALSE(registry_->RegisterBundle("com.ivi.ghost", 7));
   EXPECT_FALSE(registry_->ReportActive("com.ivi.ghost"));
   EXPECT_TRUE(observer.active.empty());
 }

@@ -375,6 +375,19 @@ int main(const int argc, char** argv) {
     if (!osgi_config.empty()) {
       orchestrator = std::make_unique<ihs::osgi::BundleStartupOrchestrator>(
           bundle_host, osgi_config.bundles);
+      // Tell the bridge which symbolic names the configuration declares, so a
+      // bundle announcing anything else is refused at init. Installed before
+      // any bundle starts: a name the shell does not know would otherwise
+      // complete the handshake and then be dropped by the orchestrator,
+      // surfacing as the correctly named bundle's deadline expiring instead of
+      // as an error at the call that made it.
+      std::vector<std::string> declared_bundles;
+      declared_bundles.reserve(osgi_config.bundles.size());
+      for (const auto& manifest : osgi_config.bundles) {
+        declared_bundles.push_back(manifest.symbolic_name);
+      }
+      ihs::osgi::BridgeRegistry::Instance().SetDeclaredBundles(
+          std::move(declared_bundles));
       // Connect the bridge to the orchestrator. Without this a bundle can call
       // init, register its port, run its activator to completion and report
       // ACTIVE -- and the critical wait would still time out, because nothing
