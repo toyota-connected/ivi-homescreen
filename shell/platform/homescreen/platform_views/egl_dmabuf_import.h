@@ -57,12 +57,39 @@ class EglDmabufImporter {
   // EGL_EXT_image_dma_buf_import / glEGLImageTargetTexture2DOES (the plugin
   // then falls back to the software floor). Call once before Import; no GL
   // context needs to be current for Init.
+  //
+  // Also probes the native-fence-sync entry points, which are optional: a
+  // display that imports dma-bufs but cannot wait on a producer's sync_file
+  // still returns true here and simply reports has_native_fence_sync() false.
   bool Init(void* egl_display);
 
   [[nodiscard]] bool ready() const {
     return egl_display_ != nullptr && create_image_ != nullptr &&
            image_target_texture_ != nullptr;
   }
+
+  // Whether this display can wait on a producer's sync_file, i.e. whether
+  // WaitAcquireFence does anything. Independent of ready(): import and
+  // explicit-sync acquire are separate driver capabilities, and this is what
+  // backs IhsPvCapabilities::explicit_sync on an EGL backend (#513).
+  [[nodiscard]] bool has_native_fence_sync() const {
+    return egl_display_ != nullptr && create_sync_ != nullptr &&
+           destroy_sync_ != nullptr && wait_sync_ != nullptr;
+  }
+
+  // Make the GL driver wait for @fence_fd (a producer acquire sync_file) before
+  // any subsequent draw samples the import, by wrapping it in an
+  // EGL_SYNC_NATIVE_FENCE_ANDROID and issuing a server-side eglWaitSyncKHR.
+  // The GPU does the waiting; this call does not block.
+  //
+  // Returns true when the fence was handed to EGL, which CONSUMES @fence_fd
+  // (EGL takes ownership and closes it) — the caller must not close it. Returns
+  // false when there is no native fence sync or the sync could not be created,
+  // leaving @fence_fd untouched and owned by the caller, which is the signal to
+  // fall back to a CPU wait.
+  //
+  // GL context must be current, same as Import.
+  [[nodiscard]] bool WaitAcquireFence(int fence_fd) const;
 
   // Import @frame's dma-buf planes into a texture in @out. On success the
   // texture owns the import; @frame.plane_fd[*] are consumed (EGL dup's them,
@@ -84,4 +111,10 @@ class EglDmabufImporter {
   void* create_image_{nullptr};          // PFNEGLCREATEIMAGEKHRPROC
   void* destroy_image_{nullptr};         // PFNEGLDESTROYIMAGEKHRPROC
   void* image_target_texture_{nullptr};  // PFNGLEGLIMAGETARGETTEXTURE2DOESPROC
+  // Native fence sync, for the explicit-sync acquire wait. Optional: null on a
+  // display without EGL_KHR_fence_sync / EGL_ANDROID_native_fence_sync /
+  // EGL_KHR_wait_sync, which leaves has_native_fence_sync() false.
+  void* create_sync_{nullptr};   // PFNEGLCREATESYNCKHRPROC
+  void* destroy_sync_{nullptr};  // PFNEGLDESTROYSYNCKHRPROC
+  void* wait_sync_{nullptr};     // PFNEGLWAITSYNCKHRPROC
 };

@@ -37,7 +37,11 @@
 #include "backend/drm_kms_egl/drm_compositor.h"
 #include "display/drm_display.h"
 #include "logging/logger.hpp"
+#include "platform/homescreen/platform_views/egl_dmabuf_import.h"
 #include "view/compositor_surface_interface.h"
+
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
 
 extern "C" {
 #include <drm_fourcc.h>
@@ -856,6 +860,102 @@ TEST_F(DrmBackendVkmsScene, TheDisplacedSlotComesBackToTheProducer) {
 #endif
 
   compositor_->UnregisterSurface(23);
+}
+
+// ─── Explicit-sync acquire (#513) ────────────────────────────────────────
+//
+// EglDmabufImporter::WaitAcquireFence is what lets an EGL backend advertise
+// IhsPvCapabilities::explicit_sync: instead of the raster thread blocking in
+// poll() on the producer's sync_file, the fence is handed to the GL driver and
+// the GPU waits.
+//
+// These drive the importer directly. The call site is IhsPluginView::
+// GetGlTextureName, which lives in an anonymous namespace in the view host and
+// cannot be constructed from a test -- the FakePlatformView above implements
+// GetGlTextureName itself, so presenting it never reaches the real wait. What
+// is coverable, and what is worth covering, is the fd-ownership contract:
+// eglCreateSyncKHR takes the fd on success and leaves it on failure, and the
+// caller closes it only in the second case. Get that backwards and the GL path
+// either double-closes or leaks one fd per frame.
+class EglAcquireFence : public DrmBackendVkmsBase {
+ protected:
+  void Configure(DrmConfig& cfg) override {
+    cfg.compositor = drm_config::Compositor::kGl;
+    content_w_ = card_.mode_w;
+    content_h_ = card_.mode_h;
+  }
+
+  // Mint a real sync_file by fencing GL work on the backend's own context,
+  // which is the same shape a producer's acquire fence has.
+  [[nodiscard]] int MintFence() {
+    auto create = reinterpret_cast<PFNEGLCREATESYNCKHRPROC>(
+        eglGetProcAddress("eglCreateSyncKHR"));
+    auto destroy = reinterpret_cast<PFNEGLDESTROYSYNCKHRPROC>(
+        eglGetProcAddress("eglDestroySyncKHR"));
+    auto dup_fd = reinterpret_cast<PFNEGLDUPNATIVEFENCEFDANDROIDPROC>(
+        eglGetProcAddress("eglDupNativeFenceFDANDROID"));
+    if (create == nullptr || destroy == nullptr || dup_fd == nullptr) {
+      return -1;
+    }
+    const EGLDisplay dpy = backend_->egl_display();
+    glClear(GL_COLOR_BUFFER_BIT);
+    EGLSyncKHR s = create(dpy, EGL_SYNC_NATIVE_FENCE_ANDROID, nullptr);
+    if (s == EGL_NO_SYNC_KHR) {
+      return -1;
+    }
+    glFlush();
+    const int fd = dup_fd(dpy, s);
+    destroy(dpy, s);
+    return fd;
+  }
+
+  static bool FdOpen(int fd) {
+    return fcntl(fd, F_GETFD) != -1 || errno != EBADF;
+  }
+};
+
+// On success EGL owns the fence: the caller must not close it, and after the
+// sync is destroyed the fd is gone. This is the branch the GL path takes on any
+// driver with native fence sync, so a leak here is a leak every frame.
+TEST_F(EglAcquireFence, ASuccessfulWaitConsumesTheProducersFence) {
+  ASSERT_TRUE(backend_->MakeCurrent());
+  EglDmabufImporter importer;
+  ASSERT_TRUE(importer.Init(backend_->egl_display()));
+  if (!importer.has_native_fence_sync()) {
+    GTEST_SKIP() << "display has no EGL_ANDROID_native_fence_sync; the GL path "
+                    "falls back to the CPU wait here";
+  }
+
+  const int fence = MintFence();
+  ASSERT_GE(fence, 0) << "could not mint a sync_file to stand in for the "
+                         "producer's acquire fence";
+  ASSERT_TRUE(FdOpen(fence));
+
+  EXPECT_TRUE(importer.WaitAcquireFence(fence));
+  EXPECT_FALSE(FdOpen(fence))
+      << "EGL took ownership of the fence, so it must be closed -- the caller "
+         "skipping its close() depends on exactly this";
+}
+
+// The importer reports the capability separately from ready(): a display that
+// imports dma-bufs but cannot wait on a sync_file still imports, and is what
+// leaves IhsPvCapabilities::explicit_sync at 0.
+TEST_F(EglAcquireFence, ImportStaysAvailableIndependentOfFenceSync) {
+  ASSERT_TRUE(backend_->MakeCurrent());
+  EglDmabufImporter importer;
+  ASSERT_TRUE(importer.Init(backend_->egl_display()));
+  EXPECT_TRUE(importer.ready())
+      << "dma-buf import is what Init's return value is about";
+}
+
+// A negative fd is the implicit-sync submit -- the producer stalled
+// synchronously and handed over no fence. Nothing to wait on, and nothing to
+// close, so the caller must not be told the fd was consumed.
+TEST_F(EglAcquireFence, NoFenceIsNotConsumed) {
+  ASSERT_TRUE(backend_->MakeCurrent());
+  EglDmabufImporter importer;
+  ASSERT_TRUE(importer.Init(backend_->egl_display()));
+  EXPECT_FALSE(importer.WaitAcquireFence(-1));
 }
 
 }  // namespace

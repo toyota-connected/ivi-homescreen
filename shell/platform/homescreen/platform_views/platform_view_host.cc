@@ -755,6 +755,15 @@ uint32_t IhsPluginView::GetGlTextureName() const {
     while (pending_egl.valid && pending_egl.acquire_fence_fd >= 0) {
       const int fence = pending_egl.acquire_fence_fd;
       pending_egl.acquire_fence_fd = -1;
+      // Explicit sync (#513): hand the fence to the GL driver and let the GPU
+      // wait on it. Cheap and non-blocking, so it runs under the lock — unlike
+      // the CPU wait below, there is nothing to drop the lock across. On
+      // success EGL owns the fd, so we must not close it here.
+      if (g_egl_importer.WaitAcquireFence(fence)) {
+        continue;
+      }
+      // No native fence sync on this display (or the sync failed): fall back to
+      // the CPU wait, which still owns the fd.
       lock.unlock();
       pollfd pfd{fence, POLLIN, 0};
       int pr = 0;
@@ -1032,6 +1041,17 @@ int HostQueryCapabilities(void* user_data, IhsPvCapabilities* out) {
     BackendEglContext egl{};
     if (backend->GetEglContext(&egl)) {
       out->kinds |= IHS_PV_KIND_TEXTURE_DMABUF_IMPORT;
+      // Explicit-sync acquire on EGL: the GL-composite path waits on the
+      // producer's sync_file with eglWaitSyncKHR before sampling the import
+      // (GetGlTextureName), which needs EGL_ANDROID_native_fence_sync on the
+      // backend's display. The importer probed that at host install, so ask it
+      // rather than re-querying here. Advertise it only when the wait is
+      // actually wired: ihs_pv_negotiate refuses EXPLICIT_REQUIRED and caps the
+      // granted sync on this flag, so claiming it without honoring it hands the
+      // producer a fence nothing waits on (#513).
+      if (g_egl_importer.has_native_fence_sync()) {
+        out->explicit_sync = 1;
+      }
       // The DRM-KMS-EGL backend (gbm_device set; wayland-egl leaves it null)
       // runs the plane compositor, which can scan out a submitted dma-buf
       // directly on a KMS overlay plane — offer the zero-copy DRM_PLANE kind.

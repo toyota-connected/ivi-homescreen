@@ -227,8 +227,10 @@ TEST(IhsPvSurface, RegisterForwardsToHost) {
 }
 
 // Explicit sync is granted only when the backend advertises the capability.
-// This is the contract #513 turns on for the EGL backends, which advertise
-// explicit_sync = 0 today and so downgrade every producer.
+// The EGL backends advertise it when the display has
+// EGL_ANDROID_native_fence_sync, so the GL-composite path can wait on the
+// producer's sync_file before sampling (#513); a display without it still
+// downgrades every producer here.
 TEST(IhsPvSurface, ExplicitSyncGrantedWhenBackendAdvertisesIt) {
   MockHost host_state;
   host_state.explicit_sync = 1;
