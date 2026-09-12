@@ -48,8 +48,12 @@ extern "C" {
 
 #include <GLES2/gl2.h>
 
+#include "capture/png.hpp"
+#include "capture/snapshot.hpp"
+
 #include <gtest/gtest.h>
 
+#include <iostream>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -187,6 +191,7 @@ class FakePlatformView : public ICompositorSurface {
   }
 
   void set_texture(uint32_t tex) { tex_ = tex; }
+  [[nodiscard]] int32_t width() const { return 16; }
   [[nodiscard]] int presents() const { return presents_; }
 
   [[nodiscard]] std::vector<uint32_t> released() const {
@@ -216,6 +221,11 @@ class DrmBackendVkmsBase : public ::testing::Test {
   // Which present path this fixture pins. Never left to DriverProbe: see the
   // comment on cfg.compositor below.
   virtual void Configure(DrmConfig& cfg) = 0;
+
+  // The framebuffer the compositor draws into, which a full-size layer has to
+  // match. Set by Configure; the backend keeps its own copy privately.
+  uint32_t content_w_{0};
+  uint32_t content_h_{0};
 
   void SetUp() override {
     card_ = FindVkms();
@@ -278,6 +288,57 @@ class DrmBackendVkmsBase : public ::testing::Test {
     display_.reset();
   }
 
+  // Paint the fixture's texture a flat colour, so a snapshot can say whether
+  // the compositor actually sampled it. Bytes are R,G,B,A in GL memory order.
+  void PaintTexture(uint8_t r, uint8_t g, uint8_t b) {
+    std::array<uint8_t, 16 * 16 * 4> px{};
+    for (size_t i = 0; i < px.size(); i += 4) {
+      px[i + 0] = r;
+      px[i + 1] = g;
+      px[i + 2] = b;
+      px[i + 3] = 0xFF;
+    }
+    ASSERT_TRUE(backend_->MakeCurrent());
+    glBindTexture(GL_TEXTURE_2D, tex_);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 16, 16, 0, GL_RGBA,
+                 GL_UNSIGNED_BYTE, px.data());
+    ASSERT_EQ(glGetError(), static_cast<GLenum>(GL_NO_ERROR));
+  }
+
+  // Read the CRTC's plane composition back. drm-cxx maps each scanout FB and
+  // composites in zpos order, so this is what the display is actually showing
+  // -- not what the compositor believes it drew.
+  //
+  // Writes a PNG alongside when IHS_TEST_CAPTURE_DIR names a directory, which
+  // is how a frame from this test gets looked at rather than only asserted on.
+  drm::capture::Image Snapshot(const char* name) {
+    auto shot = drm::capture::snapshot(backend_->device(), backend_->crtc_id());
+    if (!shot) {
+      ADD_FAILURE() << "snapshot failed: " << shot.error().message();
+      return {};
+    }
+    drm::capture::Image image = std::move(shot.value());
+    if (const char* dir = std::getenv("IHS_TEST_CAPTURE_DIR"); dir != nullptr) {
+      const std::string path = std::string(dir) + "/" + name + ".png";
+      if (auto w = drm::capture::write_png(image, path); !w) {
+        ADD_FAILURE() << "write_png: " << w.error().message();
+      } else {
+        std::cerr << "capture: " << path << "\n";
+      }
+    }
+    return image;
+  }
+
+  // The pixel at the centre of the CRTC, as 0xAARRGGBB.
+  static uint32_t CentrePixel(const drm::capture::Image& img) {
+    if (img.empty()) {
+      return 0;
+    }
+    const size_t i =
+        static_cast<size_t>(img.height() / 2) * img.width() + img.width() / 2;
+    return img.pixels()[i];
+  }
+
   // One frame carrying nothing but the platform view.
   bool PresentPlatformView(FlutterPlatformViewIdentifier id) {
     FlutterPlatformView pv{};
@@ -289,7 +350,8 @@ class DrmBackendVkmsBase : public ::testing::Test {
     layer.type = kFlutterLayerContentTypePlatformView;
     layer.platform_view = &pv;
     layer.offset = FlutterPoint{0.0, 0.0};
-    layer.size = FlutterSize{16.0, 16.0};
+    layer.size = FlutterSize{static_cast<double>(layer_w_),
+                             static_cast<double>(layer_h_)};
 
     const FlutterLayer* layers[] = {&layer};
     return compositor_->PresentLayers(layers, 1);
@@ -300,6 +362,11 @@ class DrmBackendVkmsBase : public ::testing::Test {
   std::unique_ptr<DrmBackend> backend_;
   DrmCompositor* compositor_{nullptr};
   uint32_t tex_{0};
+  // Layer extent for PresentPlatformView. Small by default; the pixel cases
+  // set it to the whole framebuffer so the centre of the CRTC lands inside it
+  // whatever the letterboxing.
+  uint32_t layer_w_{16};
+  uint32_t layer_h_{16};
 };
 
 // The GL compositor, full screen: PresentViaGlFallback.
@@ -307,6 +374,8 @@ class DrmBackendVkms : public DrmBackendVkmsBase {
  protected:
   void Configure(DrmConfig& cfg) override {
     cfg.compositor = drm_config::Compositor::kGl;
+    content_w_ = card_.mode_w;
+    content_h_ = card_.mode_h;
   }
 };
 
@@ -325,6 +394,8 @@ class DrmBackendVkmsFramed : public DrmBackendVkmsBase {
     cfg.compositor = drm_config::Compositor::kPlanes;
     cfg.width = card_.mode_w - 64;
     cfg.height = card_.mode_h - 64;
+    content_w_ = *cfg.width;
+    content_h_ = *cfg.height;
   }
 };
 
@@ -428,6 +499,59 @@ TEST_F(DrmBackendVkmsFramed, GlCompositedViewIsReportedOffAnyPlane) {
                                   "on no plane of its own";
 
   compositor_->UnregisterSurface(15);
+}
+
+// The compositor drew the plugin's texture, not just bookkeeping around it.
+//
+// Every other case here asserts on which callbacks fired, which says nothing
+// about whether a pixel moved. This reads the CRTC's plane composition back --
+// drm-cxx maps each scanout FB and composites in zpos order -- and checks the
+// colour the fake uploaded is the colour on screen at the centre of the
+// display. A view that is registered, presented and released correctly but
+// composited from the wrong texture, at the wrong scale, or into a buffer
+// nothing scans out would pass everything above and fail here.
+TEST_F(DrmBackendVkms, TheViewsTextureReachesTheDisplay) {
+  auto view = std::make_shared<FakePlatformView>(17);
+  view->set_texture(tex_);
+  PaintTexture(0x20, 0x80, 0xC0);
+  layer_w_ = content_w_;
+  layer_h_ = content_h_;
+  compositor_->RegisterSurface(17, view);
+
+  ASSERT_TRUE(PresentPlatformView(17));
+
+  const drm::capture::Image image = Snapshot("gl_platform_view");
+  ASSERT_FALSE(image.empty());
+  EXPECT_EQ(image.width(), card_.mode_w);
+  EXPECT_EQ(image.height(), card_.mode_h);
+  // RGB only: the primary is XRGB8888, so the alpha byte carries no meaning.
+  EXPECT_EQ(CentrePixel(image) & 0x00FFFFFFu, 0x002080C0u)
+      << "the centre of the display is not the colour the view uploaded";
+
+  compositor_->UnregisterSurface(17);
+}
+
+TEST_F(DrmBackendVkmsFramed, TheViewsTextureReachesTheDisplay) {
+  auto view = std::make_shared<FakePlatformView>(19);
+  view->set_texture(tex_);
+  PaintTexture(0xC0, 0x40, 0x20);
+  layer_w_ = content_w_;
+  layer_h_ = content_h_;
+  compositor_->RegisterSurface(19, view);
+
+  ASSERT_TRUE(PresentPlatformView(19));
+
+  const drm::capture::Image image = Snapshot("framed_platform_view");
+  ASSERT_FALSE(image.empty());
+  // The CRTC is the mode; the content is the smaller FB centred in it. The
+  // centre pixel is inside the content either way, which is the point of
+  // sampling there rather than at a corner.
+  EXPECT_EQ(image.width(), card_.mode_w);
+  EXPECT_EQ(image.height(), card_.mode_h);
+  EXPECT_EQ(CentrePixel(image) & 0x00FFFFFFu, 0x00C04020u)
+      << "the centre of the display is not the colour the view uploaded";
+
+  compositor_->UnregisterSurface(19);
 }
 
 }  // namespace
