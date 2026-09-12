@@ -1276,6 +1276,9 @@ void DrmBackend::OnSessionPaused() {
   // a commit submitted before the revoke; the next Present after resume
   // will start a fresh flip cycle.
   flip_pending_.store(false, std::memory_order_release);
+  if (drm_display_ != nullptr) {
+    drm_display_->WakeFlipDrain();  // nothing will arrive; unpark the waiter
+  }
 }
 
 void DrmBackend::OnSessionResumed(const int new_fd) {
@@ -1348,6 +1351,11 @@ void DrmBackend::OnLegacyFlipComplete() {
   pending_bo_ = nullptr;
   pending_fb_ = 0;
   flip_pending_.store(false, std::memory_order_release);
+  // The reader thread may have drained this event while the rasterizer was
+  // entering its poll. Wake it rather than let it wait out the budget (#367).
+  if (drm_display_ != nullptr) {
+    drm_display_->WakeFlipDrain();
+  }
   RecordFlipComplete();
 }
 
@@ -1451,6 +1459,9 @@ void DrmBackend::StopVsyncMonitor() {
           "[DrmBackend] StopVsyncMonitor: flip event never arrived, "
           "force-clearing flip_pending_ to unblock destructors");
       flip_pending_.store(false, std::memory_order_release);
+      if (drm_display_ != nullptr) {
+        drm_display_->WakeFlipDrain();
+      }
 #if BUILD_COMPOSITOR
       if (compositor_) {
         compositor_->OnFlipComplete();
@@ -1502,7 +1513,8 @@ bool DrmBackend::WaitForPendingFlip() const {
               .count();
       // Blocks up to the remaining budget waiting for the event, then drains
       // it (clearing flip_pending_ via the handler). Falls through to re-check
-      // the flag when it returns.
+      // the flag when it returns. If the reader drained this flip first, the
+      // waker ends the poll at once instead of burning the budget (#367).
       drm_display_->DrainReadyFlips(static_cast<int>(remaining));
     } else {
       // No drain: wait on the flag alone, in slices, as DrmCompositor does.

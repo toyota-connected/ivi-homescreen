@@ -170,6 +170,13 @@ add_subdirectory(ihs_pv-test)
 if (TARGET PkgConfig::DRM)
     add_subdirectory(drm_flip_wake-test)
 endif ()
+# The same race through the real DrmDisplay: DrainReadyFlips and WakeFlipDrain
+# with the card's reader thread running. Needs the display sources and drm-cxx,
+# which exist once a DRM-KMS backend is configured; the mechanism test above
+# needs neither. Skips itself without vkms + DRM master.
+if (TARGET drm-cxx)
+    add_subdirectory(drm_flip_waker-test)
+endif ()
 # T1 — drives the real LeaseClient against a mock drm-lease-v1 compositor.
 # Needs no GPU/compositor, so it runs anywhere the lease client is built.
 if (BUILD_BACKEND_WAYLAND_LEASED_DRM)

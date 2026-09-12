@@ -409,18 +409,47 @@ void DrmDisplay::ArmFlipRead() {
 
 void DrmDisplay::DrainFlip() {
   // The reader thread's re-arm callback: drain whatever is ready right now.
-  (void)DrainReadyFlips(0);
+  // Never polls the waker -- consuming it here would leave a raster thread
+  // parked with nothing left to wake it.
+  (void)DrainImpl(0, /*use_waker=*/false);
+}
+
+void DrmDisplay::WakeFlipDrain() const {
+  flip_waker_.Wake();
 }
 
 bool DrmDisplay::DrainReadyFlips(const int timeout_ms) {
+  return DrainImpl(timeout_ms, /*use_waker=*/true);
+}
+
+bool DrmDisplay::DrainImpl(const int timeout_ms, const bool use_waker) {
   if (!drm_dev_.has_value() || flip_handler_ == nullptr) {
     return false;
   }
   const int fd = drm_dev_->fd();
   // Wait for readability WITHOUT the lock so the reader thread and the raster
   // thread can both block here; whichever wins the drain locks below.
-  pollfd pfd{fd, POLLIN, 0};
-  if (::poll(&pfd, 1, timeout_ms) <= 0 || (pfd.revents & POLLIN) == 0) {
+  //
+  // The waker rides in this poll set for the raster path (#367). Without it,
+  // a thread that observed the flip pending and then entered the poll after
+  // the reader had already consumed the event would wait out the whole budget:
+  // the event is gone, so the fd never becomes readable again. A negative fd
+  // (WakeEventFd's degraded mode) is ignored by poll, which is the old
+  // behavior.
+  pollfd pfds[2];
+  pfds[0] = pollfd{fd, POLLIN, 0};
+  pfds[1] = pollfd{use_waker ? flip_waker_.fd() : -1, POLLIN, 0};
+  if (::poll(pfds, 2, timeout_ms) <= 0) {
+    return false;
+  }
+  if ((pfds[1].revents & POLLIN) != 0) {
+    // Woken because the flag was cleared elsewhere. Clear the eventfd and let
+    // the caller re-check it; there is no event of ours left to drain.
+    flip_waker_.Drain();
+    return false;
+  }
+  const pollfd& pfd = pfds[0];
+  if ((pfd.revents & POLLIN) == 0) {
     return false;
   }
   // Serialize the actual fd read: two threads may have seen it readable, but
