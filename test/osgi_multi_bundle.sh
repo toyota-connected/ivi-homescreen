@@ -60,6 +60,12 @@
 #                    (ENABLE_OSGI=ON), and an activator bundle built with it.
 #   COUNT_FLIPS      1 = prove page flips via strace (default 0)
 #   SOFTWARE_RENDER  1 = LIBGL_ALWAYS_SOFTWARE=1 (vkms/llvmpipe)
+#   REQUIRE_RUN      1 = a run that asserted nothing is a failure. Every skip
+#                    here is a prerequisite check, and skipping them all exits
+#                    0 -- which is how this harness reported success on CI
+#                    while never resolving a card. Default 0, because a skip is
+#                    the right answer on a laptop with no vkms; CI sets it once
+#                    it has provisioned the card the harness needs.
 #   --check          verify prerequisites only, do not launch
 #
 set -uo pipefail
@@ -69,6 +75,8 @@ BUNDLE="${BUNDLE:-}"
 # No numeric defaults: see the DRM_DEVICE note above.
 DRM_DEVICE="${DRM_DEVICE:-}"
 DRM_DEVICE_EXPLICIT=$([ -n "${DRM_DEVICE}" ] && echo 1 || echo 0)
+# Read under set -u, so it needs a default here rather than at the use site.
+REQUIRE_RUN="${REQUIRE_RUN:-0}"
 CONNECTOR_A="${CONNECTOR_A:-}"
 CONNECTOR_B="${CONNECTOR_B:-}"
 DURATION="${DURATION:-6}"
@@ -105,7 +113,17 @@ summary() {
     log "──── summary ────"
     for r in "${RESULTS[@]}"; do echo "  $r"; done
     log "RAN: ${#RESULTS[@]}  PASS=$PASS  FAIL=$FAIL"
-    [[ "$FAIL" -eq 0 ]] && exit 0 || exit 1
+    [[ "$FAIL" -ne 0 ]] && exit 1
+    # Every exit above this point is a prerequisite skip, and each one reaches
+    # here with FAIL=0. That is the right answer where the rig genuinely cannot
+    # run the case, and it is why CI reported this harness green over both
+    # transports while resolving no card at all. Where the caller has asserted
+    # the rig is ready, a run that proved nothing is a failure.
+    if [[ "$REQUIRE_RUN" == "1" && "$PASS" -eq 0 ]]; then
+        log "FAIL: REQUIRE_RUN=1 and no case ran -- every check was skipped"
+        exit 1
+    fi
+    exit 0
 }
 
 # Shared DRM discovery: see test/lib/drm_card.sh for why nothing is hardcoded.

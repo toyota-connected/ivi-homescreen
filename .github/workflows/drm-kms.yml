@@ -146,6 +146,75 @@ jobs:
             echo "::warning::vkms module unavailable on $(uname -r); skipping smoke test"
           fi
 
+      # A bare modprobe gives one card with one connected connector, and the
+      # OSGi multi-bundle harness needs two on the same card -- it pins a
+      # bundle to each. It resolves the card with ihs_find_vkms_card 2, found
+      # nothing, and skipped both transport legs while the job stayed green.
+      # The census and input harnesses ask for one connector, which is why they
+      # ran on card0 in the same step and this one did not.
+      #
+      # vkms_dual.sh provisions a second instance through the vkms configfs
+      # interface, so it adds a card rather than reloading the module: card0
+      # and everything already using it are untouched.
+      #
+      # It does not work on a GitHub-hosted runner, and the attempt stays here
+      # deliberately. configfs is mounted and healthy on those images -- the
+      # listing below prints crash_dm_crypt_keys, pci_ep and tsm -- but vkms
+      # registers no subsystem under it on 6.17.0-1022-azure, so the interface
+      # is absent from that build rather than merely unmounted. drm-cxx
+      # documents a >= 6.11 floor, and 6.17 lacking it while 7.1 has it puts
+      # the true floor higher than that. vkms has no module parameter for
+      # connector count, so there is no other way to get two connectors onto
+      # one card here: running this harness needs a self-hosted runner or real
+      # hardware.
+      #
+      # Keeping the attempt costs one warning per run and starts working the
+      # day a runner image ships the interface. REQUIRE_RUN below is what stops
+      # that from being mistaken for the harness passing.
+      - name: Provision a dual-connector vkms instance
+        id: vkms_dual
+        if: steps.vkms.outputs.available == 'true'
+        run: |
+          # The mount is defensive rather than corrective: it was already
+          # mounted on the runner, and this only covers an environment where it
+          # is not. What matters is the listing underneath it, because
+          # vkms_dual.sh reports a missing subsystem and an unmounted configfs
+          # with one message -- "kernel < 6.11 or vkms configfs disabled" --
+          # and those want opposite responses. Printing the kernel, the mount
+          # line and the subsystem list is what turned an unexplained
+          # "no vkms card found" into a specific missing kernel capability, so
+          # it stays whether or not the provisioning below ever succeeds here.
+          sudo modprobe configfs 2>/dev/null || true
+          grep -q ' /sys/kernel/config ' /proc/mounts \
+            || sudo mount -t configfs none /sys/kernel/config 2>/dev/null || true
+          echo "kernel: $(uname -r)"
+          grep ' /sys/kernel/config ' /proc/mounts || echo "  configfs NOT mounted"
+          echo "/sys/kernel/config:"
+          ls /sys/kernel/config 2>&1 | sed 's/^/  /'
+          if sudo third_party/drm-cxx/scripts/vkms_dual.sh up; then
+            # The node arrives root:video 0660 and the harness runs as the
+            # unprivileged runner user, so without this it would fail to open a
+            # card that is finally there -- worse than the skip it replaces.
+            #
+            # This is the first of two. udev processes a newly created node
+            # asynchronously, so its rule can re-apply root:video 0660 after
+            # this chmod and hand the permission back -- which is what #554
+            # found in the unit-tests job, where an early chmod printed
+            # crw-rw-rw- and the driver still saw no usable card. A node this
+            # step has just created is the worst case for that race, so the
+            # step before the harness applies it again and checks it held.
+            sudo chmod a+rw /dev/dri/card* 2>/dev/null || true
+            sudo third_party/drm-cxx/scripts/vkms_dual.sh status || true
+            echo "provisioned=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "provisioned=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::vkms_dual.sh could not provision two connectors; the OSGi multi-bundle harness will skip"
+          fi
+          echo "connectors by card:"
+          for c in /sys/class/drm/card[0-9]*-*/status; do
+            [ -e "$c" ] && echo "  $c = $(cat "$c")"
+          done
+
       - name: Harness pre-flight (--check)
         if: steps.vkms.outputs.available == 'true'
         run: |
@@ -182,10 +251,51 @@ jobs:
           key: emb-engine-x86_64
           restore-keys: |
             emb-engine-x86_64-
+      # Card state as the harness will actually find it, then fix it. Same
+      # treatment #554 gave the unit-tests job, for the same reason: a chmod
+      # applied when the node was created can be undone by udev before anything
+      # opens it, so the one that counts is the one nearest the consumer.
+      #
+      # The listing is printed BEFORE the chmod deliberately. It shows the state
+      # the harness would have found on its own, which is the only way to tell
+      # whether the permission had been handed back or was never the problem.
+      #
+      # The first run carrying this step answered a question that had been open
+      # here, and the answer was no. The census skips drm-kms-egl with "backend
+      # did not render" while the software backend passes on the same card, and
+      # access was a candidate. It printed root:video 0660 for both cards, then
+      # "readable and writable by runner" after the chmod, and the census
+      # skipped drm-kms-egl regardless. So that backend renders nothing for some
+      # other reason, and this job had been passing its census and input
+      # harnesses all along without write access to the node.
+      #
+      # The chmod stays for the case it was added for: a card this job
+      # provisions itself, which no other step widens.
+      - name: Card state before the harness
+        if: steps.vkms.outputs.available == 'true'
+        run: |
+          ls -l /dev/dri/ || true
+          sudo chmod a+rw /dev/dri/card* 2>/dev/null || true
+          # Test the node rather than infer from mode bits: the harness opens
+          # it, so open-ability is the property that matters.
+          for c in /dev/dri/card*; do
+            if [ -r "$c" ] && [ -w "$c" ]; then
+              echo "$c: readable and writable by $(id -un)"
+            else
+              echo "$c: NOT accessible to $(id -un)"
+            fi
+          done
+
       - name: Harness integration (census + input harness on vkms)
         if: steps.vkms.outputs.available == 'true'
         env:
           IVI_BUILD: ${{github.workspace}}/build
+          # Only demand that the OSGi harness assert something where the card
+          # it needs was actually provisioned. Where it was not, this stays 0
+          # and the leg skips as before: a capability the runner never had
+          # should read as a warning, the way an absent vkms or uinput does,
+          # rather than as a red build.
+          REQUIRE_RUN: ${{ steps.vkms_dual.outputs.provisioned == 'true' && '1' || '0' }}
         run: |
           eval "$(./emb_cli/bootstrap.sh --shellenv)"
           emb --version
