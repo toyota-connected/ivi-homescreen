@@ -231,7 +231,7 @@ class FakePlatformView : public ICompositorSurface {
   std::vector<uint32_t> planes_;
 };
 
-// A scanout-capable dma-buf filled with a flat colour.
+// A scanout-capable dma-buf filled with a flat color.
 //
 // Allocated through GBM on the card itself. vkms has no render node, so there
 // is no GPU to render into it -- but the scene path never renders a platform
@@ -494,7 +494,7 @@ class DrmBackendVkmsBase : public ::testing::Test {
     display_.reset();
   }
 
-  // Paint the fixture's texture a flat colour, so a snapshot can say whether
+  // Paint the fixture's texture a flat color, so a snapshot can say whether
   // the compositor actually sampled it. Bytes are R,G,B,A in GL memory order.
   void PaintTexture(uint8_t r, uint8_t g, uint8_t b) {
     std::array<uint8_t, 16 * 16 * 4> px{};
@@ -536,8 +536,8 @@ class DrmBackendVkmsBase : public ::testing::Test {
     return image;
   }
 
-  // The pixel at the centre of the CRTC, as 0xAARRGGBB.
-  static uint32_t CentrePixel(const drm::capture::Image& img) {
+  // The pixel at the center of the CRTC, as 0xAARRGGBB.
+  static uint32_t CenterPixel(const drm::capture::Image& img) {
     if (img.empty()) {
       return 0;
     }
@@ -553,7 +553,7 @@ class DrmBackendVkmsBase : public ::testing::Test {
     EXPECT_EQ(image.width(), card_.mode_w);
     EXPECT_EQ(image.height(), card_.mode_h);
     // RGB only: the primary is XRGB8888, so the alpha byte carries no meaning.
-    EXPECT_EQ(CentrePixel(image) & 0x00FFFFFFu, rgb)
+    EXPECT_EQ(CenterPixel(image) & 0x00FFFFFFu, rgb)
         << "the center of the display is not the color that was expected";
   }
 #endif  // IHS_TEST_HAVE_CAPTURE
@@ -604,7 +604,7 @@ class DrmBackendVkmsBase : public ::testing::Test {
   DrmCompositor* compositor_{nullptr};
   uint32_t tex_{0};
   // Layer extent for PresentPlatformView. Small by default; the pixel cases
-  // set it to the whole framebuffer so the centre of the CRTC lands inside it
+  // set it to the whole framebuffer so the center of the CRTC lands inside it
   // whatever the letterboxing.
   uint32_t layer_w_{16};
   uint32_t layer_h_{16};
@@ -765,7 +765,7 @@ TEST_F(DrmBackendVkmsFramed, GlCompositedViewIsReportedOffAnyPlane) {
 // Every other case here asserts on which callbacks fired, which says nothing
 // about whether a pixel moved. This reads the CRTC's plane composition back --
 // drm-cxx maps each scanout FB and composites in zpos order -- and checks the
-// colour the fake uploaded is the colour on screen at the centre of the
+// color the fake uploaded is the color on screen at the center of the
 // display. A view that is registered, presented and released correctly but
 // composited from the wrong texture, at the wrong scale, or into a buffer
 // nothing scans out would pass everything above and fail here.
