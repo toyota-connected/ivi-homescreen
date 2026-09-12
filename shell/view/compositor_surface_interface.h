@@ -382,6 +382,20 @@ class ICompositorSurface {
   virtual void OnScanoutRelease(uint32_t /*buffer_id*/) {}
 
   /**
+   * @brief The producer's @c buffer_id for the frame @c GetGlTextureName last
+   * bound, or 0 when nothing is bound or the surface does not track it.
+   *
+   * The GL-composite path has no plane and therefore no scanout retire, so it
+   * cannot use @c OnScanoutRelease's natural trigger. It needs this to tell one
+   * frame from the next: a buffer is finished with once a newer one has
+   * displaced it as the bound texture *and* the flip that sampled it has
+   * completed. Without it a GL-composited producer never learns that a ring
+   * slot is free, waits out its release timeout on every frame, and runs at a
+   * fraction of the display rate for reasons that look like the renderer.
+   */
+  [[nodiscard]] virtual uint32_t GetGlTextureBufferId() const { return 0; }
+
+  /**
    * @brief Report which KMS plane the surface's frame was scanned out on this
    * present, or 0 when it was GL-composited (no plane) this present.
    *

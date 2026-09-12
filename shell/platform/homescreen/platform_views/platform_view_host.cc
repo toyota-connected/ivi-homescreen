@@ -254,6 +254,10 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   mutable PendingEglFrame pending_egl;
   mutable std::map<uint32_t, EglDmabufImporter::ImportedTexture> buffers_egl;
   mutable EglDmabufImporter::ImportedTexture* current_egl{nullptr};
+  // Producer buffer_id of the frame current_egl was imported from, for
+  // GetGlTextureBufferId. The GL path has no scanout retire to key a release
+  // off, so the compositor tells one bound frame from the next by this.
+  mutable uint32_t current_egl_buffer_id{0};
   struct RetiredEglImport {
     EglDmabufImporter::ImportedTexture texture;
     uint64_t reap_at{0};
@@ -533,6 +537,13 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     release_fence_fd = fd;
   }
 
+  // Producer buffer_id of the frame currently bound as a GL texture. Raster
+  // thread, same as GetGlTextureName.
+  [[nodiscard]] uint32_t GetGlTextureBufferId() const override {
+    const std::lock_guard<std::mutex> lock(mutex);
+    return current_egl != nullptr ? current_egl_buffer_id : 0;
+  }
+
   // The DRM scene path retired this frame; wake the producer's release fence
   // for its ring slot. Compositor thread.
   void OnScanoutRelease(uint32_t buffer_id) override {
@@ -774,6 +785,7 @@ uint32_t IhsPluginView::GetGlTextureName() const {
         it->second.height == f.height) {
       CloseFrameFds(&f);  // redundant handle to the cached import
       current_egl = &it->second;
+      current_egl_buffer_id = f.buffer_id;
     } else {
       if (it != buffers_egl.end()) {
         retired_egl.push_back({it->second, submit_seq + kImportRetireMargin});
@@ -783,6 +795,7 @@ uint32_t IhsPluginView::GetGlTextureName() const {
       if (g_egl_importer.Import(f, &imported)) {
         auto [pos, ins] = buffers_egl.emplace(f.buffer_id, imported);
         current_egl = &pos->second;
+        current_egl_buffer_id = f.buffer_id;
         // Synthesised ids never repeat, so every earlier entry is dead. Retire
         // them (the reap margin covers a compositor present still binding one)
         // so the cache holds just the current import rather than growing per
@@ -1206,7 +1219,21 @@ int HostSubmit(void* user_data,
       // for it -- signal its release here so the producer reclaims that slot. A
       // frame that WAS delivered rides OnScanoutRelease and must not be
       // double-signalled.
-      if (v->dmabuf_delivered_seq < v->pending_egl.stash_seq) {
+      // Release the superseded frame unless it is on a plane, where
+      // OnScanoutRelease will do it.
+      //
+      // `dmabuf_delivered_seq` alone is the wrong test. It says GetDmabuf
+      // handed the frame over, not that the frame reached a plane -- and on the
+      // GL-composited path the compositor polls GetDmabuf and then composites
+      // through a texture instead, so a frame reads as delivered and is never
+      // scanned out. Nothing then releases it: it was superseded before being
+      // bound, so it is never displaced either, and its eventfd is left for the
+      // producer to wait out. Every frame. See #530.
+      //
+      // drm_plane_id is 0 exactly when the last present GL-composited this view
+      // (SetScanoutPlane(0)), which is the case where no retire is coming.
+      const bool on_a_plane = v->drm_plane_id.load(std::memory_order_relaxed) != 0;
+      if (v->dmabuf_delivered_seq < v->pending_egl.stash_seq || !on_a_plane) {
         v->SignalRelease(v->pending_egl.frame.buffer_id);
       }
       CloseFrameFds(&v->pending_egl.frame);  // superseded before import
