@@ -531,6 +531,29 @@ jobs:
         with:
           packages: lcov
 
+      # The DRM-KMS-EGL compositor test drives a real DrmBackend + DrmCompositor
+      # on a virtual card. Without one it skips every case, so this job built it
+      # and proved nothing. enable_overlay=1 is not optional either: the driver
+      # probe disables the plane compositor without an overlay plane, and the
+      # framed and scene cases -- the paths #530 was found on -- stop existing.
+      #
+      # Best-effort. The Azure CI kernel often strips vkms (same fallback the
+      # vkms-smoke job uses); where it cannot be loaded the cases skip, exactly
+      # as they do on a developer machine without it.
+      - name: Load vkms (compositor tests; skipped without it)
+        run: |
+          if ! sudo modprobe vkms enable_overlay=1 2>/dev/null; then
+            echo "vkms not in $(uname -r); trying linux-modules-extra"
+            sudo apt-get -y install "linux-modules-extra-$(uname -r)" || true
+            sudo modprobe vkms enable_overlay=1 2>/dev/null || true
+          fi
+          if lsmod | grep -q vkms; then
+            echo "vkms loaded; overlay planes:"
+            cat /sys/module/vkms/parameters/enable_overlay
+          else
+            echo "::warning::vkms unavailable on $(uname -r); the DRM compositor cases will skip"
+          fi
+
       - name: Run unit tests (CTest)
         working-directory: ${{github.workspace}}/build/unit-tests
         run: ctest --output-on-failure --test-dir .
