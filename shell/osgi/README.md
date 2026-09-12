@@ -25,6 +25,7 @@ here is built and the binary carries no `ihs::osgi` symbols.
 | Per-bundle startup deadline, torn down on expiry | Built-in | `startup_timeout_ms` (1…3600000) |
 | `dev.osgi/bridge` handshake: a bundle announces itself and reports ACTIVE | Built-in | `OsgiBridgePlugin` |
 | Registration refused for a `symbolic_name` the configuration does not declare | Built-in | `[[osgi.bundles]]` |
+| FFI handshake: the same registration and reports through `libihs_shared`, no channel and no UI binding | Built-in | `ihs_osgi_*`, `osgi_host.{h,cc}` |
 | Framework isolate port delivered to every bundle, either registration order | Built-in | `BridgeRegistry` |
 | One presentation source fanned out to N engines in priority order | Built-in | `VsyncCoordinator` |
 | Engine-thread CPU affinity, validated against the process mask | Built-in | `cpu_core`, `framework_core` |
@@ -96,6 +97,12 @@ to completion and still have its critical wait expire.
   `Dart_CObject_kSendPort`, because Dart cannot rebuild a `SendPort` from a port
   id. It also holds the declared `symbolic_name`s, installed from the
   configuration at bring-up, and refuses a registration naming anything else.
+- **`osgi_host`** — installs the `IhsOsgiHost` proc table so the `ihs_osgi_*`
+  surface in `libihs_shared` reaches the same `BridgeRegistry` the channel does.
+  The library holds no OSGi state and answers `IHS_OSGI_ERR_UNAVAILABLE` until
+  this is installed. Reports arrive bearing an opaque handle the registry minted
+  rather than a name, since every `ihs_*` symbol is reachable by anything that
+  `dlopen`s the library.
 - **`vsync_coordinator`** — one vblank in, N ordered batons out.
 - **`bundle_state`** — the lifecycle graph, mirrored by the Dart side so a state
   crosses the boundary as an int with no translation.
@@ -117,6 +124,7 @@ shell/osgi/
 ├── app_bundle_host.{h,cc}       production host; bundles as App views
 ├── osgi_bridge_plugin.{h,cc}    dev.osgi/bridge method channel
 ├── bridge_registry.{h,cc}       isolate ports, framework port, observer seam
+├── osgi_host.{h,cc}             IhsOsgiHost table: the ihs_osgi_* FFI path
 ├── vsync_coordinator.{h,cc}     one source -> N engines, priority ordered
 └── bundle_state.{h,cc}          OSGi lifecycle states and legal transitions
 ```
@@ -232,7 +240,9 @@ Two deployment rules that are not obvious from the schema:
   bundle can still report ACTIVE for *another declared* bundle; what the
   declared set rules out is an undeclared name, not impersonation of a
   configured one. The plugin instance already identifies the engine, so binding
-  identity to it would be strictly stronger.
+  identity to it would be strictly stronger. This is the channel's limitation
+  specifically: over FFI a bundle reports through an unforgeable handle the
+  registry mints, so it can only report for itself.
 - A bundle whose isolate dies without calling `shutdown` stays registered until
   something else releases it; the bridge learns a bundle is gone only when it
   says so.

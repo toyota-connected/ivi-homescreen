@@ -515,6 +515,7 @@ if (ENABLE_OSGI)
             osgi/cpu_affinity.cc
             osgi/osgi_bridge_plugin.cc
             osgi/osgi_config.cc
+            osgi/osgi_host.cc
             osgi/priority.cc
             osgi/startup_orchestrator.cc
             osgi/startup_plan.cc

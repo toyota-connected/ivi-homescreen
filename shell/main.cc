@@ -32,6 +32,7 @@
 #include "osgi/app_bundle_host.h"
 #include "osgi/bridge_registry.h"
 #include "osgi/osgi_config.h"
+#include "osgi/osgi_host.h"
 #include "osgi/startup_orchestrator.h"
 #endif
 #include "ihs/config.h"
@@ -395,6 +396,13 @@ int main(const int argc, char** argv) {
       // cannot report into a null observer.
       ihs::osgi::BridgeRegistry::Instance().SetLifecycleObserver(
           orchestrator.get());
+      // Install the FFI host, so a bundle can complete the same handshake
+      // through libihs_shared instead of the channel: no UI binding for a
+      // headless bundle, and an ACTIVE report that never crosses the platform
+      // thread while its own startup deadline is running. Both transports end
+      // at this one registry, so which a bundle uses changes nothing the
+      // orchestrator sees.
+      ihs::osgi::InstallOsgiHost(ihs::osgi::BridgeRegistry::Instance());
       for (const auto& outcome : orchestrator->StartCriticalPhase()) {
         if (!outcome.ok()) {
           // Reported, not fatal: one broken cluster must not stop the rest of
@@ -417,6 +425,18 @@ int main(const int argc, char** argv) {
     // (main) thread and blocks until the shutdown signal stops the io_context.
     const int ret = app.Run();
     (void)ret;
+
+#if ENABLE_OSGI
+    // Before the orchestrator is destroyed at the end of this scope. The
+    // registry is a process-lifetime singleton but dispatches lifecycle reports
+    // to the orchestrator by raw pointer, so a report arriving after this point
+    // would reach a destroyed object. Uninstalling the host first means a late
+    // ihs_osgi_* call answers IHS_OSGI_ERR_UNAVAILABLE instead of racing the
+    // teardown -- which matters more now that a bundle can report over FFI as
+    // well as over the channel.
+    ihs::osgi::UninstallOsgiHost();
+    ihs::osgi::BridgeRegistry::Instance().SetLifecycleObserver(nullptr);
+#endif
   }
 
   IHS_LOGGING_FLUSH();

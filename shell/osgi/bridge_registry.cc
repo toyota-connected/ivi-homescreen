@@ -16,6 +16,7 @@
 
 #include "bridge_registry.h"
 
+#include <random>
 #include <utility>
 
 #include "dart_api_dl.h"
@@ -212,8 +213,60 @@ bool BridgeRegistry::RegisterBundle(const std::string& symbolic_name,
   return true;
 }
 
+uint64_t BridgeRegistry::MintTokenLocked() {
+  // Follows NewSessionId() in shared/src/mcp_transport.cc -- the same problem,
+  // a value that authorizes something must not be guessable, and the same
+  // source, rather than a second randomness convention for one call site. Two
+  // draws because std::random_device yields 32 bits at a time.
+  static std::random_device source;
+  for (;;) {
+    const uint64_t token = (static_cast<uint64_t>(source()) << 32) |
+                           static_cast<uint64_t>(source());
+    // Zero is the null handle. A collision would let one bundle's report land
+    // on another's registration, which is the whole thing this guards against.
+    if (token != 0 && handles_.find(token) == handles_.end()) {
+      return token;
+    }
+  }
+}
+
+uint64_t BridgeRegistry::MintHandle(const std::string& symbolic_name) {
+  std::lock_guard lock(mutex_);
+  if (bundles_.find(symbolic_name) == bundles_.end()) {
+    return 0;
+  }
+  for (const auto& [token, name] : handles_) {
+    if (name == symbolic_name) {
+      return token;
+    }
+  }
+  const uint64_t token = MintTokenLocked();
+  handles_.emplace(token, symbolic_name);
+  return token;
+}
+
+std::optional<std::string> BridgeRegistry::BundleForHandle(
+    const uint64_t handle) const {
+  std::lock_guard lock(mutex_);
+  const auto it = handles_.find(handle);
+  if (it == handles_.end()) {
+    return std::nullopt;
+  }
+  return it->second;
+}
+
 bool BridgeRegistry::UnregisterBundle(const std::string& symbolic_name) {
   std::lock_guard lock(mutex_);
+  // The capability goes with the registration. A handle outliving its bundle
+  // would report for whatever later took the name -- and a restart taking the
+  // same name is the ordinary case, not a rare one.
+  for (auto it = handles_.begin(); it != handles_.end();) {
+    if (it->second == symbolic_name) {
+      it = handles_.erase(it);
+    } else {
+      ++it;
+    }
+  }
   return bundles_.erase(symbolic_name) > 0;
 }
 
@@ -282,6 +335,7 @@ bool BridgeRegistry::ReportStopped(const std::string& symbolic_name) {
 void BridgeRegistry::ResetForTesting() {
   std::lock_guard lock(mutex_);
   bundles_.clear();
+  handles_.clear();
   framework_port_.reset();
   declared_.reset();
   observer_ = nullptr;
