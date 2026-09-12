@@ -477,11 +477,13 @@ Details: [`shared/README.md`](../../shared/README.md).
 ### 7.3. Location Service
 
 `ihs_location_*` in `ihs_shared`: one position service that any consumer polls
-or subscribes to, instead of each plugin re-implementing acquisition. Sources
-are gpsd, geoclue (sd-bus loaded from `libsystemd` at runtime), gpsd with
-geoclue fallback, or a replayed gpsd capture. Fixes are reported as received or
-fused through a constant-velocity (`kalman.cv`) or CTRV (`kalman.ctrv`) Kalman
-filter. Always compiled in.
+or subscribes to, instead of each plugin re-implementing acquisition. Built-in
+sources are gpsd, geoclue (sd-bus loaded from `libsystemd` at runtime), gpsd
+with geoclue fallback, or a replayed gpsd capture. A consumer can also register
+its own measurement source — a CAN speed or gyro yaw rate — and bind it through
+`ihs_location_start_options()`, alone or fused with a built-in source. Fixes
+are reported as received or fused through a constant-velocity (`kalman.cv`) or
+CTRV (`kalman.ctrv`) Kalman filter. Always compiled in.
 
 Details: [`shared/src/location/README.md`](../../shared/src/location/README.md).
 
