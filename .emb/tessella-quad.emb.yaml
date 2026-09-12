@@ -1,0 +1,396 @@
+# The tessella quad on a Raspberry Pi 5 running PiOS trixie (gcc 15 / glibc 2.41).
+#
+# Layered board -> project -> app. The board (toolchain, trixie image, partition,
+# -mcpu=cortex-a76, the GUI/input/Vulkan package stack) comes from emb's shipped
+# library; the project layer is ivi-homescreen, which is the embedder this app
+# ships inside.
+#
+# It lives in the ivi-homescreen checkout rather than beside the app it builds,
+# which is not where an app layer belongs: emb configures the embedder from the
+# directory holding the manifest, not from the project the manifest extends, so
+# a manifest in tessella_fluorite/.emb sends cmake looking for a CMakeLists.txt
+# in .emb/. Move it back to the app repo when emb takes the embedder source from
+# the extended project.
+#
+#   FILAMENT_HOST_TOOLS_ROOT=<native filament 1.75 bin> \
+#   CC=$(command -v clang) CXX=$(command -v clang++) \
+#   EMB_TOOLCHAIN_FILE=<profile>/aarch64-none-linux-gnu-*-toolchain.cmake \
+#   EMB_GCC_TOOLCHAIN=<profile>/toolchain/arm-gnu-toolchain-15.2.rel1-* \
+#   emb cross .emb/rpi5-trixie.emb.yaml --target rpi5-trixie \
+#     -w /mnt/dev/maplibre-frontend/fluorite --build --backend wayland-vulkan \
+#     --app example/quad --deploy joel@raspberrypi.local --run
+#
+# The four environment variables are what fluorite's .emb/cross-prepare.sh
+# exports; the Filament augment's clang wrapper reads them and refuses to build
+# without them rather than quietly producing host objects.
+#
+# The augment stack is fluorite's, copied rather than inherited: `extends` takes
+# one parent, and the embedder has to be the one it names. The patch paths
+# resolve through the `patches` symlink at this project's root -- see below.
+#
+id: tessella-quad
+type: app
+supported_archs: [arm64]
+supported_host_types: [ubuntu, fedora]
+
+build:
+  # The embedder this app ships inside. emb configures the embedder from this
+  # path, so it names the ivi-homescreen checkout rather than this repo, which
+  # is a plugin and has no shell to build.
+  app_path: .
+  archs: [arm64]
+  modes: [release]
+  output: bundles
+
+cross:
+  # Satisfies the ivi-homescreen-shared augment's requires_define, and switches
+  # the platform-view seam on in the fluorite module below. The shell's own
+  # cmake ignores it.
+  defines:
+    FLUORITE_ENABLE_IHS_PV: 'ON'
+
+  targets:
+    rpi5-trixie-quad:
+      extends: rpi5-trixie
+      sysroot:
+        # Filament compiles with clang and -stdlib=libc++; the ARM GNU toolchain
+        # ships libstdc++ only, so the C++ runtime comes from the target rootfs.
+        # Version-pinned to the host clang the augment uses -- the unversioned
+        # metapackage resolves to 19 on trixie. Without these the Filament
+        # augment fails on `fatal error: 'string' file not found`, which reads
+        # like a broken sysroot and is a missing standard library.
+        # dev_packages union with the project and board layers'.
+        dev_packages:
+          - libc++-18-dev
+          - libc++abi-18-dev
+          # This target extends the board rather than ivi-homescreen's own
+          # rpi5-trixie, so the shell's plugin dependencies -- which live in
+          # that target, not in the project's base layer -- are named again
+          # here. Kept in step with raspberry-pi.emb.yaml's proj_packages_trixie.
+          - libcamera-dev
+          - libcurl4-openssl-dev
+          - libgstreamer1.0-dev
+          - libgstreamer-plugins-base1.0-dev
+          - libjpeg-dev
+          - libpipewire-0.3-dev
+          - libsecret-1-dev
+          - libxml2-dev
+          - libdisplay-info-dev
+      augment:
+        # ivi-homescreen's host-native codegen tool, re-declared only to name
+        # its compilers. The Filament augment below needs CC/CXX pointing at
+        # clang, and this one is built for the *host*, where clang 22 against
+        # the system libstdc++ fails to compile the scanner's own headers. Host
+        # tools take the host's gcc; the cross augments take clang.
+        - pkg: wayland-cxx-scanner
+          url: https://github.com/jwinarske/wayland-cxx-scanner/archive/9c86b8e7e87e2c9d5ff34939d044df4053e70970.tar.gz
+          build: cmake
+          host: true
+          defines:
+            WAYLAND_CXX_SCANNER_BUILD_TOOL: 'ON'
+            WAYLAND_CXX_SCANNER_TOOL_ONLY: 'ON'
+            CMAKE_C_COMPILER: gcc
+            CMAKE_CXX_COMPILER: g++
+        - pkg: filament
+          min: "1.75.0"
+          url: https://github.com/google/filament/archive/refs/tags/v1.75.0.tar.gz
+          build: cmake
+          # Filament's own targets are explicit STATIC/SHARED, so BUILD_SHARED_LIBS
+          # (which `static:` drives) does not decide this on its own — the option
+          # set below is what keeps the on-target binary free of extra .so files.
+          static: true
+          # Rebased onto 1.75.0 and renumbered; each file now carries exactly one
+          # change, in apply order. Three patches were dropped because upstream
+          # absorbed them: disable-backend-tests (option(FILAMENT_BUILD_TESTING)
+          # now gates the backend test block, so -DFILAMENT_BUILD_TESTING=OFF does
+          # it), install-utils-hash-header (Hash.h is in libs/utils DIST_HDRS), and
+          # move-include-contents-to-include-filament (the core builds against the
+          # stock layout since the sibling libraries are included by their own
+          # paths). Dropping the last one is why install-required-files now installs
+          # into include/ rather than include/filament -- the two were coupled.
+          #
+          # The two cross-only patches, 0018 and 0019, are rebased onto 1.75.0 and
+          # applied below. They were parked .UNPORTED against the 1.65.x tree; the
+          # names no longer carry that suffix and the CI skip for it matches
+          # nothing here.
+          patches:
+            - ../../maplibre-frontend/fluorite/patches/filament/0001-install-required-files.patch
+            - ../../maplibre-frontend/fluorite/patches/filament/0002-spirv-tools-threads.patch
+            - ../../maplibre-frontend/fluorite/patches/filament/0003-return-shader-type-mobile-for-linux-vulkan.patch
+            # Ships the import file Filament's install omits; a cross configure
+            # includes it to pick up host-built matc/resgen/cmgen.
+            - ../../maplibre-frontend/fluorite/patches/filament/0004-add-ImportExecutables-Release.cmake.patch
+            # Drops clang-toolchain.cmake at the source root, selected by the
+            # CMAKE_TOOLCHAIN_FILE define below.
+            - ../../maplibre-frontend/fluorite/patches/filament/0005-add-clang-toolchain.cmake.patch
+            # Without this a cross build installs into lib/<host arch>: aarch64
+            # libraries under a directory named x86_64.
+            - ../../maplibre-frontend/fluorite/patches/filament/0006-dist-arch-follows-target-when-cross-compiling.patch
+            # VulkanPlatform.h is installed and includes <bluevk/BlueVK.h>, but
+            # bluevk installs only its archive; subclassing it needs both.
+            - ../../maplibre-frontend/fluorite/patches/filament/0007-Install-the-bluevk-headers-alongside-its-archive.patch
+            # Installs filament.pc so consumers detect the renderer by pkg-config
+            # instead of reconstructing the static-archive link group by hand.
+            - ../../maplibre-frontend/fluorite/patches/filament/0008-Install-a-pkg-config-module-for-the-renderer.patch
+            # find_package(filament CONFIG) target -- the portable way the plugin
+            # links the renderer.
+            - ../../maplibre-frontend/fluorite/patches/filament/0009-Export-a-CMake-package-configuration-for-the-rendere.patch
+            # Carry gltfio and bluegl in the exported filament::filament aggregate.
+            - ../../maplibre-frontend/fluorite/patches/filament/0010-Carry-gltfio-viewer-and-bluegl-in-the-filament-packa.patch
+            # imageio and its decoders are host-only upstream, so a cross build gets
+            # no HDR decode at all -- imageio-lite handles TIFF and nothing else.
+            - ../../maplibre-frontend/fluorite/patches/filament/0011-build-imageio-and-its-decoders-unconditionally.patch
+            # Lets the platform export Filament's completion semaphore as an acquire
+            # fence, so a frame need not drain the device before the compositor may
+            # read it.
+            - ../../maplibre-frontend/fluorite/patches/filament/0012-vulkan-allow-the-platform-to-request-exportable-subm.patch
+            # Lets the platform release the image to an external queue family in
+            # GENERAL layout as part of the frame Filament already records.
+            - ../../maplibre-frontend/fluorite/patches/filament/0013-vulkan-let-the-platform-control-the-swapchain-presen.patch
+            # 0003 makes the Vulkan backend report MOBILE on Linux, but the built-in
+            # materials compile for MATC_TARGET, which is desktop off-mobile. The
+            # default material is then rejected at load and the process dies inside
+            # the backend thread. The 1.65.x stack got this from its OpenGL-ES cross
+            # patch as a side effect; 0019 is applied here too, but it no longer
+            # carries that effect, so this states it on its own.
+            - ../../maplibre-frontend/fluorite/patches/filament/0014-build-the-built-in-materials-for-both-shader-models.patch
+            # Declares getShadowAttenuation() before the material's fragment code
+            # and defines it after the shading model, so a cel material can put the
+            # shadow in its ramp term rather than take Filament's placement.
+            - ../../maplibre-frontend/fluorite/patches/filament/0015-expose-the-directional-shadow-attenuation-to-material.patch
+            # A Linux target keeps IS_HOST_PLATFORM true, so a Linux-to-Linux cross
+            # adds the in-tree tools for the target -- binaries that cannot run
+            # during the build, and whose names collide with the host ones patch
+            # 0004 imports. Upstream's import path was written for the
+            # Android/iOS/WASM crosses only.
+            - ../../maplibre-frontend/fluorite/patches/filament/0018-import-host-tools-for-linux-cross.patch
+            # bluegl is linked by filament/backend under a condition upstream never
+            # cross-compiles into disagreement with the one that builds it. A
+            # Linux-to-Linux cross is exactly that case; without this the link fails
+            # on "cannot find -lbluegl".
+            - ../../maplibre-frontend/fluorite/patches/filament/0020-build-bluegl-wherever-it-is-linked.patch
+            # FILAMENT_USE_EXTERNAL_GLES3 below gates out every OpenGL source
+            # upstream, so asking for ES 3 produces a libbackend.a with no GL driver
+            # in it -- a consumer that subclasses PlatformEGL links fine and dies at
+            # dlopen on the board. Compile the GL backend whenever OpenGL is on, and
+            # drop the one desktop-GL platform that cannot build against ES headers.
+            - ../../maplibre-frontend/fluorite/patches/filament/0019-build-opengl-es-backend-for-linux-egl-cross.patch
+            # The ubershader samples every texture inside `if (index > -1)`, where
+            # V3D cannot be relied on to produce a usable implicit LOD; minified
+            # surfaces speckle. Hoist the UV derivatives and sample explicitly.
+            - ../../maplibre-frontend/fluorite/patches/filament/0021-gltfio-sample-with-explicit-gradients-on-gles.patch
+        # A view with a stencil buffer allocated DEPTH32F_STENCIL8 unconditionally,
+        # and V3D does not have it -- the device reports no optimal-tiling
+        # features for the format at all. The allocation went through anyway and
+        # the driver segfaulted inside vkCreateImageView on the first attachment
+        # view over it. The format is now a query, as Vulkan requires (it
+        # guarantees one of the two combined formats and not both).
+        - ../../maplibre-frontend/fluorite/patches/filament/0023-depth-stencil-format-from-the-device.patch
+          defines:
+            # Both backends. Vulkan drives the platform view on a Vulkan shell
+            # (wayland-vulkan / drm-kms-vulkan). OpenGL + EGL-on-Linux drive it on
+            # an EGL shell (drm-kms-egl): there the producer renders into a gbm
+            # scanout buffer imported as an EGLImage, which V3D (Pi) can scan out on
+            # a KMS plane but cannot reach through Vulkan -- V3DV refuses to import
+            # the vc4 display buffer. The backend is chosen at runtime per shell.
+            FILAMENT_SUPPORTS_VULKAN: "ON"
+            FILAMENT_SUPPORTS_OPENGL: "ON"
+            # RTTI on, for the same reason Jolt has CPP_RTTI_ENABLED below.
+            #
+            # Filament defaults it off and so emits no typeinfo for its own classes.
+            # Fluorite compiles with RTTI -- the ECS is built on dynamic_cast -- and
+            # the platform-view seam subclasses VulkanPlatform and PlatformEGL, so
+            # the vtables it emits reference a base typeinfo that does not exist and
+            # the library fails to load on an undefined _ZTIN8filament7backend...E.
+            #
+            # Matching here rather than compiling those translation units -fno-rtti
+            # keeps one rule across the boundary. The mixed build also works, but
+            # only while each subclass keeps a key function in a no-RTTI .cc: give
+            # one an inline destructor and vtable emission moves into the RTTI
+            # translation units that include the header, the two copies disagree,
+            # and the linker keeps whichever it saw first. That failure is silent
+            # and arrives as a null typeinfo at a dynamic_cast far away.
+            FILAMENT_ENABLE_RTTI: "ON"
+            # ON: compile the GL backend against OpenGL ES 3 (the sysroot's GLES3
+            # headers), not desktop GL through bluegl. The target GPU (Pi V3D) is a
+            # GLES 3.1 part whose desktop GL tops out at 3.1, below Filament's
+            # desktop-GL floor of 4.1; GLES mode lowers the floor to ES 3.0, which it
+            # meets. (1.65.4 wired this option to the wrong compile macro; 1.75.0
+            # spells it FILAMENT_USE_EXTERNAL_GLES3 as the source reads it, so that
+            # correction is no longer patched in. Asking for it still deletes every
+            # OpenGL source, which patch 0019 is what fixes.)
+            FILAMENT_USE_EXTERNAL_GLES3: "ON"
+            FILAMENT_SUPPORTS_EGL_ON_LINUX: "ON"
+            # Wayland is the compositor's surface type; X11/XCB are dead weight.
+            FILAMENT_SUPPORTS_WAYLAND: "ON"
+            FILAMENT_SUPPORTS_X11: "OFF"
+            FILAMENT_SUPPORTS_XCB: "OFF"
+            # Trim the install to what the plugin links: no samples, no SDL2, no
+            # software rasterizer.
+            FILAMENT_SKIP_SAMPLES: "ON"
+            FILAMENT_SKIP_SDL2: "ON"
+            # No tests in an augment: nothing consumes them, and they are the only
+            # thing left linking -lbluegl once patch 0018 stops a cross build from
+            # claiming to be the host platform -- bluegl is added under
+            # IS_HOST_PLATFORM, the test targets are not.
+            FILAMENT_BUILD_TESTING: "OFF"
+            FILAMENT_USE_SWIFTSHADER: "OFF"
+            # LTO off: it multiplies link time across Filament's archive set for no
+            # benefit to a statically linked consumer.
+            FILAMENT_ENABLE_LTO: "OFF"
+            # The plugin is a shared object, so every archive it links must be PIC.
+            CMAKE_POSITION_INDEPENDENT_CODE: "ON"
+            CMAKE_BUILD_WITH_INSTALL_RPATH: "ON"
+            # Filament refuses to build with GNU, and emb's emitted toolchain file
+            # hardcodes the provider's gcc. Patch 0010 drops clang-toolchain.cmake
+            # at the source root; it wraps emb's file and swaps the compilers in.
+            # Relative because emb builds in <source>/_build and CMake resolves a
+            # relative CMAKE_TOOLCHAIN_FILE against the build dir -- so this stays
+            # correct on any machine.
+            #
+            # Reads CC, CXX, EMB_TOOLCHAIN_FILE, EMB_GCC_TOOLCHAIN and
+            # FILAMENT_HOST_TOOLS_ROOT from the environment; see .emb/README.md.
+            CMAKE_TOOLCHAIN_FILE: "../clang-toolchain.cmake"
+
+        # Jolt Physics: the rigid-body simulation behind PhysicsSystem. Staged as
+        # an augment for the same reason as Filament -- no distro ships it, and the
+        # build needs a specific option set. subdir is Build/ because that, not the
+        # tarball root, is where Jolt's CMakeLists lives.
+        #
+        # Static, PIC: it links into libfluorite_core_ffi.so and must not become a
+        # second .so on the target.
+        #
+        # SIMD stays at Jolt's per-arch defaults, which on x86_64 means AVX2, not
+        # an SSE4.2 baseline -- the archive carries JPH_USE_AVX2/AVX/F16C/FMADD and
+        # will not run on a pre-Haswell host. Fine for the desktop dev targets;
+        # narrow it here (USE_AVX2/USE_AVX/... to OFF) if an x86_64 deployment
+        # target ever predates that. aarch64 gets NEON implicitly.
+        #
+        # gated by requires_define so a FLUORITE_ENABLE_JOLT=OFF build skips
+        # fetching and building it entirely.
+        - pkg: jolt
+          requires_define: FLUORITE_ENABLE_JOLT
+          min: "5.6.0"
+          url: https://github.com/jrouwe/JoltPhysics/archive/refs/tags/v5.6.0.tar.gz
+          build: cmake
+          static: true
+          subdir: Build
+          # Drops clang-toolchain.cmake at the archive root, selected by the
+          # CMAKE_TOOLCHAIN_FILE define below. Same device as Filament's patch
+          # 0005, for the same reason -- see the define.
+          patches:
+            - ../../maplibre-frontend/fluorite/patches/jolt/0001-add-clang-toolchain.cmake.patch
+          defines:
+            # clang + libc++, matching fluorite_core_ffi. This is not optional the
+            # way it is for ihs_shared: that augment is a C ABI behind a version
+            # script, so emb's gcc is harmless there, but Jolt is a C++ library
+            # whose types cross the boundary in headers. Built with libstdc++ and
+            # consumed by a libc++ translation unit, ShapeSettings has a different
+            # layout on each side and shape construction reads a garbage material
+            # pointer -- a segfault, not a link error.
+            #
+            # Asking for it here as CMAKE_C/CXX_COMPILER plus a -stdlib in
+            # CMAKE_CXX_FLAGS, which is what this used to do, does not survive a
+            # cross build: emb's emitted toolchain file sets the compiler with a
+            # plain set(), which shadows the cache entry, so the compiler reverted
+            # to its gcc while the clang-only flag stayed -- and the configure
+            # failed on "aarch64-none-linux-gnu-g++: unrecognized command-line
+            # option '-stdlib=libc++'". The wrapper below runs after emb's file and
+            # swaps the compilers in there, where it sticks; it also carries the
+            # -stdlib, so there is one place that decides what Jolt is built with.
+            #
+            # Relative because emb builds in <source>/_build and CMake resolves a
+            # relative CMAKE_TOOLCHAIN_FILE against the build dir. Jolt's CMake
+            # source dir is <source>/Build (see subdir), so this still names the
+            # archive root.
+            #
+            # Reads CC, CXX, EMB_TOOLCHAIN_FILE and EMB_GCC_TOOLCHAIN from the
+            # environment; .emb/cross-prepare.sh is what derives and exports them.
+            CMAKE_TOOLCHAIN_FILE: "../clang-toolchain.cmake"
+            CMAKE_POSITION_INDEPENDENT_CODE: "ON"
+            # Jolt defaults RTTI off and so emits no typeinfo for its own classes.
+            # Fluorite compiles with RTTI -- the ECS is built on dynamic_cast --
+            # so a class deriving from a Jolt interface references a base typeinfo
+            # that does not exist, and the library fails to load on an undefined
+            # _ZTIN3JPH...E. Every extension point is a subclass (group filters,
+            # contact listeners, debug renderers), so this is not avoidable by
+            # writing the physics differently.
+            CPP_RTTI_ENABLED: "ON"
+            # Float precision. Doubles are for large-world origin drift, which the
+            # scenes here do not have, and they cost bandwidth on the Pi.
+            DOUBLE_PRECISION: "OFF"
+            # Determinism is off until a replay feature needs it; it constrains the
+            # instruction set and costs throughput.
+            CROSS_PLATFORM_DETERMINISTIC: "OFF"
+            # 16-bit object layers: room for per-layer collision masks without the
+            # 32-bit layer table.
+            OBJECT_LAYER_BITS: "16"
+            # GPU compute backends, added in 5.6 to drive soft-body and hair
+            # simulation. Each compiles HLSL to its own bytecode at build time --
+            # the Vulkan one needs dxc, which is not a build dependency worth
+            # taking for a rigid-body integration that never dispatches any of it.
+            # The CPU fallback stays on so the feature still works if it is ever
+            # wanted.
+            JPH_USE_DX12: "OFF"
+            JPH_USE_VK: "OFF"
+            JPH_USE_MTL: "OFF"
+            JPH_USE_CPU_COMPUTE: "ON"
+            # None of Jolt's own executables are wanted in the augment.
+            TARGET_UNIT_TESTS: "OFF"
+            TARGET_HELLO_WORLD: "OFF"
+            TARGET_PERFORMANCE_TEST: "OFF"
+            TARGET_SAMPLES: "OFF"
+            TARGET_VIEWER: "OFF"
+            # LTO across a static archive that a shared library then links is a
+            # frequent source of toolchain mismatch; leave it to the consumer.
+            INTERPROCEDURAL_OPTIMIZATION: "OFF"
+
+        # The ivi-homescreen platform-view ABI (ihs_shared): the C-ABI shared
+        # library the FFI plugin links to negotiate surfaces, submit frames and log.
+        # Pinned to the same ivi-homescreen commit as the deployed shell so the ABI
+        # matches. subdir builds ivi-homescreen's shared/ subtree, which is a
+        # self-contained project (its CMakeLists has an if(top-level) project
+        # guard) -- just libihs_shared, none of the shell or its surface stack
+        # (which pulls a git submodule a source tarball does not carry). ihs_shared
+        # is a version-scripted C ABI, so emb's gcc toolchain is fine even though
+        # the plugin is clang/libc++ -- no C++ symbols cross the boundary.
+        # requires_define gates it: a build with FLUORITE_ENABLE_IHS_PV unset skips
+        # it entirely.
+        - pkg: ivi-homescreen-shared
+          requires_define: FLUORITE_ENABLE_IHS_PV
+          min: "1.0.0"
+          url: https://github.com/toyota-connected/ivi-homescreen/archive/cb0057b22fa06addd00150de6147cc4ae6e79535.tar.gz
+          build: cmake
+          static: false
+          subdir: shared
+          defines:
+            # DLT off: the console/file log sinks need no extra dependency.
+            ENABLE_DLT: "OFF"
+      # The two backends this app is run on, named here because the project's
+      # base layer omits BUILD_COMPOSITOR and the target that adds it is the one
+      # this does not extend. Without it the FlutterCompositor API compiles out,
+      # so the platform-view factory has nothing to register against and every
+      # pane fails twice over -- `register_factory('views/fluorite-view')
+      # failed: -4`, then MissingPluginException on flutter/platform_views.
+      backends:
+        drm-kms-vulkan:
+          BUILD_BACKEND_DRM_KMS_VULKAN: 'ON'
+          BUILD_BACKEND_WAYLAND_EGL: 'OFF'
+          BUILD_BACKEND_WAYLAND_VULKAN: 'OFF'
+          BUILD_BACKEND_DRM_KMS_EGL: 'OFF'
+          BUILD_BACKEND_SOFTWARE: 'OFF'
+          BUILD_COMPOSITOR: 'ON'
+        wayland-vulkan:
+          BUILD_BACKEND_WAYLAND_VULKAN: 'ON'
+          BUILD_BACKEND_WAYLAND_EGL: 'OFF'
+          BUILD_BACKEND_DRM_KMS_EGL: 'OFF'
+          BUILD_BACKEND_SOFTWARE: 'OFF'
+          BUILD_COMPOSITOR: 'ON'
+
+      # No `modules:`. The two libraries that would go here -- fluorite's
+      # renderer and the tessella extension -- link Filament's libc++ archives,
+      # and emb runs a module's cmake without CC/CXX in its environment, so
+      # fluorite's clang wrapper has nothing to swap in and the configure dies
+      # on "No CMAKE_C_COMPILER could be found". They are built by
+      # tessella_fluorite/.emb-cross-libs.sh against this same profile, which is
+      # also where the app's `prebuilt:` user-define points.
