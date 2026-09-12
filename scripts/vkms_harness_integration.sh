@@ -44,6 +44,32 @@ shopt -u nullglob
 export BUNDLE="${bundles[0]}"
 echo "bundle: ${BUNDLE}"
 
+# ---------------------------------------------------------------------------
+# The OSGi harness needs a different bundle. scroll_bench is an ordinary
+# Flutter app: it never reports ACTIVE, so B3 -- the critical-first ordering
+# guarantee, which is the one property the unit tests can only assert against a
+# fake -- skips however correct the shell is. Running the OSGi leg on it lights
+# up B1/B2/B4/B5 and quietly proves nothing about ordering.
+#
+# The activator bundle does report ACTIVE, over either transport, so it is
+# built separately and used only for that leg.
+# ---------------------------------------------------------------------------
+echo "== building osgi_activator_test bundle =="
+emb bundle --app-path "${IVI_SRC}/test/integration/osgi_activator_test" \
+    -m debug --build
+shopt -s nullglob
+osgi_bundles=( "${BUNDLE_ROOT}"/osgi_activator_test-debug-* )
+shopt -u nullglob
+if [[ ${#osgi_bundles[@]} -ge 1 ]]; then
+    OSGI_BUNDLE="${osgi_bundles[0]}"
+    echo "osgi bundle: ${OSGI_BUNDLE}"
+else
+    # Not fatal: the OSGi legs below skip honestly rather than failing the
+    # whole integration run for a bundle the other harnesses do not need.
+    OSGI_BUNDLE=""
+    echo "::warning::no osgi_activator_test bundle; OSGi legs will skip"
+fi
+
 # Append a section to the job summary (or stdout when run outside Actions).
 emit() { if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then cat >>"${GITHUB_STEP_SUMMARY}"; else cat; fi; }
 
@@ -95,8 +121,24 @@ run_harness "event-driven input harness" \
 # on a real GPU). The harness auto-detects vkms by its connector signature and
 # reads the connectors off that card, so nothing here has to guess. It skips
 # honestly when there is no vkms card or the binary lacks ENABLE_OSGI.
-run_harness "osgi multi-bundle" \
-    env SOFTWARE_RENDER=1 "${IVI_SRC}/test/osgi_multi_bundle.sh"
+#
+# Run once per transport. Both end at the same BridgeRegistry and drive the same
+# lifecycle state machine, so B3 greps the state-machine transition rather than
+# a transport's own log line and asserts identically either way -- which is what
+# makes the ffi leg the first end-to-end exercise of the ihs_osgi_* path against
+# a live Dart VM, rather than against a fake of one half.
+#
+# ACTIVATOR=1 with the activator bundle: without it B3 skips, which is the
+# difference between proving the ordering guarantee and merely not failing.
+if [[ -n "${OSGI_BUNDLE}" ]]; then
+    for transport in channel ffi; do
+        run_harness "osgi multi-bundle (${transport})" \
+            env SOFTWARE_RENDER=1 ACTIVATOR=1 TRANSPORT="${transport}" \
+                BUNDLE="${OSGI_BUNDLE}" "${IVI_SRC}/test/osgi_multi_bundle.sh"
+    done
+else
+    echo "== osgi multi-bundle: skipped (no activator bundle) =="
+fi
 
 echo "vkms harness integration: overall rc=${rc}"
 exit "${rc}"
