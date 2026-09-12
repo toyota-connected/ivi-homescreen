@@ -32,7 +32,6 @@ import 'dart:async';
 import 'dart:ffi';
 import 'dart:isolate';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -71,7 +70,11 @@ class _Activator {
   /// isolate's port here, and closing it would strand that message.
   final ReceivePort _fromShell = ReceivePort();
 
-  int? frameworkPort;
+  /// The framework isolate's port, once the shell posts it.
+  ///
+  /// A [SendPort] rather than an int: a port id would be useless here, since
+  /// Dart offers no way to turn one back into a [SendPort].
+  SendPort? frameworkPort;
 
   /// Repaints steadily so the bundle keeps presenting.
   ///
@@ -82,19 +85,26 @@ class _Activator {
   /// that never presented at all. A real cluster or navigation view animates;
   /// this stands in for that.
   final ValueNotifier<int> tick = ValueNotifier<int>(0);
-  Timer? _ticker;
 
   Future<void> start() async {
-    _ticker = Timer.periodic(const Duration(milliseconds: 100),
-        (_) => tick.value = tick.value + 1);
+    // Never cancelled, deliberately: the bundle presents for as long as its
+    // isolate lives, and there is no teardown path here to cancel it from.
+    Timer.periodic(
+        const Duration(milliseconds: 100), (_) => tick.value = tick.value + 1);
 
     _fromShell.listen((dynamic message) {
-      // The framework port arrives as a bare int (Dart_PostCObject_DL with an
-      // int64 payload). Everything after this is SendPort traffic between
-      // isolates, off the platform thread.
-      if (message is int) {
+      // Arrives as a SendPort, because the shell posts a
+      // Dart_CObject_kSendPort. It used to post a bare int64, and this checked
+      // for one -- which silently stopped matching when the shell changed, so
+      // the bundle reached ACTIVE while never learning the framework port.
+      // An int is useless here in any case: Dart cannot turn a port id back
+      // into a SendPort, so a bundle handed one has nothing to send to.
+      //
+      // Everything after this is SendPort traffic between isolates, off the
+      // platform thread.
+      if (message is SendPort) {
         frameworkPort = message;
-        detail.value = 'framework port $message';
+        detail.value = 'framework port received';
       }
     });
 
@@ -132,7 +142,7 @@ class _Activator {
       state.value = _BundleState.active;
       detail.value = frameworkPort == null
           ? 'ACTIVE (awaiting framework port)'
-          : 'ACTIVE (framework port $frameworkPort)';
+          : 'ACTIVE (framework port received)';
     } on PlatformException catch (e) {
       state.value = _BundleState.failed;
       detail.value = 'active rejected: ${e.code}';

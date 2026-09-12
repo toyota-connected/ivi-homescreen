@@ -26,6 +26,12 @@ shell was.
 Both come from `dart:ffi`, not `dart:ui` — `NativeApi` and the `nativePort`
 extension on `SendPort` both live there.
 
+The framework port comes back as a **`SendPort`**, not as the port id that was
+sent out. That asymmetry is forced: Dart offers no way to turn a port id back
+into a `SendPort`, so an integer would leave the bundle with nothing it could
+send to. The shell posts a `Dart_CObject_kSendPort` for exactly that reason, and
+a bundle that tests the message for `int` will simply never see it.
+
 ## Symbolic name
 
 Read from `--dart-entrypoint-args`, so one build stands in for any bundle in a
