@@ -24,6 +24,7 @@
 #include "logger.hpp"
 
 #include "bridge.hpp"
+#include "lazy_context.hpp"
 #include "ring_registry.hpp"
 #include "thread_ring.hpp"
 
@@ -47,8 +48,16 @@ void check(bool cond, const char* what) {
 }  // namespace
 
 int main() {
+  // 0. A context opened before logging starts must not stay unresolved. A
+  // plain cached static would hold the -1 forever and silence its call site
+  // for the process; LazyLogContext re-attempts.
+  static ihs::dlt::LazyLogContext kEarly("EARL");
+  check(kEarly.index() < 0, "no context before start");
+
   // 1. Lifecycle.
   IHS_LOGGING_START("SMOK", "compat smoke");
+
+  check(kEarly.index() >= 0, "the early context resolves once logging is up");
 
   // 2. Format-string portability. The context is valid regardless of DLT — the
   // console sink is always available — so the format paths always run.

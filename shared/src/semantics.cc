@@ -36,6 +36,8 @@
 
 #include "ihs/logging.h"
 
+#include "logging/lazy_context.hpp"
+
 namespace {
 
 // A published tree. Immutable once built; every pointer a consumer sees points
@@ -101,12 +103,13 @@ Hub& TheHub() {
   return *hub;
 }
 
-// Attribution logging for the dispatch funnel. Opened lazily so a
-// process that never registers a consumer never allocates a log context; the
-// index is stable for the process once opened.
+// Attribution logging for the dispatch funnel. Opened lazily so a process that
+// never registers a consumer never allocates a log context, and re-attempted
+// while unresolved so a first log before ihs_log_start() does not silence this
+// site for the process (see LazyLogContext).
 int32_t TraceContext() {
-  static const int32_t ctx = ihs_log_context_open("SEMA", nullptr);
-  return ctx;
+  static ihs::dlt::LazyLogContext ctx("SEMA");
+  return ctx.index();
 }
 
 // Emits under the hub's context, skipping the formatting entirely when the

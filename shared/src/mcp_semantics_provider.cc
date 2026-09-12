@@ -39,6 +39,8 @@
 #include "ihs/ihs_semantics.h"
 #include "ihs/logging.h"
 
+#include "logging/lazy_context.hpp"
+
 namespace {
 
 // One tool as this provider declares it, paired with the hub action it
@@ -198,10 +200,12 @@ constexpr uint64_t kAllowMask = IHS_SEMANTICS_ACTION_NO_A11Y_FOCUS;
 constexpr size_t kToolCount = sizeof(kTools) / sizeof(kTools[0]);
 
 // Logging goes through the C API for the same reason the rest of ihs_shared
-// does: the library sits below the shell's C++ logging wrapper.
+// does: the library sits below the shell's C++ logging wrapper. Re-attempted
+// while unresolved so a first log before ihs_log_start() does not silence this
+// site for the process.
 int32_t TraceContext() {
-  static const int32_t ctx = ihs_log_context_open("MCPS", nullptr);
-  return ctx;
+  static ihs::dlt::LazyLogContext ctx("MCPS");
+  return ctx.index();
 }
 
 void Log(const int32_t level, const std::string& text) {

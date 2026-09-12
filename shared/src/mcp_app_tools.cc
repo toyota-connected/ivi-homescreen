@@ -39,11 +39,15 @@
 
 #include "ihs/logging.h"
 
+#include "logging/lazy_context.hpp"
+
 namespace {
 
+// Re-attempted while unresolved: caching the -1 that ihs_log_context_open()
+// returns before ihs_log_start() would silence this site for the process.
 int32_t TraceContext() {
-  static const int32_t ctx = ihs_log_context_open("MCPA", nullptr);
-  return ctx;
+  static ihs::dlt::LazyLogContext ctx("MCPA");
+  return ctx.index();
 }
 
 void Log(const int32_t level, const std::string& text) {
