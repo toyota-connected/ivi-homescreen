@@ -150,6 +150,93 @@ struct IhsLocationService {
   std::unique_ptr<ihs::location::IEventSource> source;
 };
 
+namespace {
+
+// The one start path behind every ihs_location_start* call. @o is already
+// bounded-copied and validated by the caller.
+IhsLocationService* StartService(const IhsLocationStartOptions& o) {
+  // No exception may cross the C ABI boundary above: construction and Start()
+  // (allocations, std::thread) can throw, so translate any failure to NULL.
+  try {
+    const bool use_filter = o.filter_key != nullptr && o.filter_key[0] != '\0';
+    if (use_filter) {
+      // Make the requested filter available if it is a built-in the caller did
+      // not already register. An unknown key resolves to nothing and degrades
+      // to the passthrough inside Manager.
+      EnsureBuiltinFilter(o.filter_key);
+    }
+    std::vector<std::string> keys;
+    for (size_t i = 0; i < o.source_key_count; ++i) {
+      if (o.source_keys[i] != nullptr && o.source_keys[i][0] != '\0') {
+        keys.emplace_back(o.source_keys[i]);
+      }
+    }
+    // Declare the Manager before the source: the source's worker calls into the
+    // Manager, so on any early return or exception after the source starts,
+    // reverse-order destruction must tear down the source first (joining its
+    // worker) and only then the Manager it points at.
+    auto manager = std::make_unique<Manager>(
+        std::move(keys), use_filter ? std::string(o.filter_key) : std::string{},
+        o.filter_config != nullptr ? std::string(o.filter_config)
+                                   : std::string{});
+    std::unique_ptr<IEventSource> src;
+    switch (static_cast<IhsLocationSource>(o.source)) {
+      case IHS_LOCATION_NONE:
+        break;  // registered sources only
+      case IHS_LOCATION_GEOCLUE:
+        src = MakeGeoclue(o.source_config);
+        break;
+      case IHS_LOCATION_FILE:
+        src = MakeFile(o.source_config);
+        break;
+      case IHS_LOCATION_AUTO:
+        // gpsd primary, geoclue fallback — the same composition as before, now
+        // an event-driven combiner.
+        src = std::make_unique<ihs::location::FallbackSource>(
+            MakeGpsd(nullptr), MakeGeoclue(nullptr));
+        break;
+      case IHS_LOCATION_GPSD:
+      default:
+        src = MakeGpsd(o.source_config);
+        break;
+    }
+    if (!src && static_cast<IhsLocationSource>(o.source) != IHS_LOCATION_NONE) {
+      return nullptr;
+    }
+    Manager* const mgr = manager.get();
+    // Drive the Manager on each fix the source pushes (worker thread).
+    // SetOnFix must precede the source's Start(). With a filter, route the fix
+    // through the measurement path so the filter processes it; without one,
+    // PublishFix stores the whole fix atomically (and keeps the source's
+    // speed/heading a position-only filter would otherwise re-estimate).
+    if (src) {
+      if (use_filter) {
+        src->SetOnFix([mgr](const Position& p) { mgr->SubmitPositionFix(p); });
+      } else {
+        src->SetOnFix([mgr](const Position& p) { mgr->PublishFix(p); });
+      }
+    }
+    // Arm the Manager before any source begins pushing, honoring the
+    // Start()/Stop() lifecycle (ihs_location_stop calls Stop()). Registered
+    // sources are bound and started here.
+    if (!manager->Start()) {
+      return nullptr;
+    }
+    if (src && !src->Start()) {
+      return nullptr;  // could not begin acquisition at all
+    }
+    auto service = std::make_unique<IhsLocationService>();
+    service->manager = mgr;  // alias before the unique_ptr is moved
+    service->provider = std::move(manager);
+    service->source = std::move(src);
+    return service.release();
+  } catch (...) {
+    return nullptr;
+  }
+}
+
+}  // namespace
+
 extern "C" {
 
 IhsLocationService* ihs_location_start(IhsLocationSource source,
@@ -161,74 +248,45 @@ IhsLocationService* ihs_location_start_filtered(IhsLocationSource source,
                                                 const char* config,
                                                 const char* filter_key,
                                                 const char* filter_config) {
-  // No exception may cross this C ABI boundary: construction and Start()
-  // (allocations, std::thread) can throw, so translate any failure to a NULL
-  // return.
-  try {
-    const bool use_filter = filter_key != nullptr && filter_key[0] != '\0';
-    if (use_filter) {
-      // Make the requested filter available if it is a built-in the caller did
-      // not already register. An unknown key resolves to nothing and degrades
-      // to the passthrough inside Manager.
-      EnsureBuiltinFilter(filter_key);
-    }
-    // Declare the Manager before the source: the source's worker calls into the
-    // Manager, so on any early return or exception after the source starts,
-    // reverse-order destruction must tear down the source first (joining its
-    // worker) and only then the Manager it points at.
-    auto manager = std::make_unique<Manager>(
-        std::vector<std::string>{},
-        use_filter ? std::string(filter_key) : std::string{},
-        filter_config != nullptr ? std::string(filter_config) : std::string{});
-    std::unique_ptr<IEventSource> src;
-    switch (source) {
-      case IHS_LOCATION_GEOCLUE:
-        src = MakeGeoclue(config);
-        break;
-      case IHS_LOCATION_FILE:
-        src = MakeFile(config);
-        break;
-      case IHS_LOCATION_AUTO:
-        // gpsd primary, geoclue fallback — the same composition as before, now
-        // an event-driven combiner.
-        src = std::make_unique<ihs::location::FallbackSource>(
-            MakeGpsd(nullptr), MakeGeoclue(nullptr));
-        break;
-      case IHS_LOCATION_GPSD:
-      default:
-        src = MakeGpsd(config);
-        break;
-    }
-    if (!src) {
-      return nullptr;
-    }
-    Manager* const mgr = manager.get();
-    // Drive the Manager on each fix the source pushes (worker thread).
-    // SetOnFix must precede the source's Start(). With a filter, route the fix
-    // through the measurement path so the filter processes it; without one,
-    // PublishFix stores the whole fix atomically (and keeps the source's
-    // speed/heading a position-only filter would otherwise re-estimate).
-    if (use_filter) {
-      src->SetOnFix([mgr](const Position& p) { mgr->SubmitPositionFix(p); });
-    } else {
-      src->SetOnFix([mgr](const Position& p) { mgr->PublishFix(p); });
-    }
-    // Arm the Manager before the source begins pushing, honoring the
-    // Start()/Stop() lifecycle (ihs_location_stop calls Stop()).
-    if (!manager->Start()) {
-      return nullptr;
-    }
-    if (!src->Start()) {
-      return nullptr;  // could not begin acquisition at all
-    }
-    auto service = std::make_unique<IhsLocationService>();
-    service->manager = mgr;  // alias before the unique_ptr is moved
-    service->provider = std::move(manager);
-    service->source = std::move(src);
-    return service.release();
-  } catch (...) {
+  // The enum form is the options form with no registered source keys. An
+  // out-of-range @source keeps its long-standing behavior (falls to gpsd in
+  // StartService) rather than becoming a new error.
+  IhsLocationStartOptions o{};
+  o.struct_size = sizeof(o);
+  o.source = static_cast<uint32_t>(source);
+  o.source_config = config;
+  o.filter_key = filter_key;
+  o.filter_config = filter_config;
+  return StartService(o);
+}
+
+IhsLocationService* ihs_location_start_options(
+    const IhsLocationStartOptions* options) {
+  if (options == nullptr) {
     return nullptr;
   }
+  // Bounded copy: a caller built against an older header passes a shorter
+  // struct, so read only what it carries and leave the rest zeroed. Reject one
+  // too short to hold `source`, which every other field is interpreted against.
+  constexpr size_t kMinSize =
+      offsetof(IhsLocationStartOptions, source) + sizeof(uint32_t);
+  const size_t given = options->struct_size;
+  if (given < kMinSize) {
+    return nullptr;
+  }
+  IhsLocationStartOptions o{};
+  std::memcpy(&o, options, given < sizeof(o) ? given : sizeof(o));
+  o.struct_size = sizeof(o);
+  // Unlike the enum call, an unknown source is an error here rather than a
+  // silent fall back to gpsd: this entry point is new, so nothing depends on
+  // the old leniency.
+  if (o.source > static_cast<uint32_t>(IHS_LOCATION_NONE)) {
+    return nullptr;
+  }
+  if (o.source_key_count > 0 && o.source_keys == nullptr) {
+    return nullptr;
+  }
+  return StartService(o);
 }
 
 namespace {

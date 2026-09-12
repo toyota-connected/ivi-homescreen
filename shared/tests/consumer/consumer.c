@@ -177,6 +177,24 @@ int main(void) {
         "no filter requested, none active");
   CHECK(ihs_location_filter_active(NULL) == 0, "filter_active(NULL) is safe");
   ihs_location_stop(loc);
+
+  /* Options start (ABI 1.7): NULL and a too-short struct are refused, and a
+   * valid one behaves like ihs_location_start. */
+  CHECK(ihs_location_start_options(NULL) == NULL, "start_options(NULL) safe");
+  IhsLocationStartOptions lopts;
+  memset(&lopts, 0, sizeof(lopts));
+  lopts.struct_size = sizeof(size_t); /* below `source` */
+  CHECK(ihs_location_start_options(&lopts) == NULL, "short options refused");
+  memset(&lopts, 0, sizeof(lopts));
+  lopts.struct_size = sizeof(lopts);
+  lopts.source = IHS_LOCATION_GPSD;
+  lopts.source_config = "127.0.0.1:9";
+  IhsLocationService* loc2 = ihs_location_start_options(&lopts);
+  CHECK(loc2 != NULL, "start_options returns a handle for a dead port");
+  CHECK(ihs_location_generation(loc2) == 0, "no fix from a dead port");
+  CHECK(ihs_location_filter_active(loc2) == 0, "no filter requested");
+  ihs_location_stop(loc2);
+
   CHECK(ihs_location_latest(NULL, &pos) == 0, "latest(NULL) is safe");
   CHECK(ihs_location_latest2(NULL, &pos, sizeof(pos)) == 0,
         "latest2(NULL) is safe");
