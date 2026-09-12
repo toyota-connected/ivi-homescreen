@@ -108,6 +108,12 @@ jobs:
         run: |
           # The census and input harness exercise both the DRM-KMS-EGL and the
           # software (drm-dumb sink) backends, so build both here.
+          #
+          # ENABLE_OSGI because the OSGi multi-bundle harness is already wired
+          # into vkms_harness_integration.sh and was skipping itself: without
+          # the option the binary carries no [osgi] strings, which the harness
+          # reads as "not an OSGi build" and honestly reports as a skip. This is
+          # the flip that comment anticipated.
           cmake -GNinja \
             -B ${{github.workspace}}/build \
             -D CMAKE_BUILD_TYPE=Debug \
@@ -117,6 +123,7 @@ jobs:
             -D BUILD_BACKEND_WAYLAND_EGL=OFF \
             -D BUILD_BACKEND_WAYLAND_VULKAN=OFF \
             -D BUILD_COMPOSITOR=ON \
+            -D ENABLE_OSGI=ON \
             -D BUILD_NUMBER=${GITHUB_RUN_ID}
           ninja -C ${{github.workspace}}/build
 
