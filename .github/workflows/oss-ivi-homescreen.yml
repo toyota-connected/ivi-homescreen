@@ -4,12 +4,25 @@ name: ivi-homescreen
 on:
   pull_request:
     types: [ opened, synchronize, reopened, closed ]
+  # Merges need a run of their own. The pull_request legs above build the merge
+  # ref, so their results belong to the pull request rather than to the branch:
+  # until this trigger existed, nothing here ever ran against v3.0 itself, and
+  # unit-tests and the coverage build reached it only through the nightly cron.
+  push:
+    branches: [v3.0]
   release:
     types: [ published, created, edited ]
   workflow_dispatch:
   schedule:
     # daily
     - cron:  '0 0 * * *'
+
+# This is the heaviest workflow in the tree and it now fires on every merge, so
+# group per ref: a pull request's runs supersede each other, and so do a run of
+# merges, without either cancelling the other's branch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   ivi-homescreen:
