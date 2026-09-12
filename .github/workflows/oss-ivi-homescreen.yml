@@ -520,7 +520,8 @@ jobs:
             -D BUILD_ACCESSIBILITY=ON \
             -D BUILD_CRASH_HANDLER=OFF \
             -D BUILD_WATCHDOG=ON \
-            -D BUILD_SYSTEMD_WATCHDOG=ON
+            -D BUILD_SYSTEMD_WATCHDOG=ON \
+            -D ENABLE_OSGI=ON
 
       - name: Build
         working-directory: ${{github.workspace}}/build/unit-tests
