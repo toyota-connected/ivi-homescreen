@@ -161,6 +161,9 @@ if (ENABLE_OSGI)
     add_subdirectory(osgi_orchestrator-test)
     add_subdirectory(osgi_bridge-test)
     add_subdirectory(osgi_vsync-test)
+    # Links libihs_shared rather than the shell: the ihs_osgi_* forwarders are
+    # only compiled into it when ENABLE_OSGI is on.
+    add_subdirectory(ihs_osgi-test)
 endif ()
 add_subdirectory(output_resolver-test)
 add_subdirectory(ihs_pv-test)

@@ -39,6 +39,10 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     if (NOT DEFINED BUILD_MCP)
         option(BUILD_MCP "Build the MCP provider registry into ihs_shared" OFF)
     endif ()
+    if (NOT DEFINED ENABLE_OSGI)
+        option(ENABLE_OSGI
+                "Build the OSGi bundle handshake into ihs_shared" OFF)
+    endif ()
 endif ()
 
 include(GNUInstallDirs)
@@ -217,6 +221,30 @@ else ()
     message(STATUS "MCP provider registry . Disabled")
 endif ()
 
+#
+# OSGi bundle handshake (the ihs_osgi_* C ABI).
+#
+# Forwarders only: this library holds no OSGi state. The registry behind them
+# lives in the shell, which is an executable rather than a shared object a
+# dlopen'd plugin can bind to -- the same reason the FlutterDesktop* forwarders
+# are here -- so the shell installs a proc table and these call through it.
+#
+# It exists because the dev.osgi/bridge MethodChannel drags Flutter into the
+# dependency graph of every bundle, including headless ones with no views, and
+# marshals the ACTIVE report through the platform task runner at its busiest
+# moment -- while the critical bundle's startup deadline is running.
+#
+# Gated because the surface is meaningless without that shell: with ENABLE_OSGI
+# off no source here is compiled, no ihs_osgi_* symbol is exported, and
+# ihs_osgi.h is not installed, so an out-of-tree consumer finds out at the
+# include rather than at the link.
+if (ENABLE_OSGI)
+    target_sources(ihs_shared PRIVATE src/osgi_api.cc)
+    message(STATUS "OSGi handshake ........ Enabled")
+else ()
+    message(STATUS "OSGi handshake ........ Disabled")
+endif ()
+
 # Location service (the ihs_location_* C ABI): the gpsd and geoclue providers
 # and their gpsd-primary/geoclue-fallback combiner. geoclue talks D-Bus through
 # sd-bus, which it loads from libsystemd.so.0 at runtime via dlopen — exactly as
@@ -299,6 +327,7 @@ install(TARGETS ihs_shared EXPORT ihs_shared_targets
 #                          over the wire, not to this.
 #   ihs_mcp_semantics.h    "SHELL-ONLY lifecycle ... Not part of the plugin ABI"
 #   platform_view_host.h   "SHELL-ONLY host seam ... NOT part of the plugin ABI"
+#   ihs_osgi_host.h        "SHELL-ONLY host seam ... NOT part of the plugin ABI"
 #
 # Installing them publishes a producer surface as though it were supported, and
 # invites an out-of-tree caller to install a second semantics host or platform
@@ -308,6 +337,7 @@ install(TARGETS ihs_shared EXPORT ihs_shared_targets
 set(_ihs_header_excludes
         PATTERN "flutter_desktop_bridge.h" EXCLUDE
         PATTERN "ihs_semantics_host.h" EXCLUDE
+        PATTERN "ihs_osgi_host.h" EXCLUDE
         PATTERN "ihs_mcp_registry.h" EXCLUDE
         PATTERN "ihs_mcp_transport.h" EXCLUDE
         PATTERN "ihs_mcp_semantics.h" EXCLUDE
@@ -319,6 +349,11 @@ if (NOT BUILD_MCP)
     list(APPEND _ihs_header_excludes
             PATTERN "ihs_mcp_provider.h" EXCLUDE
             PATTERN "ihs_mcp_app_tools.h" EXCLUDE)
+endif ()
+# No forwarders are compiled without ENABLE_OSGI, so installing the header would
+# let a consumer declare against symbols this build does not export.
+if (NOT ENABLE_OSGI)
+    list(APPEND _ihs_header_excludes PATTERN "ihs_osgi.h" EXCLUDE)
 endif ()
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/ihs
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}

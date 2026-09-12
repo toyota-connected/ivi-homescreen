@@ -23,6 +23,7 @@ registered plugins — `ihs_shared` exposes neither a registrar nor a messenger.
 | Platform-view surface negotiation (`ihs_pv_*`) | Built-in | Always; inert until the shell installs an `IhsPvHost` |
 | Config read-back (`ihs_config_*` snapshots) | Built-in | Always; shell publishes, plugins read |
 | Location service (`ihs_location_*`: gpsd / geoclue / capture replay, caller-registered sources, `kalman.cv` / `kalman.ctrv` filters) | Built-in | Always; geoclue `dlopen`s `libsystemd` at runtime. See [src/location/README.md](src/location/README.md) |
+| OSGi bundle handshake (`ihs_osgi_*`: framework and bundle registration, ACTIVE / STOPPED reports) | Optional | `ENABLE_OSGI` (default `OFF`); forwards to a shell-installed `IhsOsgiHost` and reports `IHS_OSGI_ERR_UNAVAILABLE` without one. See [shell/osgi/README.md](../shell/osgi/README.md) |
 | Versioned ABI handshake (`ihs_get_api`) | Built-in | Always; `IHS_SHARED_ABI_VERSION` |
 
 ---
@@ -120,12 +121,15 @@ Module responsibilities:
 | [shared/include/ihs/platform_view.h](include/ihs/platform_view.h) | Platform-view plugin surface: kinds, requirements, grants, factory/callbacks, frame submit |
 | [shared/include/ihs/platform_view_host.h](include/ihs/platform_view_host.h) | **Shell-only** host seam (`IhsPvHost`, `ihs_pv_set_host`) — not part of the plugin ABI |
 | [shared/include/ihs/config.h](include/ihs/config.h) | Config read surface + builder (`IhsConfigApi`); refcounted snapshots by flattened key |
+| [shared/include/ihs/ihs_osgi.h](include/ihs/ihs_osgi.h) | OSGi bundle handshake C ABI (`ENABLE_OSGI` only; not installed otherwise); registration, ACTIVE / STOPPED reports, opaque `IhsOsgiBundle` handle |
+| [shared/include/ihs/ihs_osgi_host.h](include/ihs/ihs_osgi_host.h) | **Shell-only** host seam (`IhsOsgiHost`, `ihs_osgi_set_host`) — not part of the plugin ABI |
 | [shared/include/ihs/format.h](include/ihs/format.h) | Header-only `ihs::format_to` (`std::format_to_n` or `snprintf`); C++ convenience, not ABI |
 | `shared/include/ihs/ihs_export.h` | Generated at configure time by `generate_export_header` — defines `IHS_EXPORT` |
 | [shared/src/ihs_api.cc](src/ihs_api.cc) | Entry point + capability-table assembly + last-error string |
 | [shared/src/trace.cc](src/trace.cc) | Tracing implementation |
 | [shared/src/config.cc](src/config.cc) | Config snapshot store + builder |
 | [shared/src/platform_view.cc](src/platform_view.cc) | Platform-view forwarder + negotiate scoring |
+| [shared/src/osgi_api.cc](src/osgi_api.cc) | OSGi handshake forwarders — validate arguments, then call through the shell's table; hold no state |
 | [shared/src/ihs_internal.hpp](src/ihs_internal.hpp) | Non-installed sub-table accessors shared between TUs |
 | `shared/src/logging/` | Logging internals: ring, registry, worker, context cache, sinks, DLT loader, FFI shim |
 | [shared/abi/libihs_shared.so.abi](abi/libihs_shared.so.abi) | Committed `libabigail` baseline — the CI ABI gate diffs against it |
