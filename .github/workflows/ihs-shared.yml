@@ -48,8 +48,14 @@ jobs:
 
       - name: Build + install ihs_shared
         run: |
+          # ENABLE_OSGI so ihs_osgi.h is installed: it is what the osgi_abi
+          # conformance step below builds against, and it puts that header
+          # through the C11 check that follows -- which is what keeps it
+          # parseable by ffigen, the tool that would remove the hand-written
+          # Dart mirrors entirely.
           cmake -S shared -B build -G Ninja \
             -DENABLE_DLT=${{ matrix.enable_dlt }} \
+            -DENABLE_OSGI=ON \
             -DCMAKE_INSTALL_PREFIX="$PWD/prefix"
           cmake --build build
           cmake --install build
@@ -80,6 +86,20 @@ jobs:
           cmake --build sbuild
           export LD_LIBRARY_PATH="$PWD/prefix/lib:$PWD/prefix/lib64:$PWD/prefix/lib/x86_64-linux-gnu"
           ctest --test-dir sbuild --output-on-failure
+
+      - name: OSGi ABI conformance (struct layout + status values)
+        # dart:ffi cannot read a C header, so every Dart caller mirrors
+        # IhsOsgiPeerInfo / IhsOsgiBundleInfo by hand. struct_size catches a
+        # struct that shrank; it cannot catch a field that moved, which keeps
+        # the same size and then writes a port id over a pointer. This pins the
+        # layout from the C side; the Dart side pins the same numbers in
+        # packages/osgi_ffi/test/abi_conformance_test.dart over in dart_osgi.
+        run: |
+          cmake -S shared/tests/osgi_abi -B obuild -G Ninja \
+            -DCMAKE_PREFIX_PATH="$PWD/prefix"
+          cmake --build obuild
+          export LD_LIBRARY_PATH="$PWD/prefix/lib:$PWD/prefix/lib64:$PWD/prefix/lib/x86_64-linux-gnu"
+          ctest --test-dir obuild --output-on-failure
 
       - name: Location unit tests (parser / registry / manager / fallback / filter / file / kalman / ctrv / wire)
         # Standalone: compiles the internal location sources directly (ParseTpv,
