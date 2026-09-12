@@ -289,6 +289,10 @@ dlt-receive -a localhost
 - **Absent capabilities.** A `NULL` sub-table means the capability is not in the
   running build (e.g. logging in a hypothetical build without it) — check for
   `NULL` rather than assuming presence.
+- **A capability logs nothing at all.** Contexts inside `ihs_shared` resolve on
+  first use and are retried while unresolved, because `ihs_log_context_open()`
+  answers -1 until `ihs_log_start()` has run. A consumer that starts logging
+  late still gets those records once it does.
 - **Logging drops.** If records go missing under load, the per-thread ring
   overflowed. `ihs_log_dropped()` is the cumulative count across all rings, and
   `ihs_log_ring_capacity()` the depth in force for this run, so a consumer can
