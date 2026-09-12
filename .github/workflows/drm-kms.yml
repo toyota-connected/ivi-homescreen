@@ -259,10 +259,18 @@ jobs:
       # The listing is printed BEFORE the chmod deliberately. It shows the state
       # the harness would have found on its own, which is the only way to tell
       # whether the permission had been handed back or was never the problem.
-      # That also puts a number on an open question in this job: the census
-      # skips drm-kms-egl with "backend did not render" while the software
-      # backend passes on the same card, and access is one candidate. If these
-      # lines report the cards accessible before the chmod, it is not this.
+      #
+      # The first run carrying this step answered a question that had been open
+      # here, and the answer was no. The census skips drm-kms-egl with "backend
+      # did not render" while the software backend passes on the same card, and
+      # access was a candidate. It printed root:video 0660 for both cards, then
+      # "readable and writable by runner" after the chmod, and the census
+      # skipped drm-kms-egl regardless. So that backend renders nothing for some
+      # other reason, and this job had been passing its census and input
+      # harnesses all along without write access to the node.
+      #
+      # The chmod stays for the case it was added for: a card this job
+      # provisions itself, which no other step widens.
       - name: Card state before the harness
         if: steps.vkms.outputs.available == 'true'
         run: |
