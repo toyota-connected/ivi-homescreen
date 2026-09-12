@@ -40,7 +40,9 @@
 #include "view/compositor_surface_interface.h"
 
 extern "C" {
+#include <drm_fourcc.h>
 #include <fcntl.h>
+#include <gbm.h>
 #include <unistd.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
@@ -212,6 +214,173 @@ class FakePlatformView : public ICompositorSurface {
   std::vector<uint32_t> planes_;
 };
 
+// A scanout-capable dma-buf filled with a flat colour.
+//
+// Allocated through GBM on the card itself. vkms has no render node, so there
+// is no GPU to render into it -- but the scene path never renders a platform
+// view's buffer, it hands it straight to a KMS plane, which is the whole point
+// of that path and exactly what this has to exercise. Linear and XRGB8888
+// because that is what the plane accepts and what makes the CPU fill trivial.
+class GbmSolidBuffer {
+ public:
+  bool Create(int card_fd, uint32_t w, uint32_t h, uint32_t argb) {
+    dev_ = gbm_create_device(card_fd);
+    if (dev_ == nullptr) {
+      return false;
+    }
+    bo_ = gbm_bo_create(dev_, w, h, GBM_FORMAT_XRGB8888,
+                        GBM_BO_USE_SCANOUT | GBM_BO_USE_LINEAR);
+    if (bo_ == nullptr) {
+      return false;
+    }
+    void* map_data = nullptr;
+    uint32_t stride = 0;
+    void* ptr =
+        gbm_bo_map(bo_, 0, 0, w, h, GBM_BO_TRANSFER_WRITE, &stride, &map_data);
+    if (ptr == nullptr) {
+      return false;
+    }
+    for (uint32_t y = 0; y < h; ++y) {
+      auto* row = reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(ptr) +
+                                              static_cast<size_t>(y) * stride);
+      for (uint32_t x = 0; x < w; ++x) {
+        row[x] = argb;
+      }
+    }
+    gbm_bo_unmap(bo_, map_data);
+    w_ = w;
+    h_ = h;
+    stride_ = gbm_bo_get_stride(bo_);
+    return true;
+  }
+
+  ~GbmSolidBuffer() {
+    if (bo_ != nullptr) {
+      gbm_bo_destroy(bo_);
+    }
+    if (dev_ != nullptr) {
+      gbm_device_destroy(dev_);
+    }
+  }
+
+  GbmSolidBuffer() = default;
+  GbmSolidBuffer(const GbmSolidBuffer&) = delete;
+  GbmSolidBuffer& operator=(const GbmSolidBuffer&) = delete;
+
+  // A fresh owned handle each call, which is the ownership GetDmabuf promises.
+  [[nodiscard]] int ExportFd() const {
+    return bo_ != nullptr ? gbm_bo_get_fd(bo_) : -1;
+  }
+  [[nodiscard]] uint32_t width() const { return w_; }
+  [[nodiscard]] uint32_t height() const { return h_; }
+  [[nodiscard]] uint32_t stride() const { return stride_; }
+
+ private:
+  gbm_device* dev_{nullptr};
+  gbm_bo* bo_{nullptr};
+  uint32_t w_{0};
+  uint32_t h_{0};
+  uint32_t stride_{0};
+};
+
+// A platform view whose content is a dma-buf, which is what the scene path
+// drives. The texture-only fake above is invisible to it: GetDmabuf defaults to
+// kNotScanoutCapable, so the scene path never presents such a surface at all.
+class FakeDmabufPlatformView : public ICompositorSurface {
+ public:
+  FakeDmabufPlatformView(FlutterPlatformViewIdentifier id,
+                         const GbmSolidBuffer& buffer,
+                         uint32_t buffer_id)
+      : id_(id), buffer_(&buffer), buffer_id_(buffer_id) {}
+
+  bool OnCreateBackingStore(const FlutterBackingStoreConfig*,
+                            FlutterBackingStore*) override {
+    return false;
+  }
+  bool OnCollectBackingStore(const FlutterBackingStore*) override {
+    return true;
+  }
+  bool OnPresent(const FlutterLayer*) override {
+    presents_++;
+    return true;
+  }
+  [[nodiscard]] FlutterPlatformViewIdentifier GetIdentifier() const override {
+    return id_;
+  }
+
+  // Deliver-once, like the real producer: a frame reaches the scanout path at
+  // most once, and a present with nothing new says so rather than handing the
+  // same buffer over twice.
+  [[nodiscard]] DmabufState GetDmabuf(Dmabuf* out) const override {
+    const std::lock_guard<std::mutex> lock(mu_);
+    if (!fresh_) {
+      return DmabufState::kNoNewFrame;
+    }
+    const int fd = buffer_->ExportFd();
+    if (fd < 0) {
+      return DmabufState::kNotScanoutCapable;
+    }
+    fresh_ = false;
+    out->fd[0] = fd;
+    out->fourcc = DRM_FORMAT_XRGB8888;
+    out->modifier = DRM_FORMAT_MOD_LINEAR;
+    out->width = buffer_->width();
+    out->height = buffer_->height();
+    out->plane_count = 1;
+    out->offset[0] = 0;
+    out->stride[0] = buffer_->stride();
+    out->acquire_fence_fd = -1;  // filled by the CPU, already synced
+    out->buffer_id = buffer_id_;
+    delivered_++;
+    return DmabufState::kFrame;
+  }
+
+  void OnScanoutRelease(uint32_t buffer_id) override {
+    const std::lock_guard<std::mutex> lock(mu_);
+    released_.push_back(buffer_id);
+  }
+  void SetScanoutPlane(uint32_t plane_id) override {
+    const std::lock_guard<std::mutex> lock(mu_);
+    planes_.push_back(plane_id);
+  }
+
+  // Stand in for the producer submitting again, optionally from a different
+  // ring slot -- which is what makes the previous slot releasable.
+  void Submit(const GbmSolidBuffer* buffer = nullptr, uint32_t buffer_id = 0) {
+    const std::lock_guard<std::mutex> lock(mu_);
+    if (buffer != nullptr) {
+      buffer_ = buffer;
+      buffer_id_ = buffer_id;
+    }
+    fresh_ = true;
+  }
+
+  [[nodiscard]] int presents() const { return presents_; }
+  [[nodiscard]] int delivered() const {
+    const std::lock_guard<std::mutex> lock(mu_);
+    return delivered_;
+  }
+  [[nodiscard]] std::vector<uint32_t> released() const {
+    const std::lock_guard<std::mutex> lock(mu_);
+    return released_;
+  }
+  [[nodiscard]] std::vector<uint32_t> planes() const {
+    const std::lock_guard<std::mutex> lock(mu_);
+    return planes_;
+  }
+
+ private:
+  const FlutterPlatformViewIdentifier id_;
+  const GbmSolidBuffer* buffer_;
+  uint32_t buffer_id_;
+  int presents_{0};
+  mutable std::mutex mu_;
+  mutable bool fresh_{true};
+  mutable int delivered_{0};
+  std::vector<uint32_t> released_;
+  std::vector<uint32_t> planes_;
+};
+
 // A backend on vkms with a framed output, which is the configuration #530 was
 // found in: a framebuffer smaller than the mode puts every present through
 // PresentFramed, the one path that queued platform-view releases and never
@@ -264,6 +433,18 @@ class DrmBackendVkmsBase : public ::testing::Test {
 
     compositor_ = backend_->compositor();
     ASSERT_NE(compositor_, nullptr) << "built without BUILD_COMPOSITOR";
+
+    // Start the card's flip reader, exactly as register_backends.cc does right
+    // after Create.
+    //
+    // Not optional bookkeeping: WaitForPendingFlip waits on a flag that only
+    // this thread clears, so without it every present after the first burns the
+    // full 100 ms timeout and logs "PAGE_FLIP_EVENT likely lost". The GL and
+    // framed cases still passed that way -- the wait returns true on timeout
+    // and the drain runs regardless -- but the scene path's scanout release is
+    // driven by the flip completion itself, so it never fired at all.
+    display_->SetFlipHandler(&DrmBackend::UnifiedPageFlipHandler);
+    display_->StartFlipReader();
 
     // A texture the compositor can actually sample. It never has to contain
     // anything: the assertions are about the release bookkeeping around the
@@ -339,6 +520,28 @@ class DrmBackendVkmsBase : public ::testing::Test {
     return img.pixels()[i];
   }
 
+  // Present until @p done holds, or give up after @p max frames.
+  //
+  // The scanout release is asynchronous by construction: the pool fires it when
+  // the flip that displaced the buffer completes, on the card's flip-reader
+  // thread, and the compositor drains the queue at the top of a later present.
+  // How many presents that takes is a scheduling detail -- measured here as two
+  // or three -- so a test that pins the count is pinning the weather. What is
+  // contractual is that it arrives.
+  bool PumpUntil(FlutterPlatformViewIdentifier id,
+                 const std::function<bool()>& done,
+                 int max = 10) {
+    for (int i = 0; i < max; ++i) {
+      if (!PresentPlatformView(id)) {
+        return false;
+      }
+      if (done()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   // One frame carrying nothing but the platform view.
   bool PresentPlatformView(FlutterPlatformViewIdentifier id) {
     FlutterPlatformView pv{};
@@ -367,6 +570,23 @@ class DrmBackendVkmsBase : public ::testing::Test {
   // whatever the letterboxing.
   uint32_t layer_w_{16};
   uint32_t layer_h_{16};
+};
+
+// The plane compositor, full screen: PresentLayersViaScene -- the zero-copy
+// path, where a platform view's own buffer goes on a KMS plane and the
+// compositor never touches its pixels. Needs overlay planes, same as the framed
+// fixture.
+class DrmBackendVkmsScene : public DrmBackendVkmsBase {
+ protected:
+  void Configure(DrmConfig& cfg) override {
+    if (card_.overlays == 0) {
+      GTEST_SKIP() << "vkms has no overlay plane, so there is no scene path "
+                      "to test (modprobe vkms enable_overlay=1)";
+    }
+    cfg.compositor = drm_config::Compositor::kPlanes;
+    content_w_ = card_.mode_w;
+    content_h_ = card_.mode_h;
+  }
 };
 
 // The GL compositor, full screen: PresentViaGlFallback.
@@ -552,6 +772,83 @@ TEST_F(DrmBackendVkmsFramed, TheViewsTextureReachesTheDisplay) {
       << "the centre of the display is not the colour the view uploaded";
 
   compositor_->UnregisterSurface(19);
+}
+
+// The zero-copy path end to end: a producer's own dma-buf lands on a KMS plane
+// and its pixels reach the display without the compositor drawing anything.
+//
+// This is the path the other fixtures cannot reach. A texture-only surface is
+// invisible to it -- GetDmabuf defaults to kNotScanoutCapable, so the scene
+// path routes the whole frame to GL and the view is never placed at all, which
+// is exactly what happened when overlay planes first appeared on this host.
+TEST_F(DrmBackendVkmsScene, AProducersBufferScansOutOnItsOwnPlane) {
+  GbmSolidBuffer buffer;
+  ASSERT_TRUE(buffer.Create(backend_->device().fd(), content_w_, content_h_,
+                            0xFF1E7A46u))
+      << "could not allocate a scanout dma-buf on the card";
+
+  auto view = std::make_shared<FakeDmabufPlatformView>(21, buffer, 0);
+  layer_w_ = content_w_;
+  layer_h_ = content_h_;
+  compositor_->RegisterSurface(21, view);
+
+  ASSERT_TRUE(PresentPlatformView(21));
+  EXPECT_EQ(view->delivered(), 1) << "the scene path never pulled the frame";
+
+  const std::vector<uint32_t> planes = view->planes();
+  ASSERT_FALSE(planes.empty())
+      << "the view was never told which plane it is on";
+  EXPECT_NE(planes.back(), 0u)
+      << "reported off any plane, so it was GL-composited rather than scanned "
+         "out -- the zero-copy path did not run";
+
+  const drm::capture::Image image = Snapshot("scene_platform_view");
+  ASSERT_FALSE(image.empty());
+  EXPECT_EQ(CentrePixel(image) & 0x00FFFFFFu, 0x001E7A46u)
+      << "the producer's buffer is not what the display is showing";
+
+  compositor_->UnregisterSurface(21);
+}
+
+// The scanout release, which is the mechanism the GL paths lack and had to
+// emulate. A second buffer displaces the first; once the flip that sampled it
+// has completed, the first slot comes back to the producer.
+TEST_F(DrmBackendVkmsScene, TheDisplacedSlotComesBackToTheProducer) {
+  GbmSolidBuffer first;
+  GbmSolidBuffer second;
+  ASSERT_TRUE(first.Create(backend_->device().fd(), content_w_, content_h_,
+                           0xFF1E7A46u));
+  ASSERT_TRUE(second.Create(backend_->device().fd(), content_w_, content_h_,
+                            0xFF7A1E46u));
+
+  // Slot 0 first, deliberately: 0 is a ring slot like any other, and it is the
+  // value that was mistaken for "no id" on the GL side.
+  auto view = std::make_shared<FakeDmabufPlatformView>(23, first, 0);
+  layer_w_ = content_w_;
+  layer_h_ = content_h_;
+  compositor_->RegisterSurface(23, view);
+
+  ASSERT_TRUE(PresentPlatformView(23));
+  EXPECT_TRUE(view->released().empty())
+      << "released while it was the frame on the plane";
+
+  view->Submit(&second, 1);
+  ASSERT_TRUE(PumpUntil(23, [&] { return !view->released().empty(); }))
+      << "slot 0 never came back";
+
+  const std::vector<uint32_t> released = view->released();
+  EXPECT_EQ(released.front(), 0u)
+      << "buffer id 0 is ring slot 0, not a sentinel for 'no id'";
+  EXPECT_EQ(view->delivered(), 2)
+      << "GetDmabuf is deliver-once; a present with no new frame must not "
+         "pull the same buffer again";
+
+  // And the newer buffer is what is on screen.
+  const drm::capture::Image image = Snapshot("scene_second_buffer");
+  ASSERT_FALSE(image.empty());
+  EXPECT_EQ(CentrePixel(image) & 0x00FFFFFFu, 0x007A1E46u);
+
+  compositor_->UnregisterSurface(23);
 }
 
 }  // namespace
