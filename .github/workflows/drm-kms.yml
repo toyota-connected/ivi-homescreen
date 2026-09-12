@@ -162,6 +162,22 @@ jobs:
         id: vkms_dual
         if: steps.vkms.outputs.available == 'true'
         run: |
+          # The subsystem directory appears on its own once the module is
+          # loaded and configfs is mounted -- nothing creates it -- so the
+          # single precondition is that mount. The first attempt died on
+          # "/sys/kernel/config/vkms missing after modprobe" against a 6.17
+          # kernel, well past the >= 6.11 floor the script names, so the other
+          # half of that message is the live one. The lines below say which:
+          # an unmounted configfs is this step's to fix, whereas a mounted one
+          # with no vkms subsystem means the interface is not in this build and
+          # no amount of retrying here will conjure it.
+          sudo modprobe configfs 2>/dev/null || true
+          grep -q ' /sys/kernel/config ' /proc/mounts \
+            || sudo mount -t configfs none /sys/kernel/config 2>/dev/null || true
+          echo "kernel: $(uname -r)"
+          grep ' /sys/kernel/config ' /proc/mounts || echo "  configfs NOT mounted"
+          echo "/sys/kernel/config:"
+          ls /sys/kernel/config 2>&1 | sed 's/^/  /'
           if sudo third_party/drm-cxx/scripts/vkms_dual.sh up; then
             # The node arrives root:video 0660 and the harness runs as the
             # unprivileged runner user, so without this it would fail to open a
