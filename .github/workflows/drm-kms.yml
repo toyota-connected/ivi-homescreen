@@ -195,6 +195,14 @@ jobs:
             # The node arrives root:video 0660 and the harness runs as the
             # unprivileged runner user, so without this it would fail to open a
             # card that is finally there -- worse than the skip it replaces.
+            #
+            # This is the first of two. udev processes a newly created node
+            # asynchronously, so its rule can re-apply root:video 0660 after
+            # this chmod and hand the permission back -- which is what #554
+            # found in the unit-tests job, where an early chmod printed
+            # crw-rw-rw- and the driver still saw no usable card. A node this
+            # step has just created is the worst case for that race, so the
+            # step before the harness applies it again and checks it held.
             sudo chmod a+rw /dev/dri/card* 2>/dev/null || true
             sudo third_party/drm-cxx/scripts/vkms_dual.sh status || true
             echo "provisioned=true" >> "$GITHUB_OUTPUT"
@@ -243,6 +251,33 @@ jobs:
           key: emb-engine-x86_64
           restore-keys: |
             emb-engine-x86_64-
+      # Card state as the harness will actually find it, then fix it. Same
+      # treatment #554 gave the unit-tests job, for the same reason: a chmod
+      # applied when the node was created can be undone by udev before anything
+      # opens it, so the one that counts is the one nearest the consumer.
+      #
+      # The listing is printed BEFORE the chmod deliberately. It shows the state
+      # the harness would have found on its own, which is the only way to tell
+      # whether the permission had been handed back or was never the problem.
+      # That also puts a number on an open question in this job: the census
+      # skips drm-kms-egl with "backend did not render" while the software
+      # backend passes on the same card, and access is one candidate. If these
+      # lines report the cards accessible before the chmod, it is not this.
+      - name: Card state before the harness
+        if: steps.vkms.outputs.available == 'true'
+        run: |
+          ls -l /dev/dri/ || true
+          sudo chmod a+rw /dev/dri/card* 2>/dev/null || true
+          # Test the node rather than infer from mode bits: the harness opens
+          # it, so open-ability is the property that matters.
+          for c in /dev/dri/card*; do
+            if [ -r "$c" ] && [ -w "$c" ]; then
+              echo "$c: readable and writable by $(id -un)"
+            else
+              echo "$c: NOT accessible to $(id -un)"
+            fi
+          done
+
       - name: Harness integration (census + input harness on vkms)
         if: steps.vkms.outputs.available == 'true'
         env:
