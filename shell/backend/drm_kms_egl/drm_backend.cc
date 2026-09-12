@@ -1507,7 +1507,7 @@ bool DrmBackend::WaitForPendingFlip() const {
           "proceeding (PAGE_FLIP_EVENT likely lost)");
       return true;
     }
-    if (drm_display_ != nullptr) {
+    if (drm_display_ != nullptr && RasterDrainEnabled()) {
       const auto remaining =
           std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now)
               .count();
@@ -1517,6 +1517,8 @@ bool DrmBackend::WaitForPendingFlip() const {
       // waker ends the poll at once instead of burning the budget (#367).
       drm_display_->DrainReadyFlips(static_cast<int>(remaining));
     } else {
+      // No drain: wait on the flag alone, in slices, as DrmCompositor does.
+      // The reader thread delivers the completion.
       std::this_thread::sleep_for(200us);
     }
   }

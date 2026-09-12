@@ -164,10 +164,16 @@ if (ENABLE_OSGI)
 endif ()
 add_subdirectory(output_resolver-test)
 add_subdirectory(ihs_pv-test)
-# The #367 waker, driven through the real DrmDisplay against vkms. Needs the
-# display sources and drm-cxx, which exist once a DRM-KMS backend is
-# configured; drm_flip_wake-test covers the same mechanism without them.
-# Skips itself without vkms + DRM master.
+# The PAGE_FLIP_EVENT drain race behind #367. Drives libdrm and an eventfd
+# directly -- no shell sources -- so it builds wherever libdrm was found, not
+# only under a DRM-KMS backend. Skips itself without vkms + DRM master.
+if (TARGET PkgConfig::DRM)
+    add_subdirectory(drm_flip_wake-test)
+endif ()
+# The same race through the real DrmDisplay: DrainReadyFlips and WakeFlipDrain
+# with the card's reader thread running. Needs the display sources and drm-cxx,
+# which exist once a DRM-KMS backend is configured; the mechanism test above
+# needs neither. Skips itself without vkms + DRM master.
 if (TARGET drm-cxx)
     add_subdirectory(drm_flip_waker-test)
 endif ()
