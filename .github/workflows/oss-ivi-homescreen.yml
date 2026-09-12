@@ -573,6 +573,30 @@ jobs:
             echo "::warning::vkms unavailable on $(uname -r); the DRM compositor cases will skip"
           fi
 
+      # Card state as the tests will actually find it, then fix it.
+      #
+      # The chmod in the load step above ran minutes earlier and printed
+      # crw-rw-rw-, yet the driver then reported no vkms card at all. udev
+      # processes a freshly created node asynchronously, so its rule (root:video
+      # 0660) can land after the chmod and put the permission back. The listing
+      # here is printed BEFORE the chmod on purpose: it shows the state the
+      # previous run's tests would have seen, which is what says whether that is
+      # the explanation or something else is.
+      - name: Card state before tests
+        run: |
+          ls -l /dev/dri/ || true
+          sudo chmod a+rw /dev/dri/card* 2>/dev/null || true
+          # Prove it is usable by this user rather than inferring it from mode
+          # bits: open the node and read the driver name the same way the test
+          # does.
+          for c in /dev/dri/card*; do
+            if [ -r "$c" ] && [ -w "$c" ]; then
+              echo "$c: readable and writable by $(id -un)"
+            else
+              echo "$c: NOT accessible to $(id -un)"
+            fi
+          done
+
       - name: Run unit tests (CTest)
         working-directory: ${{github.workspace}}/build/unit-tests
         run: ctest --output-on-failure --test-dir .
