@@ -36,6 +36,7 @@
 #include "display/drm_output_provider.h"
 #include "display/idisplay.h"
 #include "input/iseat.h"
+#include "input/wake_event_fd.h"
 
 namespace homescreen {
 class DrmCursor;
@@ -195,6 +196,12 @@ class DrmDisplay final : public IDisplay {
   // @p timeout_ms > 0 blocks up to that long waiting for an event; 0 polls
   // without blocking. Returns true if at least one event was handled.
   bool DrainReadyFlips(int timeout_ms);
+
+  // Wake a raster thread parked in DrainReadyFlips. Call wherever the flag it
+  // waits on is cleared: the event it was waiting for is gone, so nothing will
+  // make the fd readable again and its poll would otherwise run the full
+  // budget (#367). Safe from any thread; a no-op in degraded mode.
+  void WakeFlipDrain() const;
 
   // Per-card plane coordination: overlay/cursor planes on a card may be valid
   // for several CRTCs, so independent per-view backends would otherwise pick
@@ -360,9 +367,16 @@ class DrmDisplay final : public IDisplay {
   void ArmFlipRead();
   // Drain readable flip events on the reader thread (poll(0)+drmHandleEvent).
   void DrainFlip();
+  // Shared body of DrainFlip/DrainReadyFlips. @use_waker adds flip_waker_ to
+  // the poll set: only the raster path may consume a wake, or the reader could
+  // swallow it and leave that thread parked -- the bug this fixes.
+  bool DrainImpl(int timeout_ms, bool use_waker);
   // Serializes the fd drain between the reader thread (DrainFlip) and the
   // raster thread (DrainReadyFlips) so a PAGE_FLIP_EVENT is never read twice.
   std::mutex flip_drain_mu_;
+  // Wakes a raster thread parked in DrainReadyFlips when the flip it waited on
+  // was drained by the reader instead (#367). Only that path polls it.
+  homescreen::input::WakeEventFd flip_waker_;
   // Stop + join the reader thread and detach the fd (drm_dev_ still owns it).
   void StopFlipReader();
 
