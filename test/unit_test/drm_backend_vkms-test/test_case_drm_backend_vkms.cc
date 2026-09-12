@@ -72,6 +72,9 @@ struct VkmsCard {
   std::string path;
   uint32_t mode_w{0};
   uint32_t mode_h{0};
+  // What the connector scan saw, so a skip can say which half failed.
+  int connectors{0};
+  int connected{0};
   // Overlay planes the card exposes. Zero on a default vkms: enable_overlay
   // defaults off, and without an overlay the driver probe disables the plane
   // compositor, so the framed path does not exist to be tested.
@@ -135,12 +138,20 @@ VkmsCard FindVkms() {
     out.path = path;
     out.overlays = CountOverlayPlanes(fd);
     if (drmModeRes* res = drmModeGetResources(fd); res != nullptr) {
-      for (int c = 0; c < res->count_connectors && out.mode_w == 0; ++c) {
+      for (int c = 0; c < res->count_connectors; ++c) {
         drmModeConnector* conn = drmModeGetConnector(fd, res->connectors[c]);
         if (conn == nullptr) {
           continue;
         }
-        if (conn->connection == DRM_MODE_CONNECTED && conn->count_modes > 0) {
+        out.connectors++;
+        if (conn->connection == DRM_MODE_CONNECTED) {
+          out.connected++;
+        }
+        // First usable connector wins; the loop still visits the rest so the
+        // counts above describe the whole card rather than the prefix that was
+        // scanned before a match.
+        if (out.mode_w == 0 && conn->connection == DRM_MODE_CONNECTED &&
+            conn->count_modes > 0) {
           out.mode_w = conn->modes[0].hdisplay;
           out.mode_h = conn->modes[0].vdisplay;
         }
@@ -400,8 +411,16 @@ class DrmBackendVkmsBase : public ::testing::Test {
 
   void SetUp() override {
     card_ = FindVkms();
+    // Two different failures, reported as two different messages. Conflating
+    // them cost a CI round trip: the runner had a vkms card the whole time and
+    // the skip said "no connected vkms card", which reads as "no card".
+    if (card_.path.empty()) {
+      GTEST_SKIP() << "no vkms card on this host (sudo modprobe vkms)";
+    }
     if (!card_.ok()) {
-      GTEST_SKIP() << "no connected vkms card (sudo modprobe vkms)";
+      GTEST_SKIP() << card_.path << " is vkms but exposes no connected "
+                   << "connector with modes (connectors=" << card_.connectors
+                   << " connected=" << card_.connected << ")";
     }
 
     display_ = std::make_unique<DrmDisplay>(0, 0, 0.0, card_.path,
