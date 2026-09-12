@@ -160,6 +160,10 @@ if (ENABLE_OSGI)
     add_subdirectory(osgi_startup-test)
     add_subdirectory(osgi_orchestrator-test)
     add_subdirectory(osgi_bridge-test)
+    # The channel handler itself, driven through a stub messenger and the
+    # standard codec. Separate from osgi_bridge-test because that one owns its
+    # registry with a fake DartPortApi, while this one reaches the singleton.
+    add_subdirectory(osgi_bridge_plugin-test)
     add_subdirectory(osgi_vsync-test)
     # Links libihs_shared rather than the shell: the ihs_osgi_* forwarders are
     # only compiled into it when ENABLE_OSGI is on.
