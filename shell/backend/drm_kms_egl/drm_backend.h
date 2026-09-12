@@ -191,6 +191,13 @@ class DrmBackend : public Backend, public IFlipSink {
 
   // The device-context this backend scans out through (plane reservation).
   [[nodiscard]] DrmDisplay* display() const { return drm_display_; }
+
+#if BUILD_COMPOSITOR
+  // The compositor driving this backend's own CRTC (the implicit view, id 0).
+  // Null before Create finishes. Exposed for tests that drive the compositor
+  // directly; the shell reaches it through the view_id map instead.
+  [[nodiscard]] DrmCompositor* compositor() const { return compositor_.get(); }
+#endif
   ~DrmBackend() override;
 
   DrmBackend(const DrmBackend&) = delete;

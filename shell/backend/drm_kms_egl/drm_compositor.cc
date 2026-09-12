@@ -348,19 +348,81 @@ DrmCompositor::~DrmCompositor() {
   }
 }
 
-void DrmCompositor::DrainDeferredScanoutReleases() {
-  // Take the batch under the lock, then fire the callbacks without it: they run
-  // producer code (an eventfd signal) and must not re-enter under our mutex.
-  std::vector<DeferredScanoutRelease> ready;
-  {
-    const std::scoped_lock lock(deferred_releases_mu_);
-    ready.swap(deferred_releases_);
+// A platform view was GL-composited this present: return the frame this one
+// displaced, once the flip that sampled it has completed.
+//
+// A GL-composited view never reaches a plane, so the scanout retire that fires
+// OnScanoutRelease never happens for it. Without this the producer waits out
+// its release timeout on every frame -- at 100 ms that is a seventh of the
+// display rate, and it reads as the renderer being slow rather than as a missed
+// release.
+//
+// Displaced, not current: the compositor re-samples the bound texture on every
+// present until a newer frame arrives, so returning the current one would hand
+// the producer a slot still being drawn from. Deferring gives the same "off the
+// plane, one present later" guarantee the scanout path has.
+//
+// Raster thread only, like its three call sites.
+void DrmCompositor::NoteGlComposited(
+    const std::shared_ptr<ICompositorSurface>& surface,
+    FlutterPlatformViewIdentifier id) {
+  if (!surface) {
+    return;
   }
-  for (const DeferredScanoutRelease& r : ready) {
+  // No zero check. 0 is a valid buffer id -- it is ring slot 0 -- and treating
+  // it as "this surface does not track ids" meant slot 0 was never returned to
+  // the producer, which waited out its fence on every cycle through the ring.
+  // Every timeout in a 100k run was slot 0 and no other.
+  //
+  // This is only called where a texture is bound, so there is always a real
+  // frame to name. A surface that does not override the accessor reports 0 and
+  // has no eventfd registered under it, so the release finds nothing and costs
+  // nothing.
+  const uint32_t bid = surface->GetGlTextureBufferId();
+  // The frame just sampled, deferred to after this present's flip -- not the
+  // frame it displaced.
+  //
+  // Displacement is not enough, and which way it fails depends on the
+  // producer's rate. When it outruns the compositor its frames are superseded
+  // before being bound and the supersede path releases them. When it is slower
+  // -- the case that matters, because that is when a stall costs something --
+  // every frame is consumed instead, so nothing supersedes, and displacement
+  // cannot happen until the next submit, which is the thing waiting on the
+  // release. A heavy scene deadlocks on its own ring and waits out the timeout
+  // every frame.
+  //
+  // The compositor re-samples a bound texture until a newer one arrives, so
+  // this does hand back a buffer that may still be on screen. The ring is what
+  // makes that safe: the producer has to cycle every other slot before
+  // returning to this one, which is several frames after the flip that read it.
+  //
+  // Repeat pushes for the same buffer are free -- SignalRelease drops the entry
+  // on the first one and a second finds nothing.
+  const std::scoped_lock rel(deferred_releases_mu_);
+  deferred_releases_.push_back({surface, bid});
+}
+
+std::vector<DrmCompositor::DeferredScanoutRelease>
+DrmCompositor::TakeDeferredScanoutReleases() {
+  std::vector<DeferredScanoutRelease> ready;
+  const std::scoped_lock lock(deferred_releases_mu_);
+  ready.swap(deferred_releases_);
+  return ready;
+}
+
+void DrmCompositor::FireDeferredScanoutReleases(
+    const std::vector<DeferredScanoutRelease>& batch) {
+  for (const DeferredScanoutRelease& r : batch) {
     if (r.surface) {
       r.surface->OnScanoutRelease(r.buffer_id);
     }
   }
+}
+
+void DrmCompositor::DrainDeferredScanoutReleases() {
+  // Take the batch under the lock, then fire the callbacks without it: they run
+  // producer code (an eventfd signal) and must not re-enter under our mutex.
+  FireDeferredScanoutReleases(TakeDeferredScanoutReleases());
 }
 
 // ─── Init helpers ────────────────────────────────────────────────────────
@@ -1123,6 +1185,18 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
     return true;  // ack to Flutter; nothing presented, primary untouched
   }
 
+  // Releases queued by the previous fallback present. Taken now, before the
+  // composite below queues this frame's, and fired once Present has waited out
+  // the flip that sampled them.
+  //
+  // This path had neither half. It queues in NoteGlComposited like the others
+  // but never drained, so on a GL-fallback session -- which is every session
+  // where the plane compositor is unavailable, and every session after the
+  // fallback latches -- no GL-composited platform view ever got a buffer back
+  // and its producer waited out the release-fence timeout on every frame. Same
+  // defect as #530, one path over.
+  std::vector<DeferredScanoutRelease> previous = TakeDeferredScanoutReleases();
+
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   glDisable(GL_SCISSOR_TEST);
   glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -1181,13 +1255,21 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
           gl_compositor_->CompositeToDefault(0, tex, sw, sh, dx, dy, dw, dh,
                                              blend, flip_y, external);
           composited_any = true;
+
+          NoteGlComposited(surface_sp, layer->platform_view->identifier);
         }
       }
     }
   }
 
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
-  return backend_->Present();
+  const bool presented = backend_->Present();
+  // After Present, not before: its own WaitForPendingFlip is what confirms the
+  // flip that sampled these completed. Fired even when the present failed --
+  // the buffers are off the display either way, and holding them back would
+  // stall the producer behind a frame that is never coming.
+  FireDeferredScanoutReleases(previous);
+  return presented;
 }
 
 // ─── Cursor staging + shared commit settle ──────────────────────────────
@@ -1238,6 +1320,14 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
   if (!WaitForPendingFlip()) {
     return PresentViaGlFallback(layers, count);
   }
+
+  // The previous frame's flip has completed, so anything held for a post-flip
+  // release is off the plane -- return it to its producer.
+  // PresentLayersViaScene does the same after its own flip wait; this path did
+  // not, so a release deferred here was queued and never fired, and the
+  // producer waited out its fence timeout on every frame (#530).
+  DrainDeferredScanoutReleases();
+
   const uint64_t t1 = profile ? NsNow() : 0;
 
   // Composite every Flutter layer into the current comp buffer. Same
@@ -1343,6 +1433,12 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
           // sources (e.g. NV12 dmabuf or pre-flipped YUV shader) need
           // flip_y=false so their already-top-down bytes land right-side-up.
           const bool flip_y = !surface_sp->TextureIsTopFirst();
+          // GL-composited into the framed buffer: no plane. Report 0 for the
+          // same reason PresentViaGlFallback does -- otherwise the DRM_PLANE
+          // grant accessor keeps whatever plane id the scene path last set, and
+          // anything keyed on "is this view on a plane" reads a stale yes.
+          surface_sp->SetScanoutPlane(0);
+          NoteGlComposited(surface_sp, layer->platform_view->identifier);
           if (backend_->cfg_.debug_backend) {
             ihs::log::debug(
                 "[DrmCompositor] framed layer[{}] PV id={} tex={} "
@@ -2145,6 +2241,7 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
                 static_cast<GLsizei>(flutter->size.width),
                 static_cast<GLsizei>(flutter->size.height), blend, flip_y,
                 surface_sp->TextureIsExternalOes());
+            NoteGlComposited(surface_sp, flutter->platform_view->identifier);
             any_composited = true;
           }
         }

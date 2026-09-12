@@ -286,6 +286,12 @@ class DrmCompositor : public IFlipSink {
   // that WaitForPendingFlip has confirmed their displacing flip completed.
   void DrainDeferredScanoutReleases();
 
+  // Records that a platform view was GL-composited this present, returning the
+  // frame it displaced. See the definition for why the GL path needs this at
+  // all and why it is the displaced buffer rather than the current one.
+  void NoteGlComposited(const std::shared_ptr<ICompositorSurface>& surface,
+                        FlutterPlatformViewIdentifier id);
+
   // Post-first-commit sanity probe. Confirms the kernel actually honored
   // the modeset by reading CRTC.ACTIVE + primary plane.FB_ID via
   // drmModeObjectGetProperties, then samples vblank sequence across ~2
@@ -465,6 +471,18 @@ class DrmCompositor : public IFlipSink {
   };
   std::mutex deferred_releases_mu_;
   std::vector<DeferredScanoutRelease> deferred_releases_;
+
+  // The two halves of DrainDeferredScanoutReleases, for the GL fallback.
+  //
+  // That path has no flip wait of its own -- DrmBackend::Present owns it -- so
+  // it cannot simply drain at the top the way the framed and scene paths do.
+  // It takes the batch before its composite queues into it and fires the batch
+  // after Present returns, which is where the displacing flip is known to have
+  // completed. Take holds the mutex; fire must not, because the callbacks run
+  // producer code.
+  std::vector<DeferredScanoutRelease> TakeDeferredScanoutReleases();
+  static void FireDeferredScanoutReleases(
+      const std::vector<DeferredScanoutRelease>& batch);
 
   std::unique_ptr<drm::scene::LayerScene> scene_;
 
