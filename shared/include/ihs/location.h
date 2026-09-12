@@ -103,9 +103,19 @@ IHS_EXPORT IhsLocationService* ihs_location_start(IhsLocationSource source,
  * filter — "kalman.cv" is the built-in constant-velocity Kalman filter, which
  * smooths a noisy source, interpolates a fresh position between fixes when
  * polled at UI rate, and coasts through a brief outage; NULL or "" means no
- * filter (identical to ihs_location_start). @filter_config is an optional
- * filter tuning string (may be NULL); for kalman.cv, "q=<value>" sets the
- * process-noise density.
+ * filter (identical to ihs_location_start). "kalman.ctrv" is the built-in
+ * constant-turn-rate-and-velocity extended Kalman filter, which follows an arc
+ * rather than a straight line, so a turning vehicle does not lag the corner; it
+ * corrects its speed from a source that reports one and its yaw rate from a
+ * source that provides one.
+ *
+ * @filter_config is an optional filter tuning string (may be NULL). For
+ * kalman.cv, "q=<value>" sets the process-noise density (default 1.0). For
+ * kalman.ctrv, "qa=<sigma>" is the longitudinal-acceleration 1-sigma in m/s^2
+ * (default 2.0) and "qw=<sigma>" the yaw-acceleration 1-sigma in rad/s^2
+ * (default 0.15) -- 1-sigma values, not variances; the filter squares them.
+ * An unrecognized key is ignored and its knob keeps the default.
+ * shared/src/location/README.md tabulates both filters and their tuning.
  *
  * An unrecognized @filter_key (or a filter that fails to initialize) degrades
  * to no filter rather than failing the service, so a non-NULL return does NOT
