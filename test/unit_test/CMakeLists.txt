@@ -164,6 +164,9 @@ if (ENABLE_OSGI)
     # Links libihs_shared rather than the shell: the ihs_osgi_* forwarders are
     # only compiled into it when ENABLE_OSGI is on.
     add_subdirectory(ihs_osgi-test)
+    # Links both: the C surface driven against a real registry through the host
+    # table, which is the only place the two halves of the FFI path meet.
+    add_subdirectory(osgi_host-test)
 endif ()
 add_subdirectory(output_resolver-test)
 add_subdirectory(ihs_pv-test)

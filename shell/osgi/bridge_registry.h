@@ -162,12 +162,38 @@ class BridgeRegistry {
   // A bundle reported that it stopped.
   bool ReportStopped(const std::string& symbolic_name);
 
+  // Mint the opaque handle the FFI surface reports through, for a bundle that
+  // is already registered. Returns 0 when it is not.
+  //
+  // A capability, not a convenience. Reporting ACTIVE releases a critical
+  // bundle's startup wait, and every ihs_* symbol is reachable by anything in
+  // the process that dlopens libihs_shared, so a symbolic name would be no
+  // barrier at all. The token is random rather than derived from the name, the
+  // port, or an index, so forging a report costs guessing 64 bits instead of
+  // reading the configuration.
+  //
+  // Idempotent for a name that already holds one: RegisterBundle refuses a
+  // duplicate name, so a second mint for a live registration does not arise,
+  // and returning the existing handle beats either minting a second capability
+  // for one bundle or revoking the first out from under it.
+  [[nodiscard]] uint64_t MintHandle(const std::string& symbolic_name);
+
+  // The bundle a handle names, or nullopt when this registry did not mint it or
+  // has since dropped it. Handles arrive from out-of-tree code, so an unknown
+  // one is ordinary untrusted input rather than an error.
+  [[nodiscard]] std::optional<std::string> BundleForHandle(
+      uint64_t handle) const;
+
   // Test seam: drop all state (not the DL binding, which is a VM-global).
   void ResetForTesting();
 
  private:
   // Caller holds mutex_.
   bool DeliverLocked(const std::string& symbolic_name, int64_t port);
+
+  // A token no caller can predict, and not one already in use. Caller holds
+  // mutex_.
+  uint64_t MintTokenLocked();
 
   const DartPortApi& api_;
 
@@ -186,6 +212,11 @@ class BridgeRegistry {
   // Ordered so PendingBundles() is deterministic, which keeps the startup log
   // reproducible across runs.
   std::map<std::string, Bundle> bundles_;
+
+  // Capabilities handed to the FFI surface, token -> bundle. One per registered
+  // bundle at most, so dropping by name is a scan rather than a second index
+  // that could fall out of step with this one.
+  std::map<uint64_t, std::string> handles_;
 };
 
 }  // namespace ihs::osgi

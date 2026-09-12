@@ -17,6 +17,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <thread>
@@ -235,6 +236,70 @@ TEST_F(BridgeRegistryTest, AnEmptyDeclarationSetRefusesEverything) {
   registry_->SetDeclaredBundles({});
   EXPECT_FALSE(registry_->IsDeclared("com.ivi.cluster"));
   EXPECT_FALSE(registry_->RegisterBundle("com.ivi.cluster", 7));
+}
+
+// --- Handles ----------------------------------------------------------------
+//
+// The FFI surface reports through an opaque handle rather than a name, because
+// a name is no barrier there: every ihs_* symbol is reachable by anything in
+// the process that dlopens libihs_shared, and reporting ACTIVE releases a
+// critical bundle's startup wait. The handle is what makes forging one cost
+// guessing 64 bits instead of reading the configuration.
+
+TEST_F(BridgeRegistryTest, MintsAHandleOnlyForARegisteredBundle) {
+  EXPECT_EQ(registry_->MintHandle("com.ivi.ghost"), 0u);
+
+  ASSERT_TRUE(registry_->RegisterBundle("com.ivi.cluster", 7));
+  const uint64_t handle = registry_->MintHandle("com.ivi.cluster");
+  EXPECT_NE(handle, 0u);
+  EXPECT_EQ(registry_->BundleForHandle(handle), "com.ivi.cluster");
+}
+
+// RegisterBundle refuses a duplicate name, so a second mint cannot arise for a
+// live registration -- but if it did, one bundle must not end up holding two
+// capabilities, nor have its first revoked out from under it.
+TEST_F(BridgeRegistryTest, MintingTwiceReturnsTheSameHandle) {
+  ASSERT_TRUE(registry_->RegisterBundle("com.ivi.cluster", 7));
+  const uint64_t first = registry_->MintHandle("com.ivi.cluster");
+  EXPECT_NE(first, 0u);
+  EXPECT_EQ(registry_->MintHandle("com.ivi.cluster"), first);
+}
+
+TEST_F(BridgeRegistryTest, DistinctBundlesGetDistinctHandles) {
+  ASSERT_TRUE(registry_->RegisterBundle("com.ivi.cluster", 7));
+  ASSERT_TRUE(registry_->RegisterBundle("com.ivi.navigation", 8));
+  const uint64_t cluster = registry_->MintHandle("com.ivi.cluster");
+  const uint64_t navigation = registry_->MintHandle("com.ivi.navigation");
+
+  EXPECT_NE(cluster, 0u);
+  EXPECT_NE(navigation, 0u);
+  EXPECT_NE(cluster, navigation);
+  EXPECT_EQ(registry_->BundleForHandle(cluster), "com.ivi.cluster");
+  EXPECT_EQ(registry_->BundleForHandle(navigation), "com.ivi.navigation");
+}
+
+// Handles arrive from out-of-tree code, so one this registry never minted has
+// to resolve to nothing rather than to whatever sits nearby.
+TEST_F(BridgeRegistryTest, AnUnmintedHandleResolvesToNothing) {
+  ASSERT_TRUE(registry_->RegisterBundle("com.ivi.cluster", 7));
+  const uint64_t handle = registry_->MintHandle("com.ivi.cluster");
+
+  EXPECT_FALSE(registry_->BundleForHandle(0).has_value()) << "the null handle";
+  EXPECT_FALSE(registry_->BundleForHandle(handle ^ 1u).has_value())
+      << "one bit away from a live capability";
+}
+
+// The capability goes with the registration. A restart takes the same symbolic
+// name, and a handle that outlived its bundle would report for the new one.
+TEST_F(BridgeRegistryTest, UnregisterDropsTheHandle) {
+  ASSERT_TRUE(registry_->RegisterBundle("com.ivi.cluster", 7));
+  const uint64_t handle = registry_->MintHandle("com.ivi.cluster");
+  ASSERT_TRUE(registry_->UnregisterBundle("com.ivi.cluster"));
+  EXPECT_FALSE(registry_->BundleForHandle(handle).has_value());
+
+  ASSERT_TRUE(registry_->RegisterBundle("com.ivi.cluster", 8));
+  EXPECT_NE(registry_->MintHandle("com.ivi.cluster"), handle)
+      << "a restart must not inherit the previous incarnation's capability";
 }
 
 // A restart re-registers the same symbolic name, which requires an explicit
