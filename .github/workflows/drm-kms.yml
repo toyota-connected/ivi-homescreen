@@ -153,24 +153,37 @@ jobs:
       # The census and input harnesses ask for one connector, which is why they
       # ran on card0 in the same step and this one did not.
       #
-      # vkms_dual.sh provisions a second instance through the >= 6.11 configfs
+      # vkms_dual.sh provisions a second instance through the vkms configfs
       # interface, so it adds a card rather than reloading the module: card0
-      # and everything already using it are untouched. Best-effort, because a
-      # kernel without the configfs interface should leave this job exactly as
-      # it was rather than failing.
+      # and everything already using it are untouched.
+      #
+      # It does not work on a GitHub-hosted runner, and the attempt stays here
+      # deliberately. configfs is mounted and healthy on those images -- the
+      # listing below prints crash_dm_crypt_keys, pci_ep and tsm -- but vkms
+      # registers no subsystem under it on 6.17.0-1022-azure, so the interface
+      # is absent from that build rather than merely unmounted. drm-cxx
+      # documents a >= 6.11 floor, and 6.17 lacking it while 7.1 has it puts
+      # the true floor higher than that. vkms has no module parameter for
+      # connector count, so there is no other way to get two connectors onto
+      # one card here: running this harness needs a self-hosted runner or real
+      # hardware.
+      #
+      # Keeping the attempt costs one warning per run and starts working the
+      # day a runner image ships the interface. REQUIRE_RUN below is what stops
+      # that from being mistaken for the harness passing.
       - name: Provision a dual-connector vkms instance
         id: vkms_dual
         if: steps.vkms.outputs.available == 'true'
         run: |
-          # The subsystem directory appears on its own once the module is
-          # loaded and configfs is mounted -- nothing creates it -- so the
-          # single precondition is that mount. The first attempt died on
-          # "/sys/kernel/config/vkms missing after modprobe" against a 6.17
-          # kernel, well past the >= 6.11 floor the script names, so the other
-          # half of that message is the live one. The lines below say which:
-          # an unmounted configfs is this step's to fix, whereas a mounted one
-          # with no vkms subsystem means the interface is not in this build and
-          # no amount of retrying here will conjure it.
+          # The mount is defensive rather than corrective: it was already
+          # mounted on the runner, and this only covers an environment where it
+          # is not. What matters is the listing underneath it, because
+          # vkms_dual.sh reports a missing subsystem and an unmounted configfs
+          # with one message -- "kernel < 6.11 or vkms configfs disabled" --
+          # and those want opposite responses. Printing the kernel, the mount
+          # line and the subsystem list is what turned an unexplained
+          # "no vkms card found" into a specific missing kernel capability, so
+          # it stays whether or not the provisioning below ever succeeds here.
           sudo modprobe configfs 2>/dev/null || true
           grep -q ' /sys/kernel/config ' /proc/mounts \
             || sudo mount -t configfs none /sys/kernel/config 2>/dev/null || true
