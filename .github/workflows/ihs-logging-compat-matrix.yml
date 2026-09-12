@@ -24,6 +24,7 @@ on:
   push:
     branches:
       - v2.0
+      - v3.0
       - 'jw/dlt-rebase'
     paths:
       - 'cmake/cxx_compat.cmake'

@@ -22,6 +22,7 @@ on:
   push:
     branches:
       - v2.0
+      - v3.0
     paths:
       - 'shared/**'
       - 'shell/logging/**'
