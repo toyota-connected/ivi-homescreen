@@ -51,6 +51,13 @@
 #                    app cannot report ACTIVE, so the critical wait would always
 #                    time out and tear the bundle down, taking B1/B2 with it.
 #                    With 0 both bundles run at normal priority and B3 skips.
+#   TRANSPORT        channel (default) or ffi: which path the activator uses to
+#                    register and report ACTIVE. Both end at the same registry
+#                    and drive the same lifecycle state machine, so every
+#                    assertion below is identical either way -- B3 greps the
+#                    state-machine transition, not a transport's own log line.
+#                    ffi needs a shell whose libihs_shared exports ihs_osgi_*
+#                    (ENABLE_OSGI=ON), and an activator bundle built with it.
 #   COUNT_FLIPS      1 = prove page flips via strace (default 0)
 #   SOFTWARE_RENDER  1 = LIBGL_ALWAYS_SOFTWARE=1 (vkms/llvmpipe)
 #   --check          verify prerequisites only, do not launch
@@ -68,8 +75,18 @@ DURATION="${DURATION:-6}"
 STARTUP_GRACE="${STARTUP_GRACE:-3}"
 STARTUP_TIMEOUT="${STARTUP_TIMEOUT:-4000}"
 ACTIVATOR="${ACTIVATOR:-0}"
+TRANSPORT="${TRANSPORT:-channel}"
 COUNT_FLIPS="${COUNT_FLIPS:-0}"
 SOFTWARE_RENDER="${SOFTWARE_RENDER:-0}"
+
+# Checked here rather than at the point of use, so --check catches a typo
+# before anyone sets up a rig. Refused rather than defaulted: falling back to
+# the channel would report a pass for a transport that was never exercised.
+case "$TRANSPORT" in
+    channel|ffi) ;;
+    *) echo "FAIL: TRANSPORT must be 'channel' or 'ffi', got '$TRANSPORT'" >&2
+       exit 1 ;;
+esac
 
 RESULTS=(); PASS=0; FAIL=0
 log()  { echo "[osgi-mb] $*"; }
@@ -169,7 +186,7 @@ else
     CLUSTER_PRIORITY="normal"
 fi
 log "card $DRM_DEVICE ($DEVICE_SOURCE); connectors $CONNECTOR_A + $CONNECTOR_B"
-log "cluster priority: $CLUSTER_PRIORITY (ACTIVATOR=$ACTIVATOR)"
+log "cluster priority: $CLUSTER_PRIORITY (ACTIVATOR=$ACTIVATOR, TRANSPORT=$TRANSPORT)"
 
 # Throwaway copies so a config can be dropped in without touching the source
 # bundle. Two directories because each bundle is a distinct OSGi bundle with its
@@ -222,7 +239,7 @@ priority = "normal"
   # in for any bundle, and the name must match this entry or the shell refuses
   # the ACTIVE report.
   [osgi.bundles.args]
-  dart = ["com.ivi.navigation"]
+  dart = ["com.ivi.navigation", "$TRANSPORT"]
 
   [osgi.bundles.backend]
   type = "drm-kms-egl"
@@ -238,7 +255,7 @@ priority = "$CLUSTER_PRIORITY"
 startup_timeout_ms = $STARTUP_TIMEOUT
 
   [osgi.bundles.args]
-  dart = ["com.ivi.cluster"]
+  dart = ["com.ivi.cluster", "$TRANSPORT"]
 
   [osgi.bundles.backend]
   type = "drm-kms-egl"

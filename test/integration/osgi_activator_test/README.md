@@ -1,8 +1,9 @@
 # osgi_activator_test
 
 Minimal OSGi bundle activator. This is the smallest thing that makes a bundle a
-*bundle* rather than an ordinary Flutter app: it completes the `dev.osgi/bridge`
-handshake and declares itself ACTIVE.
+*bundle* rather than an ordinary Flutter app: it completes the shell's handshake
+— over `dev.osgi/bridge` or over the `ihs_osgi_*` C ABI — and declares itself
+ACTIVE.
 
 ## Why it exists
 
@@ -32,6 +33,32 @@ into a `SendPort`, so an integer would leave the bundle with nothing it could
 send to. The shell posts a `Dart_CObject_kSendPort` for exactly that reason, and
 a bundle that tests the message for `int` will simply never see it.
 
+## Two transports, one app
+
+The second entrypoint argument picks the path: `channel` (the default) or `ffi`.
+
+| | |
+|---|---|
+| `channel` | `dev.osgi/bridge`. Proven on hardware and needs nothing of the shell that is not already there — at the cost of a UI binding even for a headless bundle, and an ACTIVE report marshalled through the platform task runner during the busiest part of start-up, while the startup deadline is running. |
+| `ffi` | `ihs_osgi_register_bundle` / `ihs_osgi_report_active` in `libihs_shared`, opened by its versioned SONAME. Synchronous, no binding, no task runner. Reports through an opaque handle the shell mints rather than a name, because any code in the process can reach those symbols. Needs `ENABLE_OSGI=ON`. |
+
+One app rather than two, because a bundle directory must not ship its own
+`lib/libflutter_engine.so` (see the note at the end) — a second activator bundle
+would collide with this one for reasons unrelated to what is being tested.
+
+The FFI path still runs a widget tree and still repaints. Its point is "no
+channel, no platform thread", not headlessness: `B5` counts page flips, so a
+bundle that stopped presenting would fail it.
+
+Both paths end at the same `BridgeRegistry` and drive the same lifecycle state
+machine, which is why every assertion in the harness is identical either way —
+`B3` greps the state-machine transition (`bundle '…': STARTING -> ACTIVE`), not
+a transport's own log line.
+
+Bindings are hand-rolled rather than taken from the `osgi_ffi` package, which
+lives in another repository: this fixture stays self-contained, exactly as the
+channel path does not depend on `osgi_flutter`.
+
 ## Symbolic name
 
 Read from `--dart-entrypoint-args`, so one build stands in for any bundle in a
@@ -42,7 +69,7 @@ config:
 symbolic_name = "com.ivi.cluster"
 
   [osgi.bundles.args]
-  dart = ["com.ivi.cluster"]
+  dart = ["com.ivi.cluster", "ffi"]   # second arg optional; default "channel"
 ```
 
 It **must** match the `[[osgi.bundles]]` entry: the shell refuses an `active`
@@ -82,6 +109,18 @@ DRM_DEVICE=/dev/dri/cardN ACTIVATOR=1 COUNT_FLIPS=1 \
 
 `ACTIVATOR=1` tells the harness this bundle can report ACTIVE, which is what
 lets it make the first bundle critical and assert `B3`.
+
+To exercise the FFI path instead, add `TRANSPORT=ffi` — against a shell built
+with `ENABLE_OSGI=ON`, so `libihs_shared` exports the `ihs_osgi_*` symbols:
+
+```sh
+HOMESCREEN=./homescreen BUNDLE=/tmp/activator-bundle \
+DRM_DEVICE=/dev/dri/cardN ACTIVATOR=1 COUNT_FLIPS=1 TRANSPORT=ffi \
+    test/osgi_multi_bundle.sh
+```
+
+The panel shows which path ran (`via channel` / `via ffi`), so a photograph of
+the screen is enough to tell them apart without reading the log.
 
 > The bundle ships `lib/libflutter_engine.so`, and **two bundles cannot each
 > carry their own copy**: `LibFlutterEngine::Load()` is one-shot and keyed on the
