@@ -150,6 +150,22 @@ ctest --test-dir build -R osgi
 the missing file named if they are absent. See that directory's `PROVENANCE.md`
 for how they are pinned.
 
+The dependency is `dart_api_dl`, the dynamically-linked Dart embedding API, and
+it is what makes the bridge handshake possible at all. Native code cannot call
+`Dart_PostCObject` directly: the engine is loaded at runtime, so the symbol is
+not linkable. `dart_api_dl.c` defines a symbol table that
+`Dart_InitializeApiDL()` populates from the address an activator hands over in
+its `init` call, after which `BridgeRegistry` posts the framework isolate's
+`SendPort` to each bundle through `Dart_PostCObject_DL`. That is why an activator sends
+`NativeApi.initializeApiDLData` and its own receive port, and why both come
+from `dart:ffi` rather than `dart:ui`.
+
+`third_party/CMakeLists.txt` builds those sources into a small static
+`dart_api_dl` target, which `shell/CMakeLists.txt` links only under
+`ENABLE_OSGI`; `bridge_registry.cc` is the one translation unit that includes
+`dart_api_dl.h`. With `ENABLE_OSGI=OFF` neither the target nor the include is
+reached, which is what keeps the non-OSGi binary byte-for-byte unchanged.
+
 ---
 
 ## Running
