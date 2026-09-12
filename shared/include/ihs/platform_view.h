@@ -190,8 +190,9 @@ typedef enum IhsPvZOrder {
   IHS_PV_Z_INLINE = 2 /* interleaved with Flutter layers (hybrid composition) */
 } IhsPvZOrder;
 
-/* Result codes. Negotiation returns UNSUPPORTED only when the requirement
- * excludes even the floor (SOFTWARE_SHM bit unset and no granted higher kind).
+/* Result codes. Negotiation returns UNSUPPORTED when the requirement excludes
+ * even the floor (SOFTWARE_SHM bit unset and no granted higher kind), and when
+ * EXPLICIT_REQUIRED was asked for on a backend with no explicit sync.
  */
 typedef enum IhsPvResult {
   IHS_PV_OK = 0,

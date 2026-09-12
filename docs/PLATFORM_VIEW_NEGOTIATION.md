@@ -95,7 +95,7 @@ rather than hard-coding it.
 | --- | --- |
 | `IHS_PV_SYNC_IMPLICIT` | no fence exchange |
 | `IHS_PV_SYNC_EXPLICIT_PREFERRED` | explicit if available, silently implicit if not |
-| `IHS_PV_SYNC_EXPLICIT_REQUIRED` | the grant must honor explicit sync |
+| `IHS_PV_SYNC_EXPLICIT_REQUIRED` | the grant must honor explicit sync; negotiation fails with `IHS_PV_ERR_UNSUPPORTED` when the backend has none, before anything is granted |
 
 A grant may honor a **weaker** mode than requested unless `EXPLICIT_REQUIRED`
 was set. A plugin that cannot cope with implicit sync must ask for

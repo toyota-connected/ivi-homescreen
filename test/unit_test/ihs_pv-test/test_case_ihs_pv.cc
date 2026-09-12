@@ -226,6 +226,99 @@ TEST(IhsPvSurface, RegisterForwardsToHost) {
   detach_host();
 }
 
+// Explicit sync is granted only when the backend advertises the capability.
+// This is the contract #513 turns on for the EGL backends, which advertise
+// explicit_sync = 0 today and so downgrade every producer.
+TEST(IhsPvSurface, ExplicitSyncGrantedWhenBackendAdvertisesIt) {
+  MockHost host_state;
+  host_state.explicit_sync = 1;
+  const IhsPvHost host = make_host(&host_state);
+  ihs_pv_set_host(&host);
+
+  IhsPvRequirements req = make_req(IHS_PV_KIND_TEXTURE_DMABUF_IMPORT);
+  req.sync = IHS_PV_SYNC_EXPLICIT_PREFERRED;
+  IhsPvGrant grant{};
+  grant.struct_size = sizeof(grant);
+  ASSERT_EQ(ihs_pv_negotiate(fake_view(), &req, &grant), IHS_PV_OK);
+  EXPECT_EQ(grant.sync, static_cast<uint32_t>(IHS_PV_SYNC_EXPLICIT_PREFERRED));
+
+  detach_host();
+}
+
+// PREFERRED is documented as "explicit if available, silently implicit if
+// not", so a backend without the capability downgrades rather than failing.
+TEST(IhsPvSurface, ExplicitSyncPreferredDowngradesWhenUnavailable) {
+  MockHost host_state;
+  host_state.explicit_sync = 0;
+  const IhsPvHost host = make_host(&host_state);
+  ihs_pv_set_host(&host);
+
+  IhsPvRequirements req = make_req(IHS_PV_KIND_TEXTURE_DMABUF_IMPORT);
+  req.sync = IHS_PV_SYNC_EXPLICIT_PREFERRED;
+  IhsPvGrant grant{};
+  grant.struct_size = sizeof(grant);
+  ASSERT_EQ(ihs_pv_negotiate(fake_view(), &req, &grant), IHS_PV_OK);
+  EXPECT_EQ(grant.sync, static_cast<uint32_t>(IHS_PV_SYNC_IMPLICIT));
+
+  detach_host();
+}
+
+// A grant honors at most what was asked for: a plugin that asked for implicit
+// sync is never handed an explicit-sync grant it is not prepared to service.
+TEST(IhsPvSurface, ImplicitRequestIsNeverUpgraded) {
+  MockHost host_state;
+  host_state.explicit_sync = 1;
+  const IhsPvHost host = make_host(&host_state);
+  ihs_pv_set_host(&host);
+
+  IhsPvRequirements req = make_req(IHS_PV_KIND_TEXTURE_DMABUF_IMPORT);
+  req.sync = IHS_PV_SYNC_IMPLICIT;
+  IhsPvGrant grant{};
+  grant.struct_size = sizeof(grant);
+  ASSERT_EQ(ihs_pv_negotiate(fake_view(), &req, &grant), IHS_PV_OK);
+  EXPECT_EQ(grant.sync, static_cast<uint32_t>(IHS_PV_SYNC_IMPLICIT));
+
+  detach_host();
+}
+
+// REQUIRED is a demand: a backend with no explicit sync fails the negotiation
+// rather than quietly handing back an implicit grant.
+TEST(IhsPvSurface, ExplicitSyncRequiredFailsWhenUnavailable) {
+  MockHost host_state;
+  host_state.explicit_sync = 0;
+  const IhsPvHost host = make_host(&host_state);
+  ihs_pv_set_host(&host);
+
+  IhsPvRequirements req = make_req(IHS_PV_KIND_TEXTURE_DMABUF_IMPORT);
+  req.sync = IHS_PV_SYNC_EXPLICIT_REQUIRED;
+  IhsPvGrant grant{};
+  grant.struct_size = sizeof(grant);
+  EXPECT_EQ(ihs_pv_negotiate(fake_view(), &req, &grant),
+            IHS_PV_ERR_UNSUPPORTED);
+  // Refused before grant(), so the host allocated no plane id or shm fd for a
+  // negotiation it could not honor.
+  EXPECT_EQ(host_state.grant_calls, 0);
+
+  detach_host();
+}
+
+TEST(IhsPvSurface, ExplicitSyncRequiredGrantedWhenAvailable) {
+  MockHost host_state;
+  host_state.explicit_sync = 1;
+  const IhsPvHost host = make_host(&host_state);
+  ihs_pv_set_host(&host);
+
+  IhsPvRequirements req = make_req(IHS_PV_KIND_TEXTURE_DMABUF_IMPORT);
+  req.sync = IHS_PV_SYNC_EXPLICIT_REQUIRED;
+  IhsPvGrant grant{};
+  grant.struct_size = sizeof(grant);
+  ASSERT_EQ(ihs_pv_negotiate(fake_view(), &req, &grant), IHS_PV_OK);
+  EXPECT_EQ(grant.sync, static_cast<uint32_t>(IHS_PV_SYNC_EXPLICIT_REQUIRED));
+  EXPECT_EQ(host_state.grant_calls, 1);
+
+  detach_host();
+}
+
 // query_capabilities/vulkan_context forward and surface the host's answers.
 TEST(IhsPvSurface, ContextQueriesForwardToHost) {
   MockHost host_state;

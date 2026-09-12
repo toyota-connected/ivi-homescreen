@@ -211,6 +211,15 @@ extern "C" int ihs_pv_negotiate(IhsPlatformView* view,
     return IHS_PV_ERR_UNSUPPORTED;
   }
 
+  // EXPLICIT_REQUIRED is a demand, not a preference: a plugin asks for it
+  // precisely so it is not handed a weaker grant it cannot service. Refuse
+  // here, before grant(), so no plane id or shm fd is allocated for a
+  // negotiation that cannot be honored.
+  if (requirements->sync == IHS_PV_SYNC_EXPLICIT_REQUIRED &&
+      caps.explicit_sync == 0) {
+    return IHS_PV_ERR_UNSUPPORTED;
+  }
+
   const IhsFormatModifier fmt = choose_format(requirements, &caps);
   uint32_t plane_id = 0;
   int shm_fd = -1;
