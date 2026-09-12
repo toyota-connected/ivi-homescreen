@@ -344,6 +344,12 @@ file see
 | `[view.hud]` | `font_scale` | `float` | `1.0` | `float` | all |
 | `[view.hud]` | `margin` | `float` | `12` | `float (px)` | all |
 | `[view.hud]` | `text_color` | `string` | `#FFFFFF` | `#RRGGBB or #RRGGBBAA` | all |
+| `[osgi]` | `framework_core` | `int` | `-1` | `-1 (unpinned) or 0…CPU_SETSIZE-1` | osgi |
+| `[[osgi.bundles]]` | `bundle` | `string` | `—` | `path` | osgi |
+| `[[osgi.bundles]]` | `cpu_core` | `int` | `-1` | `-1 (unpinned) or 0…CPU_SETSIZE-1` | osgi |
+| `[[osgi.bundles]]` | `priority` | `string` | `normal` | `critical\|normal\|background` | osgi |
+| `[[osgi.bundles]]` | `startup_timeout_ms` | `int` | `(policy default)` | `1…3600000` | osgi |
+| `[[osgi.bundles]]` | `symbolic_name` | `string` | `—` | `string` | osgi |
 
 <!-- END CONFIG-REFERENCE -->
 
