@@ -350,9 +350,10 @@ class DrmBackend : public Backend, public IFlipSink {
   uint32_t AddFb(gbm_bo* bo) const;
   bool WaitForPendingFlip() const;
   // True unless IVI_DRM_RASTER_DRAIN=0 — the single source of truth for the
-  // raster-thread drain decision, shared by WaitForPendingFlip (both backend
-  // and compositor) and the nvidia-drm cursor-staging heuristic. Cached on
-  // first call.
+  // raster-thread drain decision, read by this backend's WaitForPendingFlip
+  // and by the nvidia-drm cursor-staging heuristic. DrmCompositor's waiter is
+  // drain-free by construction (it waits on the flag and never reads the fd),
+  // so the knob does not reach it. Cached on first call.
   [[nodiscard]] static bool RasterDrainEnabled();
   // Per-flip-complete work for the legacy (non-compositor) path:
   // promote pending→current, drmModeRmFB the previous scanout, clear
