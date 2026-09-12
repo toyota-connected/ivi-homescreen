@@ -2,8 +2,17 @@
 name: ivi-homescreen
 
 on:
+  # No 'closed'. It used to be here, and with the push trigger below it meant a
+  # merge started two runs of this workflow in the same second -- one for the
+  # closing pull request, one for the branch. GitHub resolved that by cancelling
+  # jobs in one of them: on the first v3.0 push run, changes, crash-handler and
+  # watchdog were cancelled a second in with no runner ever assigned, while the
+  # other five jobs ran for seventeen minutes, and crash-handler-gate then
+  # failed on result=cancelled exactly as it is written to. Sibling workflows on
+  # that same push cancelled nothing across 25 jobs; only the one firing twice
+  # was hit. The push run is the one worth keeping -- it belongs to the branch.
   pull_request:
-    types: [ opened, synchronize, reopened, closed ]
+    types: [ opened, synchronize, reopened ]
   # Merges need a run of their own. The pull_request legs above build the merge
   # ref, so their results belong to the pull request rather than to the branch:
   # until this trigger existed, nothing here ever ran against v3.0 itself, and
@@ -17,9 +26,14 @@ on:
     # daily
     - cron:  '0 0 * * *'
 
-# This is the heaviest workflow in the tree and it now fires on every merge, so
+# This is the heaviest workflow in the tree and it fires on every merge, so
 # group per ref: a pull request's runs supersede each other, and so do a run of
 # merges, without either cancelling the other's branch.
+#
+# This does not cover two runs of the same commit racing from one merge -- they
+# sit in different groups, being different refs, so the group never saw them.
+# Dropping 'closed' above is what stops that; this only keeps a synchronize
+# storm from queueing up.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
