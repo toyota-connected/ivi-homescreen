@@ -50,8 +50,10 @@ extern "C" {
 
 #include <GLES2/gl2.h>
 
+#if IHS_TEST_HAVE_CAPTURE
 #include "capture/png.hpp"
 #include "capture/snapshot.hpp"
+#endif
 
 #include <gtest/gtest.h>
 
@@ -486,6 +488,7 @@ class DrmBackendVkmsBase : public ::testing::Test {
     ASSERT_EQ(glGetError(), static_cast<GLenum>(GL_NO_ERROR));
   }
 
+#if IHS_TEST_HAVE_CAPTURE
   // Read the CRTC's plane composition back. drm-cxx maps each scanout FB and
   // composites in zpos order, so this is what the display is actually showing
   // -- not what the compositor believes it drew.
@@ -519,6 +522,18 @@ class DrmBackendVkmsBase : public ::testing::Test {
         static_cast<size_t>(img.height() / 2) * img.width() + img.width() / 2;
     return img.pixels()[i];
   }
+
+  // Assert the CRTC's center pixel is @p rgb, and save the frame when asked.
+  void ExpectCenterColor(const char* name, uint32_t rgb) {
+    const drm::capture::Image image = Snapshot(name);
+    ASSERT_FALSE(image.empty());
+    EXPECT_EQ(image.width(), card_.mode_w);
+    EXPECT_EQ(image.height(), card_.mode_h);
+    // RGB only: the primary is XRGB8888, so the alpha byte carries no meaning.
+    EXPECT_EQ(CentrePixel(image) & 0x00FFFFFFu, rgb)
+        << "the center of the display is not the color that was expected";
+  }
+#endif  // IHS_TEST_HAVE_CAPTURE
 
   // Present until @p done holds, or give up after @p max frames.
   //
@@ -721,6 +736,7 @@ TEST_F(DrmBackendVkmsFramed, GlCompositedViewIsReportedOffAnyPlane) {
   compositor_->UnregisterSurface(15);
 }
 
+#if IHS_TEST_HAVE_CAPTURE
 // The compositor drew the plugin's texture, not just bookkeeping around it.
 //
 // Every other case here asserts on which callbacks fired, which says nothing
@@ -740,13 +756,7 @@ TEST_F(DrmBackendVkms, TheViewsTextureReachesTheDisplay) {
 
   ASSERT_TRUE(PresentPlatformView(17));
 
-  const drm::capture::Image image = Snapshot("gl_platform_view");
-  ASSERT_FALSE(image.empty());
-  EXPECT_EQ(image.width(), card_.mode_w);
-  EXPECT_EQ(image.height(), card_.mode_h);
-  // RGB only: the primary is XRGB8888, so the alpha byte carries no meaning.
-  EXPECT_EQ(CentrePixel(image) & 0x00FFFFFFu, 0x002080C0u)
-      << "the centre of the display is not the colour the view uploaded";
+  ExpectCenterColor("gl_platform_view", 0x002080C0u);
 
   compositor_->UnregisterSurface(17);
 }
@@ -761,18 +771,14 @@ TEST_F(DrmBackendVkmsFramed, TheViewsTextureReachesTheDisplay) {
 
   ASSERT_TRUE(PresentPlatformView(19));
 
-  const drm::capture::Image image = Snapshot("framed_platform_view");
-  ASSERT_FALSE(image.empty());
-  // The CRTC is the mode; the content is the smaller FB centred in it. The
-  // centre pixel is inside the content either way, which is the point of
+  // The CRTC is the mode; the content is the smaller FB centered in it. The
+  // center pixel is inside the content either way, which is the point of
   // sampling there rather than at a corner.
-  EXPECT_EQ(image.width(), card_.mode_w);
-  EXPECT_EQ(image.height(), card_.mode_h);
-  EXPECT_EQ(CentrePixel(image) & 0x00FFFFFFu, 0x00C04020u)
-      << "the centre of the display is not the colour the view uploaded";
+  ExpectCenterColor("framed_platform_view", 0x00C04020u);
 
   compositor_->UnregisterSurface(19);
 }
+#endif  // IHS_TEST_HAVE_CAPTURE
 
 // The zero-copy path end to end: a producer's own dma-buf lands on a KMS plane
 // and its pixels reach the display without the compositor drawing anything.
@@ -802,10 +808,11 @@ TEST_F(DrmBackendVkmsScene, AProducersBufferScansOutOnItsOwnPlane) {
       << "reported off any plane, so it was GL-composited rather than scanned "
          "out -- the zero-copy path did not run";
 
-  const drm::capture::Image image = Snapshot("scene_platform_view");
-  ASSERT_FALSE(image.empty());
-  EXPECT_EQ(CentrePixel(image) & 0x00FFFFFFu, 0x001E7A46u)
-      << "the producer's buffer is not what the display is showing";
+#if IHS_TEST_HAVE_CAPTURE
+  // The producer's buffer is what the display is showing. Only available with
+  // blend2d; the plane assertions above run either way.
+  ExpectCenterColor("scene_platform_view", 0x001E7A46u);
+#endif
 
   compositor_->UnregisterSurface(21);
 }
@@ -843,10 +850,10 @@ TEST_F(DrmBackendVkmsScene, TheDisplacedSlotComesBackToTheProducer) {
       << "GetDmabuf is deliver-once; a present with no new frame must not "
          "pull the same buffer again";
 
+#if IHS_TEST_HAVE_CAPTURE
   // And the newer buffer is what is on screen.
-  const drm::capture::Image image = Snapshot("scene_second_buffer");
-  ASSERT_FALSE(image.empty());
-  EXPECT_EQ(CentrePixel(image) & 0x00FFFFFFu, 0x007A1E46u);
+  ExpectCenterColor("scene_second_buffer", 0x007A1E46u);
+#endif
 
   compositor_->UnregisterSurface(23);
 }
@@ -859,6 +866,12 @@ TEST_F(DrmBackendVkmsScene, TheDisplacedSlotComesBackToTheProducer) {
 // the per-layer decisions PresentFramed makes.
 int main(int argc, char** argv) {
   IHS_LOGGING_START("TEST", "drm_backend vkms test");
+#if IHS_TEST_HAVE_CAPTURE
+  std::cerr << "frame readback: available\n";
+#else
+  std::cerr << "frame readback: unavailable (built without blend2d, so drm-cxx "
+               "has no capture module); pixel cases are compiled out\n";
+#endif
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
