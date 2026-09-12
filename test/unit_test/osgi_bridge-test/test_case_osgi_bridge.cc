@@ -27,8 +27,14 @@
 
 namespace {
 
-// Records what the registry would have posted to Dart. The real calls need a
-// live VM; the ordering logic under test does not.
+// Records what the registry would have posted to Dart, as (target port, send
+// port id) pairs. The real calls need a live VM; the ordering logic under test
+// does not.
+//
+// What the real implementation puts on the wire -- a Dart_CObject_kSendPort
+// rather than an int64 -- is not observable from here for the same reason:
+// building and posting the CObject needs a VM to receive it. That part is
+// covered by the multi-bundle integration harness, not by this file.
 struct FakeDart {
   static inline std::vector<std::pair<int64_t, int64_t>> posts;
   static inline intptr_t init_result = 0;
@@ -47,17 +53,18 @@ struct FakeDart {
     return init_result;
   }
 
-  static bool Post(const int64_t port, const int64_t value) {
+  static bool PostSendPort(const int64_t target_port,
+                           const int64_t send_port_id) {
     if (!post_succeeds) {
       return false;
     }
-    posts.emplace_back(port, value);
+    posts.emplace_back(target_port, send_port_id);
     return true;
   }
 };
 
 ihs::osgi::DartPortApi FakeApi() {
-  return {&FakeDart::Initialize, &FakeDart::Post};
+  return {&FakeDart::Initialize, &FakeDart::PostSendPort};
 }
 
 // A registry with the DL API already initialized, which is the precondition for

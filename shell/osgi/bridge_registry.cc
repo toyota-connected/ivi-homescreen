@@ -24,17 +24,23 @@ namespace ihs::osgi {
 
 namespace {
 
-bool PostInt64(const int64_t port, const int64_t value) {
+bool PostSendPort(const int64_t target_port, const int64_t send_port_id) {
   Dart_CObject message;
-  message.type = Dart_CObject_kInt64;
-  message.value.as_int64 = value;
-  return Dart_PostCObject_DL(static_cast<Dart_Port_DL>(port), &message);
+  // A SendPort rather than an int64: the receiving isolate materializes a real
+  // SendPort from this, which is the only way it can reach the framework --
+  // Dart offers no way to build one from a port id. See DartPortApi.
+  message.type = Dart_CObject_kSendPort;
+  message.value.as_send_port.id = static_cast<Dart_Port_DL>(send_port_id);
+  // Unset. origin_id names the port a SendPort was derived from, which matters
+  // only for identity comparisons the bundle has no use for; it just sends.
+  message.value.as_send_port.origin_id = 0;
+  return Dart_PostCObject_DL(static_cast<Dart_Port_DL>(target_port), &message);
 }
 
 }  // namespace
 
 const DartPortApi& RealDartPortApi() {
-  static constexpr DartPortApi kApi{&Dart_InitializeApiDL, &PostInt64};
+  static constexpr DartPortApi kApi{&Dart_InitializeApiDL, &PostSendPort};
   return kApi;
 }
 
@@ -83,7 +89,7 @@ bool BridgeRegistry::DeliverLocked(const std::string& symbolic_name,
   if (!framework_port_.has_value()) {
     return false;
   }
-  if (!api_.post_int64(port, *framework_port_)) {
+  if (!api_.post_send_port(port, *framework_port_)) {
     // The port is closed or invalid: the isolate went away between registering
     // and now. Not fatal to the process -- the bundle is simply unreachable.
     ihs::log::error(

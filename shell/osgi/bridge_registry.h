@@ -36,9 +36,18 @@ struct DartPortApi {
   // mismatch between these headers and the running VM.
   intptr_t (*initialize_api)(void* data);
 
-  // Wraps Dart_PostCObject_DL with an int64 payload. Returns true when the
-  // message was enqueued; false when @port is closed or invalid.
-  bool (*post_int64)(int64_t port, int64_t value);
+  // Posts the framework isolate's port to @target_port as a Dart SendPort.
+  //
+  // Deliberately not an int64. Dart cannot turn a port id back into a
+  // SendPort: dart:ffi's `nativePort` runs one way only, and SendPort is an
+  // abstract interface with no constructor. A bundle handed an integer has
+  // nothing it can send to, so the framework would be unreachable from Dart.
+  // Dart_CObject_kSendPort is what makes the receiving isolate materialize a
+  // real SendPort.
+  //
+  // Returns true when the message was enqueued; false when @target_port is
+  // closed or invalid.
+  bool (*post_send_port)(int64_t target_port, int64_t send_port_id);
 };
 
 // The real Dart DL calls.
