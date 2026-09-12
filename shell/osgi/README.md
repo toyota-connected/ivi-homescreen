@@ -24,6 +24,7 @@ here is built and the binary carries no `ihs::osgi` symbols.
 | Normal bundles staggered after the reactor; background launched immediately | Built-in | `priority = 'normal' \| 'background'` |
 | Per-bundle startup deadline, torn down on expiry | Built-in | `startup_timeout_ms` (1…3600000) |
 | `dev.osgi/bridge` handshake: a bundle announces itself and reports ACTIVE | Built-in | `OsgiBridgePlugin` |
+| Registration refused for a `symbolic_name` the configuration does not declare | Built-in | `[[osgi.bundles]]` |
 | Framework isolate port delivered to every bundle, either registration order | Built-in | `BridgeRegistry` |
 | One presentation source fanned out to N engines in priority order | Built-in | `VsyncCoordinator` |
 | Engine-thread CPU affinity, validated against the process mask | Built-in | `cpu_core`, `framework_core` |
@@ -93,7 +94,8 @@ to completion and still have its critical wait expire.
   commutative: a bundle and the framework isolate start concurrently, so
   whichever arrives second triggers delivery. The framework port is posted as a
   `Dart_CObject_kSendPort`, because Dart cannot rebuild a `SendPort` from a port
-  id.
+  id. It also holds the declared `symbolic_name`s, installed from the
+  configuration at bring-up, and refuses a registration naming anything else.
 - **`vsync_coordinator`** — one vblank in, N ordered batons out.
 - **`bundle_state`** — the lifecycle graph, mirrored by the Dart side so a state
   crosses the boundary as an int with no translation.
@@ -185,10 +187,11 @@ Two deployment rules that are not obvious from the schema:
   a second bundle carrying its own copy is refused and its view aborts — however
   identical the files are. The engine is supplied once, process-wide; bundle
   directories carry assets and `libapp.so`.
-- **A `symbolic_name` must match an `[[osgi.bundles]]` entry.** A name the shell
-  does not know is accepted by the bridge and then ignored by the orchestrator,
-  so a typo shows up as the correctly named bundle's deadline expiring, with a
-  warning in the log rather than an error at the call.
+- **A `symbolic_name` must match an `[[osgi.bundles]]` entry.** The bridge is
+  given the declared names at bring-up and refuses `init` for anything else, so
+  a typo fails at the call that made it. Before that it was accepted and then
+  dropped by the orchestrator, which surfaced as the *correctly* named bundle's
+  deadline expiring -- a symptom pointing nowhere near the cause.
 
 ---
 
@@ -208,9 +211,11 @@ Two deployment rules that are not obvious from the schema:
 
 ## Known limitations
 
-- The bridge trusts the `symbolic_name` in a call. `HandleMethodCall` is static
-  and reads the name from the arguments, so a bundle can report ACTIVE for
-  another bundle — the plugin instance already identifies the engine, so binding
+- The bridge trusts the `symbolic_name` in a call, within the declared set.
+  `HandleMethodCall` is static and reads the name from the arguments, so a
+  bundle can still report ACTIVE for *another declared* bundle; what the
+  declared set rules out is an undeclared name, not impersonation of a
+  configured one. The plugin instance already identifies the engine, so binding
   identity to it would be strictly stronger.
 - A bundle whose isolate dies without calling `shutdown` stays registered until
   something else releases it; the bridge learns a bundle is gone only when it
