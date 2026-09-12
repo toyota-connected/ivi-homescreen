@@ -109,6 +109,44 @@ bool EglDmabufImporter::Init(void* egl_display) {
     egl_display_ = nullptr;
     return false;
   }
+
+  // Native fence sync is probed separately and is allowed to fail: a display
+  // can import dma-bufs without being able to wait on a producer's sync_file,
+  // and that combination still imports fine — it just paces implicitly.
+  //
+  // Check the extension string as well as the entry points. eglGetProcAddress
+  // can return non-null for an extension the display does not actually support,
+  // which is the same trap DrmCompositor::InitEglExtensions guards against for
+  // IN_FENCE_FD, so the check here has the same three parts.
+  const char* exts =
+      eglQueryString(static_cast<EGLDisplay>(egl_display_), EGL_EXTENSIONS);
+  const bool has_fence_sync =
+      exts != nullptr && std::strstr(exts, "EGL_KHR_fence_sync") != nullptr;
+  const bool has_native_fence =
+      exts != nullptr &&
+      std::strstr(exts, "EGL_ANDROID_native_fence_sync") != nullptr;
+  const bool has_wait_sync =
+      exts != nullptr && std::strstr(exts, "EGL_KHR_wait_sync") != nullptr;
+  if (has_fence_sync && has_native_fence && has_wait_sync) {
+    create_sync_ =
+        reinterpret_cast<void*>(eglGetProcAddress("eglCreateSyncKHR"));
+    destroy_sync_ =
+        reinterpret_cast<void*>(eglGetProcAddress("eglDestroySyncKHR"));
+    wait_sync_ = reinterpret_cast<void*>(eglGetProcAddress("eglWaitSyncKHR"));
+  }
+  // All three or none: a half-resolved set would let WaitAcquireFence create a
+  // sync it cannot wait on or destroy, leaking the producer's fd every frame.
+  if (!has_native_fence_sync()) {
+    create_sync_ = nullptr;
+    destroy_sync_ = nullptr;
+    wait_sync_ = nullptr;
+  }
+  ihs::log::debug(
+      "[EglDmabufImporter] explicit-sync acquire: {} (fence_sync={}, "
+      "native_fence_sync={}, wait_sync={})",
+      has_native_fence_sync() ? "available" : "unavailable",
+      has_fence_sync ? "y" : "n", has_native_fence ? "y" : "n",
+      has_wait_sync ? "y" : "n");
   return true;
 }
 
@@ -234,4 +272,46 @@ void EglDmabufImporter::Destroy(ImportedTexture* out) const {
                   static_cast<EGLImageKHR>(out->egl_image));
     out->egl_image = nullptr;
   }
+}
+
+bool EglDmabufImporter::WaitAcquireFence(int fence_fd) const {
+  if (!has_native_fence_sync() || fence_fd < 0) {
+    return false;
+  }
+  auto create_sync = reinterpret_cast<PFNEGLCREATESYNCKHRPROC>(create_sync_);
+  auto destroy_sync = reinterpret_cast<PFNEGLDESTROYSYNCKHRPROC>(destroy_sync_);
+  auto wait_sync = reinterpret_cast<PFNEGLWAITSYNCKHRPROC>(wait_sync_);
+  const auto dpy = static_cast<EGLDisplay>(egl_display_);
+
+  // eglCreateSyncKHR takes ownership of the fd on success and closes it when
+  // the sync is destroyed; on failure the fd is left to us. Reporting that
+  // split back through the return value is this function's whole contract --
+  // get it backwards and every frame either double-closes or leaks an fd.
+  const EGLint attribs[] = {EGL_SYNC_NATIVE_FENCE_FD_ANDROID, fence_fd,
+                            EGL_NONE};
+  const EGLSyncKHR sync =  // NOLINT(misc-misplaced-const)
+      create_sync(dpy, EGL_SYNC_NATIVE_FENCE_ANDROID, attribs);
+  if (sync == EGL_NO_SYNC_KHR) {
+    ihs::log::warn(
+        "[EglDmabufImporter] eglCreateSyncKHR(NATIVE_FENCE, fd={}): 0x{:x}; "
+        "falling back to a CPU wait",
+        fence_fd, eglGetError());
+    return false;  // fd untouched — still the caller's to close
+  }
+
+  // Server-side wait: queues the wait into the GL command stream so the GPU
+  // blocks before sampling, and this thread does not block at all. Destroying
+  // the sync afterwards does not cancel a wait already queued against it.
+  const EGLint rc = wait_sync(dpy, sync, 0);
+  destroy_sync(dpy, sync);
+  if (rc != EGL_TRUE) {
+    // The fd is gone either way (EGL took it with the sync), so there is
+    // nothing to fall back to. Sample best-effort and say so, matching the CPU
+    // path's policy on a timed-out fence.
+    ihs::log::warn(
+        "[EglDmabufImporter] eglWaitSyncKHR: 0x{:x}; sampling anyway — frame "
+        "may tear",
+        eglGetError());
+  }
+  return true;
 }
