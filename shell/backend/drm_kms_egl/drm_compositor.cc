@@ -352,9 +352,10 @@ DrmCompositor::~DrmCompositor() {
 // displaced, once the flip that sampled it has completed.
 //
 // A GL-composited view never reaches a plane, so the scanout retire that fires
-// OnScanoutRelease never happens for it. Without this the producer waits out its
-// release timeout on every frame -- at 100 ms that is a seventh of the display
-// rate, and it reads as the renderer being slow rather than as a missed release.
+// OnScanoutRelease never happens for it. Without this the producer waits out
+// its release timeout on every frame -- at 100 ms that is a seventh of the
+// display rate, and it reads as the renderer being slow rather than as a missed
+// release.
 //
 // Displaced, not current: the compositor re-samples the bound texture on every
 // present until a newer frame arrives, so returning the current one would hand
@@ -381,18 +382,19 @@ void DrmCompositor::NoteGlComposited(
   // The frame just sampled, deferred to after this present's flip -- not the
   // frame it displaced.
   //
-  // Displacement is not enough, and which way it fails depends on the producer's
-  // rate. When it outruns the compositor its frames are superseded before being
-  // bound and the supersede path releases them. When it is slower -- the case
-  // that matters, because that is when a stall costs something -- every frame is
-  // consumed instead, so nothing supersedes, and displacement cannot happen
-  // until the next submit, which is the thing waiting on the release. A heavy
-  // scene deadlocks on its own ring and waits out the timeout every frame.
+  // Displacement is not enough, and which way it fails depends on the
+  // producer's rate. When it outruns the compositor its frames are superseded
+  // before being bound and the supersede path releases them. When it is slower
+  // -- the case that matters, because that is when a stall costs something --
+  // every frame is consumed instead, so nothing supersedes, and displacement
+  // cannot happen until the next submit, which is the thing waiting on the
+  // release. A heavy scene deadlocks on its own ring and waits out the timeout
+  // every frame.
   //
-  // The compositor re-samples a bound texture until a newer one arrives, so this
-  // does hand back a buffer that may still be on screen. The ring is what makes
-  // that safe: the producer has to cycle every other slot before returning to
-  // this one, which is several frames after the flip that read it.
+  // The compositor re-samples a bound texture until a newer one arrives, so
+  // this does hand back a buffer that may still be on screen. The ring is what
+  // makes that safe: the producer has to cycle every other slot before
+  // returning to this one, which is several frames after the flip that read it.
   //
   // Repeat pushes for the same buffer are free -- SignalRelease drops the entry
   // on the first one and a second finds nothing.
@@ -1297,10 +1299,10 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
   }
 
   // The previous frame's flip has completed, so anything held for a post-flip
-  // release is off the plane -- return it to its producer. PresentLayersViaScene
-  // does the same after its own flip wait; this path did not, so a release
-  // deferred here was queued and never fired, and the producer waited out its
-  // fence timeout on every frame (#530).
+  // release is off the plane -- return it to its producer.
+  // PresentLayersViaScene does the same after its own flip wait; this path did
+  // not, so a release deferred here was queued and never fired, and the
+  // producer waited out its fence timeout on every frame (#530).
   DrainDeferredScanoutReleases();
 
   const uint64_t t1 = profile ? NsNow() : 0;

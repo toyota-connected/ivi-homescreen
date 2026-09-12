@@ -539,9 +539,19 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
 
   // Producer buffer_id of the frame currently bound as a GL texture. Raster
   // thread, same as GetGlTextureName.
+  //
+  // Guarded: current_egl only exists under IVI_HAVE_EGL, and this accessor sits
+  // outside that block because it is part of the generic surface interface. A
+  // Vulkan-only build has no GL texture to name, so 0 is the honest answer --
+  // the compositor's GL-composite path that consumes this is not built there
+  // either.
   [[nodiscard]] uint32_t GetGlTextureBufferId() const override {
+#if IVI_HAVE_EGL
     const std::lock_guard<std::mutex> lock(mutex);
     return current_egl != nullptr ? current_egl_buffer_id : 0;
+#else
+    return 0;
+#endif
   }
 
   // The DRM scene path retired this frame; wake the producer's release fence
@@ -1232,7 +1242,8 @@ int HostSubmit(void* user_data,
       //
       // drm_plane_id is 0 exactly when the last present GL-composited this view
       // (SetScanoutPlane(0)), which is the case where no retire is coming.
-      const bool on_a_plane = v->drm_plane_id.load(std::memory_order_relaxed) != 0;
+      const bool on_a_plane =
+          v->drm_plane_id.load(std::memory_order_relaxed) != 0;
       if (v->dmabuf_delivered_seq < v->pending_egl.stash_seq || !on_a_plane) {
         v->SignalRelease(v->pending_egl.frame.buffer_id);
       }
