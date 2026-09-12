@@ -277,3 +277,29 @@
   # HUD text color.
   # type=string default=#FFFFFF values=#RRGGBB or #RRGGBBAA applies=all
   text_color =
+
+[osgi]
+  # CPU to pin the Dart framework isolate's thread to. Validated against the process affinity mask rather than a core count, since the two disagree in both directions under a cpuset.
+  # type=int default=-1 values=-1 (unpinned) or 0…CPU_SETSIZE-1 applies=osgi
+  framework_core =
+
+[[osgi.bundles]]
+  # Bundle directory (assets + libapp.so). Required. Relative paths resolve against the config file's directory, as they do for [[view]]. Must not contain lib/libflutter_engine.so: the engine is supplied once, process-wide.
+  # type=string default=— values=path applies=osgi
+  bundle =
+
+  # CPU to pin this bundle's engine thread to, validated against the process affinity mask.
+  # type=int default=-1 values=-1 (unpinned) or 0…CPU_SETSIZE-1 applies=osgi
+  cpu_core =
+
+  # Bring-up phase. critical is spawned and awaited before the reactor runs; normal is staggered after it; background launches immediately without waiting.
+  # type=string default=normal values=critical|normal|background applies=osgi
+  priority =
+
+  # How long to wait for this bundle to report ACTIVE. Only a critical bundle is awaited; expiry tears it down and records the failure without stopping the rest of startup.
+  # type=int default=(policy default) values=1…3600000 applies=osgi
+  startup_timeout_ms =
+
+  # The bundle's OSGi symbolic name. Required, and unique across the process. Must match what the bundle's activator announces: the bridge refuses a registration naming anything the configuration does not declare.
+  # type=string default=— values=string applies=osgi
+  symbolic_name =

@@ -4,6 +4,7 @@
 # The KEY LIST is extracted from the parser itself:
 #   * shell/configuration/configuration.cc  — at_path("…").is_…()  (global + view)
 #   * shell/crash_handler.cc                — ->get("…")           ([sentry])
+#   * shell/osgi/osgi_config.cc             — at_path("…")/ReadBoundedInt (osgi)
 # Human-curated metadata (default / valid values / applies-to / description)
 # lives in META below. Every parsed key MUST have a META entry, or this script
 # errors — so adding a key to the parser forces a doc update.
@@ -26,6 +27,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 CFG = ROOT / "shell/configuration/configuration.cc"
 CRASH = ROOT / "shell/crash_handler/crash_handler.cc"
+# Only compiled with ENABLE_OSGI, but scraped unconditionally: this reads source
+# text, and the reference documents build-gated tables (leased DRM, AGL) already.
+# The applies-to column is what says a key needs the option.
+OSGI = ROOT / "shell/osgi/osgi_config.cc"
 REFTOML = ROOT / "docs/config-examples/reference.toml"
 # The CLI + config-reference tables live with the configuration subsystem docs.
 README = ROOT / "shell/configuration/README.md"
@@ -126,6 +131,17 @@ META = {
     "hud.font_scale": ("1.0", "float", "all", "Multiplies the base HUD font size."),
     "hud.bg_alpha": ("0.75", "float [0,1]", "all", "HUD window background opacity."),
     "hud.text_color": ("#FFFFFF", "#RRGGBB or #RRGGBBAA", "all", "HUD text color."),
+
+    # [osgi] — process-level, ENABLE_OSGI only
+    "osgi.framework_core": ("-1", "-1 (unpinned) or 0…CPU_SETSIZE-1", "osgi", "CPU to pin the Dart framework isolate's thread to. Validated against the process affinity mask rather than a core count, since the two disagree in both directions under a cpuset."),
+    # [[osgi.bundles]] — one entry per bundle. A bundle also takes the [[view]]
+    # keys and the [view.*] sub-tables, which reach the same parser; only the
+    # keys osgi_config.cc reads itself are listed here.
+    "osgi.bundles.symbolic_name": ("—", "string", "osgi", "The bundle's OSGi symbolic name. Required, and unique across the process. Must match what the bundle's activator announces: the bridge refuses a registration naming anything the configuration does not declare."),
+    "osgi.bundles.bundle": ("—", "path", "osgi", "Bundle directory (assets + libapp.so). Required. Relative paths resolve against the config file's directory, as they do for [[view]]. Must not contain lib/libflutter_engine.so: the engine is supplied once, process-wide."),
+    "osgi.bundles.priority": ("normal", "critical|normal|background", "osgi", "Bring-up phase. critical is spawned and awaited before the reactor runs; normal is staggered after it; background launches immediately without waiting."),
+    "osgi.bundles.startup_timeout_ms": ("(policy default)", "1…3600000", "osgi", "How long to wait for this bundle to report ACTIVE. Only a critical bundle is awaited; expiry tears it down and records the failure without stopping the rest of startup."),
+    "osgi.bundles.cpu_core": ("-1", "-1 (unpinned) or 0…CPU_SETSIZE-1", "osgi", "CPU to pin this bundle's engine thread to, validated against the process affinity mask."),
 }
 
 TABLE_ORDER = [
@@ -133,6 +149,7 @@ TABLE_ORDER = [
     "[view.shell.window]", "[view.shell.window.activation_area]",
     "[view.backend]", "[view.backend.drm]", "[view.backend.lease]",
     "[view.output]", "[view.engine]", "[view.hud]",
+    "[osgi]", "[[osgi.bundles]]",
 ]
 
 
@@ -164,6 +181,11 @@ def classify(key):
         return "[view.engine]", key.rsplit(".", 1)[1]
     if key.startswith("hud."):
         return "[view.hud]", key.rsplit(".", 1)[1]
+    # Must precede the "osgi." case: the bundles table is nested inside it.
+    if key.startswith("osgi.bundles."):
+        return "[[osgi.bundles]]", key.rsplit(".", 1)[1]
+    if key.startswith("osgi."):
+        return "[osgi]", key.split(".", 1)[1]
     return "[[view]]", key
 
 
@@ -207,6 +229,65 @@ def extract():
         body = body[: close.start()]
     for key, tok in re.findall(r't\["([a-z_]+)"\]\.(is_\w+)\(\)', body):
         keys.setdefault("output." + key, TYPE.get(tok, tok))
+    keys.update(extract_osgi())
+    return keys
+
+
+def function_body(text, name, path):
+    # The body of a function: from its opening brace to the next brace at column
+    # 0. Same refusal to yield nothing as the ParseOutputMatch scrape above -- a
+    # definition that moved must fail loudly, or the table silently drops out of
+    # the reference and out of the "every key needs META" check with it.
+    #
+    # The brace is found by scanning forward rather than required on the
+    # signature line: these signatures wrap across several lines, and anchoring
+    # on a same-line brace is what the ParseOutputMatch pattern gets away with
+    # only because that one signature happens to fit. A declaration is skipped
+    # by requiring the brace to arrive before any semicolon, so a forward
+    # declaration cannot capture the following function's body.
+    for m in re.finditer(rf"^\w[^\n]*\b{name}\s*\(", text, re.M):
+        brace = text.find("{", m.end())
+        semi = text.find(";", m.end())
+        if brace < 0 or (semi >= 0 and semi < brace):
+            continue  # a declaration, not the definition
+        body = text[brace + 1:]
+        close = re.search(r"^\}", body, re.M)
+        return body[: close.start()] if close is not None else body
+    sys.exit(
+        f"error: {name} definition not found in {path}; "
+        f"update the scraper in {Path(__file__).name}"
+    )
+
+
+def extract_osgi():
+    # [osgi] / [[osgi.bundles]]. Two read styles, and the at_path().is_*()
+    # scraper above sees neither reliably: 'priority' is read as
+    # `const auto node = tbl.at_path("priority"); node.is_string()`, so the
+    # predicate is not adjacent to the call, and the bounded ints go through
+    # ReadBoundedInt() with no is_*() at all. Matching only the adjacent form
+    # would document half the table and quietly miss the rest, which is worse
+    # than not scraping it: the whole point is that a new key cannot ship
+    # undocumented.
+    #
+    # Keys are namespaced because the flat key space already has 'bundle' as a
+    # [[view]] key, and [[osgi.bundles]] has its own with a different meaning.
+    text = OSGI.read_text()
+    keys = {}
+
+    bundle_body = function_body(text, "ParseBundle", OSGI)
+    for key in re.findall(r'at_path\("([^"]+)"\)[^\n]*?\bis_string\(\)',
+                          bundle_body):
+        keys.setdefault("osgi.bundles." + key, "string")
+    for key in re.findall(r'ReadBoundedInt\(\s*[\w.>-]*at_path\("([^"]+)"\)',
+                          bundle_body):
+        keys.setdefault("osgi.bundles." + key, "int")
+
+    # framework_core is already spelled osgi.framework_core at the call site,
+    # so it arrives namespaced.
+    table_body = function_body(text, "ParseOsgiTable", OSGI)
+    for key in re.findall(r'ReadBoundedInt\(\s*[\w.>-]*at_path\("([^"]+)"\)',
+                          table_body):
+        keys.setdefault(key, "int")
     return keys
 
 
