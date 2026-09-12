@@ -558,6 +558,17 @@ jobs:
             sudo chmod a+rw /dev/dri/card* 2>/dev/null || true
             ls -l /dev/dri/ || true
             id
+            # Which card is which, and whether its connector is live. The
+            # driver name matters because this runner has a second card that
+            # is not vkms, and the connector status matters because a vkms with
+            # no connected connector is useless to the test even though the
+            # module loaded and reported overlay planes.
+            for d in /sys/class/drm/card*/device/driver; do
+              echo "$(basename "$(dirname "$(dirname "$d")")") -> $(basename "$(readlink -f "$d")")"
+            done
+            for st in /sys/class/drm/card*-*/status; do
+              echo "$st = $(cat "$st" 2>/dev/null)"
+            done
           else
             echo "::warning::vkms unavailable on $(uname -r); the DRM compositor cases will skip"
           fi
