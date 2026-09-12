@@ -550,6 +550,13 @@ jobs:
           if lsmod | grep -q vkms; then
             echo "vkms loaded; overlay planes:"
             cat /sys/module/vkms/parameters/enable_overlay
+            # The card is root:video 0660 and the runner user is not in video,
+            # so the test could open nothing and skipped every case in 0.04 s
+            # while the job stayed green. Widen it: this is an ephemeral VM with
+            # one virtual display and no session manager to arbitrate.
+            sudo chmod a+rw /dev/dri/card* 2>/dev/null || true
+            ls -l /dev/dri/ || true
+            id
           else
             echo "::warning::vkms unavailable on $(uname -r); the DRM compositor cases will skip"
           fi
@@ -557,6 +564,18 @@ jobs:
       - name: Run unit tests (CTest)
         working-directory: ${{github.workspace}}/build/unit-tests
         run: ctest --output-on-failure --test-dir .
+
+      # Re-run just the DRM compositor driver verbosely.
+      #
+      # ctest prints nothing for a test that passes, and a driver that skips
+      # every case passes. That is how the first green run of this job reported
+      # success in 0.04 s having executed nothing -- the suite takes about a
+      # second when its cases actually run. This step puts the per-case result
+      # in the log, so a skip is visible as a skip instead of reading as
+      # coverage.
+      - name: DRM compositor cases (verbose, so a skip reads as a skip)
+        working-directory: ${{github.workspace}}/build/unit-tests
+        run: ctest -R drm_backend_vkms -V --test-dir .
 
       # A second configuration of the same sources, for one reason: the link
       # flags differ by build type. -Wl,--as-needed is appended to
