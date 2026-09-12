@@ -398,26 +398,31 @@ void DrmCompositor::NoteGlComposited(
   //
   // Repeat pushes for the same buffer are free -- SignalRelease drops the entry
   // on the first one and a second finds nothing.
-  {
-    const std::scoped_lock rel(deferred_releases_mu_);
-    deferred_releases_.push_back({surface, bid});
+  const std::scoped_lock rel(deferred_releases_mu_);
+  deferred_releases_.push_back({surface, bid});
+}
+
+std::vector<DrmCompositor::DeferredScanoutRelease>
+DrmCompositor::TakeDeferredScanoutReleases() {
+  std::vector<DeferredScanoutRelease> ready;
+  const std::scoped_lock lock(deferred_releases_mu_);
+  ready.swap(deferred_releases_);
+  return ready;
+}
+
+void DrmCompositor::FireDeferredScanoutReleases(
+    const std::vector<DeferredScanoutRelease>& batch) {
+  for (const DeferredScanoutRelease& r : batch) {
+    if (r.surface) {
+      r.surface->OnScanoutRelease(r.buffer_id);
+    }
   }
-  gl_pv_bound_[id] = bid;
 }
 
 void DrmCompositor::DrainDeferredScanoutReleases() {
   // Take the batch under the lock, then fire the callbacks without it: they run
   // producer code (an eventfd signal) and must not re-enter under our mutex.
-  std::vector<DeferredScanoutRelease> ready;
-  {
-    const std::scoped_lock lock(deferred_releases_mu_);
-    ready.swap(deferred_releases_);
-  }
-  for (const DeferredScanoutRelease& r : ready) {
-    if (r.surface) {
-      r.surface->OnScanoutRelease(r.buffer_id);
-    }
-  }
+  FireDeferredScanoutReleases(TakeDeferredScanoutReleases());
 }
 
 // ─── Init helpers ────────────────────────────────────────────────────────
@@ -1180,6 +1185,18 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
     return true;  // ack to Flutter; nothing presented, primary untouched
   }
 
+  // Releases queued by the previous fallback present. Taken now, before the
+  // composite below queues this frame's, and fired once Present has waited out
+  // the flip that sampled them.
+  //
+  // This path had neither half. It queues in NoteGlComposited like the others
+  // but never drained, so on a GL-fallback session -- which is every session
+  // where the plane compositor is unavailable, and every session after the
+  // fallback latches -- no GL-composited platform view ever got a buffer back
+  // and its producer waited out the release-fence timeout on every frame. Same
+  // defect as #530, one path over.
+  std::vector<DeferredScanoutRelease> previous = TakeDeferredScanoutReleases();
+
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   glDisable(GL_SCISSOR_TEST);
   glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -1246,7 +1263,13 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
   }
 
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
-  return backend_->Present();
+  const bool presented = backend_->Present();
+  // After Present, not before: its own WaitForPendingFlip is what confirms the
+  // flip that sampled these completed. Fired even when the present failed --
+  // the buffers are off the display either way, and holding them back would
+  // stall the producer behind a frame that is never coming.
+  FireDeferredScanoutReleases(previous);
+  return presented;
 }
 
 // ─── Cursor staging + shared commit settle ──────────────────────────────

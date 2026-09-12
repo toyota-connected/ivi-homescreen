@@ -472,10 +472,17 @@ class DrmCompositor : public IFlipSink {
   std::mutex deferred_releases_mu_;
   std::vector<DeferredScanoutRelease> deferred_releases_;
 
-  // Last GL-composited buffer_id per platform view, so PresentViaGlFallback can
-  // tell when a frame has been displaced and is safe to return. Raster thread
-  // only (PresentViaGlFallback), so it needs no lock of its own.
-  std::map<FlutterPlatformViewIdentifier, std::uint32_t> gl_pv_bound_;
+  // The two halves of DrainDeferredScanoutReleases, for the GL fallback.
+  //
+  // That path has no flip wait of its own -- DrmBackend::Present owns it -- so
+  // it cannot simply drain at the top the way the framed and scene paths do.
+  // It takes the batch before its composite queues into it and fires the batch
+  // after Present returns, which is where the displacing flip is known to have
+  // completed. Take holds the mutex; fire must not, because the callbacks run
+  // producer code.
+  std::vector<DeferredScanoutRelease> TakeDeferredScanoutReleases();
+  static void FireDeferredScanoutReleases(
+      const std::vector<DeferredScanoutRelease>& batch);
 
   std::unique_ptr<drm::scene::LayerScene> scene_;
 

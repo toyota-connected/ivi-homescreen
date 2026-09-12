@@ -186,6 +186,13 @@ if (BUILD_BACKEND_WAYLAND_LEASED_DRM)
         add_subdirectory(leased_drm_vkms-test)
     endif ()
 endif ()
+# The GL-composited platform-view release path, driven through a real
+# DrmCompositor on a vkms card. Needs the DRM-EGL backend (for DrmBackend) and
+# the compositor (for DrmCompositor); skips itself when no vkms card is loaded,
+# so it is safe to build and run unprivileged and in CI.
+if (BUILD_BACKEND_DRM_KMS_EGL AND BUILD_COMPOSITOR)
+    add_subdirectory(drm_backend_vkms-test)
+endif ()
 add_subdirectory(timer-test)
 add_subdirectory(watchdog-test)
 add_subdirectory(wake_event_fd-test)

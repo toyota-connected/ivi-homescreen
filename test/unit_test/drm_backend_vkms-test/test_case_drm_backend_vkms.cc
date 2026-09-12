@@ -1,0 +1,321 @@
+/*
+ * Copyright 2026 Toyota Connected North America
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+// The GL-composited platform-view release path, on a real compositor.
+//
+// #530: a platform view that the compositor draws through a texture never
+// reaches a plane, so the scanout retire that fires OnScanoutRelease never
+// happens for it. Three separate things had to be right before a producer got
+// its buffer back, and each hid the next -- the frame has to be queued at the
+// composite site, the queue has to be drained on the path that present
+// actually takes, and the plane id has to be cleared so nothing downstream
+// reads a stale "still on a plane".
+//
+// None of that is reachable from a mock. It needs a DrmCompositor, which needs
+// a DrmBackend, which needs a card, GBM and EGL. vkms supplies the card: it is
+// display-only, needs no root beyond membership of the video group, and is
+// already what the leased-lease tier uses. Every case skips rather than fails
+// when it is absent.
+//
+//   sudo modprobe vkms
+//   ./homescreen_drm_backend_vkms_ut_test_driver
+
+#include "backend/drm_kms_egl/drm_backend.h"
+#include "backend/drm_kms_egl/drm_compositor.h"
+#include "display/drm_display.h"
+#include "logging/logger.hpp"
+#include "view/compositor_surface_interface.h"
+
+extern "C" {
+#include <fcntl.h>
+#include <unistd.h>
+#include <xf86drm.h>
+#include <xf86drmMode.h>
+}
+
+#include <GLES2/gl2.h>
+
+#include <gtest/gtest.h>
+
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <vector>
+
+namespace {
+
+// The vkms card and the connector's preferred mode, or empty when there is no
+// vkms to be had.
+struct VkmsCard {
+  std::string path;
+  uint32_t mode_w{0};
+  uint32_t mode_h{0};
+
+  [[nodiscard]] bool ok() const { return !path.empty() && mode_w != 0; }
+};
+
+VkmsCard FindVkms() {
+  VkmsCard out;
+  for (int i = 0; i < 8; ++i) {
+    const std::string path = "/dev/dri/card" + std::to_string(i);
+    const int fd = ::open(path.c_str(), O_RDWR | O_CLOEXEC);
+    if (fd < 0) {
+      continue;
+    }
+    drmVersionPtr v = drmGetVersion(fd);
+    const bool is_vkms =
+        v != nullptr && v->name != nullptr && std::string(v->name) == "vkms";
+    if (v != nullptr) {
+      drmFreeVersion(v);
+    }
+    if (!is_vkms) {
+      ::close(fd);
+      continue;
+    }
+    out.path = path;
+    if (drmModeRes* res = drmModeGetResources(fd); res != nullptr) {
+      for (int c = 0; c < res->count_connectors && out.mode_w == 0; ++c) {
+        drmModeConnector* conn = drmModeGetConnector(fd, res->connectors[c]);
+        if (conn == nullptr) {
+          continue;
+        }
+        if (conn->connection == DRM_MODE_CONNECTED && conn->count_modes > 0) {
+          out.mode_w = conn->modes[0].hdisplay;
+          out.mode_h = conn->modes[0].vdisplay;
+        }
+        drmModeFreeConnector(conn);
+      }
+      drmModeFreeResources(res);
+    }
+    ::close(fd);
+    break;
+  }
+  return out;
+}
+
+// A platform-view surface that reports a GL texture and records what the
+// compositor did to it.
+//
+// The buffer id it reports is 0 on purpose. 0 is ring slot 0, not a "this
+// surface does not track ids" sentinel, and treating it as one is what left
+// slot 0 unreleased: every release-fence timeout in a 100k-splat run was slot
+// 0 and no other. A fake that reported 1 would pass against the broken code.
+class FakePlatformView : public ICompositorSurface {
+ public:
+  explicit FakePlatformView(FlutterPlatformViewIdentifier id) : id_(id) {}
+
+  bool OnCreateBackingStore(const FlutterBackingStoreConfig*,
+                            FlutterBackingStore*) override {
+    return false;
+  }
+  bool OnCollectBackingStore(const FlutterBackingStore*) override {
+    return true;
+  }
+  bool OnPresent(const FlutterLayer*) override {
+    presents_++;
+    return true;
+  }
+  [[nodiscard]] FlutterPlatformViewIdentifier GetIdentifier() const override {
+    return id_;
+  }
+
+  [[nodiscard]] uint32_t GetGlTextureName() const override { return tex_; }
+  [[nodiscard]] int32_t GetGlTextureWidth() const override { return 16; }
+  [[nodiscard]] int32_t GetGlTextureHeight() const override { return 16; }
+  [[nodiscard]] uint32_t GetGlTextureBufferId() const override { return 0; }
+
+  void OnScanoutRelease(uint32_t buffer_id) override {
+    const std::lock_guard<std::mutex> lock(mu_);
+    released_.push_back(buffer_id);
+  }
+  void SetScanoutPlane(uint32_t plane_id) override {
+    const std::lock_guard<std::mutex> lock(mu_);
+    planes_.push_back(plane_id);
+  }
+
+  void set_texture(uint32_t tex) { tex_ = tex; }
+  [[nodiscard]] int presents() const { return presents_; }
+
+  [[nodiscard]] std::vector<uint32_t> released() const {
+    const std::lock_guard<std::mutex> lock(mu_);
+    return released_;
+  }
+  [[nodiscard]] std::vector<uint32_t> planes() const {
+    const std::lock_guard<std::mutex> lock(mu_);
+    return planes_;
+  }
+
+ private:
+  const FlutterPlatformViewIdentifier id_;
+  uint32_t tex_{0};
+  int presents_{0};
+  mutable std::mutex mu_;
+  std::vector<uint32_t> released_;
+  std::vector<uint32_t> planes_;
+};
+
+// A backend on vkms with a framed output, which is the configuration #530 was
+// found in: a framebuffer smaller than the mode puts every present through
+// PresentFramed, the one path that queued platform-view releases and never
+// drained them.
+class DrmBackendVkms : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    card_ = FindVkms();
+    if (!card_.ok()) {
+      GTEST_SKIP() << "no connected vkms card (sudo modprobe vkms)";
+    }
+
+    display_ = std::make_unique<DrmDisplay>(0, 0, 0.0, card_.path,
+                                            /*no_seat=*/true);
+    drm::Device* dev = display_->SharedDevice();
+    if (dev == nullptr) {
+      GTEST_SKIP() << "no DRM master on " << card_.path;
+    }
+
+    DrmConfig cfg{card_.path, std::nullopt, std::nullopt,
+                  /*debug_backend=*/false};
+    cfg.no_seat = true;
+    cfg.disable_cursor = true;
+    backend_ =
+        DrmBackend::Create(cfg, display_->session(), dev, display_.get());
+    ASSERT_NE(backend_, nullptr) << "DrmBackend::Create failed on vkms";
+
+    compositor_ = backend_->compositor();
+    ASSERT_NE(compositor_, nullptr) << "built without BUILD_COMPOSITOR";
+
+    // A texture the compositor can actually sample. It never has to contain
+    // anything: the assertions are about the release bookkeeping around the
+    // composite, not about pixels.
+    ASSERT_TRUE(backend_->MakeCurrent());
+    glGenTextures(1, &tex_);
+    glBindTexture(GL_TEXTURE_2D, tex_);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 16, 16, 0, GL_RGBA,
+                 GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    ASSERT_EQ(glGetError(), static_cast<GLenum>(GL_NO_ERROR));
+    ASSERT_NE(tex_, 0u);
+  }
+
+  void TearDown() override {
+    if (backend_ && tex_ != 0) {
+      backend_->MakeCurrent();
+      glDeleteTextures(1, &tex_);
+    }
+    backend_.reset();
+    display_.reset();
+  }
+
+  // One frame carrying nothing but the platform view.
+  bool PresentPlatformView(FlutterPlatformViewIdentifier id) {
+    FlutterPlatformView pv{};
+    pv.struct_size = sizeof(FlutterPlatformView);
+    pv.identifier = id;
+
+    FlutterLayer layer{};
+    layer.struct_size = sizeof(FlutterLayer);
+    layer.type = kFlutterLayerContentTypePlatformView;
+    layer.platform_view = &pv;
+    layer.offset = FlutterPoint{0.0, 0.0};
+    layer.size = FlutterSize{16.0, 16.0};
+
+    const FlutterLayer* layers[] = {&layer};
+    return compositor_->PresentLayers(layers, 1);
+  }
+
+  VkmsCard card_;
+  std::unique_ptr<DrmDisplay> display_;
+  std::unique_ptr<DrmBackend> backend_;
+  DrmCompositor* compositor_{nullptr};
+  uint32_t tex_{0};
+};
+
+// The whole of #530 in one case: present a GL-composited view twice and its
+// producer gets buffer 0 back.
+//
+// Twice because the release is deferred by design -- the compositor re-samples
+// a bound texture until a newer one arrives, so handing it back during the
+// present that sampled it would return a slot still being drawn from. The
+// second present's flip wait is what makes it safe, and draining there is
+// exactly what PresentFramed did not do.
+TEST_F(DrmBackendVkms, GlCompositedViewGetsItsBufferBack) {
+  auto view = std::make_shared<FakePlatformView>(7);
+  view->set_texture(tex_);
+  compositor_->RegisterSurface(7, view);
+
+  ASSERT_TRUE(PresentPlatformView(7));
+  EXPECT_EQ(view->presents(), 1);
+  EXPECT_TRUE(view->released().empty())
+      << "released during the present that sampled it";
+
+  ASSERT_TRUE(PresentPlatformView(7));
+  const std::vector<uint32_t> released = view->released();
+  ASSERT_FALSE(released.empty())
+      << "the deferred release was queued and never drained (#530)";
+  EXPECT_EQ(released.front(), 0u) << "buffer id 0 is ring slot 0, not a "
+                                     "sentinel for 'no id'";
+
+  compositor_->UnregisterSurface(7);
+}
+
+// A GL-composited view is on no plane, and has to be told so. Anything keyed
+// on "is this view on a plane" -- the supersede guard in the view host, the
+// DRM_PLANE grant accessor -- otherwise keeps whatever id the scene path last
+// set and reads a stale yes.
+TEST_F(DrmBackendVkms, GlCompositedViewIsReportedOffAnyPlane) {
+  auto view = std::make_shared<FakePlatformView>(9);
+  view->set_texture(tex_);
+  compositor_->RegisterSurface(9, view);
+
+  ASSERT_TRUE(PresentPlatformView(9));
+
+  const std::vector<uint32_t> planes = view->planes();
+  ASSERT_FALSE(planes.empty()) << "the present never reported a plane at all";
+  EXPECT_EQ(planes.back(), 0u) << "GL-composited, so no plane";
+
+  compositor_->UnregisterSurface(9);
+}
+
+// A surface that exposes no texture is not composited, so nothing is queued
+// against it and nothing is released. Guards the other direction of the
+// buffer-id-0 fix: dropping the zero check must not start releasing frames
+// for views the compositor never sampled.
+TEST_F(DrmBackendVkms, AViewWithNoTextureIsNeverReleased) {
+  auto view = std::make_shared<FakePlatformView>(11);  // texture stays 0
+  compositor_->RegisterSurface(11, view);
+
+  ASSERT_TRUE(PresentPlatformView(11));
+  ASSERT_TRUE(PresentPlatformView(11));
+
+  EXPECT_EQ(view->presents(), 2);
+  EXPECT_TRUE(view->released().empty());
+
+  compositor_->UnregisterSurface(11);
+}
+
+}  // namespace
+
+// Own main rather than gtest_main: the shell's logging has to be started
+// before any of it runs, and a compositor failure that logs nothing is very
+// hard to tell apart from one that did not happen. IHS_LOG_LEVEL=debug shows
+// the per-layer decisions PresentFramed makes.
+int main(int argc, char** argv) {
+  IHS_LOGGING_START("TEST", "drm_backend vkms test");
+  ::testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
+}
