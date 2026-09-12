@@ -64,9 +64,47 @@ struct VkmsCard {
   std::string path;
   uint32_t mode_w{0};
   uint32_t mode_h{0};
+  // Overlay planes the card exposes. Zero on a default vkms: enable_overlay
+  // defaults off, and without an overlay the driver probe disables the plane
+  // compositor, so the framed path does not exist to be tested.
+  int overlays{0};
 
   [[nodiscard]] bool ok() const { return !path.empty() && mode_w != 0; }
 };
+
+// Overlay planes on @p fd. Needs UNIVERSAL_PLANES, which is also what the
+// backend sets before it counts them.
+int CountOverlayPlanes(int fd) {
+  if (drmSetClientCap(fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1) != 0) {
+    return 0;
+  }
+  drmModePlaneRes* pres = drmModeGetPlaneResources(fd);
+  if (pres == nullptr) {
+    return 0;
+  }
+  int overlays = 0;
+  for (uint32_t i = 0; i < pres->count_planes; ++i) {
+    drmModeObjectProperties* props =
+        drmModeObjectGetProperties(fd, pres->planes[i], DRM_MODE_OBJECT_PLANE);
+    if (props == nullptr) {
+      continue;
+    }
+    for (uint32_t p = 0; p < props->count_props; ++p) {
+      drmModePropertyRes* prop = drmModeGetProperty(fd, props->props[p]);
+      if (prop == nullptr) {
+        continue;
+      }
+      if (std::string(prop->name) == "type" &&
+          props->prop_values[p] == DRM_PLANE_TYPE_OVERLAY) {
+        overlays++;
+      }
+      drmModeFreeProperty(prop);
+    }
+    drmModeFreeObjectProperties(props);
+  }
+  drmModeFreePlaneResources(pres);
+  return overlays;
+}
 
 VkmsCard FindVkms() {
   VkmsCard out;
@@ -87,6 +125,7 @@ VkmsCard FindVkms() {
       continue;
     }
     out.path = path;
+    out.overlays = CountOverlayPlanes(fd);
     if (drmModeRes* res = drmModeGetResources(fd); res != nullptr) {
       for (int c = 0; c < res->count_connectors && out.mode_w == 0; ++c) {
         drmModeConnector* conn = drmModeGetConnector(fd, res->connectors[c]);
@@ -172,8 +211,12 @@ class FakePlatformView : public ICompositorSurface {
 // found in: a framebuffer smaller than the mode puts every present through
 // PresentFramed, the one path that queued platform-view releases and never
 // drained them.
-class DrmBackendVkms : public ::testing::Test {
+class DrmBackendVkmsBase : public ::testing::Test {
  protected:
+  // Which present path this fixture pins. Never left to DriverProbe: see the
+  // comment on cfg.compositor below.
+  virtual void Configure(DrmConfig& cfg) = 0;
+
   void SetUp() override {
     card_ = FindVkms();
     if (!card_.ok()) {
@@ -191,6 +234,20 @@ class DrmBackendVkms : public ::testing::Test {
                   /*debug_backend=*/false};
     cfg.no_seat = true;
     cfg.disable_cursor = true;
+    // Pin the GL compositor rather than letting DriverProbe choose.
+    //
+    // These cases are about the GL-composited platform-view path, and with
+    // kAuto the path is decided by whether the card happens to expose overlay
+    // planes -- which for vkms is a module parameter (enable_overlay). This
+    // test was written against a vkms with no overlays, where the probe fell
+    // back to GL on its own; loading the module with overlays turned it onto
+    // the scene path, where a platform view is driven through GetDmabuf and a
+    // texture-only surface is never presented at all. Three cases went from
+    // passing to failing with no code change on either side.
+    //
+    // The scene path deserves its own fixture and its own fake. What it must
+    // not be is whichever one the host's module parameters select today.
+    Configure(cfg);
     backend_ =
         DrmBackend::Create(cfg, display_->session(), dev, display_.get());
     ASSERT_NE(backend_, nullptr) << "DrmBackend::Create failed on vkms";
@@ -243,6 +300,32 @@ class DrmBackendVkms : public ::testing::Test {
   std::unique_ptr<DrmBackend> backend_;
   DrmCompositor* compositor_{nullptr};
   uint32_t tex_{0};
+};
+
+// The GL compositor, full screen: PresentViaGlFallback.
+class DrmBackendVkms : public DrmBackendVkmsBase {
+ protected:
+  void Configure(DrmConfig& cfg) override {
+    cfg.compositor = drm_config::Compositor::kGl;
+  }
+};
+
+// The plane compositor with a framebuffer smaller than the mode, which is what
+// puts every present through PresentFramed -- the path #530 was found on, and
+// the one the GL fixture above cannot reach. Needs a card with overlay planes;
+// on vkms that is the enable_overlay module parameter, so the fixture checks
+// for one rather than assuming.
+class DrmBackendVkmsFramed : public DrmBackendVkmsBase {
+ protected:
+  void Configure(DrmConfig& cfg) override {
+    if (card_.overlays == 0) {
+      GTEST_SKIP() << "vkms has no overlay plane, so there is no framed path "
+                      "to test (modprobe vkms enable_overlay=1)";
+    }
+    cfg.compositor = drm_config::Compositor::kPlanes;
+    cfg.width = card_.mode_w - 64;
+    cfg.height = card_.mode_h - 64;
+  }
 };
 
 // The whole of #530 in one case: present a GL-composited view twice and its
@@ -306,6 +389,45 @@ TEST_F(DrmBackendVkms, AViewWithNoTextureIsNeverReleased) {
   EXPECT_TRUE(view->released().empty());
 
   compositor_->UnregisterSurface(11);
+}
+
+// The same release contract on PresentFramed. This is the path #530 was found
+// on -- a framed config on a Pi 5 -- and it queued platform-view releases
+// without ever draining them. The GL fixture above cannot reach it: framing
+// requires the atomic plane compositor, so the framed path only exists on a
+// card with overlay planes.
+TEST_F(DrmBackendVkmsFramed, GlCompositedViewGetsItsBufferBack) {
+  auto view = std::make_shared<FakePlatformView>(13);
+  view->set_texture(tex_);
+  compositor_->RegisterSurface(13, view);
+
+  ASSERT_TRUE(PresentPlatformView(13));
+  EXPECT_EQ(view->presents(), 1);
+  EXPECT_TRUE(view->released().empty())
+      << "released during the present that sampled it";
+
+  ASSERT_TRUE(PresentPlatformView(13));
+  const std::vector<uint32_t> released = view->released();
+  ASSERT_FALSE(released.empty())
+      << "the deferred release was queued and never drained (#530)";
+  EXPECT_EQ(released.front(), 0u);
+
+  compositor_->UnregisterSurface(13);
+}
+
+TEST_F(DrmBackendVkmsFramed, GlCompositedViewIsReportedOffAnyPlane) {
+  auto view = std::make_shared<FakePlatformView>(15);
+  view->set_texture(tex_);
+  compositor_->RegisterSurface(15, view);
+
+  ASSERT_TRUE(PresentPlatformView(15));
+
+  const std::vector<uint32_t> planes = view->planes();
+  ASSERT_FALSE(planes.empty()) << "the present never reported a plane at all";
+  EXPECT_EQ(planes.back(), 0u) << "GL-composited into the framed buffer, so "
+                                  "on no plane of its own";
+
+  compositor_->UnregisterSurface(15);
 }
 
 }  // namespace
