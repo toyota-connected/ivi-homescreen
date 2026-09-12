@@ -146,6 +146,38 @@ jobs:
             echo "::warning::vkms module unavailable on $(uname -r); skipping smoke test"
           fi
 
+      # A bare modprobe gives one card with one connected connector, and the
+      # OSGi multi-bundle harness needs two on the same card -- it pins a
+      # bundle to each. It resolves the card with ihs_find_vkms_card 2, found
+      # nothing, and skipped both transport legs while the job stayed green.
+      # The census and input harnesses ask for one connector, which is why they
+      # ran on card0 in the same step and this one did not.
+      #
+      # vkms_dual.sh provisions a second instance through the >= 6.11 configfs
+      # interface, so it adds a card rather than reloading the module: card0
+      # and everything already using it are untouched. Best-effort, because a
+      # kernel without the configfs interface should leave this job exactly as
+      # it was rather than failing.
+      - name: Provision a dual-connector vkms instance
+        id: vkms_dual
+        if: steps.vkms.outputs.available == 'true'
+        run: |
+          if sudo third_party/drm-cxx/scripts/vkms_dual.sh up; then
+            # The node arrives root:video 0660 and the harness runs as the
+            # unprivileged runner user, so without this it would fail to open a
+            # card that is finally there -- worse than the skip it replaces.
+            sudo chmod a+rw /dev/dri/card* 2>/dev/null || true
+            sudo third_party/drm-cxx/scripts/vkms_dual.sh status || true
+            echo "provisioned=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "provisioned=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::vkms_dual.sh could not provision two connectors; the OSGi multi-bundle harness will skip"
+          fi
+          echo "connectors by card:"
+          for c in /sys/class/drm/card[0-9]*-*/status; do
+            [ -e "$c" ] && echo "  $c = $(cat "$c")"
+          done
+
       - name: Harness pre-flight (--check)
         if: steps.vkms.outputs.available == 'true'
         run: |
@@ -186,6 +218,12 @@ jobs:
         if: steps.vkms.outputs.available == 'true'
         env:
           IVI_BUILD: ${{github.workspace}}/build
+          # Only demand that the OSGi harness assert something where the card
+          # it needs was actually provisioned. Where it was not, this stays 0
+          # and the leg skips as before: a capability the runner never had
+          # should read as a warning, the way an absent vkms or uinput does,
+          # rather than as a red build.
+          REQUIRE_RUN: ${{ steps.vkms_dual.outputs.provisioned == 'true' && '1' || '0' }}
         run: |
           eval "$(./emb_cli/bootstrap.sh --shellenv)"
           emb --version
