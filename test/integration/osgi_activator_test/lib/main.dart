@@ -287,12 +287,28 @@ class _FfiTransport implements _Transport {
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // The shell prepends flags of its own -- FlutterView passes
+  // --ihs-view=<view name> so an app can tell which instance it is -- and those
+  // arrive ahead of anything [osgi.bundles.args] dart = [...] supplies. Reading
+  // args[0] and args[1] positionally therefore picked up the flag as the
+  // symbolic name and the symbolic name as the transport, so the switch below
+  // fell through to its default and threw before register() was ever called:
+  // no registration, no ACTIVE, a critical bundle that could only ever time
+  // out, and the reason visible on the panel alone. Both transports failed
+  // identically because neither was ever selected.
+  //
+  // Filtered rather than index-shifted: the shell is entitled to add another
+  // flag, and skipping a fixed count would break again the day it does.
+  final List<String> positional =
+      args.where((String a) => !a.startsWith('--')).toList();
+
   // Passed via [osgi.bundles.args] dart = [...]; falls back to a name that will
   // be rejected, which is a louder failure than silently reporting as some
   // other bundle.
   final String symbolicName =
-      args.isNotEmpty ? args.first : 'com.ivi.unnamed-bundle';
-  final String transportName = args.length > 1 ? args[1] : 'channel';
+      positional.isNotEmpty ? positional.first : 'com.ivi.unnamed-bundle';
+  final String transportName =
+      positional.length > 1 ? positional[1] : 'channel';
 
   final _Activator activator = _Activator(symbolicName, transportName);
   runApp(_ActivatorApp(activator: activator));
