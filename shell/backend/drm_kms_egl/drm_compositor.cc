@@ -399,7 +399,9 @@ void DrmCompositor::NoteGlComposited(
   // Repeat pushes for the same buffer are free -- SignalRelease drops the entry
   // on the first one and a second finds nothing.
   const std::scoped_lock rel(deferred_releases_mu_);
-  deferred_releases_.push_back({surface, bid});
+  // No fence: a GL-composited view never reached a commit, so there is no
+  // OUT_FENCE to hand back. Its release is the eventfd edge alone.
+  deferred_releases_.push_back({surface, bid, drm::sync::SyncFence{}});
 }
 
 std::vector<DrmCompositor::DeferredScanoutRelease>
@@ -413,9 +415,34 @@ DrmCompositor::TakeDeferredScanoutReleases() {
 void DrmCompositor::FireDeferredScanoutReleases(
     const std::vector<DeferredScanoutRelease>& batch) {
   for (const DeferredScanoutRelease& r : batch) {
-    if (r.surface) {
-      r.surface->OnScanoutRelease(r.buffer_id);
+    if (!r.surface) {
+      continue;
     }
+    // Publish the release fence before the eventfd, so a producer woken by the
+    // eventfd already has the fence waiting for it rather than racing to read a
+    // field that is about to be written.
+    //
+    // dup, not fd(): SetReleaseFenceFd takes ownership of what it is given,
+    // while SyncFence keeps ownership of its own fd and closes it when this
+    // batch goes out of scope. Handing over fd() directly would be a double
+    // close. Same shape as the Vulkan path's per-view dup.
+    //
+    // Published unconditionally. HandBackReleaseFence only hands a dup back on
+    // a submit that carried an acquire fence, which is exactly the
+    // explicit-sync submits, so an implicit producer never sees this and needs
+    // no gate here.
+    if (r.fence.valid()) {
+      const int fd = ::dup(r.fence.fd());
+      if (fd < 0) {
+        ihs::log::warn(
+            "[DrmCompositor] dup(release OUT_FENCE) failed (errno={}); this "
+            "buffer releases on the eventfd alone",
+            errno);
+      } else {
+        r.surface->SetReleaseFenceFd(fd);  // takes ownership
+      }
+    }
+    r.surface->OnScanoutRelease(r.buffer_id);
   }
 }
 
@@ -2808,12 +2835,21 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
     drm::scene::ExternalDmaBufPool::Options opts{};
     opts.on_release = [this, surface = std::move(surface)](
                           std::uintptr_t key,
-                          std::optional<drm::sync::SyncFence>) {
+                          std::optional<drm::sync::SyncFence> release_fence) {
       if (!surface) {
         return;
       }
+      // Carry the fence through with the release rather than dropping it. The
+      // scene only produces one where the CRTC advertises OUT_FENCE_PTR, and
+      // cfg.explicit_sync=no means the user asked for implicit sync, so honor
+      // that by discarding it here -- nothing else reads that knob today.
+      drm::sync::SyncFence fence;
+      if (release_fence.has_value() && backend_->resolved().explicit_sync) {
+        fence = std::move(*release_fence);
+      }
       const std::scoped_lock lock(deferred_releases_mu_);
-      deferred_releases_.push_back({surface, static_cast<uint32_t>(key)});
+      deferred_releases_.push_back(
+          {surface, static_cast<uint32_t>(key), std::move(fence)});
     };
     return drm::scene::ExternalDmaBufPool::create(backend_->device(), db.width,
                                                   db.height, db.fourcc,

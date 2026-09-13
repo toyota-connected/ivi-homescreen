@@ -47,6 +47,7 @@ extern "C" {
 #include <drm_fourcc.h>
 #include <fcntl.h>
 #include <gbm.h>
+#include <poll.h>
 #include <unistd.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
@@ -352,6 +353,12 @@ class FakeDmabufPlatformView : public ICompositorSurface {
     return DmabufState::kFrame;
   }
 
+  ~FakeDmabufPlatformView() override {
+    if (release_fence_fd_ >= 0) {
+      ::close(release_fence_fd_);
+    }
+  }
+
   void OnScanoutRelease(uint32_t buffer_id) override {
     const std::lock_guard<std::mutex> lock(mu_);
     released_.push_back(buffer_id);
@@ -359,6 +366,36 @@ class FakeDmabufPlatformView : public ICompositorSurface {
   void SetScanoutPlane(uint32_t plane_id) override {
     const std::lock_guard<std::mutex> lock(mu_);
     planes_.push_back(plane_id);
+  }
+
+  // The compositor's release fence for this view (#513). Mirrors the real view
+  // host: take ownership, superseding any previous one.
+  void SetReleaseFenceFd(int fd) override {
+    const std::lock_guard<std::mutex> lock(mu_);
+    if (release_fence_fd_ >= 0) {
+      ::close(release_fence_fd_);
+    }
+    release_fence_fd_ = fd;
+    if (fd >= 0) {
+      ++release_fences_;
+    }
+  }
+
+  [[nodiscard]] int release_fences() const {
+    const std::lock_guard<std::mutex> lock(mu_);
+    return release_fences_;
+  }
+
+  // Whether the fence handed back actually signals. A real OUT_FENCE does once
+  // its commit has been scanned out; an fd that is not a live sync_file would
+  // not, which is what separates "a fence arrived" from "a number arrived".
+  [[nodiscard]] bool ReleaseFenceSignals(int timeout_ms) const {
+    const std::lock_guard<std::mutex> lock(mu_);
+    if (release_fence_fd_ < 0) {
+      return false;
+    }
+    pollfd pfd{release_fence_fd_, POLLIN, 0};
+    return ::poll(&pfd, 1, timeout_ms) == 1 && (pfd.revents & POLLIN) != 0;
   }
 
   // Stand in for the producer submitting again, optionally from a different
@@ -396,6 +433,8 @@ class FakeDmabufPlatformView : public ICompositorSurface {
   mutable int delivered_{0};
   std::vector<uint32_t> released_;
   std::vector<uint32_t> planes_;
+  int release_fence_fd_{-1};
+  int release_fences_{0};
 };
 
 // A backend on vkms with a framed output, which is the configuration #530 was
@@ -879,6 +918,52 @@ TEST_F(DrmBackendVkmsScene, TheDisplacedSlotComesBackToTheProducer) {
 #endif
 
   compositor_->UnregisterSurface(23);
+}
+
+// The release fence (#513). Same displacement as the case above, but the
+// producer also gets the OUT_FENCE of the commit that displaced its buffer --
+// the precise "off the plane" edge, where the deferred eventfd only
+// approximates it by holding the release until WaitForPendingFlip says the flip
+// landed.
+//
+// drm-cxx already requested and imported this fence: ExternalDmaBufPool opts in
+// via wants_release_fence(), so LayerScene attaches OUT_FENCE_PTR on every real
+// commit with such a source and stamps the result per buffer. The shell was
+// taking the key from on_release and dropping the fence on the floor.
+TEST_F(DrmBackendVkmsScene, ADisplacedSlotComesBackWithItsReleaseFence) {
+  GbmSolidBuffer first;
+  GbmSolidBuffer second;
+  ASSERT_TRUE(first.Create(backend_->device().fd(), content_w_, content_h_,
+                           0xFF1E7A46u));
+  ASSERT_TRUE(second.Create(backend_->device().fd(), content_w_, content_h_,
+                            0xFF7A1E46u));
+
+  auto view = std::make_shared<FakeDmabufPlatformView>(25, first, 0);
+  layer_w_ = content_w_;
+  layer_h_ = content_h_;
+  compositor_->RegisterSurface(25, view);
+
+  ASSERT_TRUE(PresentPlatformView(25));
+  EXPECT_EQ(view->release_fences(), 0)
+      << "a fence before anything was displaced";
+
+  view->Submit(&second, 1);
+  ASSERT_TRUE(PumpUntil(25, [&] { return !view->released().empty(); }))
+      << "slot 0 never came back";
+
+  if (view->release_fences() == 0) {
+    GTEST_SKIP() << "no release fence published; this CRTC has no "
+                    "OUT_FENCE_PTR, so the eventfd edge is the only signal";
+  }
+
+  // Published with the release, not instead of it: a producer that cannot wait
+  // on a sync_file still has the eventfd, so both must arrive.
+  EXPECT_EQ(view->released().front(), 0u) << "the eventfd release still fires";
+  EXPECT_TRUE(view->ReleaseFenceSignals(1000))
+      << "the fence handed back never signalled, so a producer waiting on it "
+         "would stall rather than reuse the slot";
+
+  compositor_->UnregisterSurface(25);
 }
 
 // ─── Explicit-sync acquire (#513) ────────────────────────────────────────
