@@ -15,6 +15,7 @@ Testing/
 plugins/
 ivi-homescreen-plugins/
 build-systemd-watchdog-test/
+build-ut/
 
 lcovHtml/
 

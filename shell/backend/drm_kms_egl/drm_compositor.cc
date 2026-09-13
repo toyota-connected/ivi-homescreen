@@ -364,8 +364,7 @@ DrmCompositor::~DrmCompositor() {
 //
 // Raster thread only, like its three call sites.
 void DrmCompositor::NoteGlComposited(
-    const std::shared_ptr<ICompositorSurface>& surface,
-    FlutterPlatformViewIdentifier id) {
+    const std::shared_ptr<ICompositorSurface>& surface) {
   if (!surface) {
     return;
   }
@@ -1283,7 +1282,7 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
                                              blend, flip_y, external);
           composited_any = true;
 
-          NoteGlComposited(surface_sp, layer->platform_view->identifier);
+          NoteGlComposited(surface_sp);
         }
       }
     }
@@ -1465,7 +1464,7 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
           // grant accessor keeps whatever plane id the scene path last set, and
           // anything keyed on "is this view on a plane" reads a stale yes.
           surface_sp->SetScanoutPlane(0);
-          NoteGlComposited(surface_sp, layer->platform_view->identifier);
+          NoteGlComposited(surface_sp);
           if (backend_->cfg_.debug_backend) {
             ihs::log::debug(
                 "[DrmCompositor] framed layer[{}] PV id={} tex={} "
@@ -2268,7 +2267,7 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
                 static_cast<GLsizei>(flutter->size.width),
                 static_cast<GLsizei>(flutter->size.height), blend, flip_y,
                 surface_sp->TextureIsExternalOes());
-            NoteGlComposited(surface_sp, flutter->platform_view->identifier);
+            NoteGlComposited(surface_sp);
             any_composited = true;
           }
         }
