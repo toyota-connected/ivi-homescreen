@@ -58,6 +58,9 @@
 #                    state-machine transition, not a transport's own log line.
 #                    ffi needs a shell whose libihs_shared exports ihs_osgi_*
 #                    (ENABLE_OSGI=ON), and an activator bundle built with it.
+#   KEEP_LOG         1 = keep the shell's log on exit and print its path. Every
+#                    assertion here reads that log, so a failure is only
+#                    explicable with it; the default still removes it (default 0)
 #   COUNT_FLIPS      1 = prove page flips via strace (default 0)
 #   SOFTWARE_RENDER  1 = LIBGL_ALWAYS_SOFTWARE=1 (vkms/llvmpipe)
 #   REQUIRE_RUN      1 = a run that asserted nothing is a failure. Every skip
@@ -86,6 +89,7 @@ ACTIVATOR="${ACTIVATOR:-0}"
 TRANSPORT="${TRANSPORT:-channel}"
 COUNT_FLIPS="${COUNT_FLIPS:-0}"
 SOFTWARE_RENDER="${SOFTWARE_RENDER:-0}"
+KEEP_LOG="${KEEP_LOG:-0}"
 
 # Checked here rather than at the point of use, so --check catches a typo
 # before anyone sets up a rig. Refused rather than defaulted: falling back to
@@ -212,7 +216,26 @@ log "cluster priority: $CLUSTER_PRIORITY (ACTIVATOR=$ACTIVATOR, TRANSPORT=$TRANS
 WORK="$(mktemp -d)"
 LOG="$(mktemp)"
 FLIP_LOG=""
-trap 'rm -rf "$WORK" "$LOG" "$FLIP_LOG"' EXIT
+
+# KEEP_LOG=1 leaves the shell's own log behind, and says where.
+#
+# Every assertion below reads that log, so when one of them fails the log is the
+# only thing that says why -- and until now the trap deleted it on the way out.
+# Diagnosing the argument bug fixed in #562 meant hand-editing a copy of this
+# script on the target to rescue the file, which is not a thing anyone should
+# have to work out twice.
+#
+# Only the log survives: WORK holds the bundles and the generated config, which
+# are reconstructed on every run and are large.
+cleanup() {
+    if [ "$KEEP_LOG" = "1" ]; then
+        log "shell log kept: $LOG"
+        rm -rf "$WORK" "$FLIP_LOG"
+    else
+        rm -rf "$WORK" "$LOG" "$FLIP_LOG"
+    fi
+}
+trap cleanup EXIT
 mkdir -p "$WORK/cluster" "$WORK/navigation"
 cp -rL "$BUNDLE"/. "$WORK/cluster/"
 cp -rL "$BUNDLE"/. "$WORK/navigation/"
@@ -364,8 +387,21 @@ else
 fi
 
 # B4: no fatal/error lines.
-if grep -aqE "\] \[C\] |\] \[E\] " "$LOG"; then
-    grep -aE "\] \[C\] |\] \[E\] " "$LOG" | head >&2
+#
+# The shell logs "04:01:53.161 [E] SHEL: ..." -- a timestamp, then the level,
+# then the context. The previous pattern looked for "] [E] ", which needs a
+# bracket immediately before the level, and nothing in this format supplies one:
+# it matched none of the four error lines a refused registration produces, and
+# reported "no error/critical lines" on runs that carried them.
+#
+# Anchored to the timestamp rather than matching " [E] " anywhere, so a message
+# whose own text contains a bracketed level cannot forge a failure. That anchor
+# is the deliberate trade: a log line that does not begin with a timestamp is
+# not scanned at all, which is correct for this shell and would need revisiting
+# for a producer that prefixes something else.
+B4_ERR='^[0-9][0-9:.]* \[[CE]\] '
+if grep -aqE "$B4_ERR" "$LOG"; then
+    grep -aE "$B4_ERR" "$LOG" | head >&2
     record "B4-clean-log" fail "error/critical lines present"
 else
     record "B4-clean-log" pass "no error/critical lines"
