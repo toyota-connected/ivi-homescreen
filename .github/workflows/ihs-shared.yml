@@ -248,13 +248,102 @@ jobs:
       - name: Run dlt-daemon + capture the marker
         run: |
           export LD_LIBRARY_PATH="$PWD/prefix/lib:$PWD/prefix/lib64:$PWD/prefix/lib/x86_64-linux-gnu"
-          dlt-daemon -d ; sleep 2
+
+          # This job had never run before the workflow gained a v3.0 push
+          # trigger -- it is gated to push/workflow_dispatch, and the workflow
+          # pushed only on v2.0 -- and the first times it ran it died here:
+          #
+          #   ~DLT~ ERROR    ~FIFO user dir /tmp/dltpipes cannot be chmoded
+          #                   (Operation not permitted)!
+          #   ~DLT~ CRITICAL ~Initialization of phase 1 failed!
+          #
+          # The runner logged the cause: /tmp/dltpipes arrives owned by _dlt,
+          # the system user the dlt-daemon package creates, while the job runs
+          # as runner. chmod returns EPERM to anyone who is not the owner
+          # whatever the mode -- that directory is 01777 and refuses it anyway
+          # -- so this is ownership, and the sudo chmod that fixed /dev/dri in
+          # #545 and #554 would leave it exactly as broken.
+          #
+          # Deleting it worked but only moved the problem: -t defaults to /tmp,
+          # and the daemon puts its local fifo (/tmp/dlt) beside the user-pipes
+          # dir (/tmp/dltpipes) under it. Clearing one left the other owned by
+          # _dlt, and the daemon started and then could not open /tmp/dlt,
+          # losing every message the driver sent.
+          #
+          # So give both ends a directory this job owns outright. -t moves the
+          # daemon's fifo and user-pipes together, and DLT_PIPE_DIR is how
+          # dlt-daemon --help says a client is pointed at the same place. That
+          # leaves the package's /tmp paths untouched rather than racing another
+          # user for them.
+          PIPE_DIR="$PWD/dltpipes"
+          mkdir -p "$PIPE_DIR"
+          echo "running as: $(id -un) ($(id -u))"
+          ls -ld /tmp/dltpipes 2>/dev/null || echo "/tmp/dltpipes: absent"
+          ls -ld /tmp/dlt 2>/dev/null || echo "/tmp/dlt: absent"
+          ls -ld "$PIPE_DIR"
+
+          # Something else on this runner already speaks DLT. The previous
+          # attempt's capture carried applications this job never launched --
+          # 'DBUS' (PID 2944) and 'SYS' (PID 2945), the package's dlt-dbus and
+          # dlt-system -- along with "Daemon launched" from a daemon that was
+          # not ours. dlt-receive reaches the daemon over TCP 3490, so it was
+          # talking to whichever one owned that port, and `pgrep -x dlt-daemon`
+          # matched that one too: the readiness check was passing on a process
+          # this step never started, against a daemon still using /tmp.
+          #
+          # So state what is running, stop it, and start our own with a pid we
+          # hold. The runner is not systemd-booted -- the daemon says so on
+          # every start -- so these are ordinary processes, not units.
+          echo "--- before ---"
+          pgrep -a dlt-daemon || echo "  no dlt-daemon running"
+          pgrep -a dlt-system || echo "  no dlt-system running"
+          pgrep -a dlt-dbus   || echo "  no dlt-dbus running"
+          ss -ltnp 2>/dev/null | grep ':3490' || echo "  port 3490 free"
+          sudo pkill -x dlt-daemon 2>/dev/null || true
+          sudo pkill -f dlt-system 2>/dev/null || true
+          sudo pkill -f dlt-dbus   2>/dev/null || true
+          sleep 1
+          echo "--- after stop ---"
+          pgrep -a dlt-daemon || echo "  no dlt-daemon running"
+          ss -ltnp 2>/dev/null | grep ':3490' || echo "  port 3490 free"
+
+          # Foreground with & rather than -d, so the pid is ours to check.
+          # Daemonising hands back a pid that has already exited, which is what
+          # left the previous check matching an unrelated process. -e is on, so
+          # a daemon that dies still has to be caught explicitly here or the
+          # marker grep reports it as "marker not received" -- a different
+          # problem from the one that happened.
+          dlt-daemon -t "$PIPE_DIR" > daemon.log 2>&1 &
+          DLT_PID=$!
+          for _ in $(seq 1 20); do
+            kill -0 "$DLT_PID" 2>/dev/null && [ -p "$PIPE_DIR/dlt" ] && break
+            sleep 0.5
+          done
+          if ! kill -0 "$DLT_PID" 2>/dev/null; then
+            echo "::error::dlt-daemon (pid $DLT_PID) exited during startup"
+            cat daemon.log || true
+            exit 1
+          fi
+          if [ ! -p "$PIPE_DIR/dlt" ]; then
+            echo "::error::dlt-daemon is running but $PIPE_DIR/dlt is not a fifo"
+            ls -la "$PIPE_DIR" || true
+            cat daemon.log || true
+            exit 1
+          fi
+          echo "dlt-daemon up as pid $DLT_PID; $(ls -ld "$PIPE_DIR")"
+          ls -la "$PIPE_DIR" || true
+          cat daemon.log || true
+          # TCP on 3490, so the capture side is unaffected by the pipe dir.
           dlt-receive -a localhost > capture.txt 2>&1 &
           RECV=$!
           sleep 2
-          IHS_LOG_SINK=dlt ./driver
+          # DLT_PIPE_DIR is the client half of -t: without it the driver would
+          # look in /tmp while the daemon listens here, and the marker would go
+          # missing for a reason that looks nothing like a path mismatch.
+          IHS_LOG_SINK=dlt DLT_PIPE_DIR="$PIPE_DIR" ./driver
           sleep 3
           kill "$RECV" 2>/dev/null || true
+          kill "$DLT_PID" 2>/dev/null || true
           echo "=== dlt-receive capture (tail) ==="; tail -n 40 capture.txt || true
           if ! grep -q "dlt-e2e-marker-9f3a" capture.txt; then
             echo "::error::marker was not received by dlt-daemon"
