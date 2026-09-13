@@ -412,9 +412,29 @@ jobs:
             # never the file, so the retry decided every download failure was
             # "something other than a download" and gave up on the first
             # attempt. The retry has therefore never once fired.
+            # ENABLE_OSGI because these artifacts are the only ones that can
+            # answer the question CI cannot. The OSGi multi-bundle harness needs
+            # two connected scanout connectors on one card, and a hosted runner
+            # has none: vkms gives one connector per card, and the configfs
+            # interface that would provision a pair registers no subsystem on
+            # 6.17.0-1022-azure. A Pi 4 has two HDMI connectors on one vc4 card,
+            # which is exactly that topology -- so B1 (two engines), B2 (both
+            # outputs) and B3 (critical-first ordering) can finally run there.
+            # B3 is the one unit tests can only assert against a fake.
+            #
+            # Without the define the binary carries no [osgi] strings, and
+            # osgi_multi_bundle.sh reports "osgi-build skip" -- a skip that
+            # reads as a pass. It also gates libihs_shared's ihs_osgi_* exports,
+            # so TRANSPORT=ffi needs it too.
+            #
+            # Additive and dependency-free: with it OFF no OSGi translation unit
+            # is compiled, and ON it builds in-tree sources against the vendored
+            # Dart DL headers, which are tracked files rather than a submodule.
+            # It fetches nothing, so it needs no augment and no requires_define.
             if emb -v cross . \
                  --target "${{ matrix.board }}-${{ matrix.pios }}" \
                  --build --backend "${{ matrix.backend }}" \
+                 --define ENABLE_OSGI=ON \
                  --no-verify -w /emb 2>&1 | tee /tmp/emb-build.log; then
               break
             fi
