@@ -188,6 +188,74 @@ typedef _RegisterBundleDart = int Function(
 typedef _ReportNative = Int32 Function(Pointer<Void>);
 typedef _ReportDart = int Function(Pointer<Void>);
 
+// ---------------------------------------------------------------------------
+// Logging
+// ---------------------------------------------------------------------------
+
+typedef _ContextOpenNative = Int32 Function(Pointer<Utf8>, Pointer<Void>);
+typedef _ContextOpenDart = int Function(Pointer<Utf8>, Pointer<Void>);
+// ffi.Size, not Size: dart:ui exports a geometry Size through
+// package:flutter/widgets.dart, which is why the structs above use @ffi.Size()
+// too. A bare Size here resolves to the widget one.
+typedef _LogNative = Int32 Function(Int32, Uint8, Pointer<Utf8>, ffi.Size);
+typedef _LogDart = int Function(int, int, Pointer<Utf8>, int);
+
+/// A handshake failure, through the shell's own logging rather than print().
+///
+/// print() reaches the shell as an engine log-message callback, which routes to
+/// DLT only when the shell was built with ENABLE_DLT -- off by default -- and
+/// even then arrives under the engine's own context, indistinguishable from
+/// engine chatter. A bundle's failure belongs in the same stream as the shell's
+/// [osgi] lines, at the same severity, under a context of its own.
+///
+/// Resolved from the process rather than by SONAME. The shell links
+/// libihs_shared, so it is already resident; and one of the failures reported
+/// here is "cannot open libihs_shared.so.1", which a reporter that opened it by
+/// name could not survive.
+///
+/// Best-effort by construction: every step is guarded, because a reporter that
+/// throws is worse than one that says nothing. IHS_LEVEL_ERROR is 2.
+class _ShellLog {
+  static const int _levelError = 2;
+  static bool _tried = false;
+  static int _ctx = -1;
+  static _LogDart? _log;
+
+  static void error(String message) {
+    try {
+      if (!_tried) {
+        _tried = true;
+        final DynamicLibrary process = DynamicLibrary.process();
+        final _ContextOpenDart open =
+            process.lookupFunction<_ContextOpenNative, _ContextOpenDart>(
+                'ihs_log_context_open');
+        _log = process.lookupFunction<_LogNative, _LogDart>('ihs_log');
+        // NULL options: the sink's 4-char context id is derived from the tag.
+        // ihs_log_start is the shell's to call and ihs_log_stop is the shell's
+        // to call at shutdown -- a bundle does neither.
+        final Pointer<Utf8> tag = 'OSGB'.toNativeUtf8();
+        try {
+          _ctx = open(tag, nullptr);
+        } finally {
+          calloc.free(tag);
+        }
+      }
+      final _LogDart? log = _log;
+      if (log == null || _ctx < 0) {
+        return;
+      }
+      final Pointer<Utf8> text = message.toNativeUtf8();
+      try {
+        log(_ctx, _levelError, text, text.length);
+      } finally {
+        calloc.free(text);
+      }
+    } catch (_) {
+      // A bundle that cannot log still has a panel to fail on.
+    }
+  }
+}
+
 /// The same handshake through `libihs_shared`: synchronous, no UI binding
 /// required, and never routed through the platform task runner.
 ///
@@ -407,8 +475,15 @@ class _Activator {
   }
 
   void _fail(String why) {
+    // Panel first: it is the signal that cannot fail, and a bundle whose
+    // logging is unavailable still has a colour to show.
     state.value = _BundleState.failed;
     detail.value = why;
+    // Then the shell's own log, at the severity the shell would use. Without
+    // this the reason lived on the panel alone, so a headless run -- or anyone
+    // reading a DLT trace afterwards -- saw a critical bundle time out with no
+    // statement of why.
+    _ShellLog.error("[osgi] bundle '$symbolicName': handshake failed: $why");
   }
 
   Future<void> _startupWork() async {
