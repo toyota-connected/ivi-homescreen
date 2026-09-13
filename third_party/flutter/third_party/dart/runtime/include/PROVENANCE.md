@@ -4,9 +4,9 @@ Source: https://github.com/dart-lang/sdk — `runtime/include/`
 
 | | |
 |---|---|
-| Dart SDK revision | `d684a576a6aa954ae107a03b2b4e1d61c3bebe93` |
-| Pinned by | `flutter/flutter` tag `3.44.2`, `DEPS` → `dart_revision` |
-| Matches | `.flutter-version` (3.44.2) |
+| Dart SDK revision | `60a57cd42d64dc03e9f07aa60a2e250755c1ef28` |
+| Pinned by | `flutter/flutter` tag `3.47.2`, `DEPS` → `dart_revision` |
+| Matches | `.flutter-version` (3.47.2) |
 | `DART_API_DL` ABI | major 2, minor 6 (`dart_version.h`) |
 
 ## Files
@@ -21,16 +21,38 @@ Source: https://github.com/dart-lang/sdk — `runtime/include/`
 | `dart_version.h` | `DART_API_DL_{MAJOR,MINOR}_VERSION` |
 | `internal/dart_api_dl_impl.h` | DL function-pointer table |
 
-## Why the whole set was refreshed together
+## Why the whole set moves together
 
-`dart_native_api.h` at this revision uses `DART_API_WARN_UNUSED_RESULT`, which
-the previously vendored `dart_api.h` did not define (it had the older
-`DART_WARN_UNUSED_RESULT` spelling). Mixing revisions does not compile, so the
-whole include set moves together.
+These headers reference each other's macros, so a mixed set does not
+necessarily compile. The 3.44.2 pin proved it: `dart_native_api.h` at that
+revision used `DART_API_WARN_UNUSED_RESULT`, which the `dart_api.h` vendored
+alongside it did not define — it had the older `DART_WARN_UNUSED_RESULT`
+spelling. Every re-pin therefore refreshes all seven files, including any that
+happen to be byte-identical.
 
-Nothing in the tree consumed the previous `dart_api.h` / `dart_tools_api.h`:
-`fml/trace_event.h` is the only includer and nothing includes *it*. The refresh
-is therefore behavior-neutral for existing code.
+## This refresh (3.44.2 → 3.47.2)
+
+Four files changed and three came back identical — `dart_api_dl.c`,
+`dart_version.h` and `internal/dart_api_dl_impl.h`, which are the DL surface
+itself. The `DART_API_DL` ABI is unchanged at major 2, minor 6, so
+`Dart_InitializeApiDL()`'s runtime check against the loaded engine sees the same
+version it did before.
+
+Only two headers are consumed in this tree, and neither consumption is at risk:
+
+- `dart_api_dl.h` — included by `shell/osgi/bridge_registry.cc`, the OSGi
+  bridge. Its change is additive: `#include <stdint.h>` and a blank line.
+- `dart_tools_api.h` — included only by `fml/trace_event.h`, which no
+  CMake target compiles and nothing else includes.
+
+`dart_api.h` accounts for most of the diff (195 lines, including 27 removed
+declarations such as `DART_FLAGS_CURRENT_VERSION` and the `kVmSnapshot*` symbol
+names) and is included by nothing in the tree, so those removals reach no
+consumer here.
+
+Verified by configuring with `ENABLE_OSGI=ON` — which is what enforces the
+presence check below — and compiling `dart_api_dl.c` and `bridge_registry.cc`
+against the new headers.
 
 ## Updating
 
