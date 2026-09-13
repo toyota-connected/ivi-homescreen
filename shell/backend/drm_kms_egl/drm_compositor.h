@@ -465,9 +465,18 @@ class DrmCompositor : public IFlipSink {
   // the surface alive until then. Declared before scene_ so it outlives the
   // pools whose callbacks append to it. Appended from the scene commit /
   // teardown, drained on the present thread -- guarded by its mutex.
+  //
+  // `fence` is the OUT_FENCE of the commit that displaced the buffer, which the
+  // scene hands to on_release when the CRTC advertises OUT_FENCE_PTR. It is the
+  // exact edge the hold above approximates by polling flip_pending_, so a
+  // producer that can wait on a sync_file gets the precise signal and one that
+  // cannot still gets the held eventfd. Empty when the driver has no
+  // OUT_FENCE_PTR, when explicit sync is configured off, or on the release
+  // paths that never reached a commit.
   struct DeferredScanoutRelease {
     std::shared_ptr<ICompositorSurface> surface;
     std::uint32_t buffer_id;
+    drm::sync::SyncFence fence;
   };
   std::mutex deferred_releases_mu_;
   std::vector<DeferredScanoutRelease> deferred_releases_;
@@ -481,6 +490,9 @@ class DrmCompositor : public IFlipSink {
   // completed. Take holds the mutex; fire must not, because the callbacks run
   // producer code.
   std::vector<DeferredScanoutRelease> TakeDeferredScanoutReleases();
+  // Const ref even though the elements are move-only: publishing hands the
+  // surface a dup of the fence, so nothing is moved out and the batch keeps
+  // ownership until the caller drops it.
   static void FireDeferredScanoutReleases(
       const std::vector<DeferredScanoutRelease>& batch);
 

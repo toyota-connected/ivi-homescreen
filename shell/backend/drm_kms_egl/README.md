@@ -78,9 +78,14 @@ This document is the architecture + operations guide for the backend.
   - **Plane allocator** (preferred): each Flutter layer gets its own
     overlay plane via `drm::planes::Allocator`. First atomic commit
     attaches `MODE_ID` / `ACTIVE` / connector `CRTC_ID` to bring the
-    pipe up; subsequent commits are page-flips. Explicit-sync
-    (`IN_FENCE_FD` / `OUT_FENCE_PTR`) is not wired today — implicit
-    sync via dma-buf reservations covers every current producer.
+    pipe up; subsequent commits are page-flips. Explicit-sync is
+    partly wired: the scene attaches `IN_FENCE_FD` for direct-scanout
+    layers, and a platform view's displaced buffer is returned with
+    the `OUT_FENCE_PTR` of the commit that displaced it (gated on
+    `explicit_sync`, and only where the CRTC advertises the property).
+    Implicit sync via dma-buf reservations still covers producers that
+    hand back no acquire fence, and the GL-composite path releases on
+    an eventfd rather than a fence.
   - **GL fallback** (`PresentViaGlFallback`): composes everything
     through a single GL framebuffer that `DrmBackend::Present` then
     drives via legacy `drmModeSetCrtc` + page-flip.
@@ -162,7 +167,7 @@ thread-owned (the seat thread); the compositor never touches it.
 | SIGUSR1 CRTC PNG snapshot | ✓ | Requires Blend2D; `IVI_DRM_CAPTURE=1` to arm |
 | EACCES (master loss) skip-frame | ✓ | Always; avoids latching GL fallback during libseat pause |
 | HDR signaling (HDR_OUTPUT_METADATA) | deferred | Waiting on Flutter HDR API |
-| Explicit sync (`IN_FENCE_FD` / `OUT_FENCE_PTR`) | deferred | No per-frame producer needs it yet |
+| Explicit sync (`IN_FENCE_FD` / `OUT_FENCE_PTR`) | plane path | Release fence published to platform views; GL-composite path still on the eventfd |
 
 ---
 
