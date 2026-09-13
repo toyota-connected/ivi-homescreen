@@ -286,11 +286,11 @@ class DrmCompositor : public IFlipSink {
   // that WaitForPendingFlip has confirmed their displacing flip completed.
   void DrainDeferredScanoutReleases();
 
-  // Records that a platform view was GL-composited this present, returning the
-  // frame it displaced. See the definition for why the GL path needs this at
-  // all and why it is the displaced buffer rather than the current one.
-  void NoteGlComposited(const std::shared_ptr<ICompositorSurface>& surface,
-                        FlutterPlatformViewIdentifier id);
+  // Records that a platform view was GL-composited this present, queueing the
+  // frame it just sampled for release once this present's flip completes. See
+  // the definition for why the GL path needs this at all, and why it is the
+  // sampled frame rather than the one it displaced.
+  void NoteGlComposited(const std::shared_ptr<ICompositorSurface>& surface);
 
   // Post-first-commit sanity probe. Confirms the kernel actually honored
   // the modeset by reading CRTC.ACTIVE + primary plane.FB_ID via
