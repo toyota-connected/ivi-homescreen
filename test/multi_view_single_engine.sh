@@ -193,9 +193,15 @@ else
 fi
 
 # 3. No fatal/error spdlog lines.
-if grep -aqE "\] \[C\] |\] \[E\] " "$LOG"; then
+#
+# The shell logs "04:01:53.161 [E] SHEL: ..." -- timestamp, level, context. A
+# pattern needing "] [E] " wants a bracket immediately before the level, which
+# this format never supplies, so it reported a clean log on runs carrying
+# errors. Anchored to the timestamp so a message that quotes a level in its own
+# text cannot forge a failure.
+if grep -aqE '^[0-9][0-9:.]* \[[CE]\] ' "$LOG"; then
   echo "FAIL: error/critical log lines:" >&2
-  grep -aE "\] \[C\] |\] \[E\] " "$LOG" | head >&2
+  grep -aE '^[0-9][0-9:.]* \[[CE]\] ' "$LOG" | head >&2
   fail=1
 fi
 

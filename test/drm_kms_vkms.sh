@@ -271,9 +271,15 @@ cleanup_hs
 # directly rather than the word "critical" — the fmt patterns never
 # include the English level name.
 #
+# Anchored to the leading timestamp ("04:01:53.161 [E] SHEL: ..."), not to a
+# preceding "] ". Nothing in this format puts a bracket immediately before the
+# level, so the older pattern matched no error line at all and reported a clean
+# log on runs that carried them. The anchor also stops a message quoting a level
+# in its own text from forging a failure.
+#
 # `-a` forces text mode: spdlog's console sink emits ANSI color codes
 # that trip grep's binary-file heuristic and suppress match output.
-if grep -aE '\] \[[CE]\] ' "$LOG"; then
+if grep -aE '^[0-9][0-9:.]* \[[CE]\] ' "$LOG"; then
     echo "error: critical/error log entries detected; see above" >&2
     exit 1
 fi
