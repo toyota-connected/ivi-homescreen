@@ -58,18 +58,14 @@ trap cleanup EXIT
 
 # ─── Prerequisites ───────────────────────────────────────────────────────────
 
-find_vkms_card() {
-    local c card
-    for c in /sys/class/drm/card[0-9]*; do
-        [[ -e "$c" ]] || continue
-        card="$(basename "$c")"
-        if compgen -G "/sys/class/drm/${card}-Virtual-*" >/dev/null; then
-            echo "/dev/dri/${card}"
-            return 0
-        fi
-    done
-    return 1
-}
+# Shared discovery rather than a local copy. The copy that used to live here
+# matched "cardN-Virtual-*" and stopped at the first hit, which is ambiguous on
+# a CI runner: Hyper-V's synthetic display uses that connector name too, so the
+# search could return the VM's own display instead of vkms. VKMS_CARD is
+# interpolated into IVI_SW_SINK="drm-dumb:${VKMS_CARD}" below, so a wrong card
+# aims the software backend's dumb-buffer sink at the wrong DRM node.
+# shellcheck source=test/lib/drm_card.sh
+source "${ROOT_DIR}/test/lib/drm_card.sh"
 
 have_uinput() { [[ -w /dev/uinput ]]; }
 
@@ -80,7 +76,7 @@ build_injector() {
 
 check_prereqs() {
     [[ -d /sys/module/vkms ]] || die "vkms not loaded (sudo modprobe vkms)"
-    [[ -z "$VKMS_CARD" ]] && VKMS_CARD="$(find_vkms_card)"
+    [[ -z "$VKMS_CARD" ]] && VKMS_CARD="$(ihs_find_vkms_card)"
     [[ -n "$VKMS_CARD" && -e "$VKMS_CARD" ]] || die "no vkms /dev/dri/cardN found"
     command -v cc >/dev/null || die "no C compiler for uinput_gen"
     [[ -n "$HOMESCREEN" && -x "$HOMESCREEN" ]] || die "HOMESCREEN must be an executable binary"

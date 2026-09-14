@@ -72,21 +72,20 @@ done
 [[ "$MODE" == "check" && -z "$BASELINE" ]] && die "--check needs a baseline path (arg or BASELINE=)"
 
 # ─── Prerequisites ───────────────────────────────────────────────────────────
-find_vkms_card() {
-    local c card
-    for c in /sys/class/drm/card[0-9]*; do
-        [[ -e "$c" ]] || continue
-        card="$(basename "$c")"
-        if compgen -G "/sys/class/drm/${card}-Virtual-*" >/dev/null; then
-            echo "/dev/dri/${card}"; return 0
-        fi
-    done
-    return 1
-}
+
+# Shared discovery rather than a local copy. The copy that used to live here
+# matched "cardN-Virtual-*" and stopped at the first hit, which is ambiguous on
+# a CI runner: Hyper-V's synthetic display uses that connector name too, so the
+# search could return the VM's own display instead of vkms. That is not just a
+# mislabeled log line -- VKMS_CARD is interpolated into
+# IVI_SW_SINK="drm-dumb:${VKMS_CARD}" below, so a wrong card points the software
+# backend's dumb-buffer sink at the wrong DRM node and the census measures it.
+# shellcheck source=test/lib/drm_card.sh
+source "${ROOT_DIR}/test/lib/drm_card.sh"
 
 check_prereqs() {
     [[ -d /sys/module/vkms ]] || die "vkms not loaded (sudo modprobe vkms)"
-    [[ -z "$VKMS_CARD" ]] && VKMS_CARD="$(find_vkms_card)"
+    [[ -z "$VKMS_CARD" ]] && VKMS_CARD="$(ihs_find_vkms_card)"
     [[ -n "$VKMS_CARD" && -e "$VKMS_CARD" ]] || die "no vkms /dev/dri/cardN found"
     [[ -n "$HOMESCREEN" && -x "$HOMESCREEN" ]] || die "HOMESCREEN must be an executable binary"
     [[ -n "$BUNDLE" && -d "$BUNDLE" ]] || die "BUNDLE must be a bundle directory"
