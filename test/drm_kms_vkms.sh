@@ -45,6 +45,13 @@
 #   VKMS_CARD     explicit /dev/dri/cardN to target. Default: first card
 #                 whose driver is vkms.
 #   VKMS_AUTOLOAD 1 to `sudo modprobe vkms` if not loaded. Default: 0.
+#   KEEP_LOG      1 to keep the shell's log on exit and print its path
+#                 (default: 0). The failure paths below already dump the log
+#                 inline, but the two log-scan failures print only the lines
+#                 that matched, never the context around them, and a run that
+#                 passes keeps nothing at all -- including the strace capture
+#                 behind the page-flip count and its "no page-flip ioctls"
+#                 warning, which is deliberately non-fatal. This keeps both.
 #   SOFTWARE_RENDER
 #                 1 to export LIBGL_ALWAYS_SOFTWARE=1 before launching
 #                 homescreen. vkms is KMS-only and has no user-space
@@ -74,6 +81,7 @@ COUNT_FLIPS="${COUNT_FLIPS:-0}"
 VKMS_CARD="${VKMS_CARD:-}"
 VKMS_AUTOLOAD="${VKMS_AUTOLOAD:-0}"
 SOFTWARE_RENDER="${SOFTWARE_RENDER:-0}"
+KEEP_LOG="${KEEP_LOG:-0}"
 
 die() {
     echo "error: $*" >&2
@@ -161,7 +169,46 @@ fi
 # ─── Bundle preparation ──────────────────────────────────────────────────
 
 TMPDIR="$(mktemp -d -t drm-vkms.XXXXXXXX)"
-trap 'rm -rf "$TMPDIR"' EXIT
+
+# Stop the launched shell, giving it a chance to land a pending page flip.
+# Defined before the trap that calls it: the trap is armed here, but HS_PID is
+# only set once the shell is launched further down, so a failure in between
+# would otherwise call a function that does not exist yet.
+cleanup_hs() {
+    if kill -0 "$HS_PID" 2>/dev/null; then
+        kill -TERM "$HS_PID" || true
+        for _ in 1 2 3 4 5; do
+            kill -0 "$HS_PID" 2>/dev/null || break
+            sleep 0.2
+        done
+        if kill -0 "$HS_PID" 2>/dev/null; then
+            kill -KILL "$HS_PID" || true
+        fi
+        wait "$HS_PID" 2>/dev/null || true
+    fi
+}
+
+# One EXIT trap for the whole script. Everything this run writes lives inside
+# TMPDIR -- the log, the strace capture, the bundle copy -- so keeping the log
+# means removing TMPDIR's contents selectively rather than the directory.
+#
+# Under `set -euo pipefail` a trap is easy to break: an unset variable aborts
+# it, and a `[[ ]]` that tests false becomes the function's exit status and
+# trips -e on the way out. Hence the ${VAR:-} guards, the literal paths in the
+# keep branch (rm -rf "" returns 1), and the explicit `return 0`. bash -n
+# cannot see any of that, so both branches are exercised by hand.
+cleanup() {
+    [[ -n "${HS_PID:-}" ]] && cleanup_hs
+    if [[ "$KEEP_LOG" == "1" && -f "${LOG:-}" ]]; then
+        rm -rf "$TMPDIR/bundle"
+        log "shell log kept: $LOG"
+        [[ -f "$TMPDIR/strace.log" ]] && log "strace capture kept: $TMPDIR/strace.log"
+    else
+        rm -rf "$TMPDIR"
+    fi
+    return 0
+}
+trap cleanup EXIT
 
 BUNDLE_COPY="$TMPDIR/bundle"
 mkdir -p "$BUNDLE_COPY"
@@ -193,22 +240,6 @@ log "launching $HOMESCREEN --backend drm-kms-egl -b $BUNDLE_COPY --drm-device $V
 env "${LAUNCH_ENV[@]}" "$HOMESCREEN" --backend drm-kms-egl -b "$BUNDLE_COPY" \
     --drm-device "$VKMS_CARD" -d >"$LOG" 2>&1 &
 HS_PID=$!
-
-cleanup_hs() {
-    if kill -0 "$HS_PID" 2>/dev/null; then
-        kill -TERM "$HS_PID" || true
-        # Give it a chance to land a pending page flip.
-        for _ in 1 2 3 4 5; do
-            kill -0 "$HS_PID" 2>/dev/null || break
-            sleep 0.2
-        done
-        if kill -0 "$HS_PID" 2>/dev/null; then
-            kill -KILL "$HS_PID" || true
-        fi
-        wait "$HS_PID" 2>/dev/null || true
-    fi
-}
-trap 'cleanup_hs; rm -rf "$TMPDIR"' EXIT
 
 sleep "$STARTUP_GRACE"
 
