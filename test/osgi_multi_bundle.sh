@@ -63,6 +63,23 @@
 #                    explicable with it; the default still removes it (default 0)
 #   COUNT_FLIPS      1 = prove page flips via strace (default 0)
 #   SOFTWARE_RENDER  1 = LIBGL_ALWAYS_SOFTWARE=1 (vkms/llvmpipe)
+#   HEADLESS         1 = run both bundles on the software backend with the
+#                    'none' sink: two engines, no DRM device, no connectors.
+#                    B1/B3/B4 assert exactly as they do on KMS -- they are greps
+#                    over the engine index and the lifecycle state machine, and
+#                    neither involves a display -- while B2 and B5 skip, because
+#                    "each bundle brought up its own connector" and "both CRTCs
+#                    flipped" are claims about hardware this mode does not have.
+#                    Default 0.
+#
+#                    This exists because B3, the one property unit tests can only
+#                    assert against a fake, was asserted nowhere on CI. A hosted
+#                    runner's vkms ships without the configfs interface, so no
+#                    card can be given the two connectors the KMS path needs, and
+#                    both transports skipped while the job stayed green. Dropping
+#                    the display is what makes the rest reachable there; it does
+#                    not replace the KMS path, which is still the only thing that
+#                    proves per-bundle output pinning and real presentation.
 #   REQUIRE_RUN      1 = a run that asserted nothing is a failure. Every skip
 #                    here is a prerequisite check, and skipping them all exits
 #                    0 -- which is how this harness reported success on CI
@@ -90,6 +107,7 @@ TRANSPORT="${TRANSPORT:-channel}"
 COUNT_FLIPS="${COUNT_FLIPS:-0}"
 SOFTWARE_RENDER="${SOFTWARE_RENDER:-0}"
 KEEP_LOG="${KEEP_LOG:-0}"
+HEADLESS="${HEADLESS:-0}"
 
 # Checked here rather than at the point of use, so --check catches a typo
 # before anyone sets up a rig. Refused rather than defaulted: falling back to
@@ -139,8 +157,15 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/drm_card.sh"
 [ -n "$BUNDLE" ]     || die "set BUNDLE to a Flutter bundle dir"
 [ -d "$BUNDLE" ]     || die "BUNDLE not a directory: $BUNDLE"
 
-# The binary must be DRM-KMS-EGL built: the bundles scan out to KMS.
-if [ "$(strings "$HOMESCREEN" | grep -c '\[DrmBackend\]')" -eq 0 ]; then
+# The binary must be DRM-KMS-EGL built: the bundles scan out to KMS. Headless
+# runs on the software backend instead and needs no KMS at all, so the check
+# follows the mode rather than the binary -- demanding [DrmBackend] there would
+# refuse a build that is perfectly capable of what headless asserts.
+if [ "$HEADLESS" = "1" ]; then
+    if [ "$(strings "$HOMESCREEN" | grep -c 'SoftwareBackend')" -eq 0 ]; then
+        die "binary has no SoftwareBackend strings — build with BUILD_BACKEND_SOFTWARE=ON"
+    fi
+elif [ "$(strings "$HOMESCREEN" | grep -c '\[DrmBackend\]')" -eq 0 ]; then
     die "binary has no [DrmBackend] strings — build with BUILD_BACKEND_DRM_KMS_EGL=ON"
 fi
 
@@ -158,7 +183,15 @@ fi
 # modeset, so silently defaulting to a numeric card could blank a real display
 # on a developer's desktop. Targeting real hardware requires saying so.
 DEVICE_SOURCE="explicit"
-if [ "$DRM_DEVICE_EXPLICIT" -eq 0 ]; then
+if [ "$HEADLESS" = "1" ]; then
+    # Nothing to resolve: the software backend's 'none' sink discards frames, so
+    # there is no card to take master on and no connector to pin to. Left empty
+    # deliberately rather than set to a placeholder -- the config below omits the
+    # [backend.drm] table entirely, and a stray device string there would be a
+    # silent instruction to scan out.
+    DRM_DEVICE=""
+    DEVICE_SOURCE="headless (software backend, sink=none)"
+elif [ "$DRM_DEVICE_EXPLICIT" -eq 0 ]; then
     if DRM_DEVICE="$(ihs_find_vkms_card 2)"; then
         DEVICE_SOURCE="auto-detected vkms"
     else
@@ -176,7 +209,17 @@ if [ -n "$DRM_DEVICE" ] && [ -z "$CONNECTOR_A" ]; then
 fi
 
 if [ "${1:-}" = "--check" ]; then
-    if [ -z "$DRM_DEVICE" ]; then
+    # Headless first: it blanks DRM_DEVICE by design, so the card branch below
+    # would report "no vkms card found — would skip" for a rig that runs fine.
+    # CI calls --check as a pre-flight, so a wrong answer here is worse than no
+    # answer at all.
+    if [ "$HEADLESS" = "1" ]; then
+        if [ "$OSGI_BUILT" -eq 0 ]; then
+            echo "OK: headless prerequisites present, but binary lacks OSGi (ENABLE_OSGI=OFF) — would skip"
+        else
+            echo "OK: headless prerequisites present ($HOMESCREEN, $BUNDLE, $DEVICE_SOURCE); B2/B5 would skip"
+        fi
+    elif [ -z "$DRM_DEVICE" ]; then
         echo "OK: binary and bundle present; no vkms card found — would skip"
     elif [ "$OSGI_BUILT" -eq 0 ]; then
         echo "OK: prerequisites present ($DRM_DEVICE, $DEVICE_SOURCE), but binary lacks OSGi (ENABLE_OSGI=OFF) — would skip"
@@ -190,14 +233,19 @@ if [ "$OSGI_BUILT" -eq 0 ]; then
     record "osgi-build" skip "binary built without ENABLE_OSGI=ON"
     summary
 fi
-if [ -z "$DRM_DEVICE" ]; then
-    record "drm-device" skip "no vkms card found; set DRM_DEVICE to target real hardware"
-    summary
-fi
-[ -c "$DRM_DEVICE" ] || die "DRM_DEVICE not a device node: $DRM_DEVICE"
-if [ -z "$CONNECTOR_A" ] || [ -z "$CONNECTOR_B" ]; then
-    record "connectors" skip "need 2 scanout connectors on $CARD, found ${CONNECTOR_A:-none} ${CONNECTOR_B:-}"
-    summary
+# Headless skips the card and connector prerequisites entirely: it asserts
+# nothing about either, so demanding them would turn the one mode that CAN run
+# on a hosted runner into the same skip as the KMS path it exists to work around.
+if [ "$HEADLESS" != "1" ]; then
+    if [ -z "$DRM_DEVICE" ]; then
+        record "drm-device" skip "no vkms card found; set DRM_DEVICE to target real hardware"
+        summary
+    fi
+    [ -c "$DRM_DEVICE" ] || die "DRM_DEVICE not a device node: $DRM_DEVICE"
+    if [ -z "$CONNECTOR_A" ] || [ -z "$CONNECTOR_B" ]; then
+        record "connectors" skip "need 2 scanout connectors on $CARD, found ${CONNECTOR_A:-none} ${CONNECTOR_B:-}"
+        summary
+    fi
 fi
 # Only make the first bundle critical when it can actually report ACTIVE.
 # Otherwise the critical wait times out and tears it down, which would fail B1
@@ -207,7 +255,11 @@ if [ "$ACTIVATOR" = "1" ]; then
 else
     CLUSTER_PRIORITY="normal"
 fi
-log "card $DRM_DEVICE ($DEVICE_SOURCE); connectors $CONNECTOR_A + $CONNECTOR_B"
+if [ "$HEADLESS" = "1" ]; then
+    log "$DEVICE_SOURCE; no card, no connectors (B2/B5 will skip)"
+else
+    log "card $DRM_DEVICE ($DEVICE_SOURCE); connectors $CONNECTOR_A + $CONNECTOR_B"
+fi
 log "cluster priority: $CLUSTER_PRIORITY (ACTIVATOR=$ACTIVATOR, TRANSPORT=$TRANSPORT)"
 
 # Throwaway copies so a config can be dropped in without touching the source
@@ -254,6 +306,35 @@ if [ -f "$WORK/cluster/lib/libflutter_engine.so" ]; then
     log "hoisted one shared libflutter_engine.so (per-bundle copies cannot coexist)"
 fi
 
+# Per-bundle backend selection. The KMS form pins each bundle to its own
+# connector on one card; the headless form names the software backend and omits
+# the [backend.drm] table entirely.
+#
+# Omitting rather than blanking is deliberate: configuration.cc reads
+# backend.drm.device only `if (...is_string())`, so an absent table leaves the
+# device unset, while device = "" would be a present-but-empty string that makes
+# the drm-dumb sink probe for the first usable card. That is the difference
+# between "no display" and "whichever display it finds".
+#
+# These are expanded inside the heredoc below, so they must be set on every path
+# that reaches it -- under `set -u` an unset one aborts config generation rather
+# than producing a config that is merely wrong.
+if [ "$HEADLESS" = "1" ]; then
+    BUNDLE_BACKEND="software"
+    NAV_DRM_TABLE=""
+    CLU_DRM_TABLE=""
+else
+    BUNDLE_BACKEND="drm-kms-egl"
+    NAV_DRM_TABLE="
+    [osgi.bundles.backend.drm]
+    device = \"$DRM_DEVICE\"
+    connector = \"$CONNECTOR_B\""
+    CLU_DRM_TABLE="
+    [osgi.bundles.backend.drm]
+    device = \"$DRM_DEVICE\"
+    connector = \"$CONNECTOR_A\""
+fi
+
 # One critical bundle and one normal bundle, each pinned to its own connector.
 # Deliberately declared normal-first so a pass proves the orchestrator reordered
 # them rather than merely following file order.
@@ -265,6 +346,35 @@ fi
 # views from such a file, so a shell that has not wired [[osgi.bundles]] into
 # the config vector will come up with nothing and fail B1/B2 rather than
 # quietly rendering one window.
+# Per-bundle backend selection. The KMS form pins each bundle to its own
+# connector on one card; the headless form names the software backend and omits
+# the [backend.drm] table entirely.
+#
+# Omitting rather than blanking is deliberate: configuration.cc reads
+# backend.drm.device only `if (...is_string())`, so an absent table leaves the
+# device unset, while device = "" would be a present-but-empty string that makes
+# the drm-dumb sink probe for the first usable card. That is the difference
+# between "no display" and "whichever display it finds".
+#
+# These are expanded inside the heredoc below, so they must be set on every path
+# that reaches it -- under `set -u` an unset one aborts config generation rather
+# than producing a config that is merely wrong.
+if [ "$HEADLESS" = "1" ]; then
+    BUNDLE_BACKEND="software"
+    NAV_DRM_TABLE=""
+    CLU_DRM_TABLE=""
+else
+    BUNDLE_BACKEND="drm-kms-egl"
+    NAV_DRM_TABLE="
+    [osgi.bundles.backend.drm]
+    device = \"$DRM_DEVICE\"
+    connector = \"$CONNECTOR_B\""
+    CLU_DRM_TABLE="
+    [osgi.bundles.backend.drm]
+    device = \"$DRM_DEVICE\"
+    connector = \"$CONNECTOR_A\""
+fi
+
 cat > "$WORK/config.toml" <<EOF
 [global]
 app_id = "osgi_multi_bundle"
@@ -283,11 +393,8 @@ priority = "normal"
   dart = ["com.ivi.navigation", "$TRANSPORT"]
 
   [osgi.bundles.backend]
-  type = "drm-kms-egl"
-
-    [osgi.bundles.backend.drm]
-    device = "$DRM_DEVICE"
-    connector = "$CONNECTOR_B"
+  type = "$BUNDLE_BACKEND"
+$NAV_DRM_TABLE
 
 [[osgi.bundles]]
 symbolic_name = "com.ivi.cluster"
@@ -299,17 +406,29 @@ startup_timeout_ms = $STARTUP_TIMEOUT
   dart = ["com.ivi.cluster", "$TRANSPORT"]
 
   [osgi.bundles.backend]
-  type = "drm-kms-egl"
-
-    [osgi.bundles.backend.drm]
-    device = "$DRM_DEVICE"
-    connector = "$CONNECTOR_A"
+  type = "$BUNDLE_BACKEND"
+$CLU_DRM_TABLE
 EOF
 
 ENV=()
 [ "$SOFTWARE_RENDER" = "1" ] && ENV+=("LIBGL_ALWAYS_SOFTWARE=1")
+if [ "$HEADLESS" = "1" ]; then
+    # Both are already the defaults -- MakeSinkFromEnv passes an empty spec when
+    # IVI_SW_SINK is unset and MakeSinkFromSpec maps empty to NoneSink -- so
+    # these are set to pin the mode against an ambient value, not because the
+    # shell needs telling. A developer with IVI_SW_SINK=drm-dumb:/dev/dri/card0
+    # exported would otherwise have this "headless" run quietly take a card and
+    # scan out to it.
+    ENV+=("IVI_SW_SINK=none")
+    # No /dev/input to open on a CI runner, and nothing here asserts input.
+    ENV+=("IVI_SW_INPUT=none")
+fi
 
-log "launching 2 bundles: cluster(critical)->$CONNECTOR_A  navigation(normal)->$CONNECTOR_B"
+if [ "$HEADLESS" = "1" ]; then
+    log "launching 2 bundles headless: cluster($CLUSTER_PRIORITY) + navigation(normal), backend=software sink=none"
+else
+    log "launching 2 bundles: cluster(critical)->$CONNECTOR_A  navigation(normal)->$CONNECTOR_B"
+fi
 env "${ENV[@]}" "$HOMESCREEN" --config "$WORK/config.toml" -d >"$LOG" 2>&1 &
 HS_PID=$!
 
@@ -340,8 +459,23 @@ wait "$HS_PID" 2>/dev/null
 # that demonstrably brought up two engines), so keying on it reports a false
 # failure. "Loading AOT" and the view/output binding both carry the index and
 # are emitted per engine.
+# A third source, "(N) Engine running", is what makes this work off KMS. The
+# other two are each defeated by a condition that has nothing to do with whether
+# two engines exist:
+#
+#   - "Loading AOT" is only logged for an AOT bundle. A debug/JIT bundle
+#     (kernel_blob.bin, "Runtime=debug") never emits it, however many engines run.
+#   - "view N is on output" needs an output binding. Headless has none, and the
+#     shell says so itself: "[FlutterView] view 0 has no output binding to track".
+#
+# A headless run with a debug bundle therefore scored 0 distinct indices while
+# the log plainly showed engines (0) and (1) with separate task-runner threads
+# and separate asset paths -- a false failure for the exact case this mode
+# exists to cover. Engine::m_running is logged per engine from Engine::Run
+# regardless of snapshot kind or display, so it survives both conditions.
 engine_indices=$( { grep -aoE "\([0-9]+\) Loading AOT" "$LOG" | grep -oE "[0-9]+";
-                    grep -aoE "view [0-9]+ is on output" "$LOG" | grep -oE "[0-9]+"; } \
+                    grep -aoE "view [0-9]+ is on output" "$LOG" | grep -oE "[0-9]+";
+                    grep -aoE "\([0-9]+\) Engine running" "$LOG" | grep -oE "[0-9]+"; } \
                   | sort -un | wc -l)
 if [ "$engine_indices" -ge 2 ]; then
     record "B1-two-engines" pass "$engine_indices distinct engine indices (bundles are not collapsed)"
@@ -350,20 +484,29 @@ else
 fi
 
 # B2: each bundle brought up its own connector.
-b2_fail=0
-for c in "$CONNECTOR_A" "$CONNECTOR_B"; do
-    if grep -aq "\[DrmBackend\] .*connector.*$c" "$LOG" || grep -aq "connector=.*$c" "$LOG" \
-       || grep -aq "bound to output '$c'" "$LOG"; then
-        :
-    else
-        b2_fail=1
-        echo "  no startup line for connector $c" >&2
-    fi
-done
-if [ "$b2_fail" -eq 0 ]; then
-    record "B2-both-outputs" pass "$CONNECTOR_A and $CONNECTOR_B both up"
+#
+# Headless has no connectors, and CONNECTOR_A/CONNECTOR_B are empty there. Left
+# to run, the loop below would grep for an empty string, match every line in the
+# log, and record a pass -- a green tick for per-bundle output pinning on a run
+# that pinned nothing. Skipping says the true thing instead.
+if [ "$HEADLESS" = "1" ]; then
+    record "B2-both-outputs" skip "headless: no connectors to bring up"
 else
-    record "B2-both-outputs" fail "a bundle did not bring up its connector"
+    b2_fail=0
+    for c in "$CONNECTOR_A" "$CONNECTOR_B"; do
+        if grep -aq "\[DrmBackend\] .*connector.*$c" "$LOG" || grep -aq "connector=.*$c" "$LOG" \
+           || grep -aq "bound to output '$c'" "$LOG"; then
+            :
+        else
+            b2_fail=1
+            echo "  no startup line for connector $c" >&2
+        fi
+    done
+    if [ "$b2_fail" -eq 0 ]; then
+        record "B2-both-outputs" pass "$CONNECTOR_A and $CONNECTOR_B both up"
+    else
+        record "B2-both-outputs" fail "a bundle did not bring up its connector"
+    fi
 fi
 
 # B3: the ordering guarantee. The critical bundle must reach ACTIVE before the
@@ -409,7 +552,14 @@ fi
 
 # B5: both CRTCs actually presenting. Construction without presentation would
 # satisfy B1 and B2 while showing nothing on either panel.
-if [ "$COUNT_FLIPS" = "1" ]; then
+#
+# Headless has no CRTC to flip: the 'none' sink discards every frame, so there
+# is no ioctl to count. Checked before COUNT_FLIPS rather than leaning on its
+# default, because COUNT_FLIPS=1 on a headless run would otherwise record a
+# failure for page flips that this mode can never produce.
+if [ "$HEADLESS" = "1" ]; then
+    record "B5-page-flips" skip "headless: sink=none discards frames, no CRTC to flip"
+elif [ "$COUNT_FLIPS" = "1" ]; then
     # grep -c prints 0 *and* exits non-zero when there are no matches, so a
     # `|| echo 0` fallback appends a second line and the comparison below then
     # fails with "integer expression expected" instead of reporting no flips.

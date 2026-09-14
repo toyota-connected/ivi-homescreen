@@ -232,6 +232,12 @@ Two deployment rules that are not obvious from the schema:
   ordering guarantee end to end. `test/integration/osgi_activator_test` is the
   minimal bundle that completes the handshake, which is what makes that
   assertion possible.
+- `HEADLESS=1` runs the same two bundles on the software backend with the `none`
+  sink: two engines and the whole lifecycle state machine, without a card or a
+  connector. The connector and page-flip assertions skip there, since both are
+  claims about hardware. This is what lets the ordering guarantee be asserted on
+  a hosted CI runner, whose vkms ships without the configfs interface and so
+  cannot be given the two connectors the KMS path needs.
 
 ---
 

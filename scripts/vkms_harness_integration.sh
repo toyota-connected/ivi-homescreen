@@ -136,6 +136,33 @@ if [[ -n "${OSGI_BUNDLE}" ]]; then
             env SOFTWARE_RENDER=1 ACTIVATOR=1 TRANSPORT="${transport}" \
                 BUNDLE="${OSGI_BUNDLE}" "${IVI_SRC}/test/osgi_multi_bundle.sh"
     done
+
+    # The same two bundles again, headless: software backend, 'none' sink.
+    #
+    # The KMS legs above need one card carrying two connectors, and a hosted
+    # runner cannot supply one. Its vkms has no configfs interface -- configfs is
+    # mounted, /sys/kernel/config simply has no vkms subsystem -- so vkms_dual.sh
+    # dies in ensure_module and provisions nothing. Both legs then skip at the
+    # connector gate, which is how B3, the critical-first ordering guarantee and
+    # the one property unit tests can only assert against a fake host, came to be
+    # asserted nowhere on CI while the job stayed green.
+    #
+    # Headless drops the display and keeps everything else: two engines, the full
+    # lifecycle state machine, and the activator handshake over both transports.
+    # B2 and B5 skip there, because per-bundle output pinning and real page flips
+    # are claims about hardware this mode does not have. This does not replace the
+    # KMS legs -- they remain the only proof of those two -- it covers what they
+    # cannot reach on this runner.
+    #
+    # REQUIRE_RUN=1 unconditionally, unlike the legs above, which take it from
+    # whether vkms_dual.sh provisioned. Headless has no such prerequisite: there
+    # is no card that can be missing, so a run in which every assertion skipped is
+    # a failure rather than an honest "this rig cannot do it".
+    for transport in channel ffi; do
+        run_harness "osgi multi-bundle headless (${transport})" \
+            env HEADLESS=1 ACTIVATOR=1 REQUIRE_RUN=1 TRANSPORT="${transport}" \
+                BUNDLE="${OSGI_BUNDLE}" "${IVI_SRC}/test/osgi_multi_bundle.sh"
+    done
 else
     echo "== osgi multi-bundle: skipped (no activator bundle) =="
 fi
