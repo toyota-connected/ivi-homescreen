@@ -22,14 +22,42 @@
 #   card="$(ihs_find_vkms_card)" || card=""
 #   mapfile -t conns < <(ihs_connectors_of "$(basename "$card")")
 
+# True when <cardN> really is vkms, rather than merely wearing its connector
+# names.
+#
+# The connector signature alone is ambiguous on exactly one rig that matters:
+# Hyper-V's synthetic display calls its connector Virtual-1 too, so on an Azure
+# CI runner both the vkms card and the VM's own display match the name, and a
+# first-match search returns whichever enumerated first. It has been returning
+# the right one there by luck of ordering.
+#
+# The device link is the stable discriminator. vkms registers on the faux bus,
+# so cardN/device resolves to /sys/devices/faux/vkms; before that conversion it
+# was a platform device whose driver symlink read "vkms". Accept either. The
+# path survives the rename that made the driver name untrustworthy, because it
+# is named for the device rather than for the bus glue.
+ihs_is_vkms_card() {  # ihs_is_vkms_card <cardN>
+    local card="$1" dev drv
+    dev="$(readlink -f "/sys/class/drm/${card}/device" 2>/dev/null)" || return 1
+    [ -n "$dev" ] && [ "$(basename "$dev")" = "vkms" ] && return 0
+    drv="$(basename "$(readlink -f "/sys/class/drm/${card}/device/driver" \
+           2>/dev/null)" 2>/dev/null)"
+    [ "$drv" = "vkms" ]
+}
+
 # Echo /dev/dri/cardN for a vkms card with at least <min_connectors> scanout
 # connectors (default 1), or return 1.
 #
-# vkms is identified by its connector signature: it always advertises
-# connectors named "cardN-Virtual-M", and real GPUs do not. That is deliberately
-# not a match on the driver symlink, whose name has changed across kernel
-# versions (platform -> faux_driver) and would silently stop matching again on
-# the next rename.
+# vkms advertises connectors named "cardN-Virtual-M", which is the cheap filter,
+# and ihs_is_vkms_card then confirms the card is actually vkms. The name match
+# is kept as the first test because it is what the rest of this file reasons
+# about, and because it rejects real GPUs without touching the filesystem twice;
+# the confirmation is what stops Hyper-V's synthetic display from answering to
+# it on a CI runner.
+#
+# Neither test is a match on the driver symlink alone, whose name has changed
+# across kernel versions (platform -> faux_driver) and would silently stop
+# matching again on the next rename.
 #
 # The connector count matters because there is routinely more than one vkms
 # card. `modprobe vkms` creates a default instance with a single output, and
@@ -40,10 +68,16 @@
 ihs_find_vkms_card() {  # ihs_find_vkms_card [min_connectors]
     local min="${1:-1}" c card count
     for c in /sys/class/drm/card[0-9]*; do
-        # Skip the connector/encoder child nodes, which have no device/ dir.
+        # card[0-9]* also globs the connector child nodes (card0-Virtual-1),
+        # which are not cards. They are rejected by the connector-name test
+        # below -- "card0-Virtual-1-Virtual-*" matches nothing -- rather than
+        # here: a connector's device/ is a symlink back to its card, so it is a
+        # directory and passes this test. This guards only against a card[0-9]*
+        # entry with no device/ at all.
         [ -d "$c/device" ] || continue
         card="$(basename "$c")"
         compgen -G "/sys/class/drm/${card}-Virtual-*" >/dev/null || continue
+        ihs_is_vkms_card "$card" || continue
         count="$(ihs_connectors_of "$card" | wc -l)"
         if [ "$count" -ge "$min" ]; then
             echo "/dev/dri/${card}"
