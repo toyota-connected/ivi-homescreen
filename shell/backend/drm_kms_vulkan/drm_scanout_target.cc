@@ -26,6 +26,7 @@
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
+#include <set>
 
 #include "logging.h"
 
@@ -230,6 +231,21 @@ bool DiscoverScanoutTargetOnFd(int fd,
     err = "drmModeGetPlaneResources failed";
     return false;
   }
+  // Every plane this CRTC can drive, not just its primary.
+  //
+  // The negotiated modifier has to be one the *scene allocator* can place, and
+  // the allocator is free to put a direct-scanout layer on any plane that fits
+  // -- it only forces the primary when a layer needs composition, which a
+  // single externally-bound layer does not. Reading the primary's IN_FORMATS
+  // alone therefore asks the wrong question, and on hardware where the primary
+  // is pickier than its overlays it produces an empty intersection and refuses
+  // to start a configuration that works.
+  //
+  // RK3588 is that hardware: VOP2's primary and Cluster planes advertise ARM
+  // AFBC only, while its Esmart overlays advertise LINEAR, and panvk exports
+  // LINEAR alone. Negotiating against the primary yields nothing; against the
+  // planes the allocator may choose it yields LINEAR, which scans out.
+  std::set<uint64_t> union_mods;
   for (uint32_t i = 0; i < pres->count_planes; ++i) {
     drmModePlane* pl = drmModeGetPlane(fd, pres->planes[i]);
     if (!pl) {
@@ -237,11 +253,20 @@ bool DiscoverScanoutTargetOnFd(int fd,
     }
     const bool usable = (pl->possible_crtcs & (1u << crtc_index)) != 0;
     drmModeFreePlane(pl);
-    if (usable && PropValue(fd, pres->planes[i], DRM_MODE_OBJECT_PLANE,
-                            "type") == DRM_PLANE_TYPE_PRIMARY) {
-      out.primary_plane_id = pres->planes[i];
-      break;
+    if (!usable) {
+      continue;
     }
+    const uint64_t type =
+        PropValue(fd, pres->planes[i], DRM_MODE_OBJECT_PLANE, "type");
+    if (type == DRM_PLANE_TYPE_CURSOR) {
+      continue;  // never a scanout target for content
+    }
+    if (type == DRM_PLANE_TYPE_PRIMARY && !out.primary_plane_id) {
+      out.primary_plane_id = pres->planes[i];
+    }
+    std::vector<uint64_t> mods;
+    ReadPlaneModifiers(fd, pres->planes[i], fourcc, mods);
+    union_mods.insert(mods.begin(), mods.end());
   }
   drmModeFreePlaneResources(pres);
   if (!out.primary_plane_id) {
@@ -249,7 +274,7 @@ bool DiscoverScanoutTargetOnFd(int fd,
     return false;
   }
 
-  ReadPlaneModifiers(fd, out.primary_plane_id, fourcc, out.plane_modifiers);
+  out.plane_modifiers.assign(union_mods.begin(), union_mods.end());
   return true;
 }
 
