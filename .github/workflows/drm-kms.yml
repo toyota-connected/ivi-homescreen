@@ -285,6 +285,19 @@ jobs:
               echo "$c: NOT accessible to $(id -un)"
             fi
           done
+          # Which card is which. This runner carries two cards whose connectors
+          # both match the vkms name signature -- vkms on the faux bus, and
+          # Hyper-V's synthetic display, which also calls its connector
+          # Virtual-1 -- so "a card with a Virtual connector" does not identify
+          # one. Answering that from this job's log needed the driver link, and
+          # it was not printed here: the same question had to be answered from
+          # the unit-tests job in oss-ivi-homescreen.yml, which does print it.
+          #
+          # Connector status is deliberately not repeated; the provisioning step
+          # above already lists it per card.
+          for d in /sys/class/drm/card*/device/driver; do
+            echo "$(basename "$(dirname "$(dirname "$d")")") -> $(basename "$(readlink -f "$d")")"
+          done
 
       - name: Harness integration (census + input harness on vkms)
         if: steps.vkms.outputs.available == 'true'
