@@ -238,6 +238,40 @@ Two deployment rules that are not obvious from the schema:
   claims about hardware. This is what lets the ordering guarantee be asserted on
   a hosted CI runner, whose vkms ships without the configfs interface and so
   cannot be given the two connectors the KMS path needs.
+- **Asserting the two hardware claims.** `B2-both-outputs` and `B5-page-flips`
+  are the two the headless mode cannot make, and no CI runner can either. They
+  need a rig with **two connected scanout connectors on one card** and nothing
+  holding DRM master — a Pi 4 is one (`card1`, vc4-drm: `DSI-1` + `HDMI-A-1`,
+  with the graphical target stopped). On such a rig:
+
+  ```sh
+  DRM_DEVICE=/dev/dri/card1 CONNECTOR_A=DSI-1 CONNECTOR_B=HDMI-A-1 \
+    ACTIVATOR=1 TRANSPORT=channel REQUIRE_RUN=1 COUNT_FLIPS=1 \
+    HOMESCREEN=<binary> BUNDLE=<activator bundle> test/osgi_multi_bundle.sh
+  ```
+
+  `COUNT_FLIPS=1` is what turns B5 from a skip into an assertion, and
+  `ACTIVATOR=1` is what turns B3 from a skip into one. Run it once per
+  `TRANSPORT`; both end at the same registry, so a pass over `ffi` is the
+  end-to-end exercise of the `ihs_osgi_*` path that the channel leg cannot give.
+
+  Staging the rig is the fiddly part, because the board is usually not a build
+  host. Two things bite:
+
+  - The published CI artifact is **only** `shell/homescreen`; nothing ships
+    `libihs_shared`. The binary needs `ihs_osgi_set_host` from it, and a
+    `libihs_shared.so.1` built before `ENABLE_OSGI` exports no `ihs_osgi_*`
+    symbol at all, so pairing the two fails at load rather than degrading. Cross
+    build the binary and the library together —
+    `emb cross . --target <board>-<os> --build --backend drm-kms-egl
+    --define ENABLE_OSGI=ON` emits both — and copy the pair.
+  - `libdisplay-info.so.2` is a hard `DT_NEEDED` and is often absent from the
+    board's system libraries; ship it alongside and set `LD_LIBRARY_PATH`.
+
+  The activator bundle must match the board's architecture:
+  `emb bundle --app-path test/integration/osgi_activator_test -m debug
+  --arch arm64 --build`. Copy `test/lib/drm_card.sh` next to the harness, which
+  sources it relative to its own path.
 
 ---
 
