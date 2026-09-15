@@ -22,8 +22,10 @@
 #include <drm_fourcc.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <array>
 #include <set>
+#include <string>
 
 namespace drm_kms_vulkan {
 
@@ -72,6 +74,26 @@ uint32_t PlaneCountForModifier(VkPhysicalDevice phys,
     }
   }
   return 0;
+}
+
+// Bytes per pixel for the packed 32-bit formats this backend scans out. The
+// imported path states the row pitch itself, so it has to know the stride; the
+// exported path never asks, because the driver reports the layout it chose.
+uint32_t BytesPerPixel(const VkFormat f) {
+  switch (f) {
+    case VK_FORMAT_B8G8R8A8_UNORM:
+    case VK_FORMAT_B8G8R8A8_SRGB:
+    case VK_FORMAT_R8G8B8A8_UNORM:
+    case VK_FORMAT_R8G8B8A8_SRGB:
+    case VK_FORMAT_A8B8G8R8_UNORM_PACK32:
+      return 4;
+    default:
+      return 0;
+  }
+}
+
+constexpr uint64_t AlignUp(const uint64_t v, const uint64_t a) {
+  return (v + a - 1) & ~(a - 1);
 }
 
 }  // namespace
@@ -247,6 +269,203 @@ std::unique_ptr<VulkanBackingStore> VulkanBackingStore::Create(
   if (d().vkCreateImageView(device, &vci, nullptr, &store->view_) !=
       VK_SUCCESS) {
     err = "vkCreateImageView failed";
+    return nullptr;
+  }
+
+  store->flutter_image_.struct_size = sizeof(FlutterVulkanImage);
+  store->flutter_image_.image = reinterpret_cast<uint64_t>(store->image_);
+  store->flutter_image_.format = static_cast<uint32_t>(vk_format);
+  return store;
+}
+
+std::unique_ptr<VulkanBackingStore> VulkanBackingStore::CreateImported(
+    VkPhysicalDevice physical_device,
+    VkDevice device,
+    uint32_t width,
+    uint32_t height,
+    VkFormat vk_format,
+    uint32_t drm_fourcc,
+    const ContiguousAllocator& allocator,
+    std::string& err) {
+  const uint32_t bpp = BytesPerPixel(vk_format);
+  if (bpp == 0) {
+    err = "imported scanout: unsupported format for an explicit linear layout";
+    return nullptr;
+  }
+  // Ask before allocating. A contiguous buffer is a scarce resource on the
+  // boards that need this path, and an ICD that cannot make a linear modifier
+  // image out of an imported dma-buf should say so before one is reserved
+  // rather than after.
+  {
+    VkPhysicalDeviceImageDrmFormatModifierInfoEXT mod_info{};
+    mod_info.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_DRM_FORMAT_MODIFIER_INFO_EXT;
+    mod_info.drmFormatModifier = DRM_FORMAT_MOD_LINEAR;
+    mod_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    VkPhysicalDeviceExternalImageFormatInfo ext_info{};
+    ext_info.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO;
+    ext_info.pNext = &mod_info;
+    ext_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
+    VkPhysicalDeviceImageFormatInfo2 fmt_info{};
+    fmt_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2;
+    fmt_info.pNext = &ext_info;
+    fmt_info.format = vk_format;
+    fmt_info.type = VK_IMAGE_TYPE_2D;
+    fmt_info.tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT;
+    fmt_info.usage =
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    VkExternalImageFormatProperties ext_props{};
+    ext_props.sType = VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES;
+    VkImageFormatProperties2 props{};
+    props.sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2;
+    props.pNext = &ext_props;
+    if (d().vkGetPhysicalDeviceImageFormatProperties2(
+            physical_device, &fmt_info, &props) != VK_SUCCESS) {
+      err =
+          "imported scanout: the GPU cannot make a linear modifier image from "
+          "an imported dma-buf for this format";
+      return nullptr;
+    }
+    if ((ext_props.externalMemoryProperties.externalMemoryFeatures &
+         VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT) == 0) {
+      err = "imported scanout: the GPU does not support importing dma-bufs";
+      return nullptr;
+    }
+  }
+  // 64 bytes is the widest row alignment the scanout engines in this class
+  // ask for, and costs at most 63 bytes a row.
+  static constexpr uint64_t kRowAlign = 64;
+  static constexpr uint64_t kPage = 4096;
+  const uint64_t pitch = AlignUp(static_cast<uint64_t>(width) * bpp, kRowAlign);
+  const uint64_t used = pitch * height;
+
+  std::unique_ptr<VulkanBackingStore> store(
+      new VulkanBackingStore(device, width, height));
+  store->vk_format_ = vk_format;
+  store->drm_fourcc_ = drm_fourcc;
+  store->modifier_ = DRM_FORMAT_MOD_LINEAR;
+  store->planes_.push_back({0, pitch});
+
+  VkSubresourceLayout plane_layout{};
+  plane_layout.offset = 0;
+  plane_layout.rowPitch = pitch;
+  plane_layout.size = used;
+  VkImageDrmFormatModifierExplicitCreateInfoEXT explicit_mod{};
+  explicit_mod.sType =
+      VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_EXPLICIT_CREATE_INFO_EXT;
+  explicit_mod.drmFormatModifier = DRM_FORMAT_MOD_LINEAR;
+  explicit_mod.drmFormatModifierPlaneCount = 1;
+  explicit_mod.pPlaneLayouts = &plane_layout;
+  VkExternalMemoryImageCreateInfo ext{};
+  ext.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
+  ext.pNext = &explicit_mod;
+  ext.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
+
+  VkImageCreateInfo ic{};
+  ic.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+  ic.pNext = &ext;
+  ic.imageType = VK_IMAGE_TYPE_2D;
+  ic.format = vk_format;
+  ic.extent = {width, height, 1};
+  ic.mipLevels = 1;
+  ic.arrayLayers = 1;
+  ic.samples = VK_SAMPLE_COUNT_1_BIT;
+  ic.tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT;
+  ic.usage =
+      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+  ic.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  if (d().vkCreateImage(device, &ic, nullptr, &store->image_) != VK_SUCCESS) {
+    err =
+        "imported scanout: vkCreateImage with an explicit linear layout "
+        "failed";
+    return nullptr;
+  }
+
+  // Size the buffer only once the driver has said what the image needs, so the
+  // allocation satisfies that and not merely the framebuffer arithmetic.
+  //
+  // Then one page beyond it. An importing driver may add a read-ahead allowance
+  // to the size it demands of a foreign buffer and refuse anything smaller --
+  // Mesa's v3dv does, by its TFU read-ahead constant -- so a buffer sized
+  // exactly to the image gets rejected for being too small. A whole page covers
+  // any such allowance without encoding one driver's constant, and KMS does not
+  // care that the buffer outlasts the framebuffer.
+  VkMemoryRequirements req{};
+  d().vkGetImageMemoryRequirements(device, store->image_, &req);
+  const uint64_t size =
+      AlignUp(std::max<uint64_t>(req.size, used), kPage) + kPage;
+  store->dma_buf_fd_ = allocator.Allocate(size, err);
+  if (store->dma_buf_fd_ < 0) {
+    return nullptr;  // the destructor ignores a negative fd
+  }
+
+  // Which memory types can back this fd, intersected with what the image
+  // accepts. The fd decides the heap, so DEVICE_LOCAL is not a usable filter
+  // here the way it is for an allocation we own.
+  VkMemoryFdPropertiesKHR fdp{};
+  fdp.sType = VK_STRUCTURE_TYPE_MEMORY_FD_PROPERTIES_KHR;
+  if (d().vkGetMemoryFdPropertiesKHR(
+          device, VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
+          store->dma_buf_fd_, &fdp) != VK_SUCCESS) {
+    err = "imported scanout: vkGetMemoryFdPropertiesKHR failed";
+    return nullptr;
+  }
+  const uint32_t usable = req.memoryTypeBits & fdp.memoryTypeBits;
+  if (usable == 0) {
+    err =
+        "imported scanout: no memory type common to the image and the "
+        "dma-buf";
+    return nullptr;
+  }
+  uint32_t mt = 0;
+  while ((usable & (1u << mt)) == 0) {
+    ++mt;
+  }
+
+  // vkAllocateMemory consumes the fd it is given, so hand it a duplicate and
+  // keep ours: the framebuffer import needs the same buffer afterwards.
+  const int import_fd = ::dup(store->dma_buf_fd_);
+  if (import_fd < 0) {
+    err = "imported scanout: dup of the dma-buf fd failed";
+    return nullptr;
+  }
+  VkImportMemoryFdInfoKHR imp{};
+  imp.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR;
+  imp.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
+  imp.fd = import_fd;
+  VkMemoryDedicatedAllocateInfo ded{};
+  ded.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO;
+  ded.pNext = &imp;
+  ded.image = store->image_;
+  VkMemoryAllocateInfo mai{};
+  mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+  mai.pNext = &ded;
+  // The driver applies its own rounding to this; passing the padded size would
+  // round it a second time and ask for more than was allocated.
+  mai.allocationSize = req.size;
+  mai.memoryTypeIndex = mt;
+  if (d().vkAllocateMemory(device, &mai, nullptr, &store->memory_) !=
+      VK_SUCCESS) {
+    ::close(import_fd);
+    err = "imported scanout: vkAllocateMemory (import) failed";
+    return nullptr;
+  }
+  if (d().vkBindImageMemory(device, store->image_, store->memory_, 0) !=
+      VK_SUCCESS) {
+    err = "imported scanout: vkBindImageMemory failed";
+    return nullptr;
+  }
+
+  VkImageViewCreateInfo vci{};
+  vci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+  vci.image = store->image_;
+  vci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+  vci.format = vk_format;
+  vci.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+  if (d().vkCreateImageView(device, &vci, nullptr, &store->view_) !=
+      VK_SUCCESS) {
+    err = "imported scanout: vkCreateImageView failed";
     return nullptr;
   }
 
