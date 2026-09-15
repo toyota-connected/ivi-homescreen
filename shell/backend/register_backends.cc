@@ -30,6 +30,7 @@
 #include "configuration/configuration.h"
 #include "display/idisplay.h"
 #include "display/output_manager.h"
+#include "engine_switches.h"
 #include "logging/logging.h"
 
 // Independent guards so several backends can be compiled into one binary. The
@@ -76,7 +77,6 @@
 #include "display/software_display.h"  // reused no-op IDisplay
 #endif
 #if BUILD_BACKEND_WAYLAND_EGL
-#include "backend/wayland_egl/partial_repaint_gate.h"
 #include "backend/wayland_egl/wayland_egl.h"
 #endif
 #if BUILD_BACKEND_WAYLAND_VULKAN
@@ -559,6 +559,33 @@ std::shared_ptr<Backend> MakeDrmVulkanBackend(
     const Configuration::Config& config,
     IDisplay* display) {
   std::shared_ptr<Backend> m_backend;
+  // Impeller's Vulkan backend requires a window-system presentation stack on
+  // the instance the shell hands the engine. This backend is KMS-direct: it
+  // renders into a dma-buf it scans out itself, creates no VkSurfaceKHR, and so
+  // declares no WSI extensions. Asking for Impeller anyway fails inside the
+  // engine, and the shell then carries on holding DRM master with nothing
+  // rendering -- a dead panel and a clean exit, the worst pair to debug.
+  //
+  // The requirement is not one extension that could simply be added. Enabling
+  // VK_KHR_surface moves the refusal from capabilities_vk.cc's surface check to
+  // its WSI check, which wants a platform extension; VK_EXT_headless_surface,
+  // the only candidate implying no window system, is not accepted; and
+  // VK_KHR_display makes the loader take the display, so the backend's own
+  // drmSetMaster then fails with EPERM. Satisfying the check would mean
+  // declaring a window system this backend does not have.
+  //
+  // So refuse, unconditionally -- there is no capability here worth probing.
+  // Substituting Skia silently was the alternative and is worse: it runs the
+  // renderer the operator just asked not to use.
+  if (EngineSwitchesEnableImpeller(config.view.engine_args)) {
+    ihs::log::error(
+        "[FlutterView] drm-kms-vulkan cannot run Impeller: its Vulkan backend "
+        "requires a window-system (WSI) surface stack, and this backend "
+        "presents directly to KMS with no window system. Drop "
+        "--enable-impeller to run Skia, or use a backend that presents through "
+        "a surface (wayland-vulkan).");
+    return nullptr;
+  }
   // Shares DrmDisplay (libseat session, refresh rate, cursor) with the EGL
   // DRM backend; only the renderer differs. App::MakeDisplay always builds a
   // DrmDisplay in a DRM build, so the cast failing is programmer error.

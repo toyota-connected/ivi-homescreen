@@ -16,22 +16,29 @@
 
 #pragma once
 
-// Partial-repaint capability gate for the Wayland/EGL backend.
+// Which renderer the forwarded engine switches select.
 //
-// The backend's partial-repaint path (buffer-age existing-damage query +
-// eglSetDamageRegionKHR + eglSwapBuffersWithDamageKHR) is correct only under
-// the Skia OpenGL renderer, where the engine both consumes the existing damage
-// and reports frame/buffer damage back on present. Under Impeller GLES the
-// engine still queries existing damage and advertises partial-repaint support,
-// but its present path reports no damage: feeding it buffer-age-narrowed
-// existing damage would let it clip rendering against history the presented
-// buffer never actually preserved. The backend therefore reports the whole
-// surface as damaged (full repaint) whenever Impeller is the active renderer.
+// Engine switches are forwarded verbatim to the engine's command_line_argv, so
+// the shell learns the active renderer by reading what it passed on rather than
+// by asking the engine. Two backends need that answer, for opposite reasons:
 //
-// The shell has no dedicated Impeller flag; Impeller is requested through the
-// generic engine-switch passthrough (--enable-impeller), so the active renderer
-// is inferred from the forwarded switches. The parse is a pure function, kept
-// here so it is unit testable without an engine.
+//   - wayland_egl gates partial repaint on it. Its buffer-age existing-damage
+//     query + eglSwapBuffersWithDamageKHR path is correct only under Skia GL,
+//     where the engine both consumes existing damage and reports damage back on
+//     present. Impeller GLES queries existing damage and advertises
+//     partial-repaint support but reports none on present, so feeding it
+//     buffer-age-narrowed damage would let it clip against history the
+//     presented buffer never preserved. That backend reports a full repaint
+//     whenever Impeller is active.
+//
+//   - drm_kms_vulkan refuses outright. Impeller's Vulkan backend requires a
+//     window-system surface stack; a KMS-direct backend owns scanout itself,
+//     creates no VkSurfaceKHR and declares no WSI extensions, so the context
+//     fails to initialize and nothing renders.
+//
+// The parse is a pure function, kept in its own header so it is unit testable
+// without an engine and reachable from any backend regardless of which others
+// are compiled in.
 
 #include <string>
 #include <string_view>
@@ -41,8 +48,8 @@
 // "--enable-impeller" flag and the "--enable-impeller=<value>" form; a value of
 // "false" or "0" disables it. The last matching switch wins.
 //
-// Free function in the global namespace to match the Wayland/EGL backend it
-// supports (WaylandEglBackend and its factory are global-namespace).
+// Free function in the global namespace to match the backend factories that
+// call it, which are global-namespace.
 inline bool EngineSwitchesEnableImpeller(
     const std::vector<std::string>& switches) {
   constexpr std::string_view kKey = "--enable-impeller";

@@ -254,7 +254,7 @@ class WaylandEglBackend : public Egl, public Backend {
 
   // False when Impeller is the active renderer: the partial-repaint path
   // (existing-damage query + damage swap) is bypassed in favor of full-surface
-  // repaint. See partial_repaint_gate.h for the rationale.
+  // repaint. See engine_switches.h for the rationale.
   bool m_partial_repaint_enabled;
 
   // Keeps track of the existing damage associated with each FBO ID.
