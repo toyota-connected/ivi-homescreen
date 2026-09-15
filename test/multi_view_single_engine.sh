@@ -29,6 +29,13 @@
 #   COUNT_FLIPS      1 = prove page flips on both CRTCs via strace (default 0)
 #   CAPTURE          1 = dump a PNG per output via IVI_DRM_CAPTURE + SIGUSR1 (default 0)
 #   SOFTWARE_RENDER  1 = LIBGL_ALWAYS_SOFTWARE=1 (vkms/llvmpipe)
+#   KEEP_LOG         1 = keep the shell log and the strace capture on exit and
+#                    say where (default 0). Every assertion reads one of them --
+#                    the per-connector startup lines, the engine-index count, the
+#                    error scan, the page-flip count -- and a failure dumps only
+#                    the last 40 lines before the trap removed the rest. The
+#                    bundle copy is still deleted either way; it is rebuilt every
+#                    run and is the only bulky thing here.
 #   --check          verify prerequisites only, do not launch
 set -uo pipefail
 
@@ -43,6 +50,9 @@ STARTUP_GRACE="${STARTUP_GRACE:-2}"
 COUNT_FLIPS="${COUNT_FLIPS:-0}"
 CAPTURE="${CAPTURE:-0}"
 SOFTWARE_RENDER="${SOFTWARE_RENDER:-0}"
+# Read inside the EXIT trap, so it needs a default here rather than at the use
+# site: under `set -u` an unset variable there aborts the trap itself.
+KEEP_LOG="${KEEP_LOG:-0}"
 
 die() { echo "FAIL: $*" >&2; exit 1; }
 note() { echo "  $*"; }
@@ -86,7 +96,29 @@ fi
 # Work on a throwaway copy so we can drop in a config without touching
 # the source bundle.
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+
+# One EXIT trap for the whole script. A second one used to be installed after
+# LOG existed, and bash keeps only the last -- so a half-applied change to
+# either silently wins, which bash -n cannot see.
+#
+# KEEP_LOG=1 keeps the shell log and the strace capture. Every assertion below
+# reads one of them, and a failure dumps only the last 40 lines. WORK is removed
+# either way: it is a full `cp -rL` of the bundle, rebuilt every run, and the
+# only bulky thing here.
+#
+# LOG and FLIP_LOG are referenced with ${VAR:-} because the trap is armed before
+# either exists; under `set -u` an unset one would abort the trap itself.
+cleanup() {
+    if [ "$KEEP_LOG" = "1" ]; then
+        [ -n "${LOG:-}" ] && note "shell log kept: $LOG"
+        [ -n "${FLIP_LOG:-}" ] && [ -s "${FLIP_LOG:-}" ] && note "strace capture kept: $FLIP_LOG"
+        rm -rf "$WORK"
+    else
+        rm -rf "$WORK" "${LOG:-}" "${FLIP_LOG:-}"
+    fi
+    return 0
+}
+trap cleanup EXIT
 cp -rL "$BUNDLE"/. "$WORK/"
 
 # Config: ONE [[view]] (one engine) listing TWO outputs.
@@ -112,7 +144,6 @@ app_id = "multi_view_test"
 EOF
 
 LOG="$(mktemp)"
-trap 'rm -rf "$WORK" "$LOG"' EXIT
 
 ENV=()
 [ "$SOFTWARE_RENDER" = "1" ] && ENV+=("LIBGL_ALWAYS_SOFTWARE=1")
@@ -213,7 +244,9 @@ if [ "$COUNT_FLIPS" = "1" ]; then
   else
     echo "FAIL: expected flips on both CRTCs, saw $flips" >&2; fail=1
   fi
-  rm -f "$FLIP_LOG"
+  # No rm here: cleanup() owns it. Removing the capture at this point would
+  # destroy the evidence for the assertion immediately above -- including with
+  # KEEP_LOG=1, since this runs long before the trap does.
 fi
 
 if [ "$fail" -ne 0 ]; then

@@ -22,6 +22,10 @@
 #   RECORD       1 to capture a short video via wf-recorder (default: 0)
 #   DURATION     seconds to let the app run (default: 5)
 #   WIDTH/HEIGHT window size in pixels (default: 1920x1080)
+#   KEEP_LOG     1 to keep the log (and any recording) on exit and say where
+#                (default: 0). Both failure paths here quote the log -- the
+#                early-exit dump and the compositor error scan -- but only the
+#                matching lines, and the trap then deleted the rest.
 
 set -euo pipefail
 
@@ -32,6 +36,10 @@ RECORD="${RECORD:-0}"
 DURATION="${DURATION:-5}"
 WIDTH="${WIDTH:-1920}"
 HEIGHT="${HEIGHT:-1080}"
+# Read inside the EXIT trap, so it needs a default here: under `set -u` an
+# unset variable there aborts the trap rather than the script, which is the
+# one failure bash -n cannot see.
+KEEP_LOG="${KEEP_LOG:-0}"
 
 if [[ -z "$BUNDLE" ]]; then
     echo "error: BUNDLE env var must point to a Flutter bundle" >&2
@@ -49,7 +57,43 @@ if [[ -z "${WAYLAND_DISPLAY:-}" && -z "${XDG_RUNTIME_DIR:-}" ]]; then
 fi
 
 TMPDIR="$(mktemp -d)"
-trap 'rm -rf "$TMPDIR"' EXIT
+
+# Stop the launched shell. Defined before the trap that calls it: the trap is
+# armed here, but HS_PID is only set once homescreen is launched below, so a
+# failure in between would otherwise call a function that does not exist yet.
+cleanup_hs() {
+    if [[ -n "${HS_PID:-}" ]] && kill -0 "$HS_PID" 2>/dev/null; then
+        kill "$HS_PID" || true
+        wait "$HS_PID" 2>/dev/null || true
+    fi
+}
+
+# One EXIT trap for the whole script, rather than a second one installed after
+# launch. Bash keeps only the last trap, so two of them means a half-applied
+# change silently wins -- and bash -n is perfectly happy with it.
+#
+# KEEP_LOG=1 keeps the log, and the recording when RECORD=1. Both failure paths
+# below quote the log, but only the part that matched: the early-exit dump and
+# the compositor error scan. The rest went out with the trap.
+#
+# Under `set -euo pipefail` a trap is easy to break: an unset variable aborts it,
+# and a test that returns false becomes the function's exit status. Hence the
+# ${VAR:-} guard above and the explicit `return 0`.
+cleanup() {
+    cleanup_hs
+    if [[ "$KEEP_LOG" == "1" ]]; then
+        # ${LOG:-} because the trap is armed before LOG is assigned, a few lines
+        # below. That window is narrow but reachable -- an interrupt is enough --
+        # and under `set -u` an unset variable here aborts the trap itself,
+        # leaking TMPDIR and reporting nothing useful.
+        [[ -n "${LOG:-}" ]] && echo "==> log kept: $LOG"
+        [[ -s "${VIDEO:-}" ]] && echo "==> recording kept: $VIDEO"
+    else
+        rm -rf "$TMPDIR"
+    fi
+    return 0
+}
+trap cleanup EXIT
 
 LOG="$TMPDIR/homescreen.log"
 VIDEO="$TMPDIR/compositor_${BACKEND}.mp4"
@@ -63,14 +107,6 @@ echo "==> log=$LOG"
     -h "$HEIGHT" \
     >"$LOG" 2>&1 &
 HS_PID=$!
-
-cleanup_hs() {
-    if kill -0 "$HS_PID" 2>/dev/null; then
-        kill "$HS_PID" || true
-        wait "$HS_PID" 2>/dev/null || true
-    fi
-}
-trap 'cleanup_hs; rm -rf "$TMPDIR"' EXIT
 
 # Give the engine a moment to spin up.
 sleep 2
