@@ -541,6 +541,51 @@ bool VulkanDrmBackend::BringUp(std::string& refusal_reason) {
 // ── Compositor (present path)
 // ─────────────────────────────────────────────────
 
+namespace {
+
+constexpr uint32_t kStageWindow = 60;
+
+uint64_t MonotonicNs() {
+  timespec ts{};
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return static_cast<uint64_t>(ts.tv_sec) * 1'000'000'000ULL +
+         static_cast<uint64_t>(ts.tv_nsec);
+}
+
+// Where a present's wall time goes, in the same shape drm_kms_egl reports, so
+// the two backends can be compared on one panel without converting anything.
+// The interval counters next door say how often frames land; this says why.
+struct StageProfile {
+  uint64_t barrier_sum{0};
+  uint64_t wait_sum{0};
+  uint64_t commit_sum{0};
+  uint64_t total_sum{0};
+  uint64_t barrier_max{0};
+  uint64_t wait_max{0};
+  uint64_t commit_max{0};
+  uint64_t total_max{0};
+  uint32_t frames{0};
+
+  void account(const uint64_t barrier,
+               const uint64_t wait,
+               const uint64_t commit,
+               const uint64_t total) {
+    barrier_sum += barrier;
+    wait_sum += wait;
+    commit_sum += commit;
+    total_sum += total;
+    barrier_max = std::max(barrier_max, barrier);
+    wait_max = std::max(wait_max, wait);
+    commit_max = std::max(commit_max, commit);
+    total_max = std::max(total_max, total);
+    ++frames;
+  }
+
+  void reset() { *this = StageProfile{}; }
+};
+
+}  // namespace
+
 struct VulkanDrmBackend::CompositorState {
   explicit CompositorState(drm::Device d) : device(std::move(d)) {}
 
@@ -629,6 +674,8 @@ struct VulkanDrmBackend::CompositorState {
   // buffers therefore come from a contiguous heap instead. Null means the
   // ordinary exported path; see the scanout probe in SetupCompositor.
   std::unique_ptr<drm_kms_vulkan::ContiguousAllocator> contiguous;
+  // Per-stage present timings, when IVI_PROFILE / IVI_DRMVK_PROFILE is on.
+  StageProfile stages;
 
   // Ring of scanout buffers. The engine cycles through them
   // (avoid_backing_store_cache), rendering into a free slot while KMS scans
@@ -1788,18 +1835,9 @@ bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
     return true;
   }
   CompositorState& c = *compositor_;
-  {  // TEMP DIAGNOSTIC -- not for commit
-    std::string sig;
-    for (size_t i = 0; i < count; ++i) {
-      sig += (layers[i]->type == kFlutterLayerContentTypeBackingStore) ? "BS "
-                                                                       : "PV ";
-    }
-    static std::string last;
-    if (sig != last) {
-      last = sig;
-      ihs::log::info("[LAYERDIAG] count={} kinds=[{}]", count, sig);
-    }
-  }
+  static const bool stage_profile_enabled =
+      profiling::FrameProfile::Enabled("IVI_DRMVK_PROFILE");
+  const uint64_t t0 = stage_profile_enabled ? MonotonicNs() : 0;
   const FlutterLayer* bs_layer = nullptr;
   for (size_t i = 0; i < count; ++i) {
     if (layers[i]->type == kFlutterLayerContentTypeBackingStore) {
@@ -1827,6 +1865,7 @@ bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
   const ScopedFd scanout_fence(
       SubmitScanoutBarrier(c, store->image(), store->view(), store->width(),
                            store->height(), layers, count));
+  const uint64_t t1 = stage_profile_enabled ? MonotonicNs() : 0;
 
   // The engine's raster thread pipelines: it hands us frame N+1 while flip N is
   // still in flight, and a single plane can hold only one flip, so we wait for
@@ -1840,6 +1879,7 @@ bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
        ++spin_ms) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
+  const uint64_t t2 = stage_profile_enabled ? MonotonicNs() : 0;
   const bool stalled =
       static_cast<uint32_t>(spin_ms) * 1'000'000U > c.period_ns;
   // Rotate: the completed flip's slot is now scanning; the slot it replaced
@@ -1916,11 +1956,29 @@ bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
         slot, store->width(), store->height(), c.slots.size());
   }
 
-  static const bool profile_enabled =
-      profiling::FrameProfile::Enabled("IVI_DRMVK_PROFILE");
-  if (profile_enabled) {
+  if (stage_profile_enabled) {
     frame_profile_.Record("VulkanDrmBackend", /*ok=*/true, /*now_ns=*/0,
                           stalled);
+    const uint64_t t3 = MonotonicNs();
+    c.stages.account(t1 - t0, t2 - t1, t3 - t2, t3 - t0);
+    if (c.stages.frames >= kStageWindow) {
+      const auto& st = c.stages;
+      const auto mean_ms = [](const uint64_t sum, const uint32_t n) {
+        return static_cast<double>(sum) / static_cast<double>(n) / 1e6;
+      };
+      const auto max_ms = [](const uint64_t v) {
+        return static_cast<double>(v) / 1e6;
+      };
+      ihs::log::info(
+          "[VulkanDrmBackend] stage profile (n={}): barrier={:.2f}ms (max "
+          "{:.2f})  wait={:.2f}ms (max {:.2f})  commit={:.2f}ms (max {:.2f})  "
+          "total={:.2f}ms (max {:.2f})",
+          st.frames, mean_ms(st.barrier_sum, st.frames), max_ms(st.barrier_max),
+          mean_ms(st.wait_sum, st.frames), max_ms(st.wait_max),
+          mean_ms(st.commit_sum, st.frames), max_ms(st.commit_max),
+          mean_ms(st.total_sum, st.frames), max_ms(st.total_max));
+      c.stages.reset();
+    }
   }
   return true;
 }
