@@ -170,6 +170,10 @@
   # type=string default=auto values=auto|yes|no applies=drm
   overlay_planes =
 
+  # Frames in flight in the EGL present path. 1 waits for the page flip before swapping (lowest latency); 2 queues the frame and commits it from the flip handler, giving the raster thread a frame of headroom.
+  # type=int default=1 values=1|2 applies=drm
+  pipeline_depth =
+
   # Primary plane format.
   # type=string default=auto values=auto|xrgb8888|xbgr8888|argb8888|abgr8888|rgb565 applies=drm
   primary_format =

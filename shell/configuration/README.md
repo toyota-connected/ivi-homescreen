@@ -318,6 +318,7 @@ file see
 | `[view.backend.drm]` | `modeset` | `string` | `auto` | `auto\|legacy\|atomic` | drm |
 | `[view.backend.drm]` | `no_seat` | `bool` | `false` | `true\|false` | drm/sw |
 | `[view.backend.drm]` | `overlay_planes` | `string` | `auto` | `auto\|yes\|no` | drm |
+| `[view.backend.drm]` | `pipeline_depth` | `int` | `1` | `1\|2` | drm |
 | `[view.backend.drm]` | `primary_format` | `string` | `auto` | `auto\|xrgb8888\|xbgr8888\|argb8888\|abgr8888\|rgb565` | drm |
 | `[view.backend.drm]` | `rotation` | `int` | `0` | `0\|90\|180\|270` | drm |
 | `[view.backend.drm]` | `stage_cursor` | `string` | `auto` | `auto\|yes\|no` | drm |

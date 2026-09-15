@@ -272,6 +272,10 @@ The shell needs a Flutter app bundle. Canonical bundle for smoke
 testing (per the project's memory notes): `tcna-packages/
 video_player_linux/example/player/.desktop-homescreen/`.
 
+On an integrated system, also give the shell the scheduling policy of the
+compositor it displaces — see
+[docs/drm-kms-scheduling.md](../../../docs/drm-kms-scheduling.md).
+
 ```bash
 # Switch to a bare TTY (Ctrl+Alt+F3 or similar) so something else
 # isn't holding DRM master; or run via systemd with seatd/logind.
@@ -310,11 +314,111 @@ Typical first-run log lines worth reading:
 | `--drm-overlay-planes=auto\|yes\|no` | Disable overlay-plane scanout |
 | `--drm-explicit-sync=auto\|yes\|no` | Reserved knob; not consumed today (no per-frame fence producer) |
 | `--drm-async-flip=auto\|yes\|no` | DRM_MODE_PAGE_FLIP_ASYNC for tearing updates |
+| `--drm-pipeline-depth=1\|2` | Frames in flight; `2` gives the raster thread a frame of headroom (see [Frame pacing](#frame-pacing)) |
 | `-f` / `--fullscreen` | Drive panel at preferred mode (clears explicit w/h) |
 | `--debug-backend` | Verbose per-frame plane assignment log |
 
 Every `--drm-*` flag has a `HOMESCREEN_DRM_*` env-var equivalent and a
 `view.drm_*` TOML key. CLI > env > TOML.
+
+### Frame pacing
+
+`--drm-pipeline-depth` decides whether the raster thread waits for the page
+flip.
+
+At depth **1** (the default) `Present()` calls `WaitForPendingFlip()` before it
+swaps, so the raster thread sits idle for whatever is left of the current
+scanout. That is the lowest-latency arrangement and it is why it remains the
+default, but it leaves the frame no headroom. A present-phase breakdown on a
+1280x720@60 panel:
+
+```
+present: wait_flip=14025us swap=819us lock+commit=152us total=14996us
+present: wait_flip=12924us swap=816us lock+commit=150us total=13890us
+```
+
+The wait is ~93% of `Present()`; the real GPU work is the ~0.9 ms swap. Work
+that runs a millisecond long therefore misses the vsync and the flip repeats
+the previous frame.
+
+At depth **2** the finished frame is queued instead, and the flip-complete
+handler commits it at the earliest moment KMS will take one. The engine already
+hands the backend frame N+1 while flip N is in flight — `drm_kms_vulkan` relies
+on the same thing for its slot ring — so this is the EGL path catching up. KMS
+still accepts one flip per CRTC; what changes is that the raster thread stops
+waiting for it.
+
+Measured with `test/integration/scroll_bench`, same panel:
+
+| | dropped frames | raster p50 | raster p99 |
+|---|---|---|---|
+| depth 1 | 7.34% | 16.37 ms | 19.74 ms |
+| depth 2 | 0.11% | 2.41 ms | 6.03 ms |
+
+Note what `raster p50` does: 16.37 ms is the refresh period, not GPU time. The
+real cost was 2.41 ms all along.
+
+Two things to know before turning it on:
+
+- It costs up to one frame of latency. Leave it at 1 where
+  input-to-photon matters more than smoothness.
+- It holds three buffers at once — scanning, flip-pending, and queued. A
+  shallow `gbm` pool can leave the swap with nothing to return; the backend
+  waits out the pending flip and retries once, degrading to depth-1 behavior
+  for that frame rather than failing the present.
+
+### Choosing a pipeline depth
+
+The flag takes 1 or 2; anything else is clamped. The decision is not a guess —
+`IVI_DRM_PRESENT_TRACE=1` logs the split every 60th frame, and the split is the
+answer:
+
+```
+# depth 1
+present(flipped): wait_flip=13978us swap=832us rest=185us total=14995us
+# depth 2, same binary, same panel
+present(queued):  wait_flip=1us     swap=742us rest=39us  total=782us
+```
+
+`wait_flip` is time the raster thread spent blocked on the previous page flip.
+`swap` plus `rest` is the work — `eglSwapBuffers`, the buffer lock, the FB
+import and the commit.
+
+**Raise to 2 when `wait_flip` dominates and frames still repeat.** The first
+half of that is the flag's own trace; the second half is what makes it a
+problem rather than a curiosity, because a shell can block for most of a
+period and still never miss one.
+
+The symptom that sends you here is visible judder while everything reports
+healthy:
+
+```
+[DrmVsync] profile (n=60): fps=58.98 ... stalls=0 buckets[60Hz/...]=60/0/0/0/0
+```
+
+That line counts flips, not distinct frames. A repeated frame flips exactly on
+schedule, so a shell dropping 7% of its frames still reports a clean 60/60
+here. To confirm content cadence, build the app with `TIMINGS_FILE` (see the
+`scroll_bench` README) and look at the gaps between successive `vsyncStart`
+values: anything near two refresh periods is a repeated frame.
+
+**Stay at 1 when the work already fits, or when latency is the point.** Read
+`swap + rest` at depth 2 — that is the real per-frame cost with no wait mixed
+in. If its p99 sits well inside the refresh period, depth 1 has enough slack
+and costs you nothing; measured here it was ~0.8 ms against 16.67 ms. Depth 2
+adds up to a frame of latency, so a view whose job is tracking touch or
+displaying a camera wants depth 1 even when it could afford 2.
+
+**Depth 2 is the ceiling, and not always reachable.** KMS takes one flip per
+CRTC, so a third queued frame has nowhere to go; the depth is capped at 2 by
+design rather than by the enum. Depth 2 also holds three buffers at once
+(scanning, flip-pending, queued), and the `gbm` pool size is the driver's
+choice. On a pool of two, the swap finds nothing free, the backend waits out
+the flip and retries, and you land back at depth-1 timing — so verify with the
+trace that `wait_flip` actually fell, rather than assuming the flag took.
+
+Pacing and scheduling are separate problems and both have to be right — see
+[docs/drm-kms-scheduling.md](../../../docs/drm-kms-scheduling.md).
 
 ### Env vars for runtime toggles
 
@@ -327,12 +431,16 @@ Every `--drm-*` flag has a `HOMESCREEN_DRM_*` env-var equivalent and a
 | `IVI_DRM_VSYNC` | (on) | `0` falls back from Flutter `vsync_callback` (PAGE_FLIP_EVENT-locked) to the engine's internal wall-clock scheduler |
 | `IVI_DRM_RT` | (off) | Set to anything non-empty to enable per-thread priority elevation via Flutter's `thread_priority_setter` — rasterizer gets `SCHED_FIFO` prio 2, UI thread `SCHED_FIFO` prio 1, background tasks `SCHED_BATCH`. The deliberately low prios let amdgpu / ksoftirqd kthreads preempt the rasterizer during `glFinish` (bumping to prio 10 regressed cadence from 98% → 41% on this hardware). The platform task runner thread (asio flip monitor) is covered too. DrmSession / DrmSeat stay at default. |
 | `IVI_DRM_RASTER_DRAIN` | (on) | `0` stops the rasterizer draining its own `PAGE_FLIP_EVENT` in `WaitForPendingFlip`; it then waits on the flag in slices and the card's reader thread delivers the completion. The drain exists because that reader is unprioritized and can be CPU-starved under heavy raster load, leaving `flip_pending_` set so the next `drmModePageFlip` returns `EBUSY`. Turning it off also makes `stage_cursor=auto` revert to staging on nvidia-drm. |
+| `IVI_DRM_PRESENT_TRACE` | unset | Log the present-phase split (`wait_flip` / `swap` / `rest`) every 60th frame; how you size `--drm-pipeline-depth` |
 | `IVI_DRM_FLIP_TRACE` | (off) | `1` logs every PAGE_FLIP_EVENT (frame-cadence diagnostic) |
 | `IVI_DRM_PROFILE` | (off) | Anything non-empty enables per-frame composite profiling. Every 60 frames, `PresentFramed` / `PresentLayers` log a line: `framed/planes profile (n=60): wait=Xms compose=Yms commit=Zms total=Wms` with both per-stage mean and max. Useful for diagnosing where the per-frame budget goes. |
 | `IVI_DRM_NO_DIRECT_SCANOUT` | (off) | `1` forces GL composite even when REFLECT_Y is available. Diagnostic — bisects visual artifacts that may live on the direct-scanout path. |
 | `VIDEO_PLAYER_AUDIO_SINK` | — | Set to `alsasink` on bare TTY (no PipeWire) |
 
 #### Real-time scheduling: capability setup
+
+For how this compares with scheduling the shell from its systemd unit — and which to choose — see
+[docs/drm-kms-scheduling.md](../../../docs/drm-kms-scheduling.md).
 
 `IVI_DRM_RT` calls `pthread_setschedparam(SCHED_FIFO, ...)` on the rasterizer + UI threads (from inside Flutter's `thread_priority_setter` callback). The kernel rejects this with `EPERM` unless the process holds `CAP_SYS_NICE` (or runs as root). For an unprivileged install, grant the capability once on the binary:
 

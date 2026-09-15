@@ -317,6 +317,10 @@ void Configuration::get_view_parameters(toml::table* v, Config& instance) {
     instance.view.drm_mode =
         v->at_path("backend.drm.mode").as_string()->value_or("");
   }
+  if (v->at_path("backend.drm.pipeline_depth").is_integer()) {
+    instance.view.drm_pipeline_depth =
+        v->at_path("backend.drm.pipeline_depth").value<uint32_t>().value();
+  }
   if (v->at_path("backend.drm.rotation").is_integer()) {
     instance.view.drm_rotation =
         v->at_path("backend.drm.rotation").value<int>().value();
@@ -485,6 +489,9 @@ void Configuration::get_cli_override(const std::string& bundle_path,
   }
   if (cli.view.drm_mode.has_value()) {
     instance.view.drm_mode = cli.view.drm_mode.value();
+  }
+  if (cli.view.drm_pipeline_depth.has_value()) {
+    instance.view.drm_pipeline_depth = cli.view.drm_pipeline_depth.value();
   }
   if (cli.view.drm_rotation.has_value()) {
     instance.view.drm_rotation = cli.view.drm_rotation.value();
@@ -859,6 +866,11 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
         "drm-connector",
         "DRM connector to drive (e.g. eDP-1, HDMI-A-1); default rank-picks",
         cxxopts::value<std::string>())(
+        "drm-pipeline-depth",
+        "DRM frames in flight: 1 waits for the page flip before swapping "
+        "(default, lowest latency), 2 queues the frame and commits it from "
+        "the flip handler (one frame of headroom, up to one of latency)",
+        cxxopts::value<uint32_t>())(
         "drm-mode",
         "DRM mode <WxH@R> (e.g. 1920x1080@120); default = preferred mode",
         cxxopts::value<std::string>())(
@@ -1043,6 +1055,26 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
         out = std::string(e);
       }
     };
+    // Same precedence as pick_string, for the one numeric drm-* knob. A value
+    // that is not a number is ignored rather than fatal: the backend clamps
+    // what it gets, and a bad env var should not stop a shell from starting.
+    auto pick_uint = [&](const char* cli_name, const char* env_name,
+                         std::optional<uint32_t>& out) {
+      if (result.count(cli_name)) {
+        out = result[cli_name].as<uint32_t>();
+        return;
+      }
+      if (const char* e = std::getenv(env_name); e && *e) {
+        char* end = nullptr;
+        const unsigned long v = std::strtoul(e, &end, 10);
+        if (end != e && *end == '\0' &&
+            v <= std::numeric_limits<uint32_t>::max()) {
+          out = static_cast<uint32_t>(v);
+        }
+      }
+    };
+    pick_uint("drm-pipeline-depth", "HOMESCREEN_DRM_PIPELINE_DEPTH",
+              config.view.drm_pipeline_depth);
     pick_string("drm-device", "HOMESCREEN_DRM_DEVICE", config.view.drm_device);
     pick_string("drm-connector", "HOMESCREEN_DRM_CONNECTOR",
                 config.view.drm_connector);

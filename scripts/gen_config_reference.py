@@ -98,6 +98,7 @@ META = {
     "backend.drm.device": ("(rank-pick)", "/dev/dri/by-path/<path>-card or /dev/dri/cardN", "drm/sw", "DRM device node. Prefer the by-path form: cardN is assigned in probe order, so the same driver is card0 on one board and card2 on another, while the by-path name is derived from the hardware topology and is stable."),
     "backend.drm.connector": ("(rank-pick)", "e.g. eDP-1, HDMI-A-1", "drm/sw", "Connector to drive."),
     "backend.drm.mode": ("(preferred)", "<W>x<H>@<R>", "drm/sw", "Mode; unset = preferred from EDID."),
+    "backend.drm.pipeline_depth": ("1", "1|2", "drm", "Frames in flight in the EGL present path. 1 waits for the page flip before swapping (lowest latency); 2 queues the frame and commits it from the flip handler, giving the raster thread a frame of headroom."),
     "backend.drm.rotation": ("0", "0|90|180|270", "drm", "Scanout rotation in degrees."),
     "backend.drm.compositor": ("auto", "auto|planes|gl", "drm", "Compositor strategy."),
     "backend.drm.modeset": ("auto", "auto|legacy|atomic", "drm", "Modeset API."),
