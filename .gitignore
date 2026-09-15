@@ -29,6 +29,14 @@ coverage.info
 /flutter/
 /.config/
 /setup_env.sh
+# The fourth: `emb bundle` assembles into $FLUTTER_WORKSPACE/bundle, which is
+# this directory whenever the workspace is the checkout -- which is what the
+# documented workflow produces. One assembled bundle is ~90 MB, because it
+# carries the engine shared object and icudtl.
+#
+# Anchored, unlike the test/integration rule below: this ignores the workspace
+# output at the root and nothing named bundle/ elsewhere in the tree.
+/bundle/
 
 # AOT snapshot that `emb bundle` drops beside an app (and outside its build/
 # directory, so a per-app build/ ignore does not catch it). A build output, not
