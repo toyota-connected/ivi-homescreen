@@ -74,11 +74,15 @@ class VulkanDrmBackend final : public Backend {
   // @p explicit_sync forces the scanout hand-off: kYes fails init when the
   // device cannot export a SYNC_FD semaphore rather than degrading silently,
   // kNo takes the CPU-fence path, kAuto uses explicit sync when available.
+  // @p connector_name pins the panel (--drm-connector); empty picks the first
+  // connected connector, which is a coin flip on a card that also exposes a
+  // virtual connector.
   static std::shared_ptr<VulkanDrmBackend> Create(
       const std::string& drm_device,
       bool enable_validation,
       homescreen::DrmSession* session,
       const std::string& mode_spec,
+      const std::string& connector_name,
       int rotation,
       drm_config::TriState explicit_sync = drm_config::TriState::kAuto);
 
@@ -194,6 +198,7 @@ class VulkanDrmBackend final : public Backend {
                    bool enable_validation,
                    homescreen::DrmSession* session,
                    std::string mode_spec,
+                   std::string connector_name,
                    int rotation);
 
   // Shared tail of both Create() overloads: bring-up + compositor setup, which
@@ -259,6 +264,9 @@ class VulkanDrmBackend final : public Backend {
 
   // Scanout mode selector ("<W>x<H>[@<R>]"); empty = connector preferred mode.
   std::string mode_spec_;
+  // --drm-connector / view.backend.drm.connector. Empty = first connected
+  // connector with a mode. Unused on the leased tier, which pins by id.
+  std::string connector_name_;
   // DRM scanout rotation in degrees (0|90|180|270). 90/270 swap the render /
   // viewport extent against the CRTC mode; lowered to the plane rotation
   // property at present time.
