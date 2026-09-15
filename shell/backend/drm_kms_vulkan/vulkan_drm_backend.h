@@ -225,6 +225,19 @@ class VulkanDrmBackend final : public Backend {
   // stores and presents via present_layers, so these are never invoked at
   // runtime, but the embedder rejects a Vulkan renderer config that leaves them
   // null.
+  // Pick or grow a free scanout slot of this size, importing its framebuffer
+  // into the ring. Returns the slot index, or -1 on failure.
+  int AcquireScanoutSlot(uint32_t width, uint32_t height);
+
+  // Hand an acquired slot back to the engine as a FlutterBackingStore.
+  bool FinishBackingStore(int slot, FlutterBackingStore* out);
+
+  // Shared tail of both present paths; see the definition.
+  bool PresentSlot(size_t slot,
+                   const FlutterLayer** layers,
+                   size_t count,
+                   uint64_t t0);
+
   static FlutterVulkanImage GetNextImageCb(void* user_data,
                                            const FlutterFrameInfo* frame_info);
   static bool PresentImageCb(void* user_data, const FlutterVulkanImage* image);
@@ -304,6 +317,11 @@ class VulkanDrmBackend final : public Backend {
   // FlutterView and other GL-free translation units).
   struct CompositorState;
   std::unique_ptr<CompositorState> compositor_;
+  // The renderer-config callbacks (get_next_image / present_image) receive the
+  // engine state as user_data, not the backend, and there is no route from one
+  // to the other. This backend holds DRM master, so there is at most one, and
+  // those callbacks reach it through here.
+  static std::atomic<VulkanDrmBackend*> s_active_;
 
   // Record + submit the scanout hand-off barrier for @p image. On the
   // explicit-sync path returns an owned sync_file fd (>=0) the caller wraps as

@@ -23,7 +23,7 @@
 
 #include "gtest/gtest.h"
 
-#include "backend/wayland_egl/partial_repaint_gate.h"
+#include "engine_switches.h"
 
 TEST(PartialRepaintGate, NoSwitchesIsSkia) {
   EXPECT_FALSE(EngineSwitchesEnableImpeller({}));

@@ -30,6 +30,7 @@
 #include "configuration/configuration.h"
 #include "display/idisplay.h"
 #include "display/output_manager.h"
+#include "engine_switches.h"
 #include "logging/logging.h"
 
 // Independent guards so several backends can be compiled into one binary. The
@@ -76,7 +77,6 @@
 #include "display/software_display.h"  // reused no-op IDisplay
 #endif
 #if BUILD_BACKEND_WAYLAND_EGL
-#include "backend/wayland_egl/partial_repaint_gate.h"
 #include "backend/wayland_egl/wayland_egl.h"
 #endif
 #if BUILD_BACKEND_WAYLAND_VULKAN

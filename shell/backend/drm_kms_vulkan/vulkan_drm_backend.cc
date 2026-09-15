@@ -62,6 +62,7 @@
 #include "backend/drm_kms_vulkan/modifier_format.h"
 #include "backend/drm_kms_vulkan/vulkan_backing_store.h"
 #include "engine.h"
+#include "engine_switches.h"
 #include "logging.h"
 #include "shell/platform/homescreen/flutter_desktop_engine_state.h"
 #include "task_runner.h"
@@ -379,6 +380,8 @@ void WaitForFlip(const int drm_fd, drmEventContext& evctx) {
 
 }  // namespace
 
+std::atomic<VulkanDrmBackend*> VulkanDrmBackend::s_active_{nullptr};
+
 VulkanDrmBackend::VulkanDrmBackend(std::string drm_device,
                                    const bool enable_validation,
                                    homescreen::DrmSession* session,
@@ -394,9 +397,12 @@ VulkanDrmBackend::VulkanDrmBackend(std::string drm_device,
   // Motion-to-photon (IVI_M2P_PROFILE): the flip path feeds RecordPresent and
   // DrmSeat feeds RecordInput, both marshaled onto the platform task runner.
   InitMotionToPhoton();
+  s_active_.store(this, std::memory_order_release);
 }
 
 VulkanDrmBackend::~VulkanDrmBackend() {
+  VulkanDrmBackend* self = this;
+  s_active_.compare_exchange_strong(self, nullptr, std::memory_order_acq_rel);
   // Cadence profile summary (no-op unless IVI_PROFILE / IVI_DRMVK_PROFILE ran).
   frame_profile_.LogSessionSummary("VulkanDrmBackend");
   // Anything holding Vulkan objects has to be freed while the device is still
@@ -676,6 +682,9 @@ struct VulkanDrmBackend::CompositorState {
   std::unique_ptr<drm_kms_vulkan::ContiguousAllocator> contiguous;
   // Per-stage present timings, when IVI_PROFILE / IVI_DRMVK_PROFILE is on.
   StageProfile stages;
+  // Root-surface path only: the slot handed to the engine by get_next_image and
+  // presented by present_image. -1 when that path is not in use.
+  int root_slot = -1;
 
   // Ring of scanout buffers. The engine cycles through them
   // (avoid_backing_store_cache), rendering into a free slot while KMS scans
@@ -1109,19 +1118,53 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
 
 FlutterVulkanImage VulkanDrmBackend::GetNextImageCb(
     void* /*user_data*/,
-    const FlutterFrameInfo* /*frame_info*/) {
-  // Unreachable on the compositor path; present a well-formed but empty image
-  // so the embedder's renderer-config validation is satisfied.
+    const FlutterFrameInfo* frame_info) {
   FlutterVulkanImage img{};
   img.struct_size = sizeof(FlutterVulkanImage);
   img.image = 0;  // FlutterVulkanImageHandle is an opaque uint64, not a pointer
   img.format = VK_FORMAT_B8G8R8A8_UNORM;
-  return img;
+
+  // Only the root-surface path reaches here. Skia with a compositor never asks
+  // for a root image; Impeller does, and rejects an empty one outright
+  // ("Invalid VkImage given by the embedder"), which fails rasterization.
+  VulkanDrmBackend* self = s_active_.load(std::memory_order_acquire);
+  if (self == nullptr || !self->compositor_) {
+    return img;
+  }
+  CompositorState& c = *self->compositor_;
+  const uint32_t w = frame_info != nullptr && frame_info->size.width > 0
+                         ? frame_info->size.width
+                         : c.width;
+  const uint32_t h = frame_info != nullptr && frame_info->size.height > 0
+                         ? frame_info->size.height
+                         : c.height;
+  const int slot = self->AcquireScanoutSlot(w, h);
+  if (slot < 0) {
+    return img;
+  }
+  c.root_slot = slot;
+  return *c.slots[static_cast<size_t>(slot)].store->flutter_image();
 }
 
 bool VulkanDrmBackend::PresentImageCb(void* /*user_data*/,
                                       const FlutterVulkanImage* /*image*/) {
-  return true;
+  VulkanDrmBackend* self = s_active_.load(std::memory_order_acquire);
+  if (self == nullptr || !self->compositor_ || !self->compositor_->scene) {
+    return false;
+  }
+  CompositorState& c = *self->compositor_;
+  if (c.root_slot < 0) {
+    return false;
+  }
+  const auto slot = static_cast<size_t>(c.root_slot);
+  c.root_slot = -1;
+  c.slots[slot].engine_owned = false;
+  static const bool stage_profile_enabled =
+      profiling::FrameProfile::Enabled("IVI_DRMVK_PROFILE");
+  const uint64_t t0 = stage_profile_enabled ? MonotonicNs() : 0;
+  // No layer stack on this path: the engine rendered the whole frame into the
+  // one image, so there is nothing to composite over it.
+  return self->PresentSlot(slot, nullptr, 0, t0);
 }
 
 bool VulkanDrmBackend::CreateBackingStoreCb(
@@ -1155,6 +1198,15 @@ bool VulkanDrmBackend::CreateBackingStoreImpl(
   const auto w = static_cast<uint32_t>(config->size.width);
   const auto h = static_cast<uint32_t>(config->size.height);
 
+  const int slot = AcquireScanoutSlot(w, h);
+  if (slot < 0) {
+    return false;
+  }
+  return FinishBackingStore(slot, out);
+}
+
+int VulkanDrmBackend::AcquireScanoutSlot(const uint32_t w, const uint32_t h) {
+  CompositorState& c = *compositor_;
   // Reuse a ring slot that the engine has released and the scanout engine is no
   // longer scanning or about to scan; otherwise grow the ring.
   int slot = -1;
@@ -1174,7 +1226,7 @@ bool VulkanDrmBackend::CreateBackingStoreImpl(
           "[VulkanDrmBackend] scanout ring exhausted ({} buffers); dropping "
           "frame",
           c.slots.size());
-      return false;
+      return -1;
     }
     std::string err;
     // Whichever direction the setup probe settled on. Exported: allocate
@@ -1194,7 +1246,7 @@ bool VulkanDrmBackend::CreateBackingStoreImpl(
     if (!store) {
       ihs::log::error("[VulkanDrmBackend] CreateBackingStore({}x{}): {}", w, h,
                       err);
-      return false;
+      return -1;
     }
     if (c.ring == nullptr) {
       c.ring_owner = std::make_unique<VkScanoutRing>();
@@ -1203,7 +1255,7 @@ bool VulkanDrmBackend::CreateBackingStoreImpl(
     auto idx = c.ring->AddSlot(c.device, *store, c.fourcc);
     if (!idx) {
       ihs::log::error("[VulkanDrmBackend] scanout framebuffer import failed");
-      return false;
+      return -1;
     }
     slot = static_cast<int>(*idx);
     c.key_to_slot[store.get()] = static_cast<size_t>(slot);
@@ -1213,6 +1265,13 @@ bool VulkanDrmBackend::CreateBackingStoreImpl(
         c.slots.size(), w, h);
   }
 
+  return slot;
+}
+
+// Hand a slot the engine acquired back to it as a FlutterBackingStore.
+bool VulkanDrmBackend::FinishBackingStore(const int slot,
+                                          FlutterBackingStore* out) {
+  CompositorState& c = *compositor_;
   auto& [store, engine_owned] = c.slots[static_cast<size_t>(slot)];
   engine_owned = true;
   // Hand the engine an image in the layout it renders into. UNDEFINED as the
@@ -1852,7 +1911,20 @@ bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
   if (it == c.key_to_slot.end()) {
     return false;
   }
-  const size_t slot = it->second;
+  return PresentSlot(it->second, layers, count, t0);
+}
+
+// The present sequence, shared by the two ways a frame arrives: the compositor
+// path (present_layers, with a layer stack to composite) and the root-surface
+// path (present_image, one image and no layers). Everything from the scanout
+// barrier onward is identical; only how the slot was chosen differs.
+bool VulkanDrmBackend::PresentSlot(const size_t slot,
+                                   const FlutterLayer** layers,
+                                   const size_t count,
+                                   const uint64_t t0) {
+  CompositorState& c = *compositor_;
+  static const bool stage_profile_enabled =
+      profiling::FrameProfile::Enabled("IVI_DRMVK_PROFILE");
   drm_kms_vulkan::VulkanBackingStore* store = c.slots[slot].store.get();
 
   // Flush the renderer's color writes so the scanout engine sees this frame.
@@ -2013,6 +2085,33 @@ bool VulkanDrmBackend::CreateInstance(std::string& refusal_reason) {
     }
   }
 
+  // Impeller's instance capability check wants VK_KHR_surface plus one entry
+  // from a fixed WSI list, and its device check wants VK_KHR_swapchain. None
+  // are used -- this backend presents to KMS and creates no VkSurfaceKHR -- but
+  // the check reads the list the embedder declares, so declare them. Prefer the
+  // candidate that implies no window system; VK_KHR_display is deliberately not
+  // among them, as enabling it makes the loader take the display and the
+  // backend's own drmSetMaster then fails with EPERM.
+  if (ihs::engine_switches::ImpellerActive()) {
+    uint32_t avail_n = 0;
+    d().vkEnumerateInstanceExtensionProperties(nullptr, &avail_n, nullptr);
+    std::vector<VkExtensionProperties> avail(avail_n);
+    if (avail_n > 0) {
+      d().vkEnumerateInstanceExtensionProperties(nullptr, &avail_n,
+                                                 avail.data());
+    }
+    if (HasExt(avail, "VK_KHR_surface")) {
+      enabled_instance_extensions_.push_back("VK_KHR_surface");
+      for (const char* wsi :
+           {"VK_KHR_portability_enumeration", "VK_KHR_wayland_surface",
+            "VK_KHR_xcb_surface", "VK_KHR_xlib_surface"}) {
+        if (HasExt(avail, wsi)) {
+          enabled_instance_extensions_.push_back(wsi);
+          break;
+        }
+      }
+    }
+  }
   VkInstanceCreateInfo info{};
   info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
   info.pApplicationInfo = &app;
@@ -2228,6 +2327,20 @@ bool VulkanDrmBackend::CreateLogicalDevice(std::string& refusal_reason) {
   device_info.pNext = &sync2_enable;
   device_info.queueCreateInfoCount = 1;
   device_info.pQueueCreateInfos = &queue_info;
+  // Required by Impeller's device check; unused on this presentation path.
+  if (ihs::engine_switches::ImpellerActive()) {
+    uint32_t dev_ext_n = 0;
+    d().vkEnumerateDeviceExtensionProperties(physical_device_, nullptr,
+                                             &dev_ext_n, nullptr);
+    std::vector<VkExtensionProperties> dev_exts(dev_ext_n);
+    if (dev_ext_n > 0) {
+      d().vkEnumerateDeviceExtensionProperties(physical_device_, nullptr,
+                                               &dev_ext_n, dev_exts.data());
+    }
+    if (HasExt(dev_exts, VK_KHR_SWAPCHAIN_EXTENSION_NAME)) {
+      enabled_device_extensions_.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+    }
+  }
   device_info.enabledExtensionCount =
       static_cast<uint32_t>(enabled_device_extensions_.size());
   device_info.ppEnabledExtensionNames = enabled_device_extensions_.data();
@@ -2440,6 +2553,24 @@ FlutterRendererConfig VulkanDrmBackend::GetRenderConfig() {
 FlutterCompositor VulkanDrmBackend::GetCompositorConfig() {
   FlutterCompositor compositor{};
   compositor.struct_size = sizeof(FlutterCompositor);
+  // Under Impeller the embedder cannot turn a Vulkan backing store into a
+  // render target: embedder.cc logs "Unimplemented" for
+  // kFlutterBackingStoreTypeVulkan and rasterization fails outright, leaving a
+  // dead panel. (The OpenGL framebuffer case is implemented, which is why
+  // drm_kms_egl runs Impeller happily; Vulkan simply has not been written.)
+  //
+  // Offer no compositor there, and the engine presents through the root surface
+  // instead -- get_next_image / present_image, which this backend implements.
+  // Platform views do not reach a KMS plane on that path, so this is a real
+  // reduction, logged rather than silent.
+  if (ihs::engine_switches::ImpellerActive()) {
+    ihs::log::warn(
+        "[VulkanDrmBackend] Impeller: presenting through the root surface, not "
+        "the compositor -- the embedder has no Impeller render target for "
+        "Vulkan backing stores. Platform-view layers will not reach a KMS "
+        "plane; run Skia (drop --enable-impeller) if you need them.");
+    return compositor;
+  }
   compositor.user_data = this;
   compositor.create_backing_store_callback = CreateBackingStoreCb;
   compositor.collect_backing_store_callback = CollectBackingStoreCb;
