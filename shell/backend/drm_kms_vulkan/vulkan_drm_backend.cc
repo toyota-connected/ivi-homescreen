@@ -551,6 +551,14 @@ namespace {
 
 constexpr uint32_t kStageWindow = 60;
 
+// Whether the per-frame heartbeat is compiled in; see its use in the present
+// path. Release builds drop it.
+#ifdef NDEBUG
+constexpr bool kHeartbeat = false;
+#else
+constexpr bool kHeartbeat = true;
+#endif
+
 uint64_t MonotonicNs() {
   timespec ts{};
   clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -2022,8 +2030,19 @@ bool VulkanDrmBackend::PresentSlot(const size_t slot,
   }
 
   const uint64_t n = c.frame++;
-  if (n < 3 || n % 120 == 0) {
+  // The first frames at info confirm the pipeline started; the periodic one
+  // after that is a heartbeat, and a heartbeat at info never stops -- every two
+  // seconds for the life of the process, which is tens of thousands of lines a
+  // day in a log an operator is meant to read.
+  if (n < 3) {
     ihs::log::info(
+        "[VulkanDrmBackend] presented frame {} slot {} ({}x{}); ring={}", n,
+        slot, store->width(), store->height(), c.slots.size());
+  } else if (kHeartbeat && n % 120 == 0) {
+    // Debug records are emitted by default, so a heartbeat left on in a release
+    // build costs a line every two seconds for the life of the process. Useful
+    // while developing, not in the field.
+    ihs::log::debug(
         "[VulkanDrmBackend] presented frame {} slot {} ({}x{}); ring={}", n,
         slot, store->width(), store->height(), c.slots.size());
   }
@@ -2571,6 +2590,7 @@ FlutterCompositor VulkanDrmBackend::GetCompositorConfig() {
         "plane; run Skia (drop --enable-impeller) if you need them.");
     return compositor;
   }
+#if BUILD_COMPOSITOR
   compositor.user_data = this;
   compositor.create_backing_store_callback = CreateBackingStoreCb;
   compositor.collect_backing_store_callback = CollectBackingStoreCb;
@@ -2579,5 +2599,16 @@ FlutterCompositor VulkanDrmBackend::GetCompositorConfig() {
   // scanout ring (rendering into a free buffer while KMS scans another) rather
   // than reusing one buffer — the basis for tear-free, vsync-paced present.
   compositor.avoid_backing_store_cache = true;
+#else
+  // BUILD_COMPOSITOR=OFF means no compositor, the same as the Impeller branch
+  // above: the engine presents through the root surface instead. This used to
+  // register the callbacks regardless, so the option compiled out the overlay
+  // blend and the surface registry but left the engine on the compositor path
+  // -- it changed what a layer stack could contain, not whether one was used.
+  // drm_kms_egl has always guarded this block; this backend now matches.
+  ihs::log::info(
+      "[VulkanDrmBackend] built without BUILD_COMPOSITOR; presenting through "
+      "the root surface. Platform-view layers will not reach a KMS plane.");
+#endif
   return compositor;
 }

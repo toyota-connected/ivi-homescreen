@@ -516,9 +516,12 @@ bool DrmCompositor::InitPlaneAllocator() {
         type_str = "CURSOR";
         break;
     }
-    ihs::log::info("[DrmCompositor]   plane {} type={} zpos=[{},{}]", p->id,
-                   type_str, p->zpos_min.value_or(-1),
-                   p->zpos_max.value_or(-1));
+    // Per-plane capability detail: one line per plane on a card that can have
+    // a dozen, and what an operator needs is the outcome, which is logged at
+    // info below ("no plane supports REFLECT_Y ..." / the scene construction).
+    ihs::log::debug("[DrmCompositor]   plane {} type={} zpos=[{},{}]", p->id,
+                    type_str, p->zpos_min.value_or(-1),
+                    p->zpos_max.value_or(-1));
     if (p->type == drm::planes::DRMPlaneType::PRIMARY) {
       // Use zpos_min: when immutable it's the only legal value; when
       // mutable it's still the lowest slot, and we want the root Flutter
@@ -546,7 +549,7 @@ bool DrmCompositor::InitPlaneAllocator() {
     if (PlaneSupportsReflectY(backend_->drm_fd(),
                               static_cast<uint32_t>(p->id))) {
       any_plane_supports_reflect_y_ = true;
-      ihs::log::info("[DrmCompositor]   plane {} supports REFLECT_Y", p->id);
+      ihs::log::debug("[DrmCompositor]   plane {} supports REFLECT_Y", p->id);
     }
   }
   ihs::log::info("[DrmCompositor] primary plane zpos = {}", primary_zpos_);
