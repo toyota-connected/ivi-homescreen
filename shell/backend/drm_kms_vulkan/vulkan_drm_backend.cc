@@ -698,11 +698,33 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   if (!discovered) {
     return false;
   }
+  // A plane that advertises no IN_FORMATS is not saying "nothing works", it is
+  // saying nothing at all: the property is optional and a modifier-blind KMS
+  // driver omits it. The legal reading is the implicit modifier, which is
+  // linear. Measured on a split render/display SoC where 0 of 14 planes carry
+  // IN_FORMATS: gbm allocates LINEAR, drmModeAddFB2WithModifiers accepts a
+  // LINEAR framebuffer, and drm-kms-egl scans out on that path at full rate --
+  // so refusing here rejected a configuration the same card runs happily.
+  //
+  // Negotiate against LINEAR rather than against the empty set, so the ICD is
+  // still asked whether it can export it. If it cannot, the result is empty
+  // and the refusal below stands, which is the honest answer.
+  const bool plane_modifiers_unknown = target.plane_modifiers.empty();
+  const std::vector<uint64_t> implicit_linear{DRM_FORMAT_MOD_LINEAR};
   const std::vector<uint64_t> allowed = drm_kms_vulkan::NegotiateModifiers(
-      physical_device_, VK_FORMAT_B8G8R8A8_UNORM, target.plane_modifiers);
+      physical_device_, VK_FORMAT_B8G8R8A8_UNORM,
+      plane_modifiers_unknown ? implicit_linear : target.plane_modifiers);
   if (allowed.empty()) {
-    err = "no modifier common to the GPU and the scanout plane";
+    err = plane_modifiers_unknown
+              ? "scanout plane advertises no IN_FORMATS and the GPU cannot "
+                "export a linear image for this format"
+              : "no modifier common to the GPU and the scanout plane";
     return false;
+  }
+  if (plane_modifiers_unknown) {
+    ihs::log::info(
+        "[VulkanDrmBackend] scanout plane advertises no IN_FORMATS; using the "
+        "implicit (linear) modifier");
   }
   ihs::log::info(
       "[VulkanDrmBackend] scanout target: connector {} crtc {} plane {} mode "
