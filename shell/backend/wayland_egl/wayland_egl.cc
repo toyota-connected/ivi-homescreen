@@ -355,7 +355,7 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
     // map work.
     bool use_damage_swap = false;
     std::array<EGLint, 4> frame_rects{};
-    // Partial repaint is bypassed under Impeller (see partial_repaint_gate.h):
+    // Partial repaint is bypassed under Impeller (see engine_switches.h):
     // present a full frame and skip the damage bookkeeping entirely.
     if (b->m_partial_repaint_enabled &&
         info->struct_size == sizeof(FlutterPresentInfo)) {

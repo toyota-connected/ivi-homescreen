@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include "engine_switches.h"
 #include "logging/logging.h"
 
 #include <cassert>
@@ -183,6 +184,14 @@ FlutterView::FlutterView(Configuration::Config config,
       m_config(std::move(config)),
       m_index(index),
       m_name(std::move(name)) {
+  // Record the renderer before the backend is built: a backend's constructor
+  // decides things that depend on it -- drm_kms_vulkan declares the instance
+  // extensions Impeller's capability check reads -- and that runs well before
+  // Initialize() assembles the final switch list. The configured switches are
+  // authoritative here; Initialize() records again afterwards, because it can
+  // add one of its own.
+  ihs::engine_switches::SetImpellerActive(
+      EngineSwitchesEnableImpeller(m_config.view.engine_args));
   m_backend = Backend::Create(m_config, display);
 
   IHS_DEBUG("Width: {}, Height: {}",
@@ -537,6 +546,23 @@ bool FlutterView::Initialize() {
     }
   }
 #endif
+
+  // Record which renderer the engine is about to start with, now that the
+  // switch list is final -- the headless-egl branch above can have added one.
+  // Backends read this from callbacks that take no arguments and run later
+  // (Backend::GetCompositorConfig), so it has to be looked up, not handed over.
+  {
+    std::vector<std::string> final_switches;
+    final_switches.reserve(m_command_line_args_c.size());
+    for (size_t i = 1; i < m_command_line_args_c.size(); ++i) {
+      final_switches.emplace_back(m_command_line_args_c[i]);
+    }
+    const bool impeller = EngineSwitchesEnableImpeller(final_switches);
+    ihs::engine_switches::SetImpellerActive(impeller);
+    if (impeller) {
+      ihs::log::info("[FlutterView] renderer: Impeller");
+    }
+  }
 
   // Arguments to the Dart entrypoint main(List<String>) -> dart_entrypoint_argv
   // (no argv[0] convention).
