@@ -28,6 +28,7 @@
 #include <cstring>
 #include <set>
 
+#include "display/drm_mode_list.h"  // ConnectorTypeName
 #include "logging.h"
 
 namespace drm_kms_vulkan {
@@ -104,6 +105,7 @@ bool DiscoverScanoutTargetOnFd(int fd,
                                uint32_t fourcc,
                                const std::string& mode_spec,
                                uint32_t want_connector_id,
+                               const std::string& want_connector_name,
                                ScanoutTarget& out,
                                std::string& err) {
   drmSetClientCap(fd, DRM_CLIENT_CAP_ATOMIC, 1);
@@ -127,10 +129,24 @@ bool DiscoverScanoutTargetOnFd(int fd,
     // set -- so on a leased fd the heuristic is a coin flip that lights up the
     // wrong panel. It is still correct for the path-opened tiers, which drive
     // whatever card they were pointed at.
-    const bool wanted =
-        want_connector_id == 0
-            ? (c->connection == DRM_MODE_CONNECTED && c->count_modes > 0)
-            : c->connector_id == want_connector_id;
+    // Three ways to choose, in descending specificity: a connector id (a
+    // lease, where the compositor decided), a connector name (--drm-connector,
+    // where the operator decided), and otherwise the first connected one.
+    // Without the name pin this tier ignored --drm-connector entirely and took
+    // whatever enumerated first, which on a card carrying a virtual connector
+    // alongside the panel is a coin flip that renders to nothing visible.
+    const std::string name = std::string(ConnectorTypeName(c->connector_type)) +
+                             "-" + std::to_string(c->connector_type_id);
+    const bool connected =
+        c->connection == DRM_MODE_CONNECTED && c->count_modes > 0;
+    bool wanted = false;
+    if (want_connector_id != 0) {
+      wanted = c->connector_id == want_connector_id;
+    } else if (!want_connector_name.empty()) {
+      wanted = name == want_connector_name;
+    } else {
+      wanted = connected;
+    }
     if (wanted) {
       conn = c;
     } else {
@@ -138,10 +154,15 @@ bool DiscoverScanoutTargetOnFd(int fd,
     }
   }
   if (conn == nullptr) {
-    err = want_connector_id == 0
-              ? "no connected connector with a mode"
-              : "requested connector " + std::to_string(want_connector_id) +
-                    " is not present on this fd";
+    if (want_connector_id != 0) {
+      err = "requested connector " + std::to_string(want_connector_id) +
+            " is not present on this fd";
+    } else if (!want_connector_name.empty()) {
+      err = "requested connector " + want_connector_name +
+            " is not present on this device";
+    } else {
+      err = "no connected connector with a mode";
+    }
     drmModeFreeResources(res);
     return false;
   }
@@ -197,11 +218,37 @@ bool DiscoverScanoutTargetOnFd(int fd,
   out.mode_width = conn->modes[chosen].hdisplay;
   out.mode_height = conn->modes[chosen].vdisplay;
 
-  drmModeEncoder* enc = drmModeGetEncoder(fd, conn->encoder_id);
+  // Current encoder first: if something is already driving this connector, its
+  // CRTC is the one to keep.
+  drmModeEncoder* enc =
+      conn->encoder_id != 0 ? drmModeGetEncoder(fd, conn->encoder_id) : nullptr;
   if (enc && enc->crtc_id) {
     out.crtc_id = enc->crtc_id;
-  } else if (res->count_crtcs > 0) {
-    out.crtc_id = res->crtcs[0];
+  } else {
+    // Nothing is driving it -- the normal state for a connector the compositor
+    // released, or one never lit. Walk the connector's own encoders and take a
+    // CRTC that possible_crtcs says can actually drive it.
+    //
+    // Taking res->crtcs[0] here instead, as this did, is wrong whenever the
+    // first CRTC on the card cannot reach this connector: the modeset then
+    // programs an unrelated CRTC, every atomic commit is rejected, and the
+    // symptom is a scene whose layers are all dropped with no error -- 8515
+    // drops and 0 frames presented on the hardware this was found on, while
+    // the EGL backend drove the same connector correctly because it already
+    // walks possible_crtcs.
+    for (int e = 0; e < conn->count_encoders && !out.crtc_id; ++e) {
+      drmModeEncoder* cand = drmModeGetEncoder(fd, conn->encoders[e]);
+      if (!cand) {
+        continue;
+      }
+      for (int c = 0; c < res->count_crtcs; ++c) {
+        if ((cand->possible_crtcs & (1u << c)) != 0) {
+          out.crtc_id = res->crtcs[c];
+          break;
+        }
+      }
+      drmModeFreeEncoder(cand);
+    }
   }
   if (enc) {
     drmModeFreeEncoder(enc);
@@ -283,6 +330,7 @@ bool DiscoverScanoutTargetOnFd(int fd,
 bool DiscoverScanoutTarget(const std::string& drm_device,
                            uint32_t fourcc,
                            const std::string& mode_spec,
+                           const std::string& connector_name,
                            ScanoutTarget& out,
                            std::string& err) {
   const int fd = ::open(drm_device.c_str(), O_RDWR | O_CLOEXEC);
@@ -290,10 +338,12 @@ bool DiscoverScanoutTarget(const std::string& drm_device,
     err = "open('" + drm_device + "'): " + std::strerror(errno);
     return false;
   }
-  // The path-opened tiers drive the whole card, so there is no connector to pin
-  // and the first-connected pick stands.
+  // A path-opened tier drives the whole card, so the operator's
+  // --drm-connector is the only thing that says which panel. Empty keeps the
+  // first-connected pick.
   const bool ok = DiscoverScanoutTargetOnFd(fd, fourcc, mode_spec,
-                                            /*want_connector_id=*/0, out, err);
+                                            /*want_connector_id=*/0,
+                                            connector_name, out, err);
   ::close(fd);
   return ok;
 }
@@ -308,8 +358,11 @@ bool DiscoverScanoutTarget(int drm_fd,
     err = "DiscoverScanoutTarget: invalid fd";
     return false;
   }
+  // A lease pins by id: the compositor already chose, and its choice outranks
+  // any name the operator asked for.
   return DiscoverScanoutTargetOnFd(drm_fd, fourcc, mode_spec, want_connector_id,
-                                   out, err);
+                                   /*want_connector_name=*/std::string(), out,
+                                   err);
 }
 
 }  // namespace drm_kms_vulkan

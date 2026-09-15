@@ -568,6 +568,16 @@ std::shared_ptr<Backend> MakeDrmVulkanBackend(
       (config.view.drm_mode.has_value() && !config.view.drm_mode->empty())
           ? *config.view.drm_mode
           : std::string{};
+  // Same resolution order as the EGL DRM backend: [view.output] first (matched
+  // against the card's live connectors), then the raw backend.drm.connector.
+  std::string drm_connector;
+  if (auto resolved = homescreen::OutputManager::ResolveForView(
+          config, display, homescreen::BackendFamily::kDrm)) {
+    drm_connector = *resolved;
+  } else if (config.view.drm_connector.has_value() &&
+             !config.view.drm_connector->empty()) {
+    drm_connector = *config.view.drm_connector;
+  }
   // Serves both the direct and the leased descriptor: the lease changes only
   // where the DRM fd came from. Unlike MakeDrmEglBackend — which is reused
   // verbatim because DrmBackend::Create takes the device from the display —
@@ -589,7 +599,7 @@ std::shared_ptr<Backend> MakeDrmVulkanBackend(
           : VulkanDrmBackend::Create(
                 drm_display->device_path(),
                 config.debug_backend.value_or(false), drm_display->session(),
-                drm_mode, config.view.drm_rotation.value_or(0),
+                drm_mode, drm_connector, config.view.drm_rotation.value_or(0),
                 ParseTriState(config.view.drm_explicit_sync));
 
   // Create returns nullptr on any init failure (unsupported device, no

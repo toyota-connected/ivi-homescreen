@@ -46,9 +46,15 @@ struct ScanoutTarget {
 // matches. Returns false (with @p err set) if no usable display is found. Does
 // NOT take DRM master — it only reads KMS state, so it is safe to call before
 // the modeset path acquires the device.
+// @p connector_name pins the connector by name (e.g. "DP-4", "HDMI-A-1"), the
+// --drm-connector / view.backend.drm.connector setting; empty picks the first
+// connected connector with a mode. A card can expose a virtual connector
+// alongside the panel, and the first-connected pick is then a coin flip that
+// scans out somewhere invisible.
 bool DiscoverScanoutTarget(const std::string& drm_device,
                            uint32_t fourcc,
                            const std::string& mode_spec,
+                           const std::string& connector_name,
                            ScanoutTarget& out,
                            std::string& err);
 

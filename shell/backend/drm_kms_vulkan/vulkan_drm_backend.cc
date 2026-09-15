@@ -375,9 +375,11 @@ VulkanDrmBackend::VulkanDrmBackend(std::string drm_device,
                                    const bool enable_validation,
                                    homescreen::DrmSession* session,
                                    std::string mode_spec,
+                                   std::string connector_name,
                                    const int rotation)
     : drm_device_(std::move(drm_device)),
       mode_spec_(std::move(mode_spec)),
+      connector_name_(std::move(connector_name)),
       rotation_(rotation),
       enable_validation_(enable_validation),
       session_(session) {
@@ -421,10 +423,12 @@ std::shared_ptr<VulkanDrmBackend> VulkanDrmBackend::Create(
     const bool enable_validation,
     homescreen::DrmSession* session,
     const std::string& mode_spec,
+    const std::string& connector_name,
     const int rotation,
     const drm_config::TriState explicit_sync) {
-  auto backend = std::shared_ptr<VulkanDrmBackend>(new VulkanDrmBackend(
-      drm_device, enable_validation, session, mode_spec, rotation));
+  auto backend = std::shared_ptr<VulkanDrmBackend>(
+      new VulkanDrmBackend(drm_device, enable_validation, session, mode_spec,
+                           connector_name, rotation));
   backend->explicit_sync_pref_ = explicit_sync;
   return FinishCreate(std::move(backend));
 }
@@ -447,8 +451,11 @@ std::shared_ptr<VulkanDrmBackend> VulkanDrmBackend::Create(
   // session is null by construction: on a lease the compositor owns the seat's
   // session, so there is no libseat session to pause/resume against. The
   // existing bring-up already tolerates a null session.
+  // No connector name on this tier: the lease already fixed the connector by
+  // id, and that outranks anything the operator named.
   auto backend = std::shared_ptr<VulkanDrmBackend>(new VulkanDrmBackend(
-      drm_device, enable_validation, /*session=*/nullptr, mode_spec, rotation));
+      drm_device, enable_validation, /*session=*/nullptr, mode_spec,
+      /*connector_name=*/std::string(), rotation));
   backend->injected_fd_ = drm_fd;
   backend->fd_owner_ = std::move(fd_owner);
   // Set BEFORE FinishCreate: SetupCompositor runs inside it and is what pins
@@ -682,12 +689,12 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   // the whole card and could pick one the compositor is still driving -- and
   // may not be permitted at all.
   const bool discovered =
-      injected_fd_ >= 0
-          ? drm_kms_vulkan::DiscoverScanoutTarget(
-                injected_fd_, DRM_FORMAT_XRGB8888, mode_spec_,
-                lease_connector_id_, target, err)
-          : drm_kms_vulkan::DiscoverScanoutTarget(
-                drm_device_, DRM_FORMAT_XRGB8888, mode_spec_, target, err);
+      injected_fd_ >= 0 ? drm_kms_vulkan::DiscoverScanoutTarget(
+                              injected_fd_, DRM_FORMAT_XRGB8888, mode_spec_,
+                              lease_connector_id_, target, err)
+                        : drm_kms_vulkan::DiscoverScanoutTarget(
+                              drm_device_, DRM_FORMAT_XRGB8888, mode_spec_,
+                              connector_name_, target, err);
   if (!discovered) {
     return false;
   }
