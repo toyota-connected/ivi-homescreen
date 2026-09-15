@@ -28,6 +28,11 @@
 #   BACKENDS    space-separated list (default: "drm-kms-egl software")
 #   CENSUS_SECS steady-state capture seconds per backend (default 8)
 #   BASELINE    baseline file for --check when no path argument is given
+#   KEEP_LOG    1 = keep the per-backend homescreen logs on exit and say where
+#               (default 0). Every census figure is folded out of those logs, so
+#               a failed invariant is only explicable with them. The census line
+#               itself is already echoed to stdout, so this is about the raw
+#               profile windows behind it.
 #
 # Exit: 0 all census invariants held (and drift within tolerance for --check);
 #       1 an invariant failed or a backend produced no census; 2 bad usage/setup.
@@ -39,6 +44,8 @@ VKMS_CARD="${VKMS_CARD:-}"
 BACKENDS="${BACKENDS:-drm-kms-egl software}"
 CENSUS_SECS="${CENSUS_SECS:-8}"
 BASELINE="${BASELINE:-}"
+# Read under set -u, so it needs a default here rather than at the use site.
+KEEP_LOG="${KEEP_LOG:-0}"
 
 # Keep-up floor: fraction of presented frames that landed at 30Hz or faster
 # (60Hz + 30Hz buckets). vkms drives a 60Hz virtual head; software present adds
@@ -54,9 +61,31 @@ PASS=0
 FAIL=0
 declare -a RESULTS=()
 
-die() { echo "error: $*" >&2; rm -rf "$TMPDIR"; exit 2; }
+# No rm here: the EXIT trap below owns cleanup, and it is armed before any die()
+# can run. Removing TMPDIR here as well would defeat KEEP_LOG -- including on the
+# --write / --check failures, which happen after the census has already run.
+die() { echo "error: $*" >&2; exit 2; }
 log() { echo "[census] $*"; }
-cleanup() { [[ -n "${HOMESCREEN:-}" ]] && pkill -KILL -f "$HOMESCREEN" 2>/dev/null; rm -rf "$TMPDIR"; }
+# KEEP_LOG=1 leaves the per-backend logs behind, and says where.
+#
+# Every census figure is folded out of those logs, so when an invariant fails
+# they are the only thing that says why. Nothing kept here is bulky: the logs
+# plus census.txt, which is echoed to stdout anyway.
+#
+# This is the only deletion site. die() and the --help branch used to remove
+# TMPDIR themselves, which was already redundant -- the trap below is armed
+# before either can run -- and would have defeated KEEP_LOG on exactly the paths
+# where the logs matter most, since die() is reachable after the census has run,
+# from --write and --check.
+cleanup() {
+    [[ -n "${HOMESCREEN:-}" ]] && pkill -KILL -f "$HOMESCREEN" 2>/dev/null
+    if [[ "$KEEP_LOG" == "1" ]]; then
+        log "logs kept: $TMPDIR"
+    else
+        rm -rf "$TMPDIR"
+    fi
+    return 0
+}
 trap cleanup EXIT
 
 # ─── Argument parsing ────────────────────────────────────────────────────────
@@ -64,7 +93,11 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --write)  MODE="write"; BASELINE="${2:-}"; shift 2 || die "--write needs a path" ;;
         --check)  MODE="check"; [[ -n "${2:-}" && "$2" != -* ]] && { BASELINE="$2"; shift; }; shift ;;
-        -h|--help) sed -n '2,32p' "${BASH_SOURCE[0]}"; rm -rf "$TMPDIR"; exit 0 ;;
+        # The range ends at the last header line, so it moves whenever the block
+        # above grows -- adding KEEP_LOG to it truncated --help mid-sentence and
+        # dropped the Exit: line. No rm here: the EXIT trap is already armed and
+        # owns cleanup, and removing TMPDIR here would defeat KEEP_LOG.
+        -h|--help) sed -n '2,38p' "${BASH_SOURCE[0]}"; exit 0 ;;
         *) die "unknown argument '$1'" ;;
     esac
 done
