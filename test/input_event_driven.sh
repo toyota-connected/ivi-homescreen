@@ -30,6 +30,11 @@
 #   VKMS_CARD     explicit /dev/dri/cardN. Default: first vkms card
 #   STORM_SECS    mouse-storm duration (default 6)
 #   ONLY          run only the named scenario (I1|I3|I6|I8); default all
+#   KEEP_LOG      1 = keep the per-scenario logs on exit and say where
+#                 (default 0). Every assertion here reads one of those logs --
+#                 the lagging-warning count, the input-observed markers, the
+#                 eventfd fallback line -- so a failure is only explicable with
+#                 them, and the trap deleted them on the way out.
 #
 # Exit: 0 all ran scenarios passed; 1 an assertion failed; 2 usage/setup error.
 
@@ -42,6 +47,8 @@ STORM_SECS="${STORM_SECS:-6}"
 IDLE_SECS="${IDLE_SECS:-5}"
 IDLE_CTXT_MAX="${IDLE_CTXT_MAX:-30}"  # max idle voluntary ctxt-switches for I2
 ONLY="${ONLY:-}"
+# Read under set -u, so it needs a default here rather than at the use site.
+KEEP_LOG="${KEEP_LOG:-0}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 UINPUT_SRC="${ROOT_DIR}/test/tools/uinput_gen.c"
@@ -51,9 +58,31 @@ PASS=0
 FAIL=0
 declare -a RESULTS=()
 
-die() { echo "error: $*" >&2; rm -rf "$TMPDIR"; exit 2; }
+# No rm here: the EXIT trap below owns cleanup, and it is armed before any
+# die() can run. Removing TMPDIR here as well would defeat KEEP_LOG on the
+# setup failures whose logs are worth keeping.
+die() { echo "error: $*" >&2; exit 2; }
 log() { echo "[input-harness] $*"; }
-cleanup() { [[ -n "${HOMESCREEN:-}" ]] && pkill -KILL -f "$HOMESCREEN" 2>/dev/null; rm -rf "$TMPDIR"; }
+# KEEP_LOG=1 leaves the per-scenario logs behind, and says where.
+#
+# Every assertion here reads one of those logs -- the lagging-warning count, the
+# input-observed markers, the eventfd fallback line -- so when one fails they are
+# the only thing that says why. Nothing kept is bulky: a handful of logs plus the
+# compiled injector.
+#
+# This is the only deletion site. die() used to remove TMPDIR itself, which was
+# already redundant -- the trap below is armed before any die() can run, since
+# every call reaches it through check_prereqs -- and would have defeated
+# KEEP_LOG on the setup failures where the logs are worth keeping.
+cleanup() {
+    [[ -n "${HOMESCREEN:-}" ]] && pkill -KILL -f "$HOMESCREEN" 2>/dev/null
+    if [[ "$KEEP_LOG" == "1" ]]; then
+        log "logs kept: $TMPDIR"
+    else
+        rm -rf "$TMPDIR"
+    fi
+    return 0
+}
 trap cleanup EXIT
 
 # ─── Prerequisites ───────────────────────────────────────────────────────────
