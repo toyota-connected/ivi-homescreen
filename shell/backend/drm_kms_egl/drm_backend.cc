@@ -1427,8 +1427,22 @@ void DrmBackend::UnifiedPageFlipHandler(int /*fd*/,
   }();
   static std::atomic<uint64_t> flip_count{0};
   const uint64_t n = flip_count.fetch_add(1, std::memory_order_relaxed) + 1;
-  if (flip_trace || (n % 60) == 0) {
-    ihs::log::info("[DrmBackend] flip #{} handled (asio monitor)", n);
+  // First flip at info says the reader is live; everything after is a
+  // heartbeat, and once a second for the life of the process is not something
+  // an operator's log should carry at info.
+  // The unprompted heartbeat is a development aid: debug records are emitted
+  // by default, so leaving it on in a release build costs a line a second for
+  // the life of the process. IVI_DRM_FLIP_TRACE is an explicit request and
+  // stays available in every build.
+#ifdef NDEBUG
+  constexpr bool kHeartbeat = false;
+#else
+  constexpr bool kHeartbeat = true;
+#endif
+  if (n == 1) {
+    ihs::log::info("[DrmBackend] first flip handled (asio monitor)");
+  } else if (flip_trace || (kHeartbeat && (n % 60) == 0)) {
+    ihs::log::debug("[DrmBackend] flip #{} handled (asio monitor)", n);
   }
   // Route the completion to the exact committer: the backend for a legacy
   // Present() page flip, or a compositor for a scene/atomic commit — each
