@@ -406,6 +406,7 @@ if (BUILD_BACKEND_DRM_KMS_VULKAN)
             backend/drm_kms_vulkan/vulkan_drm_backend.cc
             backend/drm_kms_vulkan/device_caps.cc
             backend/drm_kms_vulkan/vulkan_backing_store.cc
+            backend/drm_kms_vulkan/contiguous_allocator.cc
             backend/drm_kms_vulkan/drm_scanout_target.cc
             backend/drm_kms_vulkan/modifier_format.cc
             backend/drm_kms_egl/scene_layer_source_vk.cc

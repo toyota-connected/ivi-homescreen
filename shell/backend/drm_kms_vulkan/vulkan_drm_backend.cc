@@ -279,9 +279,12 @@ class VkScanoutRing final : public drm::scene::LayerBufferSource {
  public:
   // Import `store`'s dma-buf as a KMS framebuffer and append it as a ring slot.
   // Returns the new slot index, or nullopt if the framebuffer import failed.
+  // @p expected_to_fail suppresses the error log for the setup probe, where a
+  // refusal is a branch rather than a fault; the caller reports it instead.
   std::optional<size_t> AddSlot(const drm::Device& dev,
                                 const drm_kms_vulkan::VulkanBackingStore& store,
-                                uint32_t fourcc) {
+                                uint32_t fourcc,
+                                bool expected_to_fail = false) {
     std::vector<drm::scene::ExternalPlaneInfo> planes;
     for (const auto& pl : store.planes()) {
       drm::scene::ExternalPlaneInfo info{};
@@ -298,12 +301,17 @@ class VkScanoutRing final : public drm::scene::LayerBufferSource {
     auto src = drm::scene::ExternalDmaBufSource::create(
         dev, store.width(), store.height(), fourcc, mod, planes);
     if (!src) {
-      ihs::log::error(
+      const std::string detail = fmt::format(
           "[VulkanDrmBackend] framebuffer import ({}x{} fourcc=0x{:08x} "
           "mod=0x{:016x} planes={} offset={} pitch={}): {}",
           store.width(), store.height(), fourcc, mod, planes.size(),
           planes.empty() ? 0u : planes[0].offset,
           planes.empty() ? 0u : planes[0].pitch, src.error().message());
+      if (expected_to_fail) {
+        ihs::log::debug(detail);
+      } else {
+        ihs::log::error(detail);
+      }
       return std::nullopt;
     }
     slots_.push_back(std::move(src.value()));
@@ -617,6 +625,10 @@ struct VulkanDrmBackend::CompositorState {
   // scanout (simple, universally importable); tiled non-DCC for 90/270 (amdgpu
   // requires a tiled layout to rotate, and rejects DCC + rotation).
   std::vector<uint64_t> scanout_modifiers;
+  // Set only when the display cannot import what the GPU exports, and the
+  // buffers therefore come from a contiguous heap instead. Null means the
+  // ordinary exported path; see the scanout probe in SetupCompositor.
+  std::unique_ptr<drm_kms_vulkan::ContiguousAllocator> contiguous;
 
   // Ring of scanout buffers. The engine cycles through them
   // (avoid_backing_store_cache), rendering into a free slot while KMS scans
@@ -817,12 +829,15 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   state->scene = std::move(scene_exp.value());
 
   // Probe the scanout path once: allocate a mode-sized backing store and try to
-  // import it as a KMS framebuffer. On hardware whose display cannot address
-  // the render GPU's exported buffer (e.g. a split render/display SoC with no
-  // display IOMMU — RPi4 vc4), this fails here, so refuse cleanly now instead
-  // of letting every per-frame CreateBackingStore fail into a black screen. The
-  // probe image and its framebuffer are released immediately (ring before
-  // store, so the framebuffer is gone before the memory it references).
+  // import it as a KMS framebuffer. This is also what chooses between the two
+  // allocation directions, and it lets the hardware answer rather than a driver
+  // allowlist: a display whose scanout engine has no IOMMU cannot address the
+  // render GPU's scattered export, and says so here by failing the import. The
+  // fallback below allocates contiguously instead and has both sides import
+  // that. Doing it once at setup keeps a per-frame CreateBackingStore from
+  // discovering the same thing against a live display. The probe image and its
+  // framebuffer are released immediately (ring before store, so the framebuffer
+  // is gone before the memory it references).
   {
     std::string probe_err;
     auto probe = drm_kms_vulkan::VulkanBackingStore::Create(
@@ -834,12 +849,57 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
       return false;
     }
     if (VkScanoutRing probe_ring;
-        !probe_ring.AddSlot(state->device, *probe, state->fourcc)) {
-      err =
-          "this GPU/display combination cannot zero-copy scan out the Vulkan "
-          "renderer's buffers (KMS framebuffer import failed) — use the GL "
-          "backend (drm_kms_egl) on this hardware";
-      return false;
+        !probe_ring.AddSlot(state->device, *probe, state->fourcc,
+                            /*expected_to_fail=*/true)) {
+      // The display cannot address what the GPU exported. Turn the buffer
+      // around: allocate it from a contiguous heap instead, and have both the
+      // display and the GPU import that. Probed the same way, so the fallback
+      // is only adopted once it has actually scanned in.
+      probe.reset();
+      std::string alloc_err;
+      auto contiguous = drm_kms_vulkan::ContiguousAllocator::Open(alloc_err);
+      if (!contiguous) {
+        err =
+            "the display cannot import the GPU's exported buffers and no "
+            "contiguous dma-heap is available to allocate from instead (" +
+            alloc_err + "); use the GL backend (drm_kms_egl) on this hardware";
+        return false;
+      }
+      std::string imported_err;
+      auto imported = drm_kms_vulkan::VulkanBackingStore::CreateImported(
+          physical_device_, device_, state->width, state->height,
+          VK_FORMAT_B8G8R8A8_UNORM, state->fourcc, *contiguous, imported_err);
+      if (!imported) {
+        err =
+            "the display cannot import the GPU's exported buffers, and the "
+            "contiguous fallback failed to allocate: " +
+            imported_err;
+        return false;
+      }
+      if (VkScanoutRing imported_ring;
+          !imported_ring.AddSlot(state->device, *imported, state->fourcc)) {
+        err =
+            "neither the GPU's exported buffers nor a contiguous heap "
+            "allocation can be scanned out on this display — use the GL "
+            "backend (drm_kms_egl) on this hardware";
+        return false;
+      }
+      ihs::log::info(
+          "[VulkanDrmBackend] the display cannot import the GPU's exported "
+          "buffers; scanning out of the '{}' contiguous heap instead",
+          contiguous->name());
+      // Linear is the only layout a contiguous heap allocation has, so a
+      // rotation that needed a tiled modifier cannot be served this way. 0/180
+      // never did, so only the swapping rotations lose anything here.
+      if (swap) {
+        ihs::log::warn(
+            "[VulkanDrmBackend] rotation {} needs a tiled modifier, which the "
+            "contiguous scanout path cannot provide; the rotated commit will "
+            "fail",
+            rotation_);
+      }
+      state->scanout_modifiers.assign(1, DRM_FORMAT_MOD_LINEAR);
+      state->contiguous = std::move(contiguous);
     }
   }
 
@@ -1070,13 +1130,20 @@ bool VulkanDrmBackend::CreateBackingStoreImpl(
       return false;
     }
     std::string err;
-    // Allocate against the negotiated modifier set chosen in SetupCompositor:
-    // LINEAR when unrotated, a tiled non-DCC modifier for 90/270. The driver
-    // picks one and exports its per-plane layout; AddSlot imports the FB with
-    // store.modifier() so the tiling is honored end to end.
-    auto store = drm_kms_vulkan::VulkanBackingStore::Create(
-        physical_device_, device_, w, h, VK_FORMAT_B8G8R8A8_UNORM, c.fourcc,
-        c.scanout_modifiers, err);
+    // Whichever direction the setup probe settled on. Exported: allocate
+    // against the negotiated modifier set (LINEAR when unrotated, a tiled
+    // non-DCC modifier for 90/270), the driver picks one and reports its
+    // per-plane layout. Imported: one linear buffer from the contiguous heap,
+    // whose layout we state. Either way AddSlot imports the framebuffer with
+    // store.modifier(), so the layout is honored end to end.
+    auto store =
+        c.contiguous
+            ? drm_kms_vulkan::VulkanBackingStore::CreateImported(
+                  physical_device_, device_, w, h, VK_FORMAT_B8G8R8A8_UNORM,
+                  c.fourcc, *c.contiguous, err)
+            : drm_kms_vulkan::VulkanBackingStore::Create(
+                  physical_device_, device_, w, h, VK_FORMAT_B8G8R8A8_UNORM,
+                  c.fourcc, c.scanout_modifiers, err);
     if (!store) {
       ihs::log::error("[VulkanDrmBackend] CreateBackingStore({}x{}): {}", w, h,
                       err);

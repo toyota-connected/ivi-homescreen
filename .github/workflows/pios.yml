@@ -224,9 +224,8 @@ jobs:
         pios: [bookworm, trixie]
         board: [rpi5, rpi4, rpi-zero-2w]
         backend: [wayland-egl, wayland-vulkan, drm-kms-egl, drm-kms-vulkan, software]
-        # drm-kms-vulkan is rpi5-only.
+        # drm-kms-vulkan needs a Vulkan-capable GPU; the Zero 2 W has none.
         exclude:
-          - { board: rpi4, backend: drm-kms-vulkan }
           - { board: rpi-zero-2w, backend: drm-kms-vulkan }
     name: build-${{ matrix.board }}-${{ matrix.pios }}-${{ matrix.backend }}
     steps:

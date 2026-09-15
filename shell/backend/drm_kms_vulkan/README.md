@@ -334,7 +334,7 @@ a follow-on once the negotiated modifier drives allocation in the unrotated path
 | amdgpu — desktop / iGPU (RADV) | one device, unified memory + IOMMU | **Works** — validated, tear-free; scans out LINEAR (DCC advertised, not yet used) |
 | Steam Deck "Galileo" (Van Gogh, RADV) | RDNA2 APU, unified memory + IOMMU | **Works** — validated **end-to-end** (interactive, LINEAR zero-copy, triple-buffered, 1000+ frames). **Rotation** validated at `--drm-rotation 270` (upright landscape, tiled non-DCC scanout) with touchscreen, HW cursor, and trackpad input remapped (see "Rotation" / "Input on a rotated display") |
 | Raspberry Pi 5 | `v3d` (V3D 7.x) → `vc4-drm`, display can address V3D buffers | **Works** — validated, tear-free at 3840×2160; scans out `BROADCOM(VC4_T_TILED)` |
-| Raspberry Pi 4 | `v3d` (V3D 4.2) → `vc4-drm`, **no display IOMMU** | **Fails** — `AddFB` EINVAL (see below) |
+| Raspberry Pi 4 | `v3d` (V3D 4.2) → `vc4-drm`, **no display IOMMU** | **Works** — via the contiguous scanout path (see below); validated at 1280×1440, ~42 fps (renderer-bound, not scanout-bound) |
 | Arduino Uno Q | Adreno 702 via **virtio-gpu / gfxstream** (virtualized) → `msm_dpu` | **Fails** — virtgpu fails resource allocation under DRM master; Vulkan falls back to llvmpipe (see below) |
 | NanoPC-T6 (rk3588) | Mali-G610 (blob, Vulkan 1.3) → `rockchip-drm` (vop2) | **Refuses** — vop2 planes want AFBC (on their Cluster/overlay planes); the Mali-blob Vulkan exports only `LINEAR`, so no common modifier |
 | BeaglePlay (AM625) | PowerVR AXE-1-16M (Mesa `pvr`, Vulkan 1.2) → `tidss` display | **Refuses** — Mesa `pvr` does not implement `VK_EXT_image_drm_format_modifier` (nor `synchronization2`), so there is no modifier image to export for scanout |
@@ -354,13 +354,14 @@ depends on the **display** side:
 - **Pi 5 (works).** The VideoCore VII display path can address the
   V3D-allocated buffer, so importing the V3D-exported dma-buf as a `vc4`
   framebuffer succeeds and it presents at 4K.
-- **Pi 4 (fails).** The `vc4` display HVS has **no IOMMU**; it DMAs the
-  framebuffer by physical address and can only scan **physically contiguous
-  (CMA)** memory. Registering the scattered V3D buffer as a `vc4` framebuffer
-  (`drmModeAddFB2WithModifiers`) returns **EINVAL**. This is independent of
-  resolution (confirmed at 3840×2160 and 1920×1080) and of the format/modifier
-  (`vc4` advertises `LINEAR` `XRGB8888` and it is negotiated correctly) — the
-  buffer's physical layout simply is not scannable.
+- **Pi 4 (works, by turning the buffer around).** The `vc4` display HVS has
+  **no IOMMU**; it DMAs the framebuffer by physical address and can only scan
+  **physically contiguous (CMA)** memory. Registering the scattered V3D buffer
+  as a `vc4` framebuffer (`drmModeAddFB2WithModifiers`) returns **EINVAL**, at
+  any resolution and regardless of the format/modifier (`vc4` advertises
+  `LINEAR` `XRGB8888` and it is negotiated correctly) — the buffer's physical
+  layout simply is not scannable. The backend detects that and allocates from a
+  contiguous heap instead; see "Contiguous scanout" below.
 - **NanoPC-T6 / rk3588 (refuses).** A second failure mode, independent of
   contiguity: the `rockchip-drm` vop2 display *has* an IOMMU, but its planes
   want a tiled/compressed **AFBC** modifier and reject the `LINEAR` import at
@@ -382,20 +383,57 @@ depends on the **display** side:
   A-Series AXE-1-16M missing VK_EXT_image_drm_format_modifier`. The GL backend
   (`drm_kms_egl`) renders fine on this board.
 
-**On the Pi 4, the `cma=` boot setting does not fix this.** CMA *size* governs
-how much contiguous memory `vc4` can allocate for its **own** buffers; it has no
-effect on where V3D allocates a `VkImage`. V3D never uses CMA (it has an MMU),
-so its buffers are non-contiguous regardless of CMA capacity — the mismatch is
-the allocation **source/layout**, not the CMA **size**.
+**The `cma=` boot setting is not what fixes this.** CMA *size* governs how much
+contiguous memory is available to allocate from; it has no effect on where V3D
+allocates a `VkImage`. V3D never uses CMA (it has an MMU), so its buffers are
+non-contiguous regardless of CMA capacity — the mismatch is the allocation
+**source/layout**, not the CMA **size**. Raising `cma=` only matters once the
+contiguous path below is in use and the ring needs the room.
 
-Making the export-based path work on a no-display-IOMMU SoC like the Pi 4 would
-require inverting the buffer ownership: allocate the scanout buffer from a
-**contiguous source** the display can scan (a GBM BO with `GBM_BO_USE_SCANOUT`,
-or the kernel CMA dma-buf heap `/dev/dma_heap/linux,cma`) and **import** it into
-the Vulkan driver via `VK_EXT_external_memory_dma_buf`, rendering into the
-imported buffer. That is an import-based allocator, not implemented here and not
-a boot-config change. For such SoCs the GL backend (`drm_kms_egl`, which uses
-GBM scanout buffers) is the working path today.
+### Contiguous scanout
+
+When the display cannot import what the GPU exports, the backend inverts the
+buffer ownership: it allocates the scanout buffer from a **contiguous dma-heap**
+(`/dev/dma_heap/linux,cma` or whatever the board calls its CMA heap) and
+**imports that one dma-buf into both sides** — into KMS as a framebuffer, and
+into Vulkan as an explicit-modifier `VkImage` via
+`VK_EXT_external_memory_dma_buf`. The engine then renders into the imported
+image and the display scans the same memory. Still zero-copy; only the direction
+of the hand-off changes.
+
+**How it is chosen.** Not by a driver allowlist — the hardware answers for
+itself. Compositor setup already allocates one mode-sized backing store and
+tries to import it as a KMS framebuffer, to fail cleanly rather than discover a
+problem per-frame. That probe is the predicate: if it fails, the contiguous path
+is tried and adopted only if *its* probe scans in. A board where the ordinary
+exported path works never allocates from a heap and is unaffected. The choice is
+logged:
+
+```
+[VulkanDrmBackend] the display cannot import the GPU's exported buffers;
+                   scanning out of the 'linux,cma' contiguous heap instead
+```
+
+**Buffers are deliberately over-allocated by one page.** An importing driver may
+add a read-ahead allowance to the size it demands of a foreign dma-buf and
+refuse anything smaller. Mesa's `v3dv` does: `v3dv_AllocateMemory` rounds the
+request up by `V3D_TFU_READAHEAD_SIZE` and `device_import_bo` then rejects any
+fd shorter than that, so a buffer sized exactly to the framebuffer — which is
+already page-aligned — is always one page short and fails with
+`VK_ERROR_INVALID_EXTERNAL_HANDLE`. A whole page of slack covers any such
+allowance without encoding one driver's constant. KMS does not care that the
+buffer outlasts the framebuffer.
+
+**Limits.** A contiguous allocation is linear, so a 90/270 rotation that needs a
+tiled modifier cannot be served this way (the backend warns and the rotated
+commit fails). The ring can grow to six full-screen buffers, so CMA capacity
+bounds it; exhaustion surfaces as a named allocation failure, not a black
+screen. `IVI_DRMVK_HEAP=<name>` pins a specific heap — a heap name, not a path
+— and is not second-guessed if it cannot be opened.
+
+**What it is not.** It is not a fix for a display that refuses the *modifier*
+(rk3588 below) or for a GPU with no modifier extension (AM625 below). Those
+fail for reasons contiguity does not address, and still refuse cleanly.
 
 ### Vulkan version and virtualized GPUs
 

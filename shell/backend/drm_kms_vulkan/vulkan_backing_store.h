@@ -25,6 +25,8 @@
 
 #include <shell/platform/embedder/embedder.h>
 
+#include "contiguous_allocator.h"
+
 namespace drm_kms_vulkan {
 
 // Per-memory-plane layout of an exported modifier image, used to import it as a
@@ -62,6 +64,25 @@ class VulkanBackingStore {
       VkFormat vk_format,
       uint32_t drm_fourcc,
       const std::vector<uint64_t>& allowed_modifiers,
+      std::string& err);
+
+  // The reverse direction, for a display that cannot import what the GPU
+  // exports: @p allocator provides one contiguous dma-buf, and the image is
+  // built over it instead of owning memory of its own. Always linear -- a
+  // contiguous heap has no tiling to describe, and the layout is stated
+  // explicitly rather than chosen by the driver, so both importers agree on it.
+  //
+  // The buffer is deliberately allocated larger than the framebuffer needs; see
+  // the padding note at the definition. On failure returns nullptr and sets
+  // @p err.
+  static std::unique_ptr<VulkanBackingStore> CreateImported(
+      VkPhysicalDevice physical_device,
+      VkDevice device,
+      uint32_t width,
+      uint32_t height,
+      VkFormat vk_format,
+      uint32_t drm_fourcc,
+      const ContiguousAllocator& allocator,
       std::string& err);
 
   ~VulkanBackingStore();

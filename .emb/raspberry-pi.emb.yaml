@@ -9,8 +9,8 @@
 #   emb cross raspberry-pi.emb.yaml --target rpi5-bookworm --publish --image <reg>
 #   emb cross raspberry-pi.emb.yaml --target rpi5-bookworm --build --backend drm-kms-egl -w /emb
 #
-# Backends: rpi5 builds all five (incl. drm-kms-vulkan); rpi4 and zero-2w build
-# the four without it. Plugins on (PLUGINS_DIR=../ivi-homescreen-plugins/plugins).
+# Backends: rpi5 and rpi4 build all five (incl. drm-kms-vulkan); zero-2w builds
+# the four without it, having no Vulkan-capable GPU. Plugins on (PLUGINS_DIR=../ivi-homescreen-plugins/plugins).
 # bookworm cross-builds libdisplay-info 0.2.0 (ships 0.1.1; drm-cxx needs >=0.2.0)
 # and omits apt libdisplay-info-dev so the static .a isn't shadowed; trixie ships
 # 0.2.0 and adds it. Vulkan headers are vendored, so neither OS stages them.
@@ -96,7 +96,7 @@ cross:
           # FlutterCompositor API compiles out and native/platform-view
           # content never reaches a KMS plane. (drm-kms-vulkan sets it too.)
           BUILD_COMPOSITOR: 'ON'
-        drm-kms-vulkan:
+        drm-kms-vulkan: &be_drm_kms_vulkan
           BUILD_BACKEND_WAYLAND_EGL: 'OFF'
           BUILD_BACKEND_WAYLAND_VULKAN: 'OFF'
           BUILD_BACKEND_DRM_KMS_EGL: 'OFF'
@@ -125,9 +125,28 @@ cross:
       host_dev_packages: *host_dev_pugixml
       backends: *backends_rpi5
 
-    # -- Raspberry Pi 4 (Cortex-A72) — four backends --------------------
+    # -- Raspberry Pi 4 (Cortex-A72) — five backends --------------------
     rpi4-bookworm:
       extends: rpi4-bookworm
+      sysroot: {dev_packages: *proj_packages_bookworm}
+      augment: *augment_bookworm
+      host_dev_packages: *host_dev_pugixml
+      backends: &backends_five
+        wayland-egl: *be_wayland_egl
+        wayland-vulkan: *be_wayland_vulkan
+        drm-kms-egl: *be_drm_kms_egl
+        drm-kms-vulkan: *be_drm_kms_vulkan
+        software: *be_software
+    rpi4-trixie:
+      extends: rpi4-trixie
+      sysroot: {dev_packages: *proj_packages_trixie}
+      augment: [*augment_scanner]
+      host_dev_packages: *host_dev_pugixml
+      backends: *backends_five
+
+    # -- Raspberry Pi Zero 2 W (Cortex-A53) — four backends -------------
+    rpi-zero-2w-bookworm:
+      extends: rpi-zero-2w-bookworm
       sysroot: {dev_packages: *proj_packages_bookworm}
       augment: *augment_bookworm
       host_dev_packages: *host_dev_pugixml
@@ -136,20 +155,6 @@ cross:
         wayland-vulkan: *be_wayland_vulkan
         drm-kms-egl: *be_drm_kms_egl
         software: *be_software
-    rpi4-trixie:
-      extends: rpi4-trixie
-      sysroot: {dev_packages: *proj_packages_trixie}
-      augment: [*augment_scanner]
-      host_dev_packages: *host_dev_pugixml
-      backends: *backends_four
-
-    # -- Raspberry Pi Zero 2 W (Cortex-A53) — four backends -------------
-    rpi-zero-2w-bookworm:
-      extends: rpi-zero-2w-bookworm
-      sysroot: {dev_packages: *proj_packages_bookworm}
-      augment: *augment_bookworm
-      host_dev_packages: *host_dev_pugixml
-      backends: *backends_four
     rpi-zero-2w-trixie:
       extends: rpi-zero-2w-trixie
       sysroot: {dev_packages: *proj_packages_trixie}
