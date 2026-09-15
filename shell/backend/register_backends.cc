@@ -423,6 +423,10 @@ std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
       fullscreen ? std::optional<uint32_t>{} : config.view.height,
       config.debug_backend.value_or(false),
   };
+  // Clamp rather than reject: the present path only knows 1 and 2, and a
+  // typo in a board config should not refuse to start a shell.
+  cfg.pipeline_depth = std::min<uint32_t>(
+      2, std::max<uint32_t>(1, config.view.drm_pipeline_depth.value_or(1)));
   cfg.disable_cursor = config.disable_cursor.value_or(false);
   cfg.cursor_theme = config.cursor_theme;
   // Treat empty TOML/env/CLI string as "unset" — operator-friendly:

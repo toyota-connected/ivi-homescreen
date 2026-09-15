@@ -96,6 +96,26 @@ struct DrmConfig {
   std::optional<uint32_t> height;
   bool debug_backend{false};
 
+  // Frames the present path allows in flight (--drm-pipeline-depth).
+  //
+  // 1 (default) is the historical behavior: Present() waits out the pending
+  // page flip before it swaps, so the raster thread is idle for whatever is
+  // left of the current scanout. Measured on a 1280x720@60 panel, that wait
+  // is ~93% of Present -- wait_flip ~13ms against a ~0.9ms swap -- which
+  // leaves the frame no headroom: work that runs a millisecond long misses
+  // the vsync and repeats a frame. 7.3% of frame intervals came back at two
+  // periods.
+  //
+  // 2 queues the finished frame instead of blocking on the flip, and the
+  // flip-complete handler commits it. The engine already hands us frame N+1
+  // while flip N is in flight (the vulkan backend's ring relies on the same
+  // thing), so this is the EGL path catching up to it. KMS still takes one
+  // flip per CRTC at a time; what changes is that the raster thread stops
+  // waiting for it. Costs up to one frame of latency and needs a third gbm
+  // buffer -- with only two, eglSwapBuffers blocks for a free one and the
+  // behavior degrades to depth 1 rather than breaking.
+  uint32_t pipeline_depth{1};
+
   // Skip HW cursor creation entirely (the global --disable-cursor /
   // disable_cursor config). Pointer events still reach Flutter; there is
   // just no DRM cursor sprite. Equivalent to the IVI_DRM_CURSOR=0 env.
@@ -439,6 +459,20 @@ class DrmBackend : public Backend, public IFlipSink {
   EGLContext egl_resource_context_ = EGL_NO_CONTEXT;
   EGLContext egl_texture_context_ = EGL_NO_CONTEXT;
   EGLSurface egl_surface_ = EGL_NO_SURFACE;
+
+  // Release a queued depth-2 frame that will never reach the CRTC (teardown,
+  // or a VT switch-out whose flip completion never arrives).
+  void DropQueuedFlip();
+
+  // Depth-2 present queue: a frame that is swapped, locked and has an FB, but
+  // could not be flipped because the previous flip was still in flight.
+  // Written by the raster thread in Present(), read and cleared by the
+  // flip-complete handler on the platform thread, so both sides take the
+  // mutex. Null when nothing is queued, which is the only state depth 1 ever
+  // sees.
+  std::mutex queued_flip_mutex_;
+  gbm_bo* queued_bo_ = nullptr;
+  uint32_t queued_fb_ = 0;
 
   bool mode_set_ = false;
 

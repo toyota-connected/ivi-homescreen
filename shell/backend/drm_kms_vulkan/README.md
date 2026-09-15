@@ -254,7 +254,13 @@ selected per view through the backend registry. `BUILD_COMPOSITOR=ON` is
 
 ## Running
 
-The backend needs **DRM master** on the scanout device.
+The backend needs **DRM master** on the scanout device. On an integrated
+system it also needs the scheduling policy of the compositor it is displacing,
+or it loses frames to preemption rather than to its own work — see
+[docs/drm-kms-scheduling.md](../../../docs/drm-kms-scheduling.md). No pacing
+flag is needed here: the raster thread already runs ahead of scanout, because
+the present path renders into a ring of slots and waits for the previous flip
+only at commit.
 
 - `--drm-device <node>` — the KMS device with the connectors (the display
   controller, e.g. `card1` for vc4 on a Pi, not the render-only `v3d` node).

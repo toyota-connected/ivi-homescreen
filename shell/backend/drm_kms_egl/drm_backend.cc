@@ -379,7 +379,9 @@ DrmBackend::~DrmBackend() {
   // engine destructs.
 
   // Let any in-flight page flip land so we don't free a BO still being
-  // scanned out.
+  // scanned out. Drop the depth-2 queue first: its completion handler would
+  // otherwise commit a frame while we are tearing the surface down.
+  DropQueuedFlip();
   (void)WaitForPendingFlip();
 
   // Release the GL-composited cursor's GL objects while the context is current.
@@ -1274,8 +1276,10 @@ void DrmBackend::OnSessionPaused() {
 #endif
   // Drop the legacy-path flip latch too. PAGE_FLIP_EVENT won't come for
   // a commit submitted before the revoke; the next Present after resume
-  // will start a fresh flip cycle.
+  // will start a fresh flip cycle. Same for a depth-2 queued frame: the
+  // handler that would have committed it never runs.
   flip_pending_.store(false, std::memory_order_release);
+  DropQueuedFlip();
   if (drm_display_ != nullptr) {
     drm_display_->WakeFlipDrain();  // nothing will arrive; unpark the waiter
   }
@@ -1337,6 +1341,28 @@ void DrmBackend::OnSessionResumed(const int new_fd) {
   }
 }
 
+void DrmBackend::DropQueuedFlip() {
+  // Release a depth-2 frame that will never be committed: teardown, or a VT
+  // switch-out whose flip completion never arrives. The gbm_surface only has
+  // a few buffers, so one leaked here starves the swap for good.
+  gbm_bo* bo = nullptr;
+  uint32_t fb = 0;
+  {
+    std::lock_guard<std::mutex> lk(queued_flip_mutex_);
+    bo = queued_bo_;
+    fb = queued_fb_;
+    queued_bo_ = nullptr;
+    queued_fb_ = 0;
+  }
+  if (bo == nullptr) {
+    return;
+  }
+  if (fb != 0 && drm_dev_ != nullptr) {
+    drmModeRmFB(drm_dev_->fd(), fb);
+  }
+  gbm_surface_release_buffer(gbm_surface_, bo);
+}
+
 void DrmBackend::OnLegacyFlipComplete() {
   // The page flip just promoted pending → scanout. What was scanned out
   // before is now safe to release.
@@ -1351,6 +1377,34 @@ void DrmBackend::OnLegacyFlipComplete() {
   pending_bo_ = nullptr;
   pending_fb_ = 0;
   flip_pending_.store(false, std::memory_order_release);
+  // Depth 2: a frame finished during that scanout and is waiting for the
+  // CRTC. Commit it here, which is the earliest KMS will take it. Nothing is
+  // queued at depth 1, so this costs one uncontended lock.
+  gbm_bo* queued_bo = nullptr;
+  uint32_t queued_fb = 0;
+  {
+    std::lock_guard<std::mutex> lk(queued_flip_mutex_);
+    queued_bo = queued_bo_;
+    queued_fb = queued_fb_;
+    queued_bo_ = nullptr;
+    queued_fb_ = 0;
+  }
+  if (queued_bo != nullptr) {
+    if (drmModePageFlip(drm_dev_->fd(), crtc_id_, queued_fb,
+                        DRM_MODE_PAGE_FLIP_EVENT,
+                        static_cast<IFlipSink*>(this)) == 0) {
+      pending_bo_ = queued_bo;
+      pending_fb_ = queued_fb;
+      flip_pending_.store(true, std::memory_order_release);
+    } else {
+      // The frame is unpresentable; drop it rather than leak the buffer, and
+      // leave flip_pending_ clear so the next Present commits directly.
+      ihs::log::warn("[DrmBackend] queued drmModePageFlip: {}",
+                     std::strerror(errno));
+      drmModeRmFB(drm_dev_->fd(), queued_fb);
+      gbm_surface_release_buffer(gbm_surface_, queued_bo);
+    }
+  }
   // The reader thread may have drained this event while the rasterizer was
   // entering its poll. Wake it rather than let it wait out the budget (#367).
   if (drm_display_ != nullptr) {
@@ -1663,7 +1717,44 @@ bool DrmBackend::Present() {
     pending_bo_ = nullptr;
   }
   MaybeCaptureSnapshot();
-  if (!WaitForPendingFlip()) {
+  // Present-phase breakdown, IVI_DRM_PRESENT_TRACE=1. This is how you decide
+  // whether --drm-pipeline-depth needs raising: it splits the flip wait from
+  // the work. See "Choosing a pipeline depth" in the backend README.
+  static const bool present_trace = []() {
+    const char* env = std::getenv("IVI_DRM_PRESENT_TRACE");
+    return env != nullptr && std::string_view(env) == "1";
+  }();
+  const auto now_us = []() {
+    return std::chrono::duration_cast<std::chrono::microseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+  };
+  const int64_t t_enter = present_trace ? now_us() : 0;
+  const bool pipelined = cfg_.pipeline_depth >= 2;
+  if (pipelined) {
+    // Backpressure. With a frame already queued we are holding three buffers
+    // -- scanning, flip-pending, and queued -- and the swap below would ask
+    // the pool for a fourth. Mesa's gbm blocks for one; vendor allocators do
+    // not all agree, and at least one returns success from eglSwapBuffers and
+    // then has no front buffer to hand back ("No Front BO found"), which
+    // surfaces as a failed present rather than a wait. Waiting here bounds us
+    // at three and keeps the swap on a pool that can serve it. The wait is
+    // short: the flip it waits on is already in flight, and its completion
+    // handler commits the queued frame.
+    bool have_queued = false;
+    {
+      std::lock_guard<std::mutex> lk(queued_flip_mutex_);
+      have_queued = queued_bo_ != nullptr;
+    }
+    if (have_queued && !WaitForPendingFlip()) {
+      return false;
+    }
+  }
+  // Depth 1 blocks here until the pending flip lands. Depth 2 does not: the
+  // frame is swapped and queued, and the flip-complete handler commits it.
+  // The wait is ~93% of Present at depth 1, and it is the whole of the
+  // frame's headroom.
+  if (!pipelined && !WaitForPendingFlip()) {
     return false;
   }
 
@@ -1680,10 +1771,30 @@ bool DrmBackend::Present() {
   MaybeRenderHud(nullptr, 0);
 #endif
 
+  const int64_t t_waited = present_trace ? now_us() : 0;
   if (!eglSwapBuffers(egl_display_, egl_surface_)) {
     ihs::log::error("[DrmBackend] eglSwapBuffers: 0x{:x}", eglGetError());
     return false;
   }
+  const int64_t t_swapped = present_trace ? now_us() : 0;
+  // Logged every 60th frame (about once a second at 60Hz) so the trace can be
+  // left on during a real run. `how` distinguishes a frame that reached the
+  // CRTC from one handed to the flip handler, which is the depth-2 path.
+  const auto trace_present = [&](const char* how) {
+    if (!present_trace) {
+      return;
+    }
+    static std::atomic<uint64_t> n{0};
+    if ((n.fetch_add(1, std::memory_order_relaxed) % 60) != 0) {
+      return;
+    }
+    const int64_t t_done = now_us();
+    ihs::log::info(
+        "[DrmBackend] present({}): wait_flip={}us swap={}us rest={}us "
+        "total={}us",
+        how, t_waited - t_enter, t_swapped - t_waited, t_done - t_swapped,
+        t_done - t_enter);
+  };
 
   gbm_bo* next_bo = gbm_surface_lock_front_buffer(gbm_surface_);
   if (!next_bo) {
@@ -1722,6 +1833,32 @@ bool DrmBackend::Present() {
     return true;
   }
 
+  if (pipelined) {
+    // A flip is still in flight, so KMS will not take another. Hand the frame
+    // to the flip-complete handler and return -- this is the whole point of
+    // depth 2. If a queued frame is already waiting, the engine has produced
+    // two frames inside one scanout; drop back to waiting so we never hold
+    // more than one, which also bounds the buffers we keep locked.
+    bool queued = false;
+    {
+      std::lock_guard<std::mutex> lk(queued_flip_mutex_);
+      if (flip_pending_.load(std::memory_order_acquire) &&
+          queued_bo_ == nullptr) {
+        queued_bo_ = next_bo;
+        queued_fb_ = next_fb;
+        queued = true;
+      }
+    }
+    if (queued) {
+      trace_present("queued");
+      return true;
+    }
+    if (flip_pending_.load(std::memory_order_acquire) &&
+        !WaitForPendingFlip()) {
+      return false;
+    }
+  }
+
   if (cfg_.debug_backend) {
     flip_submit_ns_ = LibFlutterEngine->GetCurrentTime();
   }
@@ -1739,6 +1876,7 @@ bool DrmBackend::Present() {
   pending_bo_ = next_bo;
   pending_fb_ = next_fb;
   flip_pending_.store(true, std::memory_order_release);
+  trace_present("flipped");
   return true;
 }
 

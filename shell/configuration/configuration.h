@@ -82,6 +82,12 @@ class Configuration {
       std::optional<double> pixel_ratio;
       std::optional<uint32_t> ivi_surface_id;
       std::optional<std::string> drm_device;
+      // Frames the DRM present path keeps in flight (--drm-pipeline-depth).
+      // 1 = wait out the pending page flip before swapping (default,
+      // lowest latency); 2 = queue the finished frame and let the
+      // flip-complete handler commit it, which is what gives the raster
+      // thread a frame of headroom.
+      std::optional<uint32_t> drm_pipeline_depth;
 
       // [view.engine] merge_render_platform: run the engine's raster thread on
       // the platform thread (one FlutterCustomTaskRunners identifier for both).
