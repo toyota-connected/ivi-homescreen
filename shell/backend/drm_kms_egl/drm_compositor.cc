@@ -3088,9 +3088,25 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       }
       return false;
     }
-    ihs::log::warn("[DrmCompositor] LayerScene::test: {}; routing through GL",
-                   test.error().message());
+    // Latch, so a rejection that persists costs one line rather than one a
+    // frame -- 574 in a ten second run on hardware that rejects the scene's
+    // plane choice, which buries everything else in the log. Paired with the
+    // resume line below, the pair also shows how the rejection behaves: on
+    // that hardware the two alternate, which is what revealed the scene was
+    // retrying a different plane each frame rather than settling.
+    if (!scene_test_rejected_) {
+      scene_test_rejected_ = true;
+      ihs::log::warn(
+          "[DrmCompositor] LayerScene::test: {}; routing through GL "
+          "(logged once until it succeeds again)",
+          test.error().message());
+    }
     return PresentViaGlFallback(layers, layer_count);
+  }
+  if (scene_test_rejected_) {
+    scene_test_rejected_ = false;
+    ihs::log::info(
+        "[DrmCompositor] LayerScene::test accepted again; scene path resumed");
   }
   for (const auto& p : test->placements) {
     if (p.placement == drm::scene::LayerPlacement::Composited ||

@@ -626,6 +626,9 @@ class DrmCompositor : public IFlipSink {
   // where overlays support rotation but primary doesn't can still
   // benefit on the layers where the allocator can use an overlay.
   bool any_plane_supports_reflect_y_{false};
+  // Set the first time an atomic scene test is rejected, so the per-frame
+  // warning is logged once rather than every frame; cleared when one succeeds.
+  bool scene_test_rejected_{false};
 
   // Probed once in InitPlaneAllocator: true iff the PRIMARY plane's
   // rotation bitmask includes REFLECT_Y. When false but
