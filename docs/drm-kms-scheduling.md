@@ -99,9 +99,10 @@ not being denied CPU time overall, it was being denied it *on time*.
 Real-time priority stops the shell from being preempted; it does not create
 room in the frame. If the present path serializes the raster thread against
 scanout, priority barely helps, because the thread is blocked rather than
-runnable. Fix the pacing first (`--drm-pipeline-depth 2` on `drm_kms_egl`;
-`drm_kms_vulkan` already pipelines through its slot ring), then raise the
-priority. In the measurements above, pacing took dropped frames from 7.34% to
+runnable. Fix the pacing first (`--drm-pipeline-depth 2` on `drm_kms_egl`,
+which applies only where the legacy present path drives scanout — the
+`drm_kms_egl` README says how to tell; `drm_kms_vulkan` already pipelines
+through its slot ring), then raise the priority. In the measurements above, pacing took dropped frames from 7.34% to
 0.11% and priority took them from 0.11% to effectively zero — in that order.
 
 ## Watch the deadline, not the frame rate
