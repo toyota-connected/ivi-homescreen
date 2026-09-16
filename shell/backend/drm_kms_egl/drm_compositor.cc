@@ -858,6 +858,20 @@ void DrmCompositor::EnsureGlCapsProbed() {
     ihs::log::info(
         "[DrmCompositor] plane compositor disabled by probe; GL path");
   }
+
+  // pipeline_depth is read only by DrmBackend::Present(), which runs only
+  // when the plane path is not driving scanout. Asking for depth 2 here is
+  // not an error, but it does nothing until the plane path falls back, and
+  // IVI_DRM_PRESENT_TRACE stays empty for the same reason. Say so once
+  // rather than leave the flag and its own diagnostic both looking broken.
+  if (planes_available_ && backend_->cfg_.pipeline_depth >= 2) {
+    ihs::log::warn(
+        "[DrmCompositor] --drm-pipeline-depth={} does not apply while the "
+        "plane path owns scanout; it takes effect only if the plane path "
+        "falls back to GL composite",
+        backend_->cfg_.pipeline_depth);
+  }
+
   gl_caps_probed_ = true;
 }
 

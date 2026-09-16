@@ -314,7 +314,7 @@ Typical first-run log lines worth reading:
 | `--drm-overlay-planes=auto\|yes\|no` | Disable overlay-plane scanout |
 | `--drm-explicit-sync=auto\|yes\|no` | Reserved knob; not consumed today (no per-frame fence producer) |
 | `--drm-async-flip=auto\|yes\|no` | DRM_MODE_PAGE_FLIP_ASYNC for tearing updates |
-| `--drm-pipeline-depth=1\|2` | Frames in flight; `2` gives the raster thread a frame of headroom (see [Frame pacing](#frame-pacing)) |
+| `--drm-pipeline-depth=1\|2` | Frames in flight; `2` gives the raster thread a frame of headroom. Only applies when the legacy present path drives scanout — see [Choosing a pipeline depth](#choosing-a-pipeline-depth) |
 | `-f` / `--fullscreen` | Drive panel at preferred mode (clears explicit w/h) |
 | `--debug-backend` | Verbose per-frame plane assignment log |
 
@@ -324,7 +324,9 @@ Every `--drm-*` flag has a `HOMESCREEN_DRM_*` env-var equivalent and a
 ### Frame pacing
 
 `--drm-pipeline-depth` decides whether the raster thread waits for the page
-flip.
+flip — on the legacy present path. It has no effect while the plane compositor
+is driving scanout; see [Choosing a pipeline depth](#choosing-a-pipeline-depth)
+for when that is and how to tell.
 
 At depth **1** (the default) `Present()` calls `WaitForPendingFlip()` before it
 swaps, so the raster thread sits idle for whatever is left of the current
@@ -369,6 +371,27 @@ Two things to know before turning it on:
 
 ### Choosing a pipeline depth
 
+**First: the flag only applies when the legacy present path is driving
+scanout.** `--drm-pipeline-depth` is read in exactly one place,
+`DrmBackend::Present()`, and that function runs only when the plane compositor
+is not active. In a `BUILD_COMPOSITOR=ON` build — which is every shipping one —
+`DrmCompositor` commits atomically through its own flip wait and has no depth
+concept, so the flag changes nothing and `IVI_DRM_PRESENT_TRACE` prints
+nothing. An empty trace means the plane path is in use, not that the
+diagnostic is broken. Setup says so once when you ask for depth 2 anyway:
+
+```
+[DrmCompositor] --drm-pipeline-depth=2 does not apply while the plane path
+owns scanout; it takes effect only if the plane path falls back to GL composite
+```
+
+The depth is live in two cases: a `BUILD_COMPOSITOR=OFF` build, and a
+compositor build whose plane path has fallen back to GL composite. Neither
+`--drm-overlay-planes no` nor `IVI_DRM_NO_DIRECT_SCANOUT=1` moves present off
+the scene — both still construct it.
+
+The rest of this section assumes one of those two cases.
+
 The flag takes 1 or 2; anything else is clamped. The decision is not a guess —
 `IVI_DRM_PRESENT_TRACE=1` logs the split every 60th frame, and the split is the
 answer:
@@ -406,8 +429,23 @@ values: anything near two refresh periods is a repeated frame.
 `swap + rest` at depth 2 — that is the real per-frame cost with no wait mixed
 in. If its p99 sits well inside the refresh period, depth 1 has enough slack
 and costs you nothing; measured here it was ~0.8 ms against 16.67 ms. Depth 2
-adds up to a frame of latency, so a view whose job is tracking touch or
-displaying a camera wants depth 1 even when it could afford 2.
+adds latency, so a view whose job is tracking touch or displaying a camera
+wants depth 1 even when it could afford 2.
+
+What that latency costs is measurable. On a workload that drops no frames at
+either depth, 1280x720@60 under a synthetic 125 Hz drag, two runs per arm:
+
+| | motion-to-photon p50 | p95 | p99 | fps | dropped |
+|---|---|---|---|---|---|
+| depth 1 | 23.5 ms | 31.5 | 32.5 | 60.0 | 0 |
+| depth 2 | 24.5 ms | 32.5 | 33.5 | 60.0 | 0 |
+
+About +1 ms across the distribution, not the full frame the upper bound
+suggests — depth 2 queues only when a flip is already pending, so it adds a
+frame opportunistically rather than unconditionally. The point stands either
+way: when nothing is dropping, depth 2 is a latency tax with no upside. It
+pays where depth 1 actually drops frames, which is the 7.34% -> 0.11% case
+above.
 
 **Depth 2 is the ceiling, and not always reachable.** KMS takes one flip per
 CRTC, so a third queued frame has nowhere to go; the depth is capped at 2 by
@@ -431,7 +469,7 @@ Pacing and scheduling are separate problems and both have to be right — see
 | `IVI_DRM_VSYNC` | (on) | `0` falls back from Flutter `vsync_callback` (PAGE_FLIP_EVENT-locked) to the engine's internal wall-clock scheduler |
 | `IVI_DRM_RT` | (off) | Set to anything non-empty to enable per-thread priority elevation via Flutter's `thread_priority_setter` — rasterizer gets `SCHED_FIFO` prio 2, UI thread `SCHED_FIFO` prio 1, background tasks `SCHED_BATCH`. The deliberately low prios let amdgpu / ksoftirqd kthreads preempt the rasterizer during `glFinish` (bumping to prio 10 regressed cadence from 98% → 41% on this hardware). The platform task runner thread (asio flip monitor) is covered too. DrmSession / DrmSeat stay at default. |
 | `IVI_DRM_RASTER_DRAIN` | (on) | `0` stops the rasterizer draining its own `PAGE_FLIP_EVENT` in `WaitForPendingFlip`; it then waits on the flag in slices and the card's reader thread delivers the completion. The drain exists because that reader is unprioritized and can be CPU-starved under heavy raster load, leaving `flip_pending_` set so the next `drmModePageFlip` returns `EBUSY`. Turning it off also makes `stage_cursor=auto` revert to staging on nvidia-drm. |
-| `IVI_DRM_PRESENT_TRACE` | unset | Log the present-phase split (`wait_flip` / `swap` / `rest`) every 60th frame; how you size `--drm-pipeline-depth` |
+| `IVI_DRM_PRESENT_TRACE` | unset | Log the present-phase split (`wait_flip` / `swap` / `rest`) every 60th frame; how you size `--drm-pipeline-depth`. Prints nothing while the plane compositor drives scanout, because the traced path does not run |
 | `IVI_DRM_FLIP_TRACE` | (off) | `1` logs every PAGE_FLIP_EVENT (frame-cadence diagnostic) |
 | `IVI_DRM_PROFILE` | (off) | Anything non-empty enables per-frame composite profiling. Every 60 frames, `PresentFramed` / `PresentLayers` log a line: `framed/planes profile (n=60): wait=Xms compose=Yms commit=Zms total=Wms` with both per-stage mean and max. Useful for diagnosing where the per-frame budget goes. |
 | `IVI_DRM_NO_DIRECT_SCANOUT` | (off) | `1` forces GL composite even when REFLECT_Y is available. Diagnostic — bisects visual artifacts that may live on the direct-scanout path. |
