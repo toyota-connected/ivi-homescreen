@@ -2747,7 +2747,14 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
         //
         // With no overlay planes (e.g. software vkms) GL composition of the
         // surface's texture is the only way to show it, so fall back.
-        if (planes_available_) {
+        //
+        // Unless the view has shown content before. Then this is not a
+        // producer waiting to start, it is an idle one whose last frame was
+        // consumed -- by a GL fallback, or by an import that failed after
+        // GetDmabuf had handed the frame over. Skipping it there blanks the
+        // view until the producer submits again, which for a static producer
+        // is never, so composite what it already has.
+        if (planes_available_ && !(surface && surface->HasContent())) {
           continue;
         }
         return PresentViaGlFallback(layers, layer_count);
@@ -2942,6 +2949,9 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
               pool->format().drm_fourcc == db.fourcc &&
               pool->format().modifier == db.modifier) {
             submit_pv_pool(pool, db);
+            if (fl.pv_surface) {
+              fl.pv_surface->AckDmabufScanout(db.buffer_id);
+            }
           } else {
             // The source isn't our pool, or the frame's buffer geometry changed
             // -- a real ABR rendition switch, or subpixel resize jitter on the
@@ -2958,6 +2968,9 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
               if (scene_->replace_source(layer->handle(),
                                          std::move(new_pool.value()))) {
                 submit_pv_pool(np_raw, db);
+                if (fl.pv_surface) {
+                  fl.pv_surface->AckDmabufScanout(db.buffer_id);
+                }
                 swapped = true;
               }
             }
@@ -2970,9 +2983,12 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
               scene_pv_tags_.erase(std::remove(scene_pv_tags_.begin(),
                                                scene_pv_tags_.end(), fl.pv_tag),
                                    scene_pv_tags_.end());
-              if (fl.pv_surface) {
-                fl.pv_surface->OnScanoutRelease(db.buffer_id);
-              }
+              // Neither acked nor released: the frame never reached a plane,
+              // so leave it outstanding and the next present re-offers it.
+              // That present sees no scene layer for this view, so it takes
+              // the first-sight path, which builds a fresh pool -- and which
+              // releases the buffer and composites through GL if it fails too.
+              // So the retry is bounded at one without a counter here.
               ++pv_pruned;
               continue;
             }
@@ -3067,6 +3083,9 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       }
       // Submit the first frame: imports this slot and caches its fb_id.
       submit_pv_pool(pool_raw, db);
+      if (fl.pv_surface) {
+        fl.pv_surface->AckDmabufScanout(db.buffer_id);
+      }
       if (backend_->cfg_.debug_backend) {
         ihs::log::debug(
             "[DrmCompositor] platform-view scene layer added: {}x{} "

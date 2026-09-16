@@ -200,9 +200,21 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   // to GetDmabuf. The compositor commits faster than a 30fps producer submits,
   // so a reused overlay layer polls GetDmabuf every present; without this it
   // would re-import the same buffer each time, churning AddFB2/retire for no
-  // new content. Set when GetDmabuf hands out a frame; a fresh submit bumps
-  // submit_seq past it, re-arming delivery.
+  // new content. Set when the compositor confirms the frame reached a plane
+  // (AckDmabufScanout) or hands its slot back (OnScanoutRelease); a fresh
+  // submit bumps submit_seq past it, re-arming delivery.
   mutable uint64_t dmabuf_delivered_seq{0};
+
+  // The submit_seq GetDmabuf last handed out, which is not yet the same as
+  // delivered: the compositor's import can fail after the hand-off, and a
+  // frame that never reached a plane has to be offered again or a producer
+  // that does not submit again never returns to scanout. Committed into
+  // dmabuf_delivered_seq by AckDmabufScanout (placed) or OnScanoutRelease
+  // (given back). Zero when nothing is outstanding.
+  mutable uint64_t dmabuf_offered_seq{0};
+  // buffer_id of that outstanding offer, so a release for some other slot
+  // (a stale retire) does not retire the offer.
+  mutable uint32_t dmabuf_offered_buffer_id{0};
 
 #if IVI_HAVE_VULKAN
   // A resize re-creates a ring slot's dma-buf at a new size, replacing the
@@ -508,7 +520,11 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
             errno);
       }
     }
-    dmabuf_delivered_seq = submit_seq;
+    // Offered, not delivered. The compositor commits this by acking the frame
+    // onto a plane, or retires it by handing the slot back; until one of those
+    // the frame stays eligible, so an import that fails downstream can retry.
+    dmabuf_offered_seq = submit_seq;
+    dmabuf_offered_buffer_id = f.buffer_id;
     return DmabufState::kFrame;
   }
 #endif
@@ -558,7 +574,49 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   // for its ring slot. Compositor thread.
   void OnScanoutRelease(uint32_t buffer_id) override {
     const std::lock_guard<std::mutex> lock(mutex);
+    // Terminal for an outstanding offer: the slot goes back to the producer,
+    // which may overwrite it, so the frame must not be offered again.
+    RetireOffer(buffer_id);
     SignalRelease(buffer_id);
+  }
+
+  // The compositor placed the offered frame on a plane. Commit the
+  // deliver-once guard, which until now was only provisional. Compositor
+  // thread.
+  void AckDmabufScanout(uint32_t buffer_id) override {
+    const std::lock_guard<std::mutex> lock(mutex);
+    RetireOffer(buffer_id);
+  }
+
+  // Whether anything has been produced for this view yet: a frame waiting to
+  // be taken, or one already imported for GL. Distinguishes a producer that
+  // has not started from one that is merely idle. Any thread.
+  [[nodiscard]] bool HasContent() const override {
+    const std::lock_guard<std::mutex> lock(mutex);
+#if IVI_HAVE_VULKAN
+    if (current != nullptr && current->image != VK_NULL_HANDLE) {
+      return true;
+    }
+#endif
+#if IVI_HAVE_EGL
+    if (pending_egl.valid || current_egl != nullptr) {
+      return true;
+    }
+#endif
+    return false;
+  }
+
+  // Close out the outstanding GetDmabuf offer when it is for `buffer_id`,
+  // whether it was placed or given back -- both mean the frame will not be
+  // offered again. A release for any other slot is a stale retire and leaves
+  // the offer alone. Caller holds `mutex`.
+  void RetireOffer(uint32_t buffer_id) const {
+    if (dmabuf_offered_seq == 0 || dmabuf_offered_buffer_id != buffer_id) {
+      return;
+    }
+    dmabuf_delivered_seq = dmabuf_offered_seq;
+    dmabuf_offered_seq = 0;
+    dmabuf_offered_buffer_id = 0;
   }
 
   // Signal and drop the release eventfd for `buffer_id` (a no-op if there is
@@ -1252,19 +1310,29 @@ int HostSubmit(void* user_data,
       // Release the superseded frame unless it is on a plane, where
       // OnScanoutRelease will do it.
       //
-      // `dmabuf_delivered_seq` alone is the wrong test. It says GetDmabuf
-      // handed the frame over, not that the frame reached a plane -- and on the
-      // GL-composited path the compositor polls GetDmabuf and then composites
-      // through a texture instead, so a frame reads as delivered and is never
-      // scanned out. Nothing then releases it: it was superseded before being
-      // bound, so it is never displaced either, and its eventfd is left for the
-      // producer to wait out. Every frame. See #530.
+      // `dmabuf_delivered_seq` now moves only when the compositor acks the
+      // frame onto a plane or hands its slot back, so it does mean "reached a
+      // plane" (#332) -- the case #530 hit, where a GL-composited frame read
+      // as delivered and nothing ever released it, no longer arises. The
+      // `!on_a_plane` arm stays as the belt-and-braces half: a compositor that
+      // takes a frame and answers neither would otherwise leave the producer
+      // waiting out an eventfd that never fires. SignalRelease is idempotent,
+      // so releasing a slot twice costs nothing.
       //
       // drm_plane_id is 0 exactly when the last present GL-composited this view
       // (SetScanoutPlane(0)), which is the case where no retire is coming.
       const bool on_a_plane =
           v->drm_plane_id.load(std::memory_order_relaxed) != 0;
-      if (v->dmabuf_delivered_seq < v->pending_egl.stash_seq || !on_a_plane) {
+      // An offer the compositor has taken but not yet answered is its to
+      // account for -- it owes an ack or a release either way. Releasing the
+      // slot here would hand it back to the producer mid-import, and the
+      // producer is by definition writing a new frame right now, so the buffer
+      // being scanned out could be overwritten under it.
+      const bool offer_outstanding =
+          v->dmabuf_offered_seq != 0 &&
+          v->dmabuf_offered_seq >= v->pending_egl.stash_seq;
+      if (!offer_outstanding &&
+          (v->dmabuf_delivered_seq < v->pending_egl.stash_seq || !on_a_plane)) {
         v->SignalRelease(v->pending_egl.frame.buffer_id);
       }
       CloseFrameFds(&v->pending_egl.frame);  // superseded before import

@@ -338,12 +338,17 @@ class FakeDmabufPlatformView : public ICompositorSurface {
     if (fd < 0) {
       return DmabufState::kNotScanoutCapable;
     }
-    fresh_ = false;
+    // Offered, not consumed: like the real view host, the frame stays
+    // eligible until the compositor acks it onto a source or hands the slot
+    // back, so an import that fails downstream is offered again (#332).
+    had_content_ = true;
     out->fd[0] = fd;
     out->fourcc = DRM_FORMAT_XRGB8888;
     out->modifier = DRM_FORMAT_MOD_LINEAR;
-    out->width = buffer_->width();
-    out->height = buffer_->height();
+    // Zero dimensions are what ExternalDmaBufPool::create rejects outright,
+    // so this is a frame the compositor cannot import however it tries.
+    out->width = bad_frame_ ? 0 : buffer_->width();
+    out->height = bad_frame_ ? 0 : buffer_->height();
     out->plane_count = 1;
     out->offset[0] = 0;
     out->stride[0] = buffer_->stride();
@@ -361,7 +366,21 @@ class FakeDmabufPlatformView : public ICompositorSurface {
 
   void OnScanoutRelease(uint32_t buffer_id) override {
     const std::lock_guard<std::mutex> lock(mu_);
+    if (buffer_id == buffer_id_) {
+      fresh_ = false;  // terminal: the slot is the producer's again
+    }
     released_.push_back(buffer_id);
+  }
+  void AckDmabufScanout(uint32_t buffer_id) override {
+    const std::lock_guard<std::mutex> lock(mu_);
+    if (buffer_id == buffer_id_) {
+      fresh_ = false;
+    }
+    acked_.push_back(buffer_id);
+  }
+  [[nodiscard]] bool HasContent() const override {
+    const std::lock_guard<std::mutex> lock(mu_);
+    return had_content_;
   }
   void SetScanoutPlane(uint32_t plane_id) override {
     const std::lock_guard<std::mutex> lock(mu_);
@@ -422,6 +441,16 @@ class FakeDmabufPlatformView : public ICompositorSurface {
     const std::lock_guard<std::mutex> lock(mu_);
     return planes_;
   }
+  [[nodiscard]] std::vector<uint32_t> acked() const {
+    const std::lock_guard<std::mutex> lock(mu_);
+    return acked_;
+  }
+  // Offer a frame the compositor cannot import, so the failure lands after
+  // GetDmabuf has already handed the frame over -- the case #332 is about.
+  void set_offers_unimportable_frame(bool v) {
+    const std::lock_guard<std::mutex> lock(mu_);
+    bad_frame_ = v;
+  }
 
  private:
   const FlutterPlatformViewIdentifier id_;
@@ -430,7 +459,10 @@ class FakeDmabufPlatformView : public ICompositorSurface {
   int presents_{0};
   mutable std::mutex mu_;
   mutable bool fresh_{true};
+  mutable bool had_content_{false};
+  bool bad_frame_{false};
   mutable int delivered_{0};
+  std::vector<uint32_t> acked_;
   std::vector<uint32_t> released_;
   std::vector<uint32_t> planes_;
   int release_fence_fd_{-1};
@@ -918,6 +950,86 @@ TEST_F(DrmBackendVkmsScene, TheDisplacedSlotComesBackToTheProducer) {
 #endif
 
   compositor_->UnregisterSurface(23);
+}
+
+// #332. GetDmabuf hands a frame over; that is not the same as the frame being
+// taken. These three pin the difference down.
+
+// The happy path: a frame that reaches a source is acked exactly once, and is
+// not also released -- the two answers are exclusive.
+TEST_F(DrmBackendVkmsScene, ATakenFrameIsAckedAndNotReleased) {
+  GbmSolidBuffer buffer;
+  ASSERT_TRUE(buffer.Create(backend_->device().fd(), content_w_, content_h_,
+                            0xFF1E7A46u));
+
+  auto view = std::make_shared<FakeDmabufPlatformView>(31, buffer, 7);
+  layer_w_ = content_w_;
+  layer_h_ = content_h_;
+  compositor_->RegisterSurface(31, view);
+
+  ASSERT_TRUE(PresentPlatformView(31));
+
+  EXPECT_EQ(view->acked(), std::vector<uint32_t>{7u})
+      << "a frame the scene took was never acked, so the view host cannot "
+         "tell it apart from one that failed to import";
+  EXPECT_TRUE(view->released().empty())
+      << "acked and released: the slot is accounted for twice";
+
+  compositor_->UnregisterSurface(31);
+}
+
+// The failure path: an import that fails after the hand-off must not ack. The
+// frame is instead given back, which is what tells the producer its slot is
+// free again.
+TEST_F(DrmBackendVkmsScene, AFrameThatFailedToImportIsNotAcked) {
+  GbmSolidBuffer buffer;
+  ASSERT_TRUE(buffer.Create(backend_->device().fd(), content_w_, content_h_,
+                            0xFF1E7A46u));
+
+  auto view = std::make_shared<FakeDmabufPlatformView>(32, buffer, 5);
+  view->set_offers_unimportable_frame(true);
+  layer_w_ = content_w_;
+  layer_h_ = content_h_;
+  compositor_->RegisterSurface(32, view);
+
+  ASSERT_TRUE(PresentPlatformView(32));
+
+  EXPECT_TRUE(view->acked().empty())
+      << "acked a frame that never reached a source; the producer would wait "
+         "for a release that cannot come";
+  EXPECT_FALSE(view->released().empty())
+      << "neither acked nor released, so the ring slot is held forever";
+
+  compositor_->UnregisterSurface(32);
+}
+
+// And the visible half. After that failed import the view has content but no
+// new frame, and the present that follows must still composite it. Dropping it
+// there is what blanked a static producer: it never submits again, so
+// GetDmabuf never returns another frame and the view never comes back.
+TEST_F(DrmBackendVkmsScene, AnIdleViewWithContentIsStillComposited) {
+  GbmSolidBuffer buffer;
+  ASSERT_TRUE(buffer.Create(backend_->device().fd(), content_w_, content_h_,
+                            0xFF1E7A46u));
+
+  auto view = std::make_shared<FakeDmabufPlatformView>(33, buffer, 3);
+  view->set_offers_unimportable_frame(true);
+  layer_w_ = content_w_;
+  layer_h_ = content_h_;
+  compositor_->RegisterSurface(33, view);
+
+  ASSERT_TRUE(PresentPlatformView(33));
+  const int after_first = view->presents();
+  ASSERT_GT(after_first, 0) << "the view was never presented at all";
+
+  // No new frame from here on -- a static producer.
+  ASSERT_TRUE(PresentPlatformView(33));
+
+  EXPECT_GT(view->presents(), after_first)
+      << "the view stopped being composited once its frame was consumed, so a "
+         "static producer blanks";
+
+  compositor_->UnregisterSurface(33);
 }
 
 // The release fence (#513). Same displacement as the case above, but the

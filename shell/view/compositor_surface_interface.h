@@ -382,6 +382,46 @@ class ICompositorSurface {
   virtual void OnScanoutRelease(uint32_t /*buffer_id*/) {}
 
   /**
+   * @brief Confirm the frame @c GetDmabuf handed out was taken for scanout.
+   *
+   * @c GetDmabuf is deliver-once, but handing a frame over is not the same as
+   * taking it: the import can still fail afterwards (pool create, add_layer,
+   * replace_source). Committing "delivered" at hand-off means such a frame is
+   * never re-offered, so a producer that does not submit again -- a static one
+   * -- never returns to scanout.
+   *
+   * So a caller that takes a @c kFrame owes the surface exactly one of two
+   * answers: this, once the frame belongs to whatever will scan it out and so
+   * will report its release, or @c OnScanoutRelease with the same
+   * @p buffer_id when it will not. Note the ack is about ownership, not about
+   * pixels having been displayed -- a commit that fails later is the scene's
+   * to retry, and the buffer's release is still accounted for. Releasing is
+   * terminal: the ring slot goes back to the producer, so the frame must not
+   * be re-offered after it. Answering neither leaves the slot held; answering
+   * both double-counts it.
+   *
+   * The default ignores it, which is correct for a surface whose @c GetDmabuf
+   * never returns @c kFrame.
+   */
+  virtual void AckDmabufScanout(uint32_t /*buffer_id*/) {}
+
+  /**
+   * @brief Whether this surface has content to show, new frame or not.
+   *
+   * @c kNoNewFrame says nothing about whether the surface has ever produced
+   * anything, and the two cases need opposite handling on a present where the
+   * view is not yet in the scene. A producer that has not delivered its first
+   * frame should be skipped, so its view does not flip the frame to GL on
+   * every present until a buffer lands -- startup flicker. A surface that has
+   * shown content but has no new frame must still be composited, or it blanks
+   * until the producer submits again, which for a static producer is forever.
+   *
+   * The default is false: a surface that never produces content is never in
+   * the second case.
+   */
+  [[nodiscard]] virtual bool HasContent() const { return false; }
+
+  /**
    * @brief The producer's @c buffer_id for the frame @c GetGlTextureName last
    * bound, or 0 when nothing is bound or the surface does not track it.
    *
