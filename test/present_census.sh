@@ -27,6 +27,15 @@
 #   VKMS_CARD   /dev/dri/cardN for vkms (auto-detected if unset)
 #   BACKENDS    space-separated list (default: "drm-kms-egl software")
 #   CENSUS_SECS steady-state capture seconds per backend (default 8)
+#   COUNT_FDS   1 to also fail a backend whose open-fd count grows over its
+#               steady-state window (default 0). Rides along because this
+#               already holds a live shell for CENSUS_SECS; see
+#               test/lib/fd_count.sh for why growth and not an absolute count.
+#   FD_GROWTH_LIMIT
+#               fds a backend may gain before COUNT_FDS fails it (default 16)
+#   FD_GRACE    seconds to let the run settle before the fd baseline is taken
+#               (default 4). Must be less than CENSUS_SECS or the check is
+#               skipped.
 #   BASELINE    baseline file for --check when no path argument is given
 #   KEEP_LOG    1 = keep the per-backend homescreen logs on exit and say where
 #               (default 0). Every census figure is folded out of those logs, so
@@ -52,6 +61,13 @@ KEEP_LOG="${KEEP_LOG:-0}"
 # jitter that spills a few frames into the 30Hz bucket, but nothing should fall
 # below 30Hz on any runner fast enough to host the census.
 KEEPUP_MIN="${KEEPUP_MIN:-0.90}"
+# Open-fd growth check, off by default: the census is a present-path census
+# first, and this rides along only because it already holds a live shell at
+# steady state for CENSUS_SECS. See test/lib/fd_count.sh for why growth rather
+# than an absolute count.
+COUNT_FDS="${COUNT_FDS:-0}"
+FD_GROWTH_LIMIT="${FD_GROWTH_LIMIT:-16}"
+FD_GRACE="${FD_GRACE:-4}"
 
 MODE="selfcheck"     # selfcheck | write | check
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -115,6 +131,10 @@ done
 # backend's dumb-buffer sink at the wrong DRM node and the census measures it.
 # shellcheck source=test/lib/drm_card.sh
 source "${ROOT_DIR}/test/lib/drm_card.sh"
+
+# Open-fd accounting, shared with drm_kms_vkms.sh.
+# shellcheck source=test/lib/fd_count.sh
+source "${ROOT_DIR}/test/lib/fd_count.sh"
 
 check_prereqs() {
     [[ -d /sys/module/vkms ]] || die "vkms not loaded (sudo modprobe vkms)"
@@ -213,9 +233,31 @@ census_backend() {  # census_backend <backend>
         "$HOMESCREEN" --backend "$backend" -b "$BUNDLE" \
         --drm-device "$VKMS_CARD" >"$hs_log" 2>&1 &
     local pid=$!
-    sleep "$CENSUS_SECS"
+    # Optional fd-growth check (COUNT_FDS=1). Split the steady-state sleep so
+    # the baseline is taken once the run has settled rather than at launch, when
+    # the engine and EGL are still opening lazily. Falls back to one sleep when
+    # the window is too short to split.
+    local fd_base="" fd_why=""
+    if [[ "$COUNT_FDS" == "1" && "$CENSUS_SECS" -gt "$FD_GRACE" ]]; then
+        sleep "$FD_GRACE"
+        fd_base="$(count_fds "$pid")" || fd_base=""
+        sleep $(( CENSUS_SECS - FD_GRACE ))
+    else
+        sleep "$CENSUS_SECS"
+    fi
     if ! kill -0 "$pid" 2>/dev/null; then
         reap_homescreen; record "$backend" skip "homescreen exited before census (no frames)"; return
+    fi
+    # Sampled before the TERM below: teardown closes fds and would mask a leak.
+    if [[ -n "$fd_base" ]]; then
+        local fd_final fd_growth
+        if fd_final="$(count_fds "$pid")"; then
+            fd_growth=$(( fd_final - fd_base ))
+            log "$backend open fds: ${fd_base} -> ${fd_final} (growth ${fd_growth}, limit ${FD_GROWTH_LIMIT})"
+            if [[ "$fd_growth" -gt "$FD_GROWTH_LIMIT" ]]; then
+                fd_why=" fds+${fd_growth}(>${FD_GROWTH_LIMIT})"
+            fi
+        fi
     fi
     kill -TERM "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; reap_homescreen
 
@@ -243,7 +285,7 @@ census_backend() {  # census_backend <backend>
 
     # Invariants (counts/ratios — admissible on vkms).
     local min_pm; min_pm=$(awk -v k="$KEEPUP_MIN" 'BEGIN{printf "%d", k*1000}')
-    local why=""
+    local why="${fd_why}"
     [[ "$disc"  -ne 0 ]] && why="${why} discarded=$disc"
     [[ "$stall" -ne 0 ]] && why="${why} stalls=$stall"
     [[ "$frames" -lt 120 ]] && why="${why} frames=$frames(<120, no steady state)"
