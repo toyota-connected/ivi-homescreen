@@ -42,6 +42,19 @@
 #                 strace must be installed and, on systems with YAMA
 #                 ptrace_scope > 0, this may need sudo to attach. See the
 #                 ptrace_scope check below.
+#   COUNT_FDS     1 to check the shell's open-fd count for growth across the
+#                 steady-state run (default: 0). #593 leaked one sync_file per
+#                 explicit-sync submit and surfaced only as a ~100 ms stall
+#                 each time the fd table doubled, then as the 1024 soft limit
+#                 about half a minute in -- nothing in the log, and no test
+#                 reaches the code it lives in. Growth rather than an absolute
+#                 count: the engine and EGL open fds lazily, so the baseline is
+#                 taken after the startup grace, not at launch.
+#   FD_GROWTH_LIMIT
+#                 fds the count may grow by before COUNT_FDS fails
+#                 (default: 16). A per-frame leak clears this in well under a
+#                 second at 60 Hz; the slack absorbs whatever the engine still
+#                 opens after the grace period.
 #   VKMS_CARD     explicit /dev/dri/cardN to target. Default: first card
 #                 whose driver is vkms.
 #   VKMS_AUTOLOAD 1 to `sudo modprobe vkms` if not loaded. Default: 0.
@@ -78,6 +91,8 @@ BUNDLE="${BUNDLE:-}"
 DURATION="${DURATION:-5}"
 STARTUP_GRACE="${STARTUP_GRACE:-2}"
 COUNT_FLIPS="${COUNT_FLIPS:-0}"
+COUNT_FDS="${COUNT_FDS:-0}"
+FD_GROWTH_LIMIT="${FD_GROWTH_LIMIT:-16}"
 VKMS_CARD="${VKMS_CARD:-}"
 VKMS_AUTOLOAD="${VKMS_AUTOLOAD:-0}"
 SOFTWARE_RENDER="${SOFTWARE_RENDER:-0}"
@@ -116,6 +131,16 @@ ensure_bundle_copy() {
     # → ../../build/flutter_assets) resolve to real files in the copy.
     cp -rL "$BUNDLE"/. "$dst/"
     [[ -f "$dst/config.toml" ]] || die "bundle has no config.toml"
+}
+
+# Open fds held by $1. Fails (rc 1) when /proc is not readable for that pid,
+# which is a skip rather than a leak -- the caller warns and drops the check.
+count_fds() {
+    local dir="/proc/$1/fd"
+    [[ -r "$dir" ]] || return 1
+    local n
+    n="$(find "$dir" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)"
+    echo "$n"
 }
 
 check_ptrace_scope() {
@@ -251,6 +276,18 @@ fi
 
 log "homescreen alive; PID=$HS_PID"
 
+# ─── Optional: baseline the open-fd count ────────────────────────────────
+
+FD_BASELINE=""
+if [[ "$COUNT_FDS" == "1" ]]; then
+    if FD_BASELINE="$(count_fds "$HS_PID")"; then
+        log "open fds after startup grace: $FD_BASELINE"
+    else
+        echo "warning: cannot read /proc/$HS_PID/fd; skipping the fd check" >&2
+        FD_BASELINE=""
+    fi
+fi
+
 # ─── Optional: count page-flip ioctls via strace ─────────────────────────
 
 if [[ "$COUNT_FLIPS" == "1" ]]; then
@@ -288,6 +325,26 @@ if ! kill -0 "$HS_PID" 2>/dev/null; then
     echo "error: homescreen exited during steady-state run; log follows:" >&2
     sed 's/^/  | /' "$LOG" >&2
     exit 1
+fi
+
+# ─── Optional: fd growth over the run ────────────────────────────────────
+#
+# Sampled while the process is still up, before cleanup_hs: teardown closes
+# things, which would mask exactly the growth this is looking for.
+
+if [[ "$COUNT_FDS" == "1" && -n "$FD_BASELINE" ]]; then
+    if FD_FINAL="$(count_fds "$HS_PID")"; then
+        FD_GROWTH=$(( FD_FINAL - FD_BASELINE ))
+        log "open fds after ${DURATION}s: $FD_FINAL (baseline $FD_BASELINE, growth $FD_GROWTH)"
+        if [[ "$FD_GROWTH" -gt "$FD_GROWTH_LIMIT" ]]; then
+            echo "error: open fds grew by $FD_GROWTH over the run (limit $FD_GROWTH_LIMIT);" >&2
+            echo "       something is leaking one per frame or per submit. Log follows:" >&2
+            sed 's/^/  | /' "$LOG" >&2
+            exit 1
+        fi
+    else
+        echo "warning: cannot read /proc/$HS_PID/fd at end of run; fd check incomplete" >&2
+    fi
 fi
 
 # ─── Clean shutdown ──────────────────────────────────────────────────────

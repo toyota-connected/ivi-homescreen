@@ -101,6 +101,28 @@ run_harness "present census" \
     env CENSUS_SECS=12 KEEPUP_MIN=0.30 "${IVI_SRC}/test/present_census.sh"
 
 # ---------------------------------------------------------------------------
+# fd growth across a steady-state run.
+#
+# #593 leaked one sync_file per explicit-sync submit and showed up only as a
+# ~100 ms stall each time the fd table doubled -- nothing in the log, and no
+# test reaches the code it lives in. This is the cheap half of that coverage:
+# scroll_bench has no platform view, so it gates shell-side growth (backing
+# stores, EGL images, the flip path) rather than the ihs_pv submit path, which
+# needs the producer fixture in #602.
+#
+# Guarded on --check rather than run unconditionally: drm_kms_vkms.sh exits 2
+# when its prerequisites are missing, and run_harness maps any nonzero to a job
+# failure, so an absent vkms would fail the leg instead of skipping it.
+# ---------------------------------------------------------------------------
+if "${IVI_SRC}/test/drm_kms_vkms.sh" --check >/dev/null 2>&1; then
+    run_harness "vkms fd growth" \
+        env SOFTWARE_RENDER=1 COUNT_FDS=1 DURATION=20 \
+            "${IVI_SRC}/test/drm_kms_vkms.sh"
+else
+    echo "== vkms fd growth: skipped (harness prerequisites not met) =="
+fi
+
+# ---------------------------------------------------------------------------
 # Event-driven input harness (I2/I3 always; I1/I6 run only with writable uinput).
 # Raise I2's idle wake ceiling: a shared, loaded runner accrues more idle
 # context switches than a quiet box while staying far below a busy poll (~300/5s).
