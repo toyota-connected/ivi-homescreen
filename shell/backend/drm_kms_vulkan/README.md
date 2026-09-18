@@ -112,9 +112,52 @@ differ.
    rest are non-blocking page flips drained against the DRM fd, giving
    tear-free triple-buffered present.
 
-   The Vulkan renderer config also supplies `get_next_image` / `present_image`
-   callbacks. They are never invoked on the compositor path, but the embedder
-   rejects a Vulkan renderer config that leaves them null, so they are stubs.
+   The Vulkan renderer config also supplies `get_next_image` / `present_image`.
+   The compositor path never calls them. When no compositor is offered they
+   are the present path: the engine renders into a scanout slot and hands it
+   back, and the backend commits it the same way. See
+   [Impeller](#impeller) for when that happens.
+
+### Impeller
+
+Impeller presents two ways here, and which one runs decides whether platform
+views reach a KMS plane.
+
+| `--drm-compositor` | Skia | Impeller |
+|---|---|---|
+| `auto` (default) | compositor | root surface |
+| `planes` | compositor | compositor |
+| `gl` | root surface | root surface |
+
+**The compositor under Impeller needs engine support.** Engines up to and
+including 3.47 cannot render Impeller into a Vulkan backing store: the
+embedder logs `Unimplemented` and nothing is presented
+([flutter/flutter#187525](https://github.com/flutter/flutter/issues/187525)).
+The engine offers no way to ask, so `auto` keeps Impeller on the root surface,
+which works on either engine, and `planes` is the opt-in for an engine that has
+the render target.
+
+Asking for `planes` on an engine without it is not silent. Such an engine takes
+backing store after backing store and presents no layer from any of them --
+measured: `present_layers` with `count=0` every frame, against `count=1`
+carrying a Vulkan backing store on an engine that can -- and the backend says
+so once:
+
+```
+[VulkanDrmBackend] the engine has taken 8 backing stores and presented no layer
+from any of them. This engine cannot render Impeller into a Vulkan backing
+store, so nothing will reach the panel. Drop --drm-compositor planes to present
+through the root surface instead ...
+```
+
+**The root surface costs platform views.** There is no layer stack, so
+platform-view content is composited into the one image instead of reaching its
+own plane. The backend logs a warning when it takes that path.
+
+Declaring the extensions is not optional either way: Impeller's capability
+check reads the lists the embedder declares, so under Impeller the backend
+enables `VK_KHR_surface`, one window-system extension and `VK_KHR_swapchain`,
+although it creates no `VkSurfaceKHR` and presents only to KMS.
 
 ### Module responsibilities
 
@@ -296,6 +339,7 @@ loader is dlopen'd, never linked).
 | `--drm-device <node>` | KMS device with the connectors (display controller node) |
 | `--drm-mode <W>x<H>[@<R>]` | Select the scanout mode (`R` = integer refresh Hz); unset = connector preferred |
 | `--drm-rotation <0\|90\|180\|270>` | Rotate the scanout (see Rotation) |
+| `--drm-compositor <auto\|planes\|gl>` | Compositor (one plane per layer) or root surface; see [Impeller](#impeller) |
 | `--drm-list-modes` | Report each connector's modes and which planes can rotate, then exit |
 | `--input-transform "<name-substring>=<0\|90\|180\|270>[,flip-x][,flip-y]"` | Per-device pointer transform, matched on the libinput device-name substring (repeatable; first match wins) |
 | `--disable-cursor` | Disable the KMS HW cursor |

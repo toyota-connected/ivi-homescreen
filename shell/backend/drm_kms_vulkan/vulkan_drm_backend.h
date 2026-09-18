@@ -140,6 +140,14 @@ class VulkanDrmBackend final : public Backend {
   FlutterRendererConfig GetRenderConfig() override;
   FlutterCompositor GetCompositorConfig() override;
 
+  /// --drm-compositor for this backend. kPlanes selects the compositor even
+  /// under Impeller, which needs an engine that renders Impeller into Vulkan
+  /// backing stores; kGl selects the root surface; kAuto uses the compositor
+  /// except under Impeller. Set before the engine starts.
+  void SetCompositorMode(const drm_config::Compositor mode) {
+    compositor_mode_ = mode;
+  }
+
   // Expose the backend's Vulkan device to the ihs_pv platform-view host so a
   // plugin (e.g. the Mapbox Maps SDK) can adopt the shared device, render into
   // an exported dma-buf, and submit it for zero-copy import — the same seam
@@ -251,6 +259,11 @@ class VulkanDrmBackend final : public Backend {
   static bool PresentLayersCb(const FlutterLayer** layers,
                               size_t count,
                               void* user_data);
+  // Called as stores are handed out. Reports once if the engine has taken
+  // several and presented none, which is what an engine without Impeller
+  // Vulkan backing stores looks like from here.
+  void ReportIfEngineNeverPresents();
+
   bool CreateBackingStoreImpl(const FlutterBackingStoreConfig* config,
                               FlutterBackingStore* out);
   bool CollectBackingStoreImpl(const FlutterBackingStore* store);
@@ -288,6 +301,16 @@ class VulkanDrmBackend final : public Backend {
   // scanout path, kYes refuses to start when the device cannot export a SYNC_FD
   // semaphore, kAuto uses explicit sync when it is available.
   drm_config::TriState explicit_sync_pref_ = drm_config::TriState::kAuto;
+  // --drm-compositor. Decides between the compositor (backing stores, one KMS
+  // plane per layer) and the root surface; see GetCompositorConfig.
+  drm_config::Compositor compositor_mode_ = drm_config::Compositor::kAuto;
+  // Backing stores handed to the engine, and whether any of them ever came
+  // back through present_layers. An engine that cannot render Impeller into a
+  // Vulkan backing store takes every store and presents none; see
+  // ReportIfEngineNeverPresents.
+  uint32_t backing_stores_created_ = 0;
+  bool layers_presented_ = false;
+  bool never_presents_reported_ = false;
   // Unified cadence profiler (IVI_PROFILE / legacy IVI_DRMVK_PROFILE). Written
   // from the rasterizer thread (PresentLayersImpl) only.
   profiling::FrameProfile frame_profile_;
