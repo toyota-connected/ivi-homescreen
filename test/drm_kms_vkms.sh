@@ -111,6 +111,10 @@ log() {
 # shellcheck source=test/lib/drm_card.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/drm_card.sh"
 
+# Open-fd accounting, shared with present_census.sh.
+# shellcheck source=test/lib/fd_count.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/fd_count.sh"
+
 ensure_vkms_loaded() {
     if lsmod | awk '{print $1}' | grep -qx vkms; then
         return 0
@@ -131,16 +135,6 @@ ensure_bundle_copy() {
     # → ../../build/flutter_assets) resolve to real files in the copy.
     cp -rL "$BUNDLE"/. "$dst/"
     [[ -f "$dst/config.toml" ]] || die "bundle has no config.toml"
-}
-
-# Open fds held by $1. Fails (rc 1) when /proc is not readable for that pid,
-# which is a skip rather than a leak -- the caller warns and drops the check.
-count_fds() {
-    local dir="/proc/$1/fd"
-    [[ -r "$dir" ]] || return 1
-    local n
-    n="$(find "$dir" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)"
-    echo "$n"
 }
 
 check_ptrace_scope() {

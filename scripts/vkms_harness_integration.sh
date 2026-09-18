@@ -97,38 +97,22 @@ run_harness() {  # run_harness <title> <cmd...>
 # ---------------------------------------------------------------------------
 # Present-path census (self-check, relaxed timing for shared runners)
 # ---------------------------------------------------------------------------
+# COUNT_FDS rides along here rather than in its own leg. #593 leaked one
+# sync_file per explicit-sync submit and said nothing in the log -- it showed up
+# as a ~100 ms stall each time the fd table doubled, then as the 1024 soft limit
+# half a minute in -- and no test reaches the code it lives in.
+#
+# The census is the only leg that gets a live shell on a hosted runner. The full
+# drm_kms_vkms.sh run cannot: libseat has no session and cannot open a tty
+# there, so the DRM backend never initializes and the harness fails its own
+# [DrmBackend] log scan. That is why the workflow only ever runs it as --check.
+#
+# scroll_bench has no platform view, so this gates shell-side growth -- backing
+# stores, EGL images, the flip path -- not the ihs_pv submit path where #593
+# lived. That still needs the producer fixture in #602.
 run_harness "present census" \
-    env CENSUS_SECS=12 KEEPUP_MIN=0.30 "${IVI_SRC}/test/present_census.sh"
-
-# ---------------------------------------------------------------------------
-# fd growth across a steady-state run.
-#
-# #593 leaked one sync_file per explicit-sync submit and showed up only as a
-# ~100 ms stall each time the fd table doubled -- nothing in the log, and no
-# test reaches the code it lives in. This is the cheap half of that coverage:
-# scroll_bench has no platform view, so it gates shell-side growth (backing
-# stores, EGL images, the flip path) rather than the ihs_pv submit path, which
-# needs the producer fixture in #602.
-#
-# Guarded on --check rather than run unconditionally: drm_kms_vkms.sh exits 2
-# when its prerequisites are missing, and run_harness maps any nonzero to a job
-# failure, so an absent vkms would fail the leg instead of skipping it.
-# ---------------------------------------------------------------------------
-# emb bundles carry no config.toml -- the shell takes CLI flags -- but
-# drm_kms_vkms.sh requires one: it predates emb and documents its input as
-# config.toml + data/ + lib/, and dies in ensure_bundle_copy without it. The
-# census leg never noticed because it hands $BUNDLE straight to -b. An empty
-# file satisfies the check and sets no keys, so the legs after this one are
-# unaffected; crash_handler_integration.sh does the same on its own bundle.
-[[ -f "${BUNDLE}/config.toml" ]] || : > "${BUNDLE}/config.toml"
-
-if "${IVI_SRC}/test/drm_kms_vkms.sh" --check >/dev/null 2>&1; then
-    run_harness "vkms fd growth" \
-        env SOFTWARE_RENDER=1 COUNT_FDS=1 DURATION=20 \
-            "${IVI_SRC}/test/drm_kms_vkms.sh"
-else
-    echo "== vkms fd growth: skipped (harness prerequisites not met) =="
-fi
+    env CENSUS_SECS=12 KEEPUP_MIN=0.30 COUNT_FDS=1 \
+        "${IVI_SRC}/test/present_census.sh"
 
 # ---------------------------------------------------------------------------
 # Event-driven input harness (I2/I3 always; I1/I6 run only with writable uinput).
