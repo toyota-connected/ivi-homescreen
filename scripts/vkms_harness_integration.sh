@@ -114,6 +114,14 @@ run_harness "present census" \
 # when its prerequisites are missing, and run_harness maps any nonzero to a job
 # failure, so an absent vkms would fail the leg instead of skipping it.
 # ---------------------------------------------------------------------------
+# emb bundles carry no config.toml -- the shell takes CLI flags -- but
+# drm_kms_vkms.sh requires one: it predates emb and documents its input as
+# config.toml + data/ + lib/, and dies in ensure_bundle_copy without it. The
+# census leg never noticed because it hands $BUNDLE straight to -b. An empty
+# file satisfies the check and sets no keys, so the legs after this one are
+# unaffected; crash_handler_integration.sh does the same on its own bundle.
+[[ -f "${BUNDLE}/config.toml" ]] || : > "${BUNDLE}/config.toml"
+
 if "${IVI_SRC}/test/drm_kms_vkms.sh" --check >/dev/null 2>&1; then
     run_harness "vkms fd growth" \
         env SOFTWARE_RENDER=1 COUNT_FDS=1 DURATION=20 \
