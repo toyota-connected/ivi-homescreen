@@ -1551,8 +1551,44 @@ int VulkanDrmBackend::SubmitScanoutBarrier(CompositorState& c,
   if (d().vkGetSemaphoreFdKHR(device_, &gfi, &fd) != VK_SUCCESS) {
     return -1;
   }
+#if BUILD_COMPOSITOR
+  // The submit just recorded is the one that samples the platform views, so
+  // its sync_file is exactly "the compositor is done reading your buffer".
+  // Publish it before the caller goes on to commit: a producer that submits
+  // concurrently then finds a fence waiting rather than -1.
+  PublishReleaseFence(fd);
+#endif
   return fd;
 }
+
+#if BUILD_COMPOSITOR
+void VulkanDrmBackend::PublishReleaseFence(const int sync_fd) {
+  if (sync_fd < 0) {
+    return;
+  }
+  for (const std::shared_ptr<ICompositorSurface>& surface : sampled_views_) {
+    if (!surface) {
+      continue;
+    }
+    // dup, not sync_fd itself: SetReleaseFenceFd takes ownership of what it is
+    // given, and the caller closes sync_fd (and may hand it to IN_FENCE_FD).
+    // Same shape as the EGL compositor's OUT_FENCE publish.
+    const int fd = ::dup(sync_fd);
+    if (fd < 0) {
+      // Capture errno before logging, which may clobber it. A producer that
+      // gets no fence throttles on its ring depth alone for this frame.
+      const int dup_errno = errno;
+      ihs::log::warn(
+          "[VulkanDrmBackend] dup(scanout fence) failed (errno={}); this view "
+          "releases on ring depth alone",
+          dup_errno);
+      continue;
+    }
+    surface->SetReleaseFenceFd(fd);  // takes ownership
+  }
+  sampled_views_.clear();
+}
+#endif
 
 #if BUILD_HUD
 bool VulkanDrmBackend::RecordHud(VkCommandBuffer cmd,
@@ -1710,6 +1746,10 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
                                          const uint32_t width,
                                          const uint32_t height,
                                          const uint64_t frame) {
+  // Cleared before the early return too: a frame that blends nothing must not
+  // leave the previous frame's views looking sampled, or PublishReleaseFence
+  // would hand them a fence for work that never read them.
+  sampled_views_.clear();
   if (layers == nullptr || count < 2) {
     return false;  // base backing store only — nothing to blend over it
   }
@@ -1826,6 +1866,10 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
            static_cast<VkSamplerYcbcrModelConversion>(
                surface->GetVulkanYcbcrModel()),
            static_cast<VkSamplerYcbcrRange>(surface->GetVulkanYcbcrRange())});
+      // This frame's submit reads the view's image, so its completion is what
+      // frees the producer's ring slot. Keep the surface alive until that
+      // fence has been handed over (the map entry can be erased meanwhile).
+      sampled_views_.push_back(std::move(surface));
     }
   }
 

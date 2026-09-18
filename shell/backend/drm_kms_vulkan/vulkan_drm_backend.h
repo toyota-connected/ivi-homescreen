@@ -388,6 +388,18 @@ class VulkanDrmBackend final : public Backend {
   // implicit-sync producer does. Raster thread.
   void CollectAcquireWait(CompositorState& c, ICompositorSurface* surface);
 
+  // Platform-view surfaces this frame's blend sampled, collected by
+  // CompositeOverlays and consumed by PublishReleaseFence once the submit that
+  // reads them has an exported sync_file. Raster thread only; cleared at the
+  // start of every blend.
+  std::vector<std::shared_ptr<ICompositorSurface>> sampled_views_;
+
+  // Hand @p sync_fd -- the scanout submit's exported sync_file -- to every
+  // surface that blend sampled, so a producer has something to wait on before
+  // it redraws a ring slot. Each surface gets its own dup: SetReleaseFenceFd
+  // takes ownership, while @p sync_fd stays the caller's. Raster thread.
+  void PublishReleaseFence(int sync_fd);
+
   bool CompositeOverlays(VkCommandBuffer cmd,
                          const FlutterLayer** layers,
                          size_t count,
