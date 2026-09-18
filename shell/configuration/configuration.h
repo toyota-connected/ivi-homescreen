@@ -103,6 +103,9 @@ class Configuration {
       //   drm_mode                  : "<W>x<H>@<R>" (e.g. "1920x1080@120");
       //                               unset = preferred mode from EDID
       //   drm_compositor            : "auto" | "planes" | "gl"
+      //                               (drm_kms_vulkan: planes selects the
+      //                               compositor under Impeller too, gl the
+      //                               root surface)
       //   drm_modeset               : "auto" | "legacy" | "atomic"
       //   drm_allow_nonblock_modeset: "auto" | "yes" | "no"
       //   drm_primary_format        : "auto" | "xrgb8888" | "argb8888"

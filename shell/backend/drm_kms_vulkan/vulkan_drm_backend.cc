@@ -1196,12 +1196,39 @@ bool VulkanDrmBackend::PresentLayersCb(const FlutterLayer** layers,
                                                                       count);
 }
 
+// An engine without an Impeller render target for
+// kFlutterBackingStoreTypeVulkan logs "Unimplemented", drops the frame, and
+// collects the store again. It still calls present_layers, but with no layers
+// -- measured: count=0 every frame, against count=1 carrying a Vulkan backing
+// store on an engine that can. So it takes store after store and never presents
+// one. Say so once, because the alternative is a black panel and no shell-level
+// error (flutter/flutter#187525).
+void VulkanDrmBackend::ReportIfEngineNeverPresents() {
+  // Enough stores that a slow first frame cannot be mistaken for this. The ring
+  // is small, so this is reached in well under a second of a stalled engine.
+  constexpr uint32_t kStoresBeforeVerdict = 8;
+  if (never_presents_reported_ || layers_presented_ ||
+      ++backing_stores_created_ < kStoresBeforeVerdict) {
+    return;
+  }
+  never_presents_reported_ = true;
+  ihs::log::error(
+      "[VulkanDrmBackend] the engine has taken {} backing stores and presented "
+      "no layer from any of them. This engine cannot render Impeller into a "
+      "Vulkan backing store, so nothing will reach the panel. Drop "
+      "--drm-compositor planes to present through the root surface instead "
+      "(platform-view layers then do not reach a KMS plane), or run without "
+      "--enable-impeller.",
+      backing_stores_created_);
+}
+
 bool VulkanDrmBackend::CreateBackingStoreImpl(
     const FlutterBackingStoreConfig* config,
     FlutterBackingStore* out) {
   if (!compositor_) {
     return false;
   }
+  ReportIfEngineNeverPresents();
   CompositorState& c = *compositor_;
   const auto w = static_cast<uint32_t>(config->size.width);
   const auto h = static_cast<uint32_t>(config->size.height);
@@ -1400,6 +1427,31 @@ void VulkanDrmBackend::StopVsyncMonitor() {
   }
 }
 
+// The layout the engine leaves a backing store in, and the normalization to
+// what the scanout hand-off expects.
+//
+// Skia ends its render in COLOR_ATTACHMENT_OPTIMAL, which is what the barrier
+// and the overlay blend below both declare as their source. Impeller ends in
+// GENERAL: the embedder render target wraps the image as a swapchain image, and
+// Impeller's render pass picks GENERAL as the final layout for those. Declaring
+// the wrong old layout does not fail -- the contents simply become undefined --
+// which shows as one good frame and then black.
+//
+// So normalize once, here, rather than teaching every consumer two layouts.
+void NormalizeEngineOutputLayout(VkCommandBuffer cmd, VkImage image) {
+  if (!ihs::engine_switches::ImpellerActive()) {
+    return;
+  }
+  const VkImageMemoryBarrier barrier = ColorBarrier(
+      image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+      VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+          VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+  d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                           VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0,
+                           nullptr, 0, nullptr, 1, &barrier);
+}
+
 int VulkanDrmBackend::SubmitScanoutBarrier(CompositorState& c,
                                            VkImage image,
                                            VkImageView view,
@@ -1419,6 +1471,7 @@ int VulkanDrmBackend::SubmitScanoutBarrier(CompositorState& c,
     SubmitOneShot(
         device_, c.barrier_pool, c.barrier_fence, graphics_queue_,
         [&](VkCommandBuffer cmd) {
+          NormalizeEngineOutputLayout(cmd, image);
           bool composited = false;
 #if BUILD_COMPOSITOR
           composited = CompositeOverlays(cmd, layers, count, image, view, width,
@@ -1480,6 +1533,7 @@ int VulkanDrmBackend::SubmitScanoutBarrier(CompositorState& c,
 #else
   const bool hud_active = false;
 #endif
+  NormalizeEngineOutputLayout(cmd, image);
 #if BUILD_COMPOSITOR
   // Blend the platform views and any Flutter overlay stores over the engine's
   // render, which is already resident in this image. The blend's render pass
@@ -1880,6 +1934,13 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
 
 bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
                                          size_t count) {
+  // A layer here is the evidence that the engine could build a render target
+  // from the backing store this backend handed it. An engine that could not
+  // still presents -- with no layers at all -- so the test is what arrived,
+  // not that present was called. See ReportIfEngineNeverPresents.
+  if (count > 0) {
+    layers_presented_ = true;
+  }
   if (!compositor_ || !compositor_->scene) {
     return false;
   }
@@ -2572,23 +2633,35 @@ FlutterRendererConfig VulkanDrmBackend::GetRenderConfig() {
 FlutterCompositor VulkanDrmBackend::GetCompositorConfig() {
   FlutterCompositor compositor{};
   compositor.struct_size = sizeof(FlutterCompositor);
-  // Under Impeller the embedder cannot turn a Vulkan backing store into a
-  // render target: embedder.cc logs "Unimplemented" for
+  // Engines up to and including 3.47 cannot turn a Vulkan backing store into
+  // an Impeller render target: embedder.cc logs "Unimplemented" for
   // kFlutterBackingStoreTypeVulkan and rasterization fails outright, leaving a
-  // dead panel. (The OpenGL framebuffer case is implemented, which is why
-  // drm_kms_egl runs Impeller happily; Vulkan simply has not been written.)
-  //
-  // Offer no compositor there, and the engine presents through the root surface
-  // instead -- get_next_image / present_image, which this backend implements.
-  // Platform views do not reach a KMS plane on that path, so this is a real
-  // reduction, logged rather than silent.
-  if (ihs::engine_switches::ImpellerActive()) {
+  // dead panel (flutter/flutter#187525). The engine exposes no way to ask, so
+  // under Impeller the compositor is opt-in: --drm-compositor planes selects it
+  // for an engine that has the render target, and anything else presents
+  // through the root surface -- get_next_image / present_image, which this
+  // backend implements. Platform views do not reach a KMS plane on that path,
+  // so it is a real reduction, logged rather than silent.
+  const bool impeller = ihs::engine_switches::ImpellerActive();
+  if (compositor_mode_ == drm_config::Compositor::kGl) {
+    ihs::log::info(
+        "[VulkanDrmBackend] --drm-compositor gl: presenting through the root "
+        "surface; platform-view layers will not reach a KMS plane");
+    return compositor;
+  }
+  if (impeller && compositor_mode_ != drm_config::Compositor::kPlanes) {
     ihs::log::warn(
         "[VulkanDrmBackend] Impeller: presenting through the root surface, not "
-        "the compositor -- the embedder has no Impeller render target for "
-        "Vulkan backing stores. Platform-view layers will not reach a KMS "
-        "plane; run Skia (drop --enable-impeller) if you need them.");
+        "the compositor. Platform-view layers will not reach a KMS plane. With "
+        "an engine that renders Impeller into Vulkan backing stores, pass "
+        "--drm-compositor planes; otherwise run Skia if you need them.");
     return compositor;
+  }
+  if (impeller) {
+    ihs::log::info(
+        "[VulkanDrmBackend] Impeller: using the compositor (--drm-compositor "
+        "planes). An engine without Impeller Vulkan backing stores presents "
+        "nothing here.");
   }
 #if BUILD_COMPOSITOR
   compositor.user_data = this;

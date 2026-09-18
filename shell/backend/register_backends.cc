@@ -118,6 +118,23 @@ drm_config::TriState ParseTriState(
   return drm_config::TriState::kAuto;
 }
 
+// Parse --drm-compositor. File scope for the same reason as ParseTriState: the
+// Vulkan backend reads it too.
+drm_config::Compositor ParseCompositor(const std::optional<std::string>& s) {
+  if (!s.has_value() || s->empty() || *s == "auto") {
+    return drm_config::Compositor::kAuto;
+  }
+  if (*s == "planes") {
+    return drm_config::Compositor::kPlanes;
+  }
+  if (*s == "gl") {
+    return drm_config::Compositor::kGl;
+  }
+  ihs::log::warn("[FlutterView] drm-compositor '{}' unrecognized; using auto",
+                 *s);
+  return drm_config::Compositor::kAuto;
+}
+
 // DRM/KMS does not have a compositor-level display concept. The refresh
 // rate and mode are owned by the backend; the DrmDisplay stub answers
 // queries the shell issues (metrics, cursor activation, event loop) with
@@ -349,20 +366,6 @@ std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
                       drm_config::TriState def = drm_config::TriState::kAuto) {
     return ParseTriState(s, def);
   };
-  auto parse_compositor = [](const std::optional<std::string>& s) {
-    if (!s.has_value() || s->empty() || *s == "auto") {
-      return drm_config::Compositor::kAuto;
-    }
-    if (*s == "planes") {
-      return drm_config::Compositor::kPlanes;
-    }
-    if (*s == "gl") {
-      return drm_config::Compositor::kGl;
-    }
-    ihs::log::warn("[FlutterView] drm-compositor '{}' unrecognized; using auto",
-                   *s);
-    return drm_config::Compositor::kAuto;
-  };
   auto parse_modeset = [](const std::optional<std::string>& s) {
     if (!s.has_value() || s->empty() || *s == "auto") {
       return drm_config::Modeset::kAuto;
@@ -445,7 +448,7 @@ std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
   if (config.view.drm_mode.has_value() && !config.view.drm_mode->empty()) {
     cfg.mode_spec = config.view.drm_mode;
   }
-  cfg.compositor = parse_compositor(config.view.drm_compositor);
+  cfg.compositor = ParseCompositor(config.view.drm_compositor);
   cfg.modeset = parse_modeset(config.view.drm_modeset);
   cfg.allow_nonblock_modeset =
       parse_tri(config.view.drm_allow_nonblock_modeset);
@@ -609,6 +612,8 @@ std::shared_ptr<Backend> MakeDrmVulkanBackend(
     ihs::log::error("[FlutterView] DRM Vulkan backend init failed");
     return nullptr;
   }
+  // Read by GetCompositorConfig, which the engine calls after this returns.
+  vk_backend->SetCompositorMode(ParseCompositor(config.view.drm_compositor));
 
   // Wire the self-committing HW cursor (if Create opened one) to the seat
   // dispatch thread, and clamp the pointer to the resolved scanout size. The
