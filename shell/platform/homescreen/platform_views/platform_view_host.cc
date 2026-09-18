@@ -661,6 +661,15 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
         close(ef);  // don't leak ef or leave a stale release_efds entry the
         return;     // producer never got a fence to wait on
       }
+      // The caller may already have stored a dup of the compositor's release
+      // fence here (HandBackReleaseFence runs first on the EGL path). The
+      // eventfd supersedes it; overwriting without closing leaked one sync_file
+      // per explicit-sync submit, which grew the fd table through each power
+      // of two (a ~100 ms RCU stall on a Pi 4 at 256 and 512) and reached the
+      // 1024 soft limit about half a minute into a 30fps stream.
+      if (*out_fd >= 0) {
+        close(*out_fd);
+      }
       *out_fd = dup_fd;
     }
     release_efds[buffer_id] = ef;
