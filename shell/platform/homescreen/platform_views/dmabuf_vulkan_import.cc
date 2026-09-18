@@ -16,6 +16,8 @@
 
 #include "dmabuf_vulkan_import.h"
 
+#include <unistd.h>
+
 #include <array>
 #include <cstdint>
 
@@ -233,8 +235,13 @@ bool DmabufVulkanImporter::Import(const IhsFrame& frame,
   ic.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
   VkImage image = VK_NULL_HANDLE;
-  if (create_image_(device_, &ic, nullptr, &image) != VK_SUCCESS) {
-    ihs::log::warn("[ihs_pv] dma-buf import: vkCreateImage failed");
+  const VkResult image_rc = create_image_(device_, &ic, nullptr, &image);
+  if (image_rc != VK_SUCCESS) {
+    ihs::log::warn(
+        "[ihs_pv] dma-buf import: vkCreateImage failed ({}) for {}x{} fourcc "
+        "{:#x} modifier {:#x}",
+        static_cast<int>(image_rc), frame.width, frame.height,
+        frame.format.fourcc, frame.format.modifier);
     return false;
   }
 
@@ -281,13 +288,29 @@ bool DmabufVulkanImporter::Import(const IhsFrame& frame,
   VkDeviceMemory memory = VK_NULL_HANDLE;
   // On success Vulkan owns the imported fd; on failure ownership stays with the
   // caller, so leave it untouched here.
-  if (allocate_memory_(device_, &mai, nullptr, &memory) != VK_SUCCESS) {
-    ihs::log::warn("[ihs_pv] dma-buf import: vkAllocateMemory (import) failed");
+  const VkResult alloc_rc = allocate_memory_(device_, &mai, nullptr, &memory);
+  if (alloc_rc != VK_SUCCESS) {
+    // The two numbers that explain this failure, and the reason it was
+    // unreadable without them: a driver refuses the import when the image needs
+    // more memory than the producer's dma-buf holds, and it can need more than
+    // req.size -- a tiled layout is padded past the frame geometry, and the
+    // producer has no way to compute that padding. Equal sizes here mean the
+    // driver wants padding neither side accounted for; a short dma-buf means
+    // the producer under-allocated outright.
+    const off_t dmabuf_size = ::lseek(frame.plane_fd[0], 0, SEEK_END);
+    ihs::log::warn(
+        "[ihs_pv] dma-buf import: vkAllocateMemory (import) failed ({}); image "
+        "wants {} bytes, dma-buf holds {} ({}x{} stride {} modifier {:#x})",
+        static_cast<int>(alloc_rc), req.size,
+        static_cast<long long>(dmabuf_size), frame.width, frame.height,
+        frame.plane_stride[0], frame.format.modifier);
     destroy_image_(device_, image, nullptr);
     return false;
   }
-  if (bind_image_memory_(device_, image, memory, 0) != VK_SUCCESS) {
-    ihs::log::warn("[ihs_pv] dma-buf import: vkBindImageMemory failed");
+  const VkResult bind_rc = bind_image_memory_(device_, image, memory, 0);
+  if (bind_rc != VK_SUCCESS) {
+    ihs::log::warn("[ihs_pv] dma-buf import: vkBindImageMemory failed ({})",
+                   static_cast<int>(bind_rc));
     free_memory_(device_, memory, nullptr);  // closes the imported fd
     destroy_image_(device_, image, nullptr);
     return false;

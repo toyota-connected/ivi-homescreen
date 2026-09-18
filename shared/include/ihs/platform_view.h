@@ -531,6 +531,16 @@ IHS_EXPORT int ihs_pv_grant_shm_fd(IhsPlatformView* view, size_t* out_stride);
  * @plane_stride describe each plane (one fd may back several planes). Fill
  * @plane_count planes.
  *
+ * The allocation must be at least the size the granted format+modifier implies,
+ * which is NOT width*height*bpp once a tiled modifier is in play: a tiled
+ * layout is padded to whole tiles, and an importing driver can want more still.
+ * A plugin cannot compute that padding, and an allocator may report a tiled
+ * modifier for a buffer it sized as if linear -- so allocate with headroom
+ * (rounding the height up to a tile and adding one more is enough in practice)
+ * rather than to the exact frame geometry. An import refused for this reason
+ * fails with no indication of the size it wanted; the registry logs what the
+ * image needed against what the dma-buf held.
+ *
  * @buffer_id names WHICH buffer of the plugin's ring this frame is (0..N-1,
  * stable for that buffer's lifetime). The registry imports each distinct
  * buffer_id once — creating the VkImage / KMS framebuffer that aliases the
