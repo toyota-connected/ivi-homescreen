@@ -13,6 +13,10 @@
 //   VELOCITY     auto-scroll speed, logical px/s      (default 600)
 //   AUTOSCROLL   "false" disables auto-scroll (manual)(default on)
 //   TIMINGS_FILE per-frame engine-timing CSV path     (default off)
+//
+// TIMINGS_FILE is also read from the environment at startup, which the
+// compile-time defines cannot be: one AOT build then serves a run per
+// configuration, each writing its own CSV, instead of a rebuild per run.
 import 'dart:io';
 import 'dart:ui' show FramePhase;
 
@@ -22,8 +26,14 @@ const int kItems = int.fromEnvironment('ITEMS', defaultValue: 2000);
 const int kVelocity = int.fromEnvironment('VELOCITY', defaultValue: 600);
 const bool kAutoScroll =
     bool.fromEnvironment('AUTOSCROLL', defaultValue: true);
-const String kTimingsFile =
+const String _kTimingsFileDefine =
     String.fromEnvironment('TIMINGS_FILE', defaultValue: '');
+
+/// The compile-time define when it was given, else the environment. Read once:
+/// the file is opened at startup and the path cannot change after that.
+final String kTimingsFile = _kTimingsFileDefine.isNotEmpty
+    ? _kTimingsFileDefine
+    : (Platform.environment['TIMINGS_FILE'] ?? '');
 
 void main() {
   if (kTimingsFile.isNotEmpty) {
