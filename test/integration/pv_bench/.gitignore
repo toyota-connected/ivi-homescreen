@@ -1,0 +1,16 @@
+# Dart / Flutter build output
+.dart_tool/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+pubspec.lock
+
+# Homescreen bundle output (`-b` target for the homescreen embedder)
+.desktop-homescreen/
+bundle-*/
+
+# IDE / editor
+.idea/
+*.iml
+.vscode/
