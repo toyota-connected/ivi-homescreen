@@ -230,6 +230,34 @@ bool DmabufVulkanImporter::Import(const IhsFrame& frame,
   ic.arrayLayers = 1;
   ic.samples = VK_SAMPLE_COUNT_1_BIT;
   ic.tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT;
+  // SAMPLED is requested unconditionally, and on at least one driver the
+  // modifier does not advertise it (#597). Measured on a Pi 5, V3D 7.1.7.0,
+  // VK_FORMAT_B8G8R8A8_UNORM:
+  //
+  //   modifier                   tilingFeatures  SAMPLED  importable
+  //   DRM_FORMAT_MOD_LINEAR      0xc980          no       no
+  //   DRM_FORMAT_MOD_BROADCOM_UIF 0xdd83         yes      yes
+  //
+  // "importable" is vkGetPhysicalDeviceImageFormatProperties2 asked with
+  // VkPhysicalDeviceExternalImageFormatInfo, the modifier, and this exact
+  // usage: for LINEAR it returns VK_ERROR_FORMAT_NOT_SUPPORTED. Creating the
+  // image anyway is invalid, and V3D tolerates it -- vkCreateImage returns
+  // VK_SUCCESS and the frames sample and composite correctly.
+  //
+  // Not fixed by offering only modifiers that pass, which was the obvious move
+  // and is wrong here: gbm on that board cannot allocate UIF at all
+  // (gbm_bo_create_with_modifiers -> "Unsupported modifier requested"), so
+  // LINEAR is the only modifier a producer can actually make. Preferring UIF
+  // would hand producers something they cannot allocate.
+  //
+  // The legal fix is to drop SAMPLED when the modifier lacks it -- LINEAR does
+  // advertise TRANSFER_SRC, so the import stays valid -- and have the
+  // compositor vkCmdCopyImage into an optimal-tiled sampled image before
+  // sampling. That costs a full-resolution copy per frame and needs a new
+  // ICompositorSurface seam plus changes in both Vulkan backends, so it is
+  // deferred: the defect is invisible in practice, and #582 means this path
+  // cannot currently run on the board that exhibits it. #597 carries the
+  // numbers.
   ic.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
   ic.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
   ic.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
