@@ -33,17 +33,33 @@
 //   sudo modprobe vkms
 //   ./homescreen_drm_backend_vkms_ut_test_driver
 
+#include "backend/backend_registry.h"
 #include "backend/drm_kms_egl/drm_backend.h"
 #include "backend/drm_kms_egl/drm_compositor.h"
+#include "backend/register_backends.h"
+#include "configuration/configuration.h"
 #include "display/drm_display.h"
 #include "logging/logger.hpp"
+#include "platform/homescreen/flutter_desktop_engine_state.h"
+#include "platform/homescreen/flutter_desktop_view_controller_state.h"
 #include "platform/homescreen/platform_views/egl_dmabuf_import.h"
+#include "platform/homescreen/platform_views/platform_view_host.h"
+#include "platform/homescreen/platform_views/platform_view_registry.h"
+// FlutterDesktopViewControllerState only forward-declares TextInputPlugin but
+// holds it by unique_ptr, so destroying a controller state needs the complete
+// type here.
+#include "platform/homescreen/text_input_plugin.h"
 #include "view/compositor_surface_interface.h"
+#include "view/flutter_view.h"
+
+#include "ihs/platform_view.h"
+#include "ihs/platform_view_host.h"
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 
 extern "C" {
+#include <dirent.h>
 #include <drm_fourcc.h>
 #include <fcntl.h>
 #include <gbm.h>
@@ -87,6 +103,22 @@ struct VkmsCard {
 
   [[nodiscard]] bool ok() const { return !path.empty() && mode_w != 0; }
 };
+
+// Descriptors this process holds. What it measures across a loop is what the
+// loop left behind, so callers compare two samples rather than a ceiling.
+// Same approach as mcp_transport-test and lease_client-test.
+int CountOpenFds() {
+  int count = 0;
+  DIR* dir = ::opendir("/proc/self/fd");
+  if (dir == nullptr) {
+    return 0;
+  }
+  while (::readdir(dir) != nullptr) {
+    ++count;
+  }
+  ::closedir(dir);
+  return count;
+}
 
 // Overlay planes on @p fd. Needs UNIVERSAL_PLANES, which is also what the
 // backend sets before it counts them.
@@ -1172,6 +1204,288 @@ TEST_F(EglAcquireFence, NoFenceIsNotConsumed) {
   EglDmabufImporter importer;
   ASSERT_TRUE(importer.Init(backend_->egl_display()));
   EXPECT_FALSE(importer.WaitAcquireFence(-1));
+}
+
+// ─── The real ihs_pv host path (#602) ────────────────────────────────────
+//
+// Everything above drives ICompositorSurface directly, so it exercises the
+// compositor and never HostSubmit. That is how #593 -- one leaked sync_file per
+// explicit-sync submit -- reached a release: it lives in HostSubmit, and
+// InstallPlatformViewHost is called from flutter_desktop.cc and nowhere else.
+//
+// The host needs less of an engine than it looks. BackendOf walks
+// state->view_controller->view->GetBackend(), and InstallPlatformViewHost wants
+// a non-null platform_view_registry; nothing on the install path touches
+// flutter_engine. So a hand-built state over a FlutterView is enough, and
+// FlutterView's constructor builds the backend itself (Backend::Create) --
+// which is why this fixture does not extend DrmBackendVkmsBase: that one
+// creates its own DrmBackend, and two cannot hold DRM master on one card.
+//
+// Initialize() is deliberately not called. It wants a live engine; the
+// constructor alone is what stands the backend up.
+class PvHostVkms : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    card_ = FindVkms();
+    if (!card_.ok()) {
+      GTEST_SKIP() << "no connected vkms card (sudo modprobe vkms)";
+    }
+    display_ = std::make_shared<DrmDisplay>(0, 0, 0.0, card_.path,
+                                            /*no_seat=*/true);
+    if (display_->SharedDevice() == nullptr) {
+      GTEST_SKIP() << "no DRM master on " << card_.path;
+    }
+
+    // Production populates the registry on the way into App; nothing does in a
+    // test, and an empty registry resolves to key='' rather than failing
+    // loudly at the point of the mistake. Idempotent, so re-running per case is
+    // fine.
+    RegisterCompiledBackends(backend::BackendRegistry::Instance());
+
+    Configuration::Config cfg{};
+    cfg.view.backend = "drm-kms-egl";
+    cfg.view.drm_device = card_.path;
+    cfg.view.width = card_.mode_w;
+    cfg.view.height = card_.mode_h;
+    cfg.view.drm_no_seat = true;
+
+    view_ = std::make_unique<FlutterView>(cfg, 0, "pv-host-test", display_);
+    ASSERT_NE(view_->GetBackend(), nullptr)
+        << "FlutterView built no backend for drm-kms-egl on " << card_.path;
+
+    controller_.view = view_.get();
+    state_.view_controller = &controller_;
+    state_.platform_view_registry =
+        std::make_unique<PlatformViewRegistry>(&state_);
+
+    InstallPlatformViewHost(&state_);
+    installed_ = true;
+  }
+
+  void TearDown() override {
+    // The host is process-global. Leaving it installed would point a later case
+    // at a destroyed engine state.
+    if (installed_) {
+      ihs_pv_unregister_factory(kViewType);
+      ihs_pv_set_host(nullptr);
+      installed_ = false;
+    }
+    state_.platform_view_registry.reset();
+    view_.reset();
+    display_.reset();
+  }
+
+  static constexpr const char* kViewType = "views/fd-audit";
+
+  VkmsCard card_;
+  std::shared_ptr<DrmDisplay> display_;
+  std::unique_ptr<FlutterView> view_;
+  FlutterDesktopViewControllerState controller_{};
+  FlutterDesktopEngineState state_{};
+  bool installed_{false};
+};
+
+// The producer the factory hands back: it keeps the IhsPlatformView so the case
+// can submit against it, and counts the callbacks the registry drives.
+struct FakeProducer {
+  IhsPlatformView* view{nullptr};
+  int disposed{0};
+};
+
+int fake_factory(const IhsPvCreateInfo* /*info*/,
+                 void* factory_user_data,
+                 IhsPlatformView* view,
+                 IhsPvCallbacks* out_callbacks,
+                 void** out_user_data) {
+  auto* p = static_cast<FakeProducer*>(factory_user_data);
+  p->view = view;
+  out_callbacks->struct_size = sizeof(*out_callbacks);
+  out_callbacks->dispose = [](void* u) {
+    static_cast<FakeProducer*>(u)->disposed++;
+  };
+  *out_user_data = p;
+  return IHS_PV_OK;
+}
+
+// The explicit-sync submit loop must not cost an fd per frame.
+//
+// This is #593's shape. HandBackReleaseFence stores a dup of the compositor's
+// release fence in out_release_fence_fd and HandBackReleaseEventfd then
+// supersedes it; overwriting without closing leaked one sync_file per submit.
+//
+// Both of its preconditions have to be armed or the leaking line never runs:
+// the submit must carry an acquire fence, and the view must already hold a
+// release fence. The first is minted here; the second needs the plane path to
+// have presented the view at least once, which is why this presents before it
+// measures. An earlier draft of this test did neither, passed against a
+// deliberately reintroduced leak, and would have been worthless.
+TEST_F(PvHostVkms, ExplicitSyncSubmitLoopDoesNotLeakFds) {
+  auto* drm = dynamic_cast<DrmBackend*>(view_->GetBackend());
+  ASSERT_NE(drm, nullptr) << "not a DrmBackend";
+  DrmCompositor* comp = drm->compositor();
+  ASSERT_NE(comp, nullptr) << "built without BUILD_COMPOSITOR";
+
+  FakeProducer producer;
+  ASSERT_EQ(ihs_pv_register_factory(kViewType, &fake_factory, &producer),
+            IHS_PV_OK);
+
+  PlatformViewRegistry::CreateRequest req{};
+  req.id = 1;
+  req.view_type = kViewType;
+  req.width = 64;
+  req.height = 64;
+  ASSERT_TRUE(state_.platform_view_registry->CreateViaFactory(req));
+  ASSERT_NE(producer.view, nullptr) << "the factory was never invoked";
+
+  IhsPvRequirements reqs{};
+  reqs.struct_size = sizeof(reqs);
+  reqs.kinds = IHS_PV_KIND_TEXTURE_DMABUF_IMPORT | IHS_PV_KIND_DRM_PLANE;
+  reqs.sync = IHS_PV_SYNC_EXPLICIT_PREFERRED;
+  IhsPvGrant grant{};
+  grant.struct_size = sizeof(grant);
+  ASSERT_EQ(ihs_pv_negotiate(producer.view, &reqs, &grant), IHS_PV_OK);
+  if (grant.granted_kind == IHS_PV_KIND_SOFTWARE_SHM) {
+    GTEST_SKIP() << "negotiated down to the software floor; HostSubmit's EGL "
+                    "branch is not reachable on this display";
+  }
+
+  ASSERT_TRUE(drm->MakeCurrent());
+
+  // The card fd off the display: GetBackend() hands back the base Backend,
+  // which exposes no device().
+  GbmSolidBuffer buffer;
+  ASSERT_TRUE(
+      buffer.Create(display_->SharedDevice()->fd(), 64, 64, 0xFF1E7A46u))
+      << "could not allocate a dma-buf on the card";
+
+  // A real producer acquire fence: fence some GL work and export the sync_file.
+  auto mint_acquire = [&]() -> int {
+    auto create = reinterpret_cast<PFNEGLCREATESYNCKHRPROC>(
+        eglGetProcAddress("eglCreateSyncKHR"));
+    auto destroy = reinterpret_cast<PFNEGLDESTROYSYNCKHRPROC>(
+        eglGetProcAddress("eglDestroySyncKHR"));
+    auto dup_fd = reinterpret_cast<PFNEGLDUPNATIVEFENCEFDANDROIDPROC>(
+        eglGetProcAddress("eglDupNativeFenceFDANDROID"));
+    if (create == nullptr || destroy == nullptr || dup_fd == nullptr) {
+      return -1;
+    }
+    const EGLDisplay dpy = drm->egl_display();
+    glClear(GL_COLOR_BUFFER_BIT);
+    EGLSyncKHR s = create(dpy, EGL_SYNC_NATIVE_FENCE_ANDROID, nullptr);
+    if (s == EGL_NO_SYNC_KHR) {
+      return -1;
+    }
+    glFlush();
+    const int fd = dup_fd(dpy, s);
+    destroy(dpy, s);
+    return fd;
+  };
+
+  auto submit = [&](uint32_t slot, int acquire_fd, int* out_release) {
+    IhsFrame frame{};
+    frame.struct_size = sizeof(frame);
+    frame.format.fourcc = DRM_FORMAT_XRGB8888;
+    frame.format.modifier = DRM_FORMAT_MOD_LINEAR;
+    frame.width = 64;
+    frame.height = 64;
+    frame.plane_count = 1;
+    frame.plane_fd[0] = buffer.ExportFd();
+    frame.plane_offset[0] = 0;
+    frame.plane_stride[0] = buffer.stride();
+    frame.buffer_id = slot;
+    // Plane fds are not closed here. The header spells out ownership for
+    // acquire_fence_fd and out_release_fence_fd but not for these; the host
+    // settles it by stashing the frame by value and closing its own copy
+    // (CloseFrameFds) at supersede and on every error path, so on success they
+    // belong to the registry. Closing them here is a double close, and it
+    // surfaces later as the release write failing with EINVAL.
+    return ihs_pv_submit(producer.view, &frame, acquire_fd, out_release);
+  };
+
+  auto present = [&]() {
+    FlutterPlatformView pv{};
+    pv.struct_size = sizeof(FlutterPlatformView);
+    pv.identifier = 1;
+    FlutterLayer layer{};
+    layer.struct_size = sizeof(FlutterLayer);
+    layer.type = kFlutterLayerContentTypePlatformView;
+    layer.platform_view = &pv;
+    layer.offset = FlutterPoint{0.0, 0.0};
+    layer.size = FlutterSize{64.0, 64.0};
+    const FlutterLayer* layers[] = {&layer};
+    return comp->PresentLayers(layers, 1);
+  };
+
+  // Prime the release fence. The plane path hands one back through
+  // SetReleaseFenceFd only after a commit has displaced a buffer, so this needs
+  // a frame, a present that places it, and a second present whose flip wait
+  // fires the deferred release.
+  int rel = -1;
+  ASSERT_EQ(submit(0, -1, &rel), IHS_PV_OK);
+  if (rel >= 0) {
+    ::close(rel);
+  }
+  present();
+  ASSERT_EQ(submit(1, -1, &rel), IHS_PV_OK);
+  if (rel >= 0) {
+    ::close(rel);
+  }
+  present();
+
+  // A real producer holds the release fd until it wants the slot back, so this
+  // does too: the host signals a slot's eventfd when the next submit for that
+  // buffer_id retires the stale entry, and that readability is the only outward
+  // sign the host still holds a valid fd. A double close leaves the fd count
+  // flat and shows up nowhere else.
+  int held[2] = {-1, -1};
+  int release_failures = 0;
+  const auto submit_explicit = [&](uint32_t slot) {
+    const int acquire = mint_acquire();
+    int release_fd = -1;
+    const int rc = submit(slot, acquire, &release_fd);
+    if (held[slot] >= 0) {
+      pollfd pfd{held[slot], POLLIN, 0};
+      if (::poll(&pfd, 1, 0) != 1 || (pfd.revents & POLLIN) == 0) {
+        ++release_failures;
+      }
+      ::close(held[slot]);
+    }
+    held[slot] = release_fd;
+    return rc;
+  };
+
+  for (int i = 0; i < 8; ++i) {
+    ASSERT_EQ(submit_explicit(static_cast<uint32_t>(i % 2)), IHS_PV_OK)
+        << "warm-up submit " << i;
+    present();
+  }
+  const int before = CountOpenFds();
+  ASSERT_GT(before, 0) << "could not read /proc/self/fd";
+
+  for (int i = 0; i < 64; ++i) {
+    ASSERT_EQ(submit_explicit(static_cast<uint32_t>(i % 2)), IHS_PV_OK)
+        << "submit " << i;
+    present();
+  }
+  const int after = CountOpenFds();
+
+  EXPECT_LE(after - before, 4)
+      << "open fds grew from " << before << " to " << after
+      << " over 64 explicit-sync submits; the submit path is leaking about one "
+         "per frame (#593)";
+
+  EXPECT_EQ(release_failures, 0)
+      << "a release eventfd never signalled; the host could not write to an fd "
+         "it owns, which means one was closed underneath it";
+
+  for (int& fd : held) {
+    if (fd >= 0) {
+      ::close(fd);
+      fd = -1;
+    }
+  }
+
+  EXPECT_TRUE(state_.platform_view_registry->Dispose(1, false));
 }
 
 }  // namespace
