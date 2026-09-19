@@ -60,6 +60,25 @@ bool PlatformViewRegistry::CreateViaFactory(const CreateRequest& request) {
     factory = it->second;
   }
 
+  // A create for an id that is already live replaces it, and the incumbent is
+  // torn down first -- through the same Dispose the framework's dispose message
+  // runs, so the plugin releases what it holds rather than merely losing the
+  // owned wrapper (the per-view state lives behind the listener, and only
+  // dispose reaches it).
+  //
+  // The ordering is the point. A platform view owns per-view resources: a
+  // render thread, its buffers, whatever slot or index the plugin uses to mark
+  // its primary view. A factory that runs while the outgoing view still holds
+  // them builds a replacement that has to take second best, and nothing ever
+  // puts it back. That is not hypothetical -- it is how a hot restart, which
+  // re-creates a view under the id the previous isolate used, left fluorite's
+  // producer on view slot 1, the slot that pumps no animation, no skinning and
+  // no physics, with the scene frozen behind it. Nothing needs the two to
+  // overlap, so they do not.
+  //
+  // Harmless when the id is not live: Dispose reports whether it found one.
+  Dispose(request.id, /*hybrid=*/false);
+
   // Invoke outside the lock: the factory calls RegisterListener, which locks.
   std::unique_ptr<PlatformView> instance = factory(*this, request);
   if (!instance) {
