@@ -244,20 +244,35 @@ bool DmabufVulkanImporter::Import(const IhsFrame& frame,
   // image anyway is invalid, and V3D tolerates it -- vkCreateImage returns
   // VK_SUCCESS and the frames sample and composite correctly.
   //
-  // Not fixed by offering only modifiers that pass, which was the obvious move
-  // and is wrong here: gbm on that board cannot allocate UIF at all
-  // (gbm_bo_create_with_modifiers -> "Unsupported modifier requested"), so
-  // LINEAR is the only modifier a producer can actually make. Preferring UIF
-  // would hand producers something they cannot allocate.
+  // Fixable by offering only the modifiers that pass. What made that look
+  // impossible was probing the allocator with SCANOUT, which UIF is refused
+  // for; the import path never asks for it, since the frame is sampled through
+  // Vulkan rather than handed to a plane. Same board, renderD128, 1280x1440
+  // XR24, gbm_bo_create_with_modifiers2:
   //
-  // The legal fix is to drop SAMPLED when the modifier lacks it -- LINEAR does
-  // advertise TRANSFER_SRC, so the import stays valid -- and have the
-  // compositor vkCmdCopyImage into an optimal-tiled sampled image before
-  // sampling. That costs a full-resolution copy per frame and needs a new
-  // ICompositorSurface seam plus changes in both Vulkan backends, so it is
-  // deferred: the defect is invisible in practice, and #582 means this path
-  // cannot currently run on the board that exhibits it. #597 carries the
-  // numbers.
+  //   modifier  usage                result
+  //   UIF       RENDERING            OK
+  //   UIF       none                 OK
+  //   UIF       RENDERING|SCANOUT    failed
+  //   LINEAR    RENDERING            OK
+  //
+  // Run end to end with the capability query filtered to modifiers that pass
+  // the importability probe: the board offered UIF for all four packed RGB
+  // fourccs, the producer allocated it, and 20 s at 60 submits/s imported with
+  // no failures.
+  //
+  // Two costs go with it, neither fatal and both worth knowing. UIF comes back
+  // at the linear stride, so a producer still over-allocates exactly as #598
+  // describes. And a CPU producer pays the tiling on every gbm_bo_map/unmap,
+  // which is cheap for a small tile and not free at full screen.
+  //
+  // Still deferred, now on cost rather than impossibility: the defect is
+  // invisible in practice, and #582 means this path cannot currently run on
+  // the board that exhibits it. The other legal route -- drop SAMPLED when the
+  // modifier lacks it and have the compositor vkCmdCopyImage into an
+  // optimal-tiled image first -- costs a full-resolution copy per frame and a
+  // new ICompositorSurface seam, so it is the fallback, not the plan. #597
+  // carries the numbers.
   ic.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
   ic.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
   ic.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
