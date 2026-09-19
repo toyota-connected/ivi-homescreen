@@ -1393,12 +1393,11 @@ TEST_F(PvHostVkms, ExplicitSyncSubmitLoopDoesNotLeakFds) {
     frame.plane_offset[0] = 0;
     frame.plane_stride[0] = buffer.stride();
     frame.buffer_id = slot;
-    // Plane fds are not closed here. The header spells out ownership for
-    // acquire_fence_fd and out_release_fence_fd but not for these; the host
-    // settles it by stashing the frame by value and closing its own copy
-    // (CloseFrameFds) at supersede and on every error path, so on success they
-    // belong to the registry. Closing them here is a double close, and it
-    // surfaces later as the release write failing with EINVAL.
+    // Plane fds are not closed here: ihs_pv_submit consumes them whatever it
+    // returns (see FD OWNERSHIP on IhsFrame). Closing them is a double close,
+    // which does not report itself -- it lands several submits later on an
+    // unrelated fd that reused the number, and surfaces as the release write
+    // failing with EINVAL. The first draft of this test did exactly that.
     return ihs_pv_submit(producer.view, &frame, acquire_fd, out_release);
   };
 
