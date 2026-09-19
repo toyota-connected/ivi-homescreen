@@ -547,8 +547,19 @@ IHS_EXPORT int ihs_pv_grant_shm_fd(IhsPlatformView* view, size_t* out_stride);
  * dma-buf — and reuses that import on every later submit of the same id, so a
  * steady stream of frames costs no per-frame allocation. A plugin that hands a
  * fresh dma-buf every frame (no ring) uses a rolling id; one that cycles a
- * fixed ring reuses its ids. The plane fds are consumed by the registry on the
- * import (first sight of an id) and closed as redundant on a cache hit.
+ * fixed ring reuses its ids.
+ *
+ * FD OWNERSHIP: ihs_pv_submit consumes @plane_fd. The registry closes them --
+ * on the import, as redundant handles on a cache hit, and on every path that
+ * refuses the frame. That holds whatever ihs_pv_submit returns, with one
+ * exception: a frame so malformed it is rejected on struct_size (or a NULL
+ * frame) leaves them alone, because nothing in it can be trusted to close from.
+ * So a plugin closes its own fds only when it never handed them over.
+ *
+ * A plugin that keeps a ring passes dups and holds its originals for the life
+ * of the slot. One that closes after a failed submit double-closes, and a
+ * double close does not report itself -- it lands several submits later on an
+ * unrelated fd that reused the number.
  */
 typedef struct IhsFrame {
   size_t struct_size;
@@ -570,7 +581,9 @@ typedef struct IhsFrame {
  * Hand the registry a produced @frame for @view. Used by all kinds
  * (TEXTURE_DMABUF_IMPORT, SOFTWARE_SHM, and the registry-driven DRM_PLANE).
  * @acquire_fence_fd signals when the plugin's production completed (-1 for
- * implicit sync); the registry takes ownership of the fd.
+ * implicit sync); the registry takes ownership of the fd, on the same terms as
+ * @plane_fd above -- consumed whatever this returns, except on the malformed-
+ * frame rejection, which closes nothing.
  * *out_release_fence_fd, when the registry sets it to a non-negative fd, is a
  * release fence that fires when the buffer is free to reuse: the plugin owns
  * that fd and must close it (waiting on it first before overwriting the
