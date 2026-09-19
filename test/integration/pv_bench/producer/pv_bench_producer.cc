@@ -413,9 +413,13 @@ class BenchView {
     int release_fence = -1;
     const int rc = ihs_pv_submit(view_, &f, -1, &release_fence);
     if (rc != IHS_PV_OK) {
-      /* Ownership only transfers on success; reclaim the dup so a failing
-       * registry cannot exhaust the fd table one frame at a time. */
-      ::close(f.plane_fd[0]);
+      /*
+       * The dup is gone either way: submit consumes plane_fd whatever it
+       * returns, bar the malformed-frame rejection, and this frame is well
+       * formed. Closing it here was a double close -- it ran 178 times in three
+       * seconds on the import-failure path, each one able to take out an
+       * unrelated fd that had reused the number.
+       */
       if (submit_errors_++ % 60 == 0) {
         Log("submit failed: %d", rc);
       }

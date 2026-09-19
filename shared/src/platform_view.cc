@@ -28,6 +28,8 @@
  * thread. The mutex guards only the installed host pointer.
  */
 
+#include <unistd.h>
+
 #include <cstddef>
 
 #include "ihs/platform_view.h"
@@ -46,6 +48,46 @@ const IhsPvHost* g_host = nullptr;
 const IhsPvHost* host() {
   const std::lock_guard<std::mutex> lock(g_mutex);
   return g_host;
+}
+
+// Close a submitted frame's fds, honoring one rule: ihs_pv_submit consumes what
+// it is handed. The host end of the path has always done this on its own error
+// returns; these entry-point returns did not, so IHS_PV_ERR_NO_BACKEND meant
+// "already closed" coming from the host and "still yours" coming from here --
+// the same code, opposite ownership, with nothing for a plugin to test. A
+// producer that guessed either way leaked fds or double-closed them, and a
+// double close surfaces later on an unrelated fd that reused the number.
+//
+// One fd may back several planes, so close each distinct number once.
+void close_frame_fds(const IhsFrame* frame, int acquire_fence_fd) {
+  if (acquire_fence_fd >= 0) {
+    ::close(acquire_fence_fd);
+  }
+  // The acquire fence is closed above regardless; the plane fds need
+  // struct_size to actually reach them first. A caller that declared a frame
+  // ending before plane_fd has no fds here to close, and reading them anyway
+  // would close whatever follows its struct.
+  if (frame == nullptr ||
+      frame->struct_size <
+          offsetof(IhsFrame, plane_offset) + sizeof(frame->plane_offset)) {
+    return;
+  }
+  const uint32_t planes = frame->plane_count < 4u ? frame->plane_count : 4u;
+  for (uint32_t i = 0; i < planes; ++i) {
+    if (frame->plane_fd[i] < 0) {
+      continue;
+    }
+    bool already_closed = false;
+    for (uint32_t j = 0; j < i; ++j) {
+      if (frame->plane_fd[j] == frame->plane_fd[i]) {
+        already_closed = true;
+        break;
+      }
+    }
+    if (!already_closed) {
+      ::close(frame->plane_fd[i]);
+    }
+  }
 }
 
 // Zero an out struct up to its caller-declared struct_size (preserving that
@@ -263,14 +305,19 @@ extern "C" int ihs_pv_submit(IhsPlatformView* view,
   if (out_release_fence_fd != nullptr) {
     *out_release_fence_fd = -1;
   }
+  // The one case where the fds stay the caller's: a frame this malformed has no
+  // trustworthy plane_count or plane_fd to close from, and guessing would close
+  // whatever integers happen to be there.
   if (frame == nullptr || frame->struct_size == 0) {
     return IHS_PV_ERR_INVALID;
   }
   const IhsPvHost* h = host();
   if (h == nullptr) {
+    close_frame_fds(frame, acquire_fence_fd);
     return IHS_PV_ERR_NO_REGISTRY;
   }
   if (h->submit == nullptr) {
+    close_frame_fds(frame, acquire_fence_fd);
     return IHS_PV_ERR_NO_BACKEND;
   }
   return h->submit(h->user_data, view, frame, acquire_fence_fd,
