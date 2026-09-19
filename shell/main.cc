@@ -20,6 +20,10 @@
 #include <string_view>
 #include <thread>
 
+#if defined(__GLIBC__)
+#include <malloc.h>
+#endif
+
 #include "config/common.h"
 
 #include "app.h"
@@ -160,6 +164,40 @@ void PublishIhsConfig(const std::vector<Configuration::Config>& configs) {
  * wayland, flutter
  */
 int main(const int argc, char** argv) {
+  // Bound glibc's malloc arenas before anything spawns a thread.
+  //
+  // glibc hands a thread its own 64-128 MB heap whenever it finds every
+  // existing arena contended, up to 8 * ncores of them -- 256 on a 32-thread
+  // machine. Nothing hands them back. A shell that hosts several plugins is
+  // exactly the shape that trips it: each plugin brings its own worker threads,
+  // they come up together at startup, and they all reach for the allocator at
+  // once.
+  //
+  // Measured on the fluorite platform view, whose renderer and job system are
+  // threaded, by repeatedly restarting the Dart isolate -- the dev-loop action
+  // that brings a burst of threads up over and over. Resident memory grew
+  // 35 MB per restart, 41 arena-sized regions holding 337 MB after a dozen of
+  // them, and every ordinary leak instrument came back clean because the memory
+  // is reachable and mostly free *inside* the arenas. Capping them took the
+  // same cycle to 12.5 MB, which is what the Dart VM alone costs.
+  //
+  // Four rather than one or two: the arenas exist to keep threads off each
+  // other's locks, and this process is genuinely multi-threaded -- a platform
+  // view's render thread, the engine's task runners, whatever a plugin starts.
+  // Four bounds the footprint while leaving room to allocate in parallel.
+  //
+  // MALLOC_ARENA_MAX wins when it is set, so an integrator who has measured
+  // their own workload keeps the last word; glibc reads it at first malloc and
+  // this would otherwise override it.
+  // glibc only: M_ARENA_MAX is its knob, and the arenas are its design. musl
+  // allocates differently and has no equivalent to ask for, so there is
+  // nothing to do there rather than something to emulate.
+#if defined(__GLIBC__)
+  if (getenv("MALLOC_ARENA_MAX") == nullptr) {
+    mallopt(M_ARENA_MAX, 4);
+  }
+#endif
+
   IHS_LOGGING_START("IHSC", "ivi-homescreen Flutter runtime");
 
 #if BUILD_BACKEND_WAYLAND_LEASED_DRM
