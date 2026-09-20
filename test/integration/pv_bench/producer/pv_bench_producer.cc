@@ -526,6 +526,10 @@ void OnRenegotiate(void* user_data) {
   static_cast<BenchView*>(user_data)->Suspend(true);
 }
 
+/* The destructor joins the submit thread, which is what the contract asks for:
+ * the registry destroys the view once this returns, so a submit still in flight
+ * would be running against freed memory. A flag would not do -- the thread can
+ * already be inside ihs_pv_submit when it is cleared. */
 void OnDispose(void* user_data) {
   delete static_cast<BenchView*>(user_data);
 }
