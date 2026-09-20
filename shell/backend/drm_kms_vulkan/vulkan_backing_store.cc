@@ -220,9 +220,19 @@ std::unique_ptr<VulkanBackingStore> VulkanBackingStore::Create(
   VkExportMemoryAllocateInfo emai{};
   emai.sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO;
   emai.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
+  // Dedicated, like the import path below. This allocation backs exactly one
+  // image, so it costs nothing to say so -- and a driver that reports
+  // requiresDedicatedAllocation for a DRM-modifier scanout image (V3D does)
+  // otherwise gets memory it asked to be dedicated and was not. Validation
+  // catches it at bind, five times a run; the driver does not complain, which
+  // is why it sat here.
+  VkMemoryDedicatedAllocateInfo ded{};
+  ded.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO;
+  ded.pNext = &emai;
+  ded.image = store->image_;
   VkMemoryAllocateInfo mai{};
   mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  mai.pNext = &emai;
+  mai.pNext = &ded;
   mai.allocationSize = req.size;
   mai.memoryTypeIndex = mt;
   if (d().vkAllocateMemory(device, &mai, nullptr, &store->memory_) !=
