@@ -307,9 +307,15 @@ IHS_EXPORT IHS_WEAK_IMPORT const char* ihs_pv_assets_path(void);
  * A plugin cannot add extensions or features to an already-created device, so
  * @device_extensions lists what was enabled: dma-buf export needs
  * VK_EXT_external_memory_dma_buf + VK_KHR_external_memory_fd +
- * VK_EXT_image_drm_format_modifier; explicit sync needs
- * VK_KHR_timeline_semaphore or synchronization2. Absent an extension, the
- * plugin falls back to the floor.
+ * VK_EXT_image_drm_format_modifier. Absent an extension, the plugin falls back
+ * to the floor.
+ *
+ * Do not read explicit-sync availability out of this list. What the registry
+ * honors is reported by IhsPvCapabilities::explicit_sync and, per view, by the
+ * granted IhsPvGrant::sync -- gate on those. VK_KHR_synchronization2 in
+ * particular is enabled only where the device has it, since nothing in the
+ * shell or the engine issues a synchronization2 command, so its presence here
+ * says what the device can do and not what the surface guarantees.
  *
  * Queue sharing: the Flutter embedder Vulkan API takes a single VkQueue and
  * exposes no engine->backend hand-off semaphore, so the engine, the backend and

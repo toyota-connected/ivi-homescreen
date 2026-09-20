@@ -24,6 +24,7 @@
 #include <drm_fourcc.h>
 #include <drm_mode.h>  // DRM_MODE_ROTATE_*
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <chrono>
@@ -147,7 +148,7 @@ bool RotationCompatible(const uint64_t mod) {
 // required by the device extension VK_EXT_image_drm_format_modifier" -- the
 // device is created anyway and the modifier path appears to work, so nothing
 // short of a validation run says otherwise.
-constexpr std::array<const char*, 8> kRequiredDeviceExtensions = {
+constexpr std::array<const char*, 7> kRequiredDeviceExtensions = {
     VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
     VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME,
     VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME,
@@ -155,6 +156,15 @@ constexpr std::array<const char*, 8> kRequiredDeviceExtensions = {
     VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME,
     VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME,
     VK_KHR_EXTERNAL_FENCE_FD_EXTENSION_NAME,
+};
+
+// Enabled when the device has it, never required. This array is both the
+// device filter and the enable list, so a name in it costs a device that
+// lacks it -- and nothing here spends synchronization2: the shell issues
+// v1 barriers throughout, and neither Impeller nor Skia references it in
+// the engine. It is carried for a plugin, and platform_view.h already tells
+// a plugin to fall back when an extension is absent.
+constexpr const char* kOptionalDeviceExtensions[] = {
     VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
 };
 
@@ -537,12 +547,13 @@ bool VulkanDrmBackend::BringUp(std::string& refusal_reason) {
       VK_VERSION_MAJOR(caps_.api_version), VK_VERSION_MINOR(caps_.api_version),
       VK_VERSION_PATCH(caps_.api_version));
   ihs::log::info(
-      "[VulkanDrmBackend] caps: drm_node={} timeline_sem={} global_priority={} "
+      "[VulkanDrmBackend] caps: drm_node={} timeline_sem={} sync2={} "
+      "global_priority={} "
       "lazy_transient={} dedicated_transfer={} gfx_queues={} max_image_2d={}",
       caps_.has_physical_device_drm, caps_.has_timeline_semaphore,
-      caps_.has_global_priority, caps_.has_lazy_transient,
-      caps_.has_dedicated_transfer_queue, caps_.graphics_queue_count,
-      caps_.max_image_2d);
+      caps_.has_synchronization2, caps_.has_global_priority,
+      caps_.has_lazy_transient, caps_.has_dedicated_transfer_queue,
+      caps_.graphics_queue_count, caps_.max_image_2d);
   ihs::log::info(
       "[VulkanDrmBackend] graphics queue family {} created; scanout node '{}'",
       graphics_queue_family_, drm_device_);
@@ -2421,10 +2432,10 @@ bool VulkanDrmBackend::CreateLogicalDevice(std::string& refusal_reason) {
   features2.pNext = &sync2_supported;
   d().vkGetPhysicalDeviceFeatures2(physical_device_, &features2);
 
-  if (sync2_supported.synchronization2 != VK_TRUE) {
-    refusal_reason = "selected device does not support synchronization2";
-    return false;
-  }
+  // Not a refusal. The device is usable without it -- see
+  // kOptionalDeviceExtensions -- so record it and enable it only if present,
+  // the same way timelineSemaphore below has always been treated.
+  caps_.has_synchronization2 = sync2_supported.synchronization2 == VK_TRUE;
 
   VkPhysicalDeviceSynchronization2Features sync2_enable{};
   sync2_enable.sType =
@@ -2434,8 +2445,16 @@ bool VulkanDrmBackend::CreateLogicalDevice(std::string& refusal_reason) {
   timeline_enable.sType =
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
   timeline_enable.timelineSemaphore = VK_TRUE;
+  // Chain head depends on what the device has: without synchronization2 the
+  // struct must not be chained at all, or vkCreateDevice is asked to enable a
+  // feature from an extension that was never enabled.
+  const void* features_chain = nullptr;
   if (timeline_supported.timelineSemaphore == VK_TRUE) {
-    sync2_enable.pNext = &timeline_enable;
+    features_chain = &timeline_enable;
+  }
+  if (caps_.has_synchronization2) {
+    sync2_enable.pNext = const_cast<void*>(features_chain);
+    features_chain = &sync2_enable;
   }
 
   constexpr float priority = 1.0f;
@@ -2454,7 +2473,7 @@ bool VulkanDrmBackend::CreateLogicalDevice(std::string& refusal_reason) {
 
   VkDeviceCreateInfo device_info{};
   device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-  device_info.pNext = &sync2_enable;
+  device_info.pNext = features_chain;
   device_info.queueCreateInfoCount = 1;
   device_info.pQueueCreateInfos = &queue_info;
   // Required by Impeller's device check; unused on this presentation path.
@@ -2469,6 +2488,30 @@ bool VulkanDrmBackend::CreateLogicalDevice(std::string& refusal_reason) {
     }
     if (HasExt(dev_exts, VK_KHR_SWAPCHAIN_EXTENSION_NAME)) {
       enabled_device_extensions_.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+    }
+  }
+
+  // The optional set, enabled only where present. A plugin reads these back
+  // through IhsVulkanContext::device_extensions and gates on what it finds, so
+  // leaving one out where the device lacks it is the contract working, not a
+  // capability lost.
+  {
+    uint32_t opt_n = 0;
+    d().vkEnumerateDeviceExtensionProperties(physical_device_, nullptr, &opt_n,
+                                             nullptr);
+    std::vector<VkExtensionProperties> opt_exts(opt_n);
+    if (opt_n > 0) {
+      d().vkEnumerateDeviceExtensionProperties(physical_device_, nullptr,
+                                               &opt_n, opt_exts.data());
+    }
+    for (const char* opt : kOptionalDeviceExtensions) {
+      if (HasExt(opt_exts, opt) &&
+          std::find_if(enabled_device_extensions_.begin(),
+                       enabled_device_extensions_.end(), [opt](const char* e) {
+                         return std::strcmp(e, opt) == 0;
+                       }) == enabled_device_extensions_.end()) {
+        enabled_device_extensions_.push_back(opt);
+      }
     }
   }
   device_info.enabledExtensionCount =

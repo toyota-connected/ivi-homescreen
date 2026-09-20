@@ -177,11 +177,18 @@ DeviceCaps ProbeDeviceCaps(const std::string& display_device,
     VkPhysicalDeviceTimelineSemaphoreFeatures timeline{};
     timeline.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
+    VkPhysicalDeviceSynchronization2Features sync2{};
+    sync2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES;
+    sync2.pNext = &timeline;
     VkPhysicalDeviceFeatures2 features2{};
     features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    features2.pNext = &timeline;
+    features2.pNext = &sync2;
     d.vkGetPhysicalDeviceFeatures2(pd, &features2);
     caps.has_timeline_semaphore = timeline.timelineSemaphore == VK_TRUE;
+    // The feature bit alone, to mean one thing everywhere: synchronization2 is
+    // core from Vulkan 1.3, so a device can report the feature without listing
+    // the extension, and requiring both here would call that device incapable.
+    caps.has_synchronization2 = sync2.synchronization2 == VK_TRUE;
 
     VkPhysicalDeviceMemoryProperties mem{};
     d.vkGetPhysicalDeviceMemoryProperties(pd, &mem);
