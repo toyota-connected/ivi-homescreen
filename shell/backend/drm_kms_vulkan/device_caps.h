@@ -34,8 +34,12 @@ struct DeviceCaps {
 
   bool has_physical_device_drm = false;  // false on Adreno & Mali blobs
   bool has_timeline_semaphore = false;   // false on Adreno
-  bool has_global_priority = false;      // gate a high-priority queue
-  bool has_lazy_transient = false;       // transient attachments in tile mem
+  // Enabled when the device reports it, not required. Nothing in the shell or
+  // the engine issues a synchronization2 command; it is carried for a plugin
+  // that wants one, which reads it back from IhsVulkanContext.
+  bool has_synchronization2 = false;
+  bool has_global_priority = false;  // gate a high-priority queue
+  bool has_lazy_transient = false;   // transient attachments in tile mem
   bool has_dedicated_transfer_queue =
       false;               // offload copies off the gfx queue
   uint32_t vendor_id = 0;  // fallback match when no DRM node
