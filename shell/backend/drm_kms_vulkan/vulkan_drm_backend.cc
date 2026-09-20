@@ -138,14 +138,20 @@ bool RotationCompatible(const uint64_t mod) {
 }
 
 // Device extensions required for zero-copy dma-buf scanout and explicit
-// synchronization. The dependencies of VK_EXT_image_drm_format_modifier
+// synchronization. Most dependencies of VK_EXT_image_drm_format_modifier
 // (bind_memory2, get_memory_requirements2, sampler_ycbcr_conversion,
-// get_physical_device_properties2) are all core in Vulkan 1.1, which the
-// instance targets, so only the non-core extensions are listed here.
-constexpr std::array<const char*, 7> kRequiredDeviceExtensions = {
+// get_physical_device_properties2) are core in Vulkan 1.1, which the instance
+// targets, so they are not listed. VK_KHR_image_format_list is the exception:
+// it went core in 1.2, not 1.1, so under this instance it has to be asked for
+// by name. Leaving it out is what validation reports as "Missing extension
+// required by the device extension VK_EXT_image_drm_format_modifier" -- the
+// device is created anyway and the modifier path appears to work, so nothing
+// short of a validation run says otherwise.
+constexpr std::array<const char*, 8> kRequiredDeviceExtensions = {
     VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
     VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME,
     VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME,
+    VK_KHR_IMAGE_FORMAT_LIST_EXTENSION_NAME,
     VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME,
     VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME,
     VK_KHR_EXTERNAL_FENCE_FD_EXTENSION_NAME,
