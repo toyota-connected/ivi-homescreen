@@ -49,6 +49,23 @@
  * only. The factory and every IhsPvCallbacks entry are invoked on the platform
  * thread. Grant accessors are valid only between a successful negotiate and the
  * next renegotiate/dispose for that view.
+ *
+ * ihs_pv_submit is the exception: it may be called from any thread, which is
+ * the point -- a producer drives it from whatever decode or render thread it
+ * owns, and the registry locks per view to make that safe.
+ *
+ * What the registry cannot do is keep the view alive underneath such a call.
+ * A view is unregistered, then IhsPvCallbacks::dispose runs, then the instance
+ * is destroyed; no lock spans that, because the producer's thread is not the
+ * registry's to block. So the plugin owns this guarantee: when its dispose
+ * callback returns, no ihs_pv_submit for that view is in flight and none can
+ * start. Joining the producing thread inside dispose is the usual way, and the
+ * only reliable one -- a flag checked before the call still loses the race.
+ *
+ * Dispose is not only teardown. A create for an id that is already live
+ * disposes the incumbent first, so a producer can be disposed while it is
+ * running at full rate -- a hot restart, which re-creates views under the ids
+ * the previous isolate used, is exactly that.
  */
 
 #ifndef IHS_PLATFORM_VIEW_H_
@@ -580,6 +597,9 @@ typedef struct IhsFrame {
 /*
  * Hand the registry a produced @frame for @view. Used by all kinds
  * (TEXTURE_DMABUF_IMPORT, SOFTWARE_SHM, and the registry-driven DRM_PLANE).
+ * Callable from any thread, unlike the rest of this surface; see the threading
+ * note at the top of this header for the one thing that requires -- that no
+ * call is in flight once IhsPvCallbacks::dispose has returned.
  * @acquire_fence_fd signals when the plugin's production completed (-1 for
  * implicit sync); the registry takes ownership of the fd, on the same terms as
  * @plane_fd above -- consumed whatever this returns, except on the malformed-
