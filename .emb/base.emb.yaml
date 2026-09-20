@@ -89,6 +89,20 @@ cross:
         ACCESSKIT_BUILD_LIBRARIES: 'ON'
   defines:
     DISABLE_PLUGINS: 'ON'              # shared by the native build and the boards
+
+  # ihs_shared, staged into the overlay (or the sysroot, cross) after the shell
+  # is built and before any app module is.
+  #
+  # A platform-view plugin links this ABI and the bundle ships the copy built
+  # here, so the two have to be the same binary. Left to itself a plugin links
+  # whatever an augment or the sysroot provided -- a second build of the same
+  # source, from whatever commit that manifest pinned -- and then runs against
+  # this one, because the bundle's lib/ is on the loader path. The two agreeing
+  # is not something either side can check: a contract change like "submit
+  # consumes the frame's fds" compiles clean against the old headers and
+  # misbehaves at runtime.
+  embedder_exports:
+    - shared
   # Native host backend matrix: `emb cross . --build` (no --target) compiles
   # every backend with the host toolchain — the dev compile smoke-test. A board
   # target declares its own cross.backends, which REPLACES this set (it does not
