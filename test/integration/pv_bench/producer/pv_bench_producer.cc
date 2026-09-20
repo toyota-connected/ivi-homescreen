@@ -310,6 +310,7 @@ class BenchView {
           pad_env != nullptr
               ? height_ + static_cast<uint32_t>(::atoi(pad_env))
               : ((height_ + kTileRows - 1) / kTileRows) * kTileRows + kTileRows;
+#ifdef HAVE_GBM_BO_CREATE_WITH_MODIFIERS2
       // The usage matters to the allocator as much as the modifier does, and
       // which combination it will take differs per driver, so try the narrow
       // one before the broad one rather than guessing once and giving up.
@@ -326,6 +327,16 @@ class BenchView {
           break;
         }
       }
+#else
+      // Pre-Mesa-21.1 gbm: modifiers without a usage argument. The allocator
+      // picks the usage itself, so there is nothing to retry -- a failure here
+      // means the modifier is refused outright.
+      s.bo = gbm_bo_create_with_modifiers(gbm_, width_, alloc_height,
+                                          format_.fourcc, &modifier, 1);
+      if (s.bo != nullptr && i == 0) {
+        Log("allocated (gbm without usage flags)");
+      }
+#endif
       if (!s.bo) {
         Log("gbm_bo_create_with_modifiers failed for slot %u (%ux%u fourcc %#x "
             "modifier %#llx)",
