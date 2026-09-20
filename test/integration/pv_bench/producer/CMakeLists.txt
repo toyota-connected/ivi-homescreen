@@ -58,7 +58,25 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(GBM REQUIRED IMPORTED_TARGET gbm)
 pkg_check_modules(LIBDRM REQUIRED IMPORTED_TARGET libdrm)
 
+# gbm_bo_create_with_modifiers2 (usage flags alongside modifiers) arrived in
+# Mesa 21.1. Older stacks -- and vendor gbm implementations, which are often
+# older still -- have only the usage-less form, so detect rather than assume:
+# the alternative is a producer that will not compile for the targets most
+# likely to need it.
+include(CheckSymbolExists)
+set(CMAKE_REQUIRED_INCLUDES ${GBM_INCLUDE_DIRS})
+set(CMAKE_REQUIRED_LIBRARIES ${GBM_LIBRARIES})
+check_symbol_exists(gbm_bo_create_with_modifiers2 "gbm.h"
+        HAVE_GBM_BO_CREATE_WITH_MODIFIERS2)
+unset(CMAKE_REQUIRED_INCLUDES)
+unset(CMAKE_REQUIRED_LIBRARIES)
+
 add_library(pv_bench_producer SHARED pv_bench_producer.cc)
+
+if (HAVE_GBM_BO_CREATE_WITH_MODIFIERS2)
+    target_compile_definitions(pv_bench_producer PRIVATE
+            HAVE_GBM_BO_CREATE_WITH_MODIFIERS2)
+endif ()
 
 target_include_directories(pv_bench_producer PRIVATE
         ${IHS_SOURCE_DIR}/shared/include
