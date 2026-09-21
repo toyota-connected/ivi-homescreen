@@ -329,6 +329,22 @@ class VulkanDrmBackend final : public Backend {
   uint32_t graphics_queue_family_ = UINT32_MAX;
   VkQueue graphics_queue_ = VK_NULL_HANDLE;
 
+  // Give each Flutter layer its own KMS plane rather than blending them all
+  // into the bottom one (IVI_DRMVK_PLANE_LAYERS). Resolved once at compositor
+  // setup because it decides the scanout format.
+  bool plane_layers_ = false;
+  // Latched off after a commit failure the plane path cannot be blamed out of,
+  // so a bad frame does not become a bad session of retry churn.
+  bool plane_layers_latched_off_ = false;
+  // The primary plane's own zpos; overlays are placed above it, not above 0.
+  int primary_zpos_ = 0;
+  // Said once: a frame shape whose layers the allocator would not all place.
+  bool plane_test_rejected_ = false;
+  // Layers on planes as of the last commit, logged when it changes; 0 until
+  // the first plane commit. An absence of warnings is not evidence the path
+  // ran, so this is the positive signal.
+  size_t plane_layers_confirmed_ = 0;
+
   std::vector<const char*> enabled_instance_extensions_;
   std::vector<const char*> enabled_instance_layers_;
   std::vector<const char*> enabled_device_extensions_;
@@ -356,7 +372,13 @@ class VulkanDrmBackend final : public Backend {
                            uint32_t width,
                            uint32_t height,
                            const FlutterLayer** layers,
-                           size_t count);
+                           size_t count,
+                           const std::vector<VkImage>* plane_images = nullptr);
+
+  // Submit ring entry @p i's already-ended command buffer and export its
+  // signal semaphore as a sync_file. Shared by the blend and plane paths --
+  // they differ in what they record, not in how it reaches KMS.
+  int SubmitSyncRing(CompositorState& c, size_t i);
 
 #if BUILD_HUD
   // Debug HUD (imgui Vulkan). Lazily created on the first present when IVI_HUD
@@ -431,6 +453,47 @@ class VulkanDrmBackend final : public Backend {
                          uint32_t width,
                          uint32_t height,
                          uint64_t frame);
+
+  // Add, update or prune one scene layer per backing-store layer, so each can
+  // reach its own KMS plane instead of being blended into the bottom one.
+  // False means this frame cannot go that way -- a platform view in the
+  // stack, an unknown store, or a source/layer that could not be made -- and
+  // the caller should blend. Layers added here survive the frame; the caller
+  // drops them with DropPlaneLayers when the plan is abandoned.
+  bool ReconcilePlaneLayers(CompositorState& c,
+                            const FlutterLayer** layers,
+                            size_t count);
+
+  // Present this frame with every layer on its own KMS plane: reconcile the
+  // scene, ask whether the allocator can place them all, and commit if so.
+  // False means it could not, and the caller should present through the blend
+  // path instead -- nothing has been committed and any layers added on the way
+  // are removed again.
+  bool PresentLayersViaPlanes(const FlutterLayer** layers, size_t count);
+
+  // The commit half of the plane path, once the plan is known good. @p
+  // assigned is the layer count test() reported, or 0 when the plan was
+  // reused and no test ran this frame.
+  bool CommitPlaneFrame(CompositorState& c,
+                        const FlutterLayer** layers,
+                        size_t count,
+                        size_t assigned);
+
+  // One platform-view layer within ReconcilePlaneLayers: add or update the
+  // scene layer and submit the view's newest dma-buf to its pool. False means
+  // the frame cannot take the plane path.
+  bool ReconcilePlatformViewLayer(CompositorState& c,
+                                  const FlutterLayer& fl,
+                                  int z_index,
+                                  std::vector<const void*>& present);
+
+  // Remove every scene layer ReconcilePlaneLayers added and forget them.
+  static void DropPlaneLayers(CompositorState& c);
+
+  // Hand back every platform-view buffer the previous present displaced, with
+  // its release fence where the CRTC produced one. Deliberately one present
+  // late: drm-cxx releases at displacement, not at flip completion.
+  static void DrainDeferredScanoutReleases(CompositorState& c);
 
   // An OPTIMAL, sampleable image of this size to copy a backing store into,
   // for the case where the store's own modifier cannot be sampled (#617).

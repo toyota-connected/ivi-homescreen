@@ -175,6 +175,27 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   std::map<uint32_t, DmabufVulkanImporter::ImportedImage> buffers;
   DmabufVulkanImporter::ImportedImage* current{nullptr};
   uint32_t current_layout{VK_IMAGE_LAYOUT_UNDEFINED};
+
+  // The producer's dma-buf kept alive beside the import, so a frame can reach
+  // a KMS plane as well as be sampled. The importer consumes the submitted fds
+  // (#606), so these are dups taken before it runs, and they live exactly as
+  // long as the import they mirror -- same key, retired together. Without them
+  // GetDmabuf has nothing to offer on this path, and every platform view is
+  // composited however many planes are free.
+  struct ScanoutBuffer {
+    int fd[4]{-1, -1, -1, -1};
+    uint32_t offset[4]{};
+    uint32_t stride[4]{};
+    uint32_t plane_count{0};
+    uint32_t width{0};
+    uint32_t height{0};
+    uint32_t fourcc{0};
+    uint64_t modifier{0};
+  };
+  std::map<uint32_t, ScanoutBuffer> scanout;
+  // Key of the buffer `current` points at, so its scanout twin can be found.
+  uint32_t current_buffer_id{0};
+  bool current_buffer_valid{false};
 #endif
 
   // Common retire clock for both import paths (incremented on every submit).
@@ -417,6 +438,13 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   // must V-flip when sampling into its bottom-first framebuffer.
   [[nodiscard]] bool TextureIsTopFirst() const override { return true; }
 
+#endif  // IVI_HAVE_EGL
+
+// The direct-scanout seam is not EGL's alone: a Vulkan backend places the same
+// producer buffers on the same planes. Guarding it on IVI_HAVE_EGL left a
+// Vulkan-only build with the base class's "cannot scan out", so every platform
+// view composited however many planes were free.
+#if IVI_HAVE_VULKAN || IVI_HAVE_EGL
   // Direct-scanout seam for the DRM compositor: expose the latest submitted
   // frame's dma-buf so it can be placed on a KMS overlay plane instead of being
   // GL-composited. Reads the frame stashed by HostSubmit and returns a *dup* of
@@ -436,9 +464,66 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   // dynamic-producer follow-up.
   [[nodiscard]] DmabufState GetDmabuf(Dmabuf* out) const override {
     const std::lock_guard<std::mutex> lock(mutex);
+    if (out == nullptr) {
+      return DmabufState::kNoNewFrame;
+    }
+#if IVI_HAVE_VULKAN
+    // Vulkan path: the frame was imported at submit and its fds consumed, so
+    // what a plane can be given is the dup retained beside that import rather
+    // than a stashed frame. Same deliver-once rule as below: the compositor
+    // polls every present but only wants a buffer the producer has refreshed.
+    if (current != nullptr) {
+      if (!current_buffer_valid) {
+        // Imported but not dup'd -- a producer whose fds could not be
+        // duplicated. New content exists and cannot be scanned out, which is
+        // exactly what the composite fallback is for.
+        return dmabuf_delivered_seq == submit_seq
+                   ? DmabufState::kNoNewFrame
+                   : DmabufState::kNotScanoutCapable;
+      }
+      if (dmabuf_delivered_seq == submit_seq) {
+        return DmabufState::kNoNewFrame;
+      }
+      const auto sit = scanout.find(current_buffer_id);
+      if (sit == scanout.end() || sit->second.plane_count == 0) {
+        return DmabufState::kNotScanoutCapable;
+      }
+      const ScanoutBuffer& sb = sit->second;
+      int duped[4] = {-1, -1, -1, -1};
+      for (uint32_t i = 0; i < sb.plane_count; ++i) {
+        duped[i] = sb.fd[i] >= 0 ? ::dup(sb.fd[i]) : -1;
+        if (duped[i] < 0) {
+          for (uint32_t j = 0; j < i; ++j) {
+            ::close(duped[j]);
+          }
+          return DmabufState::kNotScanoutCapable;
+        }
+      }
+      *out = Dmabuf{};
+      out->width = sb.width;
+      out->height = sb.height;
+      out->fourcc = sb.fourcc;
+      out->modifier = sb.modifier;
+      out->plane_count = sb.plane_count;
+      for (uint32_t i = 0; i < sb.plane_count; ++i) {
+        out->fd[i] = duped[i];
+        out->offset[i] = sb.offset[i];
+        out->stride[i] = sb.stride[i];
+      }
+      out->buffer_id = current_buffer_id;
+      // The acquire fence is the producer's, and the compositor lowers it to
+      // the plane's IN_FENCE_FD. dup: pending_acquire_fd stays ours, and the
+      // blend path may still want it if this frame ends up composited.
+      out->acquire_fence_fd =
+          pending_acquire_fd >= 0 ? ::dup(pending_acquire_fd) : -1;
+      dmabuf_offered_seq = submit_seq;
+      return DmabufState::kFrame;
+    }
+#endif
+#if IVI_HAVE_EGL
     // Nothing submitted yet. Not "cannot scan out" -- this producer is simply
     // not ready, and its plane lights up on its first submit.
-    if (out == nullptr || !pending_egl.valid) {
+    if (!pending_egl.valid) {
       return DmabufState::kNoNewFrame;
     }
     // Hand each submitted frame to the scanout path at most once — the reuse
@@ -526,7 +611,13 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     dmabuf_offered_seq = submit_seq;
     dmabuf_offered_buffer_id = f.buffer_id;
     return DmabufState::kFrame;
+#else
+    return DmabufState::kNoNewFrame;
+#endif
   }
+#endif  // IVI_HAVE_VULKAN || IVI_HAVE_EGL
+
+#if IVI_HAVE_EGL
 #endif
 
   // The image is an imported dma-buf the plugin rewrites; the compositor
@@ -740,6 +831,18 @@ IhsPluginView::~IhsPluginView() {
     defer(r.image);
   }
   retired.clear();
+  // The scanout dups are plain fds, so they close here rather than going
+  // through the deferred free the VkImages need.
+  for (auto& [id, sb] : scanout) {
+    for (int& fd : sb.fd) {
+      if (fd >= 0) {
+        ::close(fd);
+        fd = -1;
+      }
+    }
+  }
+  scanout.clear();
+  current_buffer_valid = false;
 #endif
 
 #if IVI_HAVE_EGL
@@ -800,6 +903,24 @@ void CloseFrameFds(const IhsFrame* frame) {
     }
   }
 }
+
+#if IVI_HAVE_VULKAN
+// Close the dups retained for direct scanout. Safe while a plane is still
+// scanning the buffer: the KMS framebuffer holds its own reference, and the
+// scene's pool dups whatever it keeps.
+void CloseScanoutBuffer(IhsPluginView::ScanoutBuffer* sb) {
+  if (sb == nullptr) {
+    return;
+  }
+  for (int& fd : sb->fd) {
+    if (fd >= 0) {
+      ::close(fd);
+      fd = -1;
+    }
+  }
+  sb->plane_count = 0;
+}
+#endif
 
 #if IVI_HAVE_EGL
 // Raster-thread lazy import for the EGL path: HostSubmit stashed the frame
@@ -1432,9 +1553,13 @@ int HostSubmit(void* user_data,
   if (it != v->buffers.end() && it->second.width == frame->width &&
       it->second.height == frame->height) {
     // Known ring buffer, unchanged size: the submitted fd is a redundant handle
-    // to the same memory. Close it and reuse the existing import.
+    // to the same memory. Close it and reuse the existing import -- and the
+    // scanout dup taken when this id was first imported, which aliases the
+    // same memory and is still live.
     CloseFrameFds(frame);
     v->current = &it->second;
+    v->current_buffer_id = frame->buffer_id;
+    v->current_buffer_valid = true;
   } else {
     // New ring id, or the plugin re-created this slot at a different size (a
     // resize): the cached import — if any — now aliases old memory of the wrong
@@ -1445,15 +1570,63 @@ int HostSubmit(void* user_data,
     if (it != v->buffers.end()) {
       v->retired.push_back({it->second, v->submit_seq + kImportRetireMargin});
       v->buffers.erase(it);
+      // The scanout dup aliases the memory this import is being retired for,
+      // so it goes now rather than on the import's reap margin -- the plane,
+      // if any, holds its own reference.
+      if (const auto sit = v->scanout.find(frame->buffer_id);
+          sit != v->scanout.end()) {
+        CloseScanoutBuffer(&sit->second);
+        v->scanout.erase(sit);
+      }
     }
+    // Dup for scanout first: Import consumes the fds, and after it there is
+    // nothing left to give a plane. A dup that fails is not fatal -- the view
+    // is simply composited rather than placed -- so the frame still imports.
+    IhsPluginView::ScanoutBuffer sb;
+    sb.plane_count = frame->plane_count < 4 ? frame->plane_count : 4;
+    sb.width = frame->width;
+    sb.height = frame->height;
+    sb.fourcc = frame->format.fourcc;
+    sb.modifier = frame->format.modifier;
+    bool scanout_ok = sb.plane_count > 0;
+    for (uint32_t pi = 0; pi < sb.plane_count; ++pi) {
+      sb.offset[pi] = frame->plane_offset[pi];
+      sb.stride[pi] = frame->plane_stride[pi];
+      sb.fd[pi] = frame->plane_fd[pi] >= 0 ? ::dup(frame->plane_fd[pi]) : -1;
+      if (sb.fd[pi] < 0) {
+        scanout_ok = false;
+      }
+    }
+    if (!scanout_ok) {
+      for (int& fd : sb.fd) {
+        if (fd >= 0) {
+          ::close(fd);
+          fd = -1;
+        }
+      }
+    }
+
     DmabufVulkanImporter::ImportedImage imported;
     if (!g_importer.Import(*frame, &imported)) {
       CloseFrameFds(frame);  // import left the fds untouched on failure
+      for (int& fd : sb.fd) {
+        if (fd >= 0) {
+          ::close(fd);
+        }
+      }
       return IHS_PV_ERR_INVALID;
+    }
+    if (scanout_ok) {
+      CloseScanoutBuffer(&v->scanout[frame->buffer_id]);
+      v->scanout[frame->buffer_id] = sb;
+    } else {
+      v->scanout.erase(frame->buffer_id);
     }
     // Import consumed plane_fd[0]; a single-plane RGB frame owns no other fds.
     auto [pos, inserted] = v->buffers.emplace(frame->buffer_id, imported);
     v->current = &pos->second;
+    v->current_buffer_id = frame->buffer_id;
+    v->current_buffer_valid = scanout_ok;
     // Synthesised ids never repeat, so every earlier entry is dead. Retire them
     // (the reap margin covers a compositor present still binding one) so the
     // cache holds just the current import rather than growing per frame.
@@ -1462,6 +1635,11 @@ int HostSubmit(void* user_data,
         if (bit->first != frame->buffer_id) {
           v->retired.push_back(
               {bit->second, v->submit_seq + kImportRetireMargin});
+          if (const auto sit = v->scanout.find(bit->first);
+              sit != v->scanout.end()) {
+            CloseScanoutBuffer(&sit->second);
+            v->scanout.erase(sit);
+          }
           bit = v->buffers.erase(bit);
         } else {
           ++bit;
