@@ -95,6 +95,16 @@ class VulkanBackingStore {
   [[nodiscard]] uint32_t width() const { return width_; }
   [[nodiscard]] uint32_t height() const { return height_; }
   [[nodiscard]] VkFormat vk_format() const { return vk_format_; }
+
+  /// Whether this store's image was created with SAMPLED usage.
+  ///
+  /// False when no modifier the scanout plane accepts also supports sampling,
+  /// which is not hypothetical: on one board the plane takes LINEAR and
+  /// VC4_T_TILED while Vulkan offers LINEAR and UIF, so the only modifier in
+  /// both lacks SAMPLED. The compositor samples every non-base store, so a
+  /// false here means that draw is reading an image whose usage never
+  /// permitted it (#617).
+  [[nodiscard]] bool sampleable() const { return sampleable_; }
   [[nodiscard]] uint32_t drm_fourcc() const { return drm_fourcc_; }
   [[nodiscard]] uint64_t modifier() const { return modifier_; }
   [[nodiscard]] const std::vector<PlaneLayout>& planes() const {
@@ -114,6 +124,7 @@ class VulkanBackingStore {
   VkDevice device_ = VK_NULL_HANDLE;  // not owned
   uint32_t width_ = 0;
   uint32_t height_ = 0;
+  bool sampleable_ = false;
   VkFormat vk_format_ = VK_FORMAT_UNDEFINED;
   uint32_t drm_fourcc_ = 0;
   uint64_t modifier_ = 0;
