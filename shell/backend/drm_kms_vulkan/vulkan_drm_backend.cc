@@ -48,6 +48,7 @@
 #include <asio/posix/stream_descriptor.hpp>
 
 #include <drm-cxx/core/device.hpp>
+#include <drm-cxx/scene/external_dma_buf_pool.hpp>
 #include <drm-cxx/scene/external_dma_buf_source.hpp>
 #include <drm-cxx/scene/layer_desc.hpp>
 #include <drm-cxx/scene/layer_handle.hpp>
@@ -729,13 +730,43 @@ struct VulkanDrmBackend::CompositorState {
   struct Slot {
     std::unique_ptr<drm_kms_vulkan::VulkanBackingStore> store;
     bool engine_owned = false;  // handed to the engine, not yet collected
+    // Plane path only: this store's own framebuffer, as a scene source.
+    // Built on first use and moved into the scene by add_layer, so a null
+    // here means either "not on a plane" or "the scene owns it"; the layer
+    // the scene keyed on store.get() is the authority.
+    std::unique_ptr<VkBackingStoreLayerSource> scene_source;
   };
   std::vector<Slot> slots;
   std::unordered_map<const void*, size_t> key_to_slot;
+  // Single-layer path: the engine cycles slots and one persistent layer
+  // presents whichever is ready. Unused when every layer gets its own plane.
   std::unique_ptr<VkScanoutRing>
       ring_owner;                 // until moved into the scene layer
   VkScanoutRing* ring = nullptr;  // stable; owned by the scene layer
   std::optional<drm::scene::LayerHandle> layer;
+  // Plane path: identity tags the scene currently holds a layer for -- store
+  // pointers for backing stores, ICompositorSurface pointers for platform
+  // views. drm-cxx retains layers across commits and exposes no iteration
+  // beyond find_by_identity_tag, so the prune list lives here.
+  std::vector<const void*> plane_layer_keys;
+  // Buffers a platform view's pool displaced, held until the next flip
+  // completes. drm-cxx fires on_release at displacement, not at flip, so
+  // returning one straight away hands the producer a slot KMS is still
+  // scanning out.
+  struct DeferredRelease {
+    std::shared_ptr<ICompositorSurface> surface;
+    uint32_t buffer_id = 0;
+    drm::sync::SyncFence fence;
+  };
+  std::mutex deferred_releases_mu;
+  std::vector<DeferredRelease> deferred_releases;
+  // A layer entered or left the scene, so the next commit must be a blocking
+  // modeset: a plane appearing or leaving under NONBLOCK returns EBUSY.
+  bool plane_topology_changed = false;
+  // Signature of the layer set the last successful test() answered for, so an
+  // unchanged frame commits without re-asking.
+  size_t plane_plan_sig = 0;
+  bool plane_plan_sig_valid = false;
 
   // Vsync pacing. The first commit is a blocking modeset; subsequent commits
   // are non-blocking page flips whose completion the async reader drains.
@@ -744,8 +775,14 @@ struct VulkanDrmBackend::CompositorState {
   // reader thread when its event arrives — hence atomic. scanning_slot /
   // pending_slot stay raster-thread-local (present_layers only).
   std::atomic<bool> flip_pending{false};
-  int scanning_slot = -1;            // slot the CRTC is currently scanning
-  int pending_slot = -1;             // slot in the in-flight non-blocking flip
+  int scanning_slot = -1;  // slot the CRTC is currently scanning
+  int pending_slot = -1;   // slot in the in-flight non-blocking flip
+  // Plane path: the same two facts, but per plane. One plane scans one slot,
+  // so the ints above suffice for the blend path; with a plane per layer
+  // several slots are live at once and recycling any of them tears the frame
+  // KMS is still reading.
+  std::vector<size_t> plane_scanning_slots;
+  std::vector<size_t> plane_pending_slots;
   uint32_t period_ns = 16'666'667U;  // connector refresh period (from setup)
   drmEventContext evctx{};
 
@@ -801,18 +838,29 @@ struct VulkanDrmBackend::CompositorState {
 
 bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   drm_kms_vulkan::ScanoutTarget target;
+  // Give every layer its own KMS plane rather than blending them into one.
+  // Off by default while it proves out; the blend path stays the fallback and
+  // is what runs whenever a frame's layers do not all get planes.
+  plane_layers_ = std::getenv("IVI_DRMVK_PLANE_LAYERS") != nullptr;
+  // An overlay layer needs an alpha channel or it paints opaque black over
+  // whatever plane is below it -- Flutter draws transparent pixels where a
+  // platform view shows through. The blend path does not care, because it
+  // composites into one opaque target, so only ask for alpha when the planes
+  // are in play and the choice can still cost a modifier.
+  const uint32_t scanout_fourcc =
+      plane_layers_ ? DRM_FORMAT_ARGB8888 : DRM_FORMAT_XRGB8888;
   // Probe through the lease fd when we have one. Not an optimisation: the
   // kernel scopes that fd's view to the leased objects, so this finds exactly
   // the connector we hold, where re-opening the card by path would enumerate
   // the whole card and could pick one the compositor is still driving -- and
   // may not be permitted at all.
-  const bool discovered =
-      injected_fd_ >= 0 ? drm_kms_vulkan::DiscoverScanoutTarget(
-                              injected_fd_, DRM_FORMAT_XRGB8888, mode_spec_,
-                              lease_connector_id_, target, err)
-                        : drm_kms_vulkan::DiscoverScanoutTarget(
-                              drm_device_, DRM_FORMAT_XRGB8888, mode_spec_,
-                              connector_name_, target, err);
+  const bool discovered = injected_fd_ >= 0
+                              ? drm_kms_vulkan::DiscoverScanoutTarget(
+                                    injected_fd_, scanout_fourcc, mode_spec_,
+                                    lease_connector_id_, target, err)
+                              : drm_kms_vulkan::DiscoverScanoutTarget(
+                                    drm_device_, scanout_fourcc, mode_spec_,
+                                    connector_name_, target, err);
   if (!discovered) {
     return false;
   }
@@ -881,7 +929,7 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   auto state = std::make_unique<CompositorState>(std::move(*dev));
   (void)state->device.enable_atomic();
   (void)state->device.enable_universal_planes();
-  state->fourcc = DRM_FORMAT_XRGB8888;
+  state->fourcc = scanout_fourcc;
   // The CRTC always scans its native mode; a 90/270 rotation swaps the render
   // extent (backing stores + Flutter viewport) so the GPU paints landscape into
   // a buffer the plane rotates onto the portrait panel. 0/180 keep the extents
@@ -933,6 +981,25 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
     return false;
   }
   state->scene = std::move(scene_exp.value());
+
+  if (plane_layers_) {
+    // Bias every overlay's zpos by the primary's own. A raw zpos of 1 sits
+    // below a primary whose zpos is 2 (amdgpu does this) and inverts the
+    // stack; zpos_min is the right read, being the only legal value when the
+    // property is immutable and the lowest slot when it is not.
+    if (auto reg = drm::planes::PlaneRegistry::enumerate(state->device)) {
+      for (const auto& p : reg->all()) {
+        if (p.id == target.primary_plane_id) {
+          primary_zpos_ = static_cast<int>(p.zpos_min.value_or(0));
+          break;
+        }
+      }
+    }
+    ihs::log::info(
+        "[VulkanDrmBackend] plane layers enabled (IVI_DRMVK_PLANE_LAYERS); "
+        "primary zpos {}, backing stores ARGB8888",
+        primary_zpos_);
+  }
 
   // Probe the scanout path once: allocate a mode-sized backing store and try to
   // import it as a KMS framebuffer. This is also what chooses between the two
@@ -1288,10 +1355,14 @@ int VulkanDrmBackend::AcquireScanoutSlot(const uint32_t w, const uint32_t h) {
   // longer scanning or about to scan; otherwise grow the ring.
   int slot = -1;
   for (size_t i = 0; i < c.slots.size(); ++i) {
-    if (const auto& [store, engine_owned] = c.slots[i];
+    if (const auto& [store, engine_owned, scene_source] = c.slots[i];
         !engine_owned && static_cast<int>(i) != c.scanning_slot &&
-        static_cast<int>(i) != c.pending_slot && store->width() == w &&
-        store->height() == h) {
+        static_cast<int>(i) != c.pending_slot &&
+        std::find(c.plane_scanning_slots.begin(), c.plane_scanning_slots.end(),
+                  i) == c.plane_scanning_slots.end() &&
+        std::find(c.plane_pending_slots.begin(), c.plane_pending_slots.end(),
+                  i) == c.plane_pending_slots.end() &&
+        store->width() == w && store->height() == h) {
       slot = static_cast<int>(i);
       break;
     }
@@ -1349,7 +1420,8 @@ int VulkanDrmBackend::AcquireScanoutSlot(const uint32_t w, const uint32_t h) {
 bool VulkanDrmBackend::FinishBackingStore(const int slot,
                                           FlutterBackingStore* out) {
   CompositorState& c = *compositor_;
-  auto& [store, engine_owned] = c.slots[static_cast<size_t>(slot)];
+  auto& [store, engine_owned, scene_source] =
+      c.slots[static_cast<size_t>(slot)];
   engine_owned = true;
   // Hand the engine an image in the layout it renders into. UNDEFINED as the
   // old layout discards the slot's prior contents — the engine fully repaints
@@ -1494,13 +1566,15 @@ void NormalizeEngineOutputLayout(VkCommandBuffer cmd, VkImage image) {
                            nullptr, 0, nullptr, 1, &barrier);
 }
 
-int VulkanDrmBackend::SubmitScanoutBarrier(CompositorState& c,
-                                           VkImage image,
-                                           VkImageView view,
-                                           uint32_t width,
-                                           uint32_t height,
-                                           const FlutterLayer** layers,
-                                           size_t count) {
+int VulkanDrmBackend::SubmitScanoutBarrier(
+    CompositorState& c,
+    VkImage image,
+    VkImageView view,
+    uint32_t width,
+    uint32_t height,
+    const FlutterLayer** layers,
+    size_t count,
+    const std::vector<VkImage>* plane_images) {
   if (!c.explicit_sync) {
     // CPU-fence fallback: submit + block until the work retires, then the
     // caller marks the slot ready with no in-fence. (The HUD is folded only
@@ -1575,6 +1649,23 @@ int VulkanDrmBackend::SubmitScanoutBarrier(CompositorState& c,
 #else
   const bool hud_active = false;
 #endif
+  // Plane path: every store reaches scanout on its own plane, so there is
+  // nothing to blend and each one only needs its writes made visible to KMS.
+  if (plane_images != nullptr) {
+    for (VkImage img : *plane_images) {
+      NormalizeEngineOutputLayout(cmd, img);
+      const VkImageMemoryBarrier pb = ColorBarrier(
+          img, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+          VK_IMAGE_LAYOUT_GENERAL, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+          VK_ACCESS_MEMORY_READ_BIT);
+      d().vkCmdPipelineBarrier(cmd,
+                               VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                               VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0,
+                               nullptr, 0, nullptr, 1, &pb);
+    }
+    d().vkEndCommandBuffer(cmd);
+    return SubmitSyncRing(c, i);
+  }
   NormalizeEngineOutputLayout(cmd, image);
 #if BUILD_COMPOSITOR
   // Blend the platform views and any Flutter overlay stores over the engine's
@@ -1613,7 +1704,11 @@ int VulkanDrmBackend::SubmitScanoutBarrier(CompositorState& c,
   (void)count;
 #endif
   d().vkEndCommandBuffer(cmd);
+  return SubmitSyncRing(c, i);
+}
 
+int VulkanDrmBackend::SubmitSyncRing(CompositorState& c, const size_t i) {
+  VkCommandBuffer cmd = c.sync_cmd[i];
   // Producer acquire fences collected while recording: the blend samples those
   // images, so the wait belongs at the fragment stage. Ownership moves to the
   // slot before the submit is built, so pWaitSemaphores points at storage that
@@ -1832,6 +1927,275 @@ void VulkanDrmBackend::CollectAcquireWait(CompositorState& c,
     return;
   }
   c.pending_acquire_waits.push_back(sem);
+}
+
+void VulkanDrmBackend::DropPlaneLayers(CompositorState& c) {
+  c.plane_plan_sig_valid = false;
+  for (const void* key : c.plane_layer_keys) {
+    if (auto* layer = c.scene->find_by_identity_tag(const_cast<void*>(key))) {
+      c.scene->remove_layer(layer->handle());
+    }
+  }
+  c.plane_layer_keys.clear();
+}
+
+// Hand @p db's planes and acquire fence to @p pool. The fence rides the
+// submit so the display engine waits on the producer rather than the CPU;
+// import_fd dups, so the caller still owns its fds.
+namespace {
+void SubmitPvPool(drm::scene::ExternalDmaBufPool* pool,
+                  const ICompositorSurface::Dmabuf& db) {
+  const uint32_t np = db.plane_count < 4 ? db.plane_count : 4;
+  std::array<drm::scene::ExternalPlaneInfo, 4> planes{};
+  for (uint32_t p = 0; p < np; ++p) {
+    planes[p] =
+        drm::scene::ExternalPlaneInfo{db.fd[p], db.offset[p], db.stride[p]};
+  }
+  std::optional<drm::sync::SyncFence> acquire;
+  if (db.acquire_fence_fd >= 0) {
+    if (auto f = drm::sync::SyncFence::import_fd(db.acquire_fence_fd); f) {
+      acquire = std::move(f.value());
+    } else {
+      ihs::log::warn(
+          "[VulkanDrmBackend] pv acquire-fence import failed ({}); implicit "
+          "sync this frame",
+          f.error().message());
+    }
+  }
+  pool->submit(
+      db.buffer_id,
+      drm::span<const drm::scene::ExternalPlaneInfo>(planes.data(), np),
+      std::move(acquire));
+}
+}  // namespace
+
+bool VulkanDrmBackend::ReconcilePlatformViewLayer(
+    CompositorState& c,
+    const FlutterLayer& fl,
+    const int z_index,
+    std::vector<const void*>& present) {
+  std::shared_ptr<ICompositorSurface> surface;
+  {
+    const std::lock_guard<std::mutex> lock(compositor_surfaces_mu_);
+    if (const auto it = compositor_surfaces_.find(fl.platform_view->identifier);
+        it != compositor_surfaces_.end()) {
+      surface = it->second;
+    }
+  }
+  if (!surface) {
+    return false;
+  }
+  const void* key = surface.get();
+  present.push_back(key);
+
+  surface->OnResize(static_cast<int32_t>(fl.size.width),
+                    static_cast<int32_t>(fl.size.height));
+  ICompositorSurface::Dmabuf db{};
+  const auto state = surface->GetDmabuf(&db);
+  // Every populated fd in db is ours now; the pool dups what it keeps.
+  const auto close_fds = [&db] {
+    for (uint32_t p = 0; p < db.plane_count && p < 4; ++p) {
+      if (db.fd[p] >= 0) {
+        ::close(db.fd[p]);
+      }
+    }
+    if (db.acquire_fence_fd >= 0) {
+      ::close(db.acquire_fence_fd);
+    }
+  };
+
+  const drm::planes::Rect dst{static_cast<int32_t>(fl.offset.x),
+                              static_cast<int32_t>(fl.offset.y),
+                              static_cast<uint32_t>(fl.size.width),
+                              static_cast<uint32_t>(fl.size.height)};
+  const std::optional<int> zpos(primary_zpos_ + z_index);
+
+  if (auto* layer = c.scene->find_by_identity_tag(const_cast<void*>(key))) {
+    layer->set_dst_rect_if_changed(dst);
+    layer->set_zpos_if_changed(zpos);
+    if (state != ICompositorSurface::DmabufState::kFrame) {
+      // No new frame this vblank is flow control, not a failure -- the plane
+      // keeps scanning what it already has. Anything else (a producer that
+      // cannot scan out) has to go back to the blend.
+      return state == ICompositorSurface::DmabufState::kNoNewFrame;
+    }
+    auto* pool =
+        dynamic_cast<drm::scene::ExternalDmaBufPool*>(&layer->source());
+    if (pool == nullptr) {
+      close_fds();
+      return false;
+    }
+    SubmitPvPool(pool, db);
+    surface->AckDmabufScanout(db.buffer_id);
+    close_fds();
+    return true;
+  }
+
+  if (state != ICompositorSurface::DmabufState::kFrame) {
+    // A view with nothing to show yet: let the blend path handle the frame
+    // rather than adding a layer with no buffer.
+    return false;
+  }
+  // The pool caches one fb_id per producer buffer and hands each back through
+  // on_release. drm-cxx fires that at displacement rather than at flip, so
+  // park it until the next flip completes instead of returning the producer a
+  // slot KMS is still scanning.
+  drm::scene::ExternalDmaBufPool::Options opts{};
+  opts.on_release = [&c, surface](
+                        std::uintptr_t rkey,
+                        std::optional<drm::sync::SyncFence> release_fence) {
+    drm::sync::SyncFence fence;
+    if (release_fence.has_value()) {
+      fence = std::move(*release_fence);
+    }
+    const std::scoped_lock lock(c.deferred_releases_mu);
+    c.deferred_releases.push_back(
+        {surface, static_cast<uint32_t>(rkey), std::move(fence)});
+  };
+  auto pool_exp = drm::scene::ExternalDmaBufPool::create(
+      c.device, db.width, db.height, db.fourcc, db.modifier, std::move(opts));
+  if (!pool_exp) {
+    ihs::log::debug("[VulkanDrmBackend] pv pool: {}",
+                    pool_exp.error().message());
+    close_fds();
+    return false;
+  }
+  auto pool = std::move(pool_exp.value());
+  auto* pool_raw = pool.get();
+  drm::scene::LayerDesc desc{};
+  desc.source = std::move(pool);
+  desc.display.dst_rect = dst;
+  // The producer hands over scanout-oriented (top-down) pixels.
+  desc.display.rotation = DRM_MODE_ROTATE_0;
+  desc.display.zpos = zpos;
+  desc.content_type = drm::planes::ContentType::Generic;
+  desc.identity_tag = const_cast<void*>(key);
+  auto handle = c.scene->add_layer(std::move(desc));
+  if (!handle) {
+    ihs::log::debug("[VulkanDrmBackend] pv add_layer: {}",
+                    handle.error().message());
+    close_fds();
+    return false;
+  }
+  c.plane_layer_keys.push_back(key);
+  c.plane_topology_changed = true;
+  SubmitPvPool(pool_raw, db);
+  surface->AckDmabufScanout(db.buffer_id);
+  close_fds();
+  return true;
+}
+
+bool VulkanDrmBackend::ReconcilePlaneLayers(CompositorState& c,
+                                            const FlutterLayer** layers,
+                                            const size_t count) {
+  // Only backing stores here. A platform view reaching a plane is the same
+  // mechanism with a different source (a dma-buf pool fed by the producer),
+  // but it is not what makes the blend expensive, so it stays on the blend
+  // path and its presence is what forces this frame to bail out below.
+  std::vector<const void*> present;
+  present.reserve(count);
+
+  int z_index = 0;
+  for (size_t i = 0; i < count; ++i) {
+    const FlutterLayer* fl = layers[i];
+    if (fl == nullptr) {
+      continue;
+    }
+    if (fl->type == kFlutterLayerContentTypePlatformView &&
+        fl->platform_view != nullptr) {
+      if (!ReconcilePlatformViewLayer(c, *fl, z_index, present)) {
+        return false;
+      }
+      ++z_index;
+      continue;
+    }
+    if (fl->type != kFlutterLayerContentTypeBackingStore ||
+        fl->backing_store == nullptr) {
+      return false;
+    }
+    const auto it = c.key_to_slot.find(fl->backing_store->user_data);
+    if (it == c.key_to_slot.end()) {
+      return false;
+    }
+    auto& [store, engine_owned, scene_source] = c.slots[it->second];
+    if (store == nullptr) {
+      return false;
+    }
+    const void* key = store.get();
+    present.push_back(key);
+
+    const drm::planes::Rect dst{static_cast<int32_t>(fl->offset.x),
+                                static_cast<int32_t>(fl->offset.y),
+                                static_cast<uint32_t>(fl->size.width),
+                                static_cast<uint32_t>(fl->size.height)};
+    // The bottom layer lands on the primary, whose zpos is immutable on some
+    // drivers -- leave it unset and let the allocator place it.
+    const std::optional<int> zpos =
+        z_index == 0 ? std::nullopt
+                     : std::optional<int>(primary_zpos_ + z_index);
+
+    if (auto* layer = c.scene->find_by_identity_tag(const_cast<void*>(key))) {
+      layer->set_dst_rect_if_changed(dst);
+      layer->set_zpos_if_changed(zpos);
+      ++z_index;
+      continue;
+    }
+
+    if (scene_source == nullptr) {
+      std::vector<drm::scene::ExternalPlaneInfo> planes;
+      for (const auto& pl : store->planes()) {
+        drm::scene::ExternalPlaneInfo info{};
+        info.fd = store->dma_buf_fd();
+        info.offset = static_cast<uint32_t>(pl.offset);
+        info.pitch = static_cast<uint32_t>(pl.pitch);
+        planes.push_back(info);
+      }
+      auto src = VkBackingStoreLayerSource::create(c.device, store->width(),
+                                                   store->height(), c.fourcc,
+                                                   store->modifier(), planes);
+      if (!src) {
+        ihs::log::debug("[VulkanDrmBackend] plane layer source: {}",
+                        src.error().message());
+        return false;
+      }
+      scene_source = std::move(src.value());
+    }
+
+    drm::scene::LayerDesc desc{};
+    desc.source = std::move(scene_source);
+    desc.display.dst_rect = dst;
+    // Vulkan renders top-down, so no REFLECT_Y -- the GL path needs it and
+    // pays for it in plane support; this path does not.
+    desc.display.rotation = DRM_MODE_ROTATE_0;
+    desc.display.zpos = zpos;
+    desc.content_type = drm::planes::ContentType::UI;
+    desc.identity_tag = const_cast<void*>(key);
+    auto handle = c.scene->add_layer(std::move(desc));
+    if (!handle) {
+      ihs::log::debug("[VulkanDrmBackend] add_layer: {}",
+                      handle.error().message());
+      return false;
+    }
+    c.plane_layer_keys.push_back(key);
+    ++z_index;
+  }
+
+  if (present.empty()) {
+    return false;
+  }
+  // Prune layers for stores that are no longer in the frame, so the scene's
+  // allocator is not holding planes for content that left.
+  for (auto it = c.plane_layer_keys.begin(); it != c.plane_layer_keys.end();) {
+    if (std::find(present.begin(), present.end(), *it) != present.end()) {
+      ++it;
+      continue;
+    }
+    if (auto* layer = c.scene->find_by_identity_tag(const_cast<void*>(*it))) {
+      c.scene->remove_layer(layer->handle());
+    }
+    it = c.plane_layer_keys.erase(it);
+  }
+  return true;
 }
 
 VkImage VulkanDrmBackend::AcquireSampleScratch(CompositorState& c,
@@ -2218,6 +2582,14 @@ bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
   if (bs_layer == nullptr) {
     return false;
   }
+  // Try to give every layer its own plane first. Falling through costs a
+  // reconcile and a TEST_ONLY commit, which is why the rejection latches a log
+  // line rather than being silent -- a frame shape that never places is worth
+  // knowing about.
+  if (plane_layers_ && !plane_layers_latched_off_ &&
+      PresentLayersViaPlanes(layers, count)) {
+    return true;
+  }
   const auto it = c.key_to_slot.find(bs_layer->backing_store->user_data);
   if (it == c.key_to_slot.end()) {
     return false;
@@ -2229,6 +2601,214 @@ bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
 // path (present_layers, with a layer stack to composite) and the root-surface
 // path (present_image, one image and no layers). Everything from the scanout
 // barrier onward is identical; only how the slot was chosen differs.
+void VulkanDrmBackend::DrainDeferredScanoutReleases(CompositorState& c) {
+  // Take the batch under the lock and fire the callbacks without it: they run
+  // producer code (an eventfd signal) and must not re-enter under our mutex.
+  std::vector<CompositorState::DeferredRelease> batch;
+  {
+    const std::scoped_lock lock(c.deferred_releases_mu);
+    batch.swap(c.deferred_releases);
+  }
+  for (auto& r : batch) {
+    if (!r.surface) {
+      continue;
+    }
+    // Publish the fence before the release, so a producer woken by the
+    // release already has something to wait on rather than racing to read a
+    // field about to be written. dup, not fd(): SetReleaseFenceFd takes
+    // ownership while SyncFence closes its own when the batch goes out of
+    // scope, and handing fd() over directly would double-close.
+    if (r.fence.valid()) {
+      if (const int fd = ::dup(r.fence.fd()); fd >= 0) {
+        r.surface->SetReleaseFenceFd(fd);
+      }
+    }
+    r.surface->OnScanoutRelease(r.buffer_id);
+  }
+}
+
+bool VulkanDrmBackend::PresentLayersViaPlanes(const FlutterLayer** layers,
+                                              const size_t count) {
+  CompositorState& c = *compositor_;
+  // Buffers displaced by the previous present. drm-cxx releases at
+  // displacement, not at flip, so this is deliberately one present late: the
+  // flip that retired them is the one waited on just below.
+  DrainDeferredScanoutReleases(c);
+  if (!ReconcilePlaneLayers(c, layers, count)) {
+    DropPlaneLayers(c);
+    return false;
+  }
+
+  // Ask before recording. A layer the allocator cannot place comes back
+  // Composited -- drm-cxx's CPU canvas, far slower than the blend we already
+  // have -- or Unassigned, which drops it. Either way the frame goes back to
+  // the blend, and that has to be decided now: the command buffer below is
+  // recorded on the assumption that nothing needs compositing.
+  //
+  // All-or-nothing, not per layer. A layer blended into the bottom store sits
+  // below anything on an overlay plane, so mixing the two inverts the stack
+  // wherever a blended layer belongs above a placed one.
+  // Steady state re-asks a question whose inputs have not changed. The
+  // allocator is deterministic for a given layer set, so cache the verdict
+  // against a signature of it and skip the ioctl while that holds; a topology
+  // change or any geometry move invalidates it.
+  size_t sig = c.plane_layer_keys.size();
+  for (const void* k : c.plane_layer_keys) {
+    sig = sig * 1000003U ^ reinterpret_cast<uintptr_t>(k);
+  }
+  for (size_t li = 0; li < count; ++li) {
+    if (layers[li] == nullptr) {
+      continue;
+    }
+    sig = sig * 1000003U ^ static_cast<size_t>(layers[li]->offset.x);
+    sig = sig * 1000003U ^ static_cast<size_t>(layers[li]->offset.y);
+    sig = sig * 1000003U ^ static_cast<size_t>(layers[li]->size.width);
+    sig = sig * 1000003U ^ static_cast<size_t>(layers[li]->size.height);
+  }
+  if (!c.plane_topology_changed && c.plane_plan_sig_valid &&
+      c.plane_plan_sig == sig) {
+    return CommitPlaneFrame(c, layers, count, /*assigned=*/0);
+  }
+
+  auto test = c.scene->test();
+  if (!test) {
+    if (test.error() != std::errc::permission_denied) {
+      DropPlaneLayers(c);
+    }
+    return false;
+  }
+  for (const auto& p : test->placements) {
+    if (p.placement != drm::scene::LayerPlacement::AssignedToPlane) {
+      if (!plane_test_rejected_) {
+        plane_test_rejected_ = true;
+        ihs::log::info(
+            "[VulkanDrmBackend] {} of {} layers would not get a plane; "
+            "blending instead (said once)",
+            test->layers_total - test->layers_assigned, test->layers_total);
+      }
+      DropPlaneLayers(c);
+      return false;
+    }
+  }
+
+  c.plane_plan_sig = sig;
+  c.plane_plan_sig_valid = true;
+  return CommitPlaneFrame(c, layers, count, test->layers_assigned);
+}
+
+bool VulkanDrmBackend::CommitPlaneFrame(CompositorState& c,
+                                        const FlutterLayer** layers,
+                                        const size_t count,
+                                        const size_t assigned) {
+  // Every store is scanned out and none is sampled, so the barrier only makes
+  // the engine's writes visible: no blend, no copy.
+  std::vector<VkImage> images;
+  std::vector<size_t> slots;
+  images.reserve(count);
+  slots.reserve(count);
+  for (size_t i = 0; i < count; ++i) {
+    if (layers[i] == nullptr ||
+        layers[i]->type != kFlutterLayerContentTypeBackingStore ||
+        layers[i]->backing_store == nullptr) {
+      continue;
+    }
+    const auto it = c.key_to_slot.find(layers[i]->backing_store->user_data);
+    if (it == c.key_to_slot.end()) {
+      continue;
+    }
+    if (auto* store = c.slots[it->second].store.get(); store != nullptr) {
+      images.push_back(store->image());
+      slots.push_back(it->second);
+    }
+  }
+  const ScopedFd scanout_fence(SubmitScanoutBarrier(
+      c, VK_NULL_HANDLE, VK_NULL_HANDLE, 0, 0, layers, count, &images));
+
+  // Same single-flip pacing as the blend path: one flip in flight whatever the
+  // plane count.
+  for (int spin_ms = 0;
+       spin_ms < 100 && c.flip_pending.load(std::memory_order_acquire);
+       ++spin_ms) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  // That flip completed, so the slots it carried are the ones now scanning and
+  // whatever they displaced is free to be handed out again.
+  if (!c.plane_pending_slots.empty()) {
+    c.plane_scanning_slots = std::move(c.plane_pending_slots);
+    c.plane_pending_slots.clear();
+  }
+
+  // Hand the render-done fence to each store's source so KMS waits on the GPU
+  // rather than the raster thread. import_fd dups; ours is ScopedFd's.
+  if (scanout_fence.get() >= 0) {
+    for (const size_t slot : slots) {
+      const auto* store = c.slots[slot].store.get();
+      auto* layer = c.scene->find_by_identity_tag(
+          const_cast<void*>(static_cast<const void*>(store)));
+      if (layer == nullptr) {
+        continue;
+      }
+      if (auto* src =
+              dynamic_cast<VkBackingStoreLayerSource*>(&layer->source())) {
+        if (auto f = drm::sync::SyncFence::import_fd(scanout_fence.get())) {
+          src->set_acquire_fence(std::move(f.value()));
+        }
+      }
+    }
+  }
+
+  // A plane entering or leaving needs ALLOW_MODESET, which cannot be
+  // non-blocking; steady state is a non-blocking flip we pace against.
+  const bool modeset = c.first_commit || c.plane_topology_changed;
+  const uint32_t flags =
+      modeset ? 0U : (DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK);
+  if (auto report = c.scene->commit(flags, this); !report) {
+    ihs::log::error("[VulkanDrmBackend] plane commit: {}",
+                    report.error().message());
+    DropPlaneLayers(c);
+    plane_layers_latched_off_ = true;
+    ihs::log::warn(
+        "[VulkanDrmBackend] plane layers off for this session after a commit "
+        "failure; blending from here");
+    return false;
+  }
+  // Say so once, positively. Everything else about this path is visible only
+  // as an absence -- no rejection, no fallback warning -- and an absence is
+  // not evidence that it ran.
+  if (assigned != 0 && plane_layers_confirmed_ != assigned) {
+    plane_layers_confirmed_ = assigned;
+    ihs::log::info(
+        "[VulkanDrmBackend] presenting on KMS planes: {} layers, no blend",
+        assigned);
+  }
+  c.plane_topology_changed = false;
+  if (modeset) {
+    // Blocking modeset: no flip event, so these slots are already scanning.
+    c.first_commit = false;
+    c.plane_scanning_slots = slots;
+  } else {
+    c.plane_pending_slots = slots;
+    c.flip_pending.store(true, std::memory_order_release);
+    vsync_.SetSourcePending(true);
+  }
+
+  // Report each view's plane back, for ihs_pv_grant_drm_plane_id.
+  {
+    const std::lock_guard<std::mutex> lock(compositor_surfaces_mu_);
+    for (auto& [id, surface] : compositor_surfaces_) {
+      if (!surface) {
+        continue;
+      }
+      if (auto* layer = c.scene->find_by_identity_tag(
+              const_cast<void*>(static_cast<const void*>(surface.get())))) {
+        surface->SetScanoutPlane(layer->last_assigned_plane_id().value_or(0));
+      }
+    }
+  }
+  ++c.frame;
+  return true;
+}
+
 bool VulkanDrmBackend::PresentSlot(const size_t slot,
                                    const FlutterLayer** layers,
                                    const size_t count,

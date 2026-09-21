@@ -86,6 +86,14 @@ class VkBackingStoreLayerSource final : public drm::scene::LayerBufferSource {
   VkBackingStoreLayerSource& operator=(const VkBackingStoreLayerSource&) =
       delete;
 
+  // Render-done fence for this buffer. The scene lowers it to the plane's
+  // IN_FENCE_FD, so the display engine waits on the GPU instead of the raster
+  // thread blocking before the commit. Set once per frame, before the commit
+  // that scans the buffer out.
+  void set_acquire_fence(drm::sync::SyncFence fence) noexcept {
+    inner_->set_acquire_fence(std::move(fence));
+  }
+
   // ── LayerBufferSource — forwarded to inner ExternalDmaBufSource. ────
   [[nodiscard]] drm::expected<drm::scene::AcquiredBuffer, std::error_code>
   acquire() override {
