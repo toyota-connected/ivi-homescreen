@@ -431,6 +431,18 @@ class VulkanDrmBackend final : public Backend {
                          uint32_t width,
                          uint32_t height,
                          uint64_t frame);
+
+  // An OPTIMAL, sampleable image of this size to copy a backing store into,
+  // for the case where the store's own modifier cannot be sampled (#617).
+  // @p slot indexes within the current frame, which may need several. The
+  // image is owned by the compositor's per-frame ring and stays valid until
+  // that ring entry comes round again. VK_NULL_HANDLE if it cannot be made,
+  // which leaves the caller to sample the store and warn.
+  VkImage AcquireSampleScratch(CompositorState& c,
+                               size_t slot,
+                               uint32_t width,
+                               uint32_t height,
+                               VkFormat format);
 #endif
 
   // Flutter's vsync_callback -> parks the baton in vsync_. Static C ABI; the

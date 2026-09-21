@@ -231,6 +231,26 @@ std::unique_ptr<VulkanBackingStore> VulkanBackingStore::Create(
   const std::vector<uint64_t>& candidates =
       store->sampleable_ ? sampled_modifiers : allowed_modifiers;
 
+  VkImageUsageFlags usage = kBaseUsage;
+  if (store->sampleable_) {
+    usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
+  } else {
+    // Not sampleable, so the compositor has to copy it into an image that is.
+    // That needs TRANSFER_SRC, which is a separate question from SAMPLED -- a
+    // linear layout commonly carries one and not the other. Every candidate
+    // has to support it, for the same reason the SAMPLED filter is a filter.
+    const bool all_transfer_src =
+        std::all_of(candidates.begin(), candidates.end(), [&](uint64_t m) {
+          return SupportsUsageForExport(
+              physical_device, vk_format,
+              kBaseUsage | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, m);
+        });
+    if (all_transfer_src) {
+      usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+      store->copyable_ = true;
+    }
+  }
+
   // Exported image constrained to the negotiated modifier set; the driver picks
   // one, read back below.
   VkImageDrmFormatModifierListCreateInfoEXT mod_list{};
@@ -253,8 +273,7 @@ std::unique_ptr<VulkanBackingStore> VulkanBackingStore::Create(
   ic.arrayLayers = 1;
   ic.samples = VK_SAMPLE_COUNT_1_BIT;
   ic.tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT;
-  ic.usage =
-      store->sampleable_ ? kBaseUsage | VK_IMAGE_USAGE_SAMPLED_BIT : kBaseUsage;
+  ic.usage = usage;
   ic.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
   if (d().vkCreateImage(device, &ic, nullptr, &store->image_) != VK_SUCCESS) {
     err = "vkCreateImage with modifier list failed";
