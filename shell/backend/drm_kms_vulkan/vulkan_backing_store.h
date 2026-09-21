@@ -105,6 +105,16 @@ class VulkanBackingStore {
   /// false here means that draw is reading an image whose usage never
   /// permitted it (#617).
   [[nodiscard]] bool sampleable() const { return sampleable_; }
+
+  /// Whether this store's image can be a vkCmdCopyImage source.
+  ///
+  /// Only set when sampleable() is false, since that is the only case that
+  /// needs it: the compositor copies the store into an image it can sample
+  /// instead of sampling the store directly. TRANSFER_SRC is a separate
+  /// question from SAMPLED -- a linear layout commonly carries one and not the
+  /// other -- so it is asked separately and can also come back false, leaving
+  /// no legal way to composite this store.
+  [[nodiscard]] bool copyable() const { return copyable_; }
   [[nodiscard]] uint32_t drm_fourcc() const { return drm_fourcc_; }
   [[nodiscard]] uint64_t modifier() const { return modifier_; }
   [[nodiscard]] const std::vector<PlaneLayout>& planes() const {
@@ -125,6 +135,7 @@ class VulkanBackingStore {
   uint32_t width_ = 0;
   uint32_t height_ = 0;
   bool sampleable_ = false;
+  bool copyable_ = false;
   VkFormat vk_format_ = VK_FORMAT_UNDEFINED;
   uint32_t drm_fourcc_ = 0;
   uint64_t modifier_ = 0;

@@ -675,6 +675,16 @@ struct VulkanDrmBackend::CompositorState {
         d().vkDestroySemaphore(vk_device, s, nullptr);
       }
     }
+    for (const auto& frame_scratch : sample_scratch) {
+      for (const SampleScratch& s : frame_scratch) {
+        if (s.image != VK_NULL_HANDLE) {
+          d().vkDestroyImage(vk_device, s.image, nullptr);
+        }
+        if (s.memory != VK_NULL_HANDLE) {
+          d().vkFreeMemory(vk_device, s.memory, nullptr);
+        }
+      }
+    }
     if (barrier_pool != VK_NULL_HANDLE) {
       d().vkDestroyCommandPool(vk_device, barrier_pool, nullptr);
     }
@@ -770,6 +780,20 @@ struct VulkanDrmBackend::CompositorState {
   std::array<std::vector<VkSemaphore>, kSyncRing> acquire_waits{};
   // Collected while recording the current frame, moved into the slot at submit.
   std::vector<VkSemaphore> pending_acquire_waits{};
+
+  // Sampleable copies of backing stores the GPU refuses to sample directly
+  // (#617). Ringed on the same index as sync_cmd/sync_fence, so the submit
+  // that last read scratch[i] is exactly the one waited on before entry i is
+  // re-recorded -- which is why the copy needs no synchronization of its own.
+  // A vector per frame because one frame can composite several such stores.
+  struct SampleScratch {
+    VkImage image{VK_NULL_HANDLE};
+    VkDeviceMemory memory{VK_NULL_HANDLE};
+    uint32_t width{0};
+    uint32_t height{0};
+    VkFormat format{VK_FORMAT_UNDEFINED};
+  };
+  std::array<std::vector<SampleScratch>, kSyncRing> sample_scratch{};
   bool explicit_sync = false;
 
   uint64_t frame = 0;
@@ -1810,6 +1834,89 @@ void VulkanDrmBackend::CollectAcquireWait(CompositorState& c,
   c.pending_acquire_waits.push_back(sem);
 }
 
+VkImage VulkanDrmBackend::AcquireSampleScratch(CompositorState& c,
+                                               const size_t slot,
+                                               const uint32_t width,
+                                               const uint32_t height,
+                                               const VkFormat format) {
+  auto& frame_scratch = c.sample_scratch[c.frame % CompositorState::kSyncRing];
+  if (slot >= frame_scratch.size()) {
+    frame_scratch.resize(slot + 1);
+  }
+  CompositorState::SampleScratch& s = frame_scratch[slot];
+  if (s.image != VK_NULL_HANDLE && s.width == width && s.height == height &&
+      s.format == format) {
+    return s.image;  // reusable: this ring entry's last reader has retired
+  }
+  // Wrong size or first use. Safe to destroy without a wait for the same
+  // reason the copy needs no barrier against other frames: the caller has
+  // already waited this ring entry's fence.
+  if (s.image != VK_NULL_HANDLE) {
+    d().vkDestroyImage(device_, s.image, nullptr);
+    s.image = VK_NULL_HANDLE;
+  }
+  if (s.memory != VK_NULL_HANDLE) {
+    d().vkFreeMemory(device_, s.memory, nullptr);
+    s.memory = VK_NULL_HANDLE;
+  }
+  s.width = width;
+  s.height = height;
+  s.format = format;
+
+  VkImageCreateInfo ic{};
+  ic.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+  ic.imageType = VK_IMAGE_TYPE_2D;
+  ic.format = format;
+  ic.extent = {width, height, 1};
+  ic.mipLevels = 1;
+  ic.arrayLayers = 1;
+  ic.samples = VK_SAMPLE_COUNT_1_BIT;
+  // Plain OPTIMAL: no modifier, never scanned out, never exported. That is the
+  // whole point -- it is free of the constraint that makes the store
+  // unsampleable.
+  ic.tiling = VK_IMAGE_TILING_OPTIMAL;
+  ic.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+  ic.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  if (d().vkCreateImage(device_, &ic, nullptr, &s.image) != VK_SUCCESS) {
+    s.image = VK_NULL_HANDLE;
+    return VK_NULL_HANDLE;
+  }
+
+  VkMemoryRequirements req{};
+  d().vkGetImageMemoryRequirements(device_, s.image, &req);
+  VkPhysicalDeviceMemoryProperties mem{};
+  d().vkGetPhysicalDeviceMemoryProperties(physical_device_, &mem);
+  uint32_t type = UINT32_MAX;
+  for (uint32_t i = 0; i < mem.memoryTypeCount; ++i) {
+    if ((req.memoryTypeBits & (1u << i)) != 0 &&
+        (mem.memoryTypes[i].propertyFlags &
+         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0) {
+      type = i;
+      break;
+    }
+  }
+  if (type == UINT32_MAX) {
+    d().vkDestroyImage(device_, s.image, nullptr);
+    s.image = VK_NULL_HANDLE;
+    return VK_NULL_HANDLE;
+  }
+  VkMemoryAllocateInfo mai{};
+  mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+  mai.allocationSize = req.size;
+  mai.memoryTypeIndex = type;
+  if (d().vkAllocateMemory(device_, &mai, nullptr, &s.memory) != VK_SUCCESS ||
+      d().vkBindImageMemory(device_, s.image, s.memory, 0) != VK_SUCCESS) {
+    if (s.memory != VK_NULL_HANDLE) {
+      d().vkFreeMemory(device_, s.memory, nullptr);
+      s.memory = VK_NULL_HANDLE;
+    }
+    d().vkDestroyImage(device_, s.image, nullptr);
+    s.image = VK_NULL_HANDLE;
+    return VK_NULL_HANDLE;
+  }
+  return s.image;
+}
+
 bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
                                          const FlutterLayer** layers,
                                          const size_t count,
@@ -1827,10 +1934,14 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
   }
 
   struct Draw {
-    VkImage src;
+    VkImage src;  // what is sampled: the store, or a scratch copy of it
     VkFormat format;
     int32_t dx, dy, dw, dh;
-    bool restore_color_attachment;  // a Flutter store the engine renders into
+    // A Flutter store the engine renders into, to hand back as a color
+    // attachment in phase 3, and the layout it is left in here. Not always
+    // src: a store that cannot be sampled is copied and the copy is drawn.
+    VkImage restore_image;
+    VkImageLayout restore_from;
     VkSamplerYcbcrModelConversion ycbcr_model;
     VkSamplerYcbcrRange ycbcr_range;
   };
@@ -1856,6 +1967,9 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
       };
 
   CompositorState& c = *compositor_;
+  // Scratch copies handed out this frame; one per unsampleable store, so the
+  // index is a running count rather than the layer index.
+  size_t scratch_used = 0;
   // Phase 1: move every source to SHADER_READ_ONLY. Layout transitions cannot
   // happen inside a render pass, so they all precede phase 2.
   for (size_t i = 0; i < count; ++i) {
@@ -1882,27 +1996,70 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
       if (store == nullptr || store->image() == target_image) {
         continue;  // the base store, already resident in the target
       }
-      // Sampling a store the GPU declined SAMPLED usage for. Reached when no
-      // modifier the scanout plane accepts also supports sampling, so the
-      // store cannot be made sampleable without giving up scanout (#617).
-      // Once per process: a property of the GPU's modifier sets, not of a
-      // frame.
+      // Where the GPU refused SAMPLED, copy the store into an image that can
+      // be sampled and draw that instead (#617). Reached when no modifier the
+      // scanout plane accepts also supports sampling, so the store cannot be
+      // made sampleable without giving up scanout.
+      VkImage sampled = store->image();
+      VkImageLayout leaves_store_in = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
       if (!store->sampleable()) {
-        static std::once_flag warned_unsampleable;
-        std::call_once(warned_unsampleable, [] {
-          ihs::log::warn(
-              "[VulkanDrmBackend] compositing an overlay layer by sampling a "
-              "backing store created without SAMPLED usage -- no scanout "
-              "modifier this GPU accepts also supports sampling (#617). "
-              "Frames may be correct anyway; the usage is not");
-        });
+        VkImage scratch =
+            store->copyable()
+                ? AcquireSampleScratch(c, scratch_used, store->width(),
+                                       store->height(), store->vk_format())
+                : VK_NULL_HANDLE;
+        if (scratch != VK_NULL_HANDLE) {
+          ++scratch_used;
+          barrier(store->image(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                  VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                  VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                  VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                  VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+          // UNDEFINED, not the layout it was left in: every texel is about to
+          // be overwritten, so discarding is both legal and cheaper.
+          barrier(scratch, VK_IMAGE_LAYOUT_UNDEFINED,
+                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0,
+                  VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                  VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+          VkImageCopy region{};
+          region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+          region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+          region.extent = {store->width(), store->height(), 1};
+          d().vkCmdCopyImage(cmd, store->image(),
+                             VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, scratch,
+                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+          barrier(scratch, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                  VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                  VK_ACCESS_SHADER_READ_BIT,
+                  VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+          sampled = scratch;
+          leaves_store_in = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        } else {
+          // No copy available either, so the draw below samples an image whose
+          // usage never permitted it. Once per process: a property of the
+          // GPU's modifier sets, not of a frame.
+          static std::once_flag warned_unsampleable;
+          std::call_once(warned_unsampleable, [] {
+            ihs::log::warn(
+                "[VulkanDrmBackend] compositing an overlay layer by sampling a "
+                "backing store created without SAMPLED usage, and no "
+                "TRANSFER_SRC to copy it with either -- nothing this GPU "
+                "scans out can be sampled (#617). Frames may be correct "
+                "anyway; the usage is not");
+          });
+        }
       }
-      barrier(store->image(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-              VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-              VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-              VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
-      draws.push_back({store->image(), store->vk_format(), dx, dy, dw, dh, true,
+      if (sampled == store->image()) {
+        barrier(store->image(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                VK_ACCESS_SHADER_READ_BIT,
+                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+      }
+      draws.push_back({sampled, store->vk_format(), dx, dy, dw, dh,
+                       store->image(), leaves_store_in,
                        VK_SAMPLER_YCBCR_MODEL_CONVERSION_RGB_IDENTITY,
                        VK_SAMPLER_YCBCR_RANGE_ITU_NARROW});
     } else if (layer->type == kFlutterLayerContentTypePlatformView &&
@@ -1949,7 +2106,8 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
         surface->SetVulkanImageLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
       }
       draws.push_back(
-          {src, src_format, dx, dy, dw, dh, false,
+          {src, src_format, dx, dy, dw, dh, VK_NULL_HANDLE,
+           VK_IMAGE_LAYOUT_UNDEFINED,
            static_cast<VkSamplerYcbcrModelConversion>(
                surface->GetVulkanYcbcrModel()),
            static_cast<VkSamplerYcbcrRange>(surface->GetVulkanYcbcrRange())});
@@ -1997,13 +2155,20 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
   // Phase 3: hand the Flutter stores back as color attachments for the engine's
   // next render. Runs even if the pass never opened, since phase 1 moved them.
   for (const Draw& dr : draws) {
-    if (dr.restore_color_attachment) {
-      barrier(dr.src, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-              VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-              VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-              VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+    if (dr.restore_image == VK_NULL_HANDLE) {
+      continue;
     }
+    // A copied store was left in TRANSFER_SRC by the copy, not read by the
+    // draw; anything else was sampled directly. Restoring from the wrong
+    // layout would discard the engine's contents.
+    const bool copied = dr.restore_from == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    barrier(dr.restore_image, dr.restore_from,
+            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            copied ? VK_ACCESS_TRANSFER_READ_BIT : VK_ACCESS_SHADER_READ_BIT,
+            copied ? VK_PIPELINE_STAGE_TRANSFER_BIT
+                   : VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
   }
   return opened;
 }
