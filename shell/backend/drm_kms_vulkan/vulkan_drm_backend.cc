@@ -29,6 +29,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cstring>
+#include <mutex>
 #include <optional>
 #include <thread>
 #include <unordered_map>
@@ -1880,6 +1881,21 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
           c.slots[it->second].store.get();
       if (store == nullptr || store->image() == target_image) {
         continue;  // the base store, already resident in the target
+      }
+      // Sampling a store the GPU declined SAMPLED usage for. Reached when no
+      // modifier the scanout plane accepts also supports sampling, so the
+      // store cannot be made sampleable without giving up scanout (#617).
+      // Once per process: a property of the GPU's modifier sets, not of a
+      // frame.
+      if (!store->sampleable()) {
+        static std::once_flag warned_unsampleable;
+        std::call_once(warned_unsampleable, [] {
+          ihs::log::warn(
+              "[VulkanDrmBackend] compositing an overlay layer by sampling a "
+              "backing store created without SAMPLED usage -- no scanout "
+              "modifier this GPU accepts also supports sampling (#617). "
+              "Frames may be correct anyway; the usage is not");
+        });
       }
       barrier(store->image(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,

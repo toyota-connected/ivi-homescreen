@@ -96,6 +96,52 @@ constexpr uint64_t AlignUp(const uint64_t v, const uint64_t a) {
   return (v + a - 1) & ~(a - 1);
 }
 
+// Whether an image with this format, usage and DRM modifier can be created and
+// exported as a dma-buf.
+//
+// vkCreateImage is not a substitute for this question. A driver may accept
+// usage the format properties do not support -- V3D accepts SAMPLED on a
+// modifier whose features lack SAMPLED_IMAGE -- and hands back a valid handle,
+// so a create-and-fall-back scheme never falls back. The mismatch surfaces
+// later instead: an unsampleable view at draw, and a handle type the export
+// cannot honor at bind. Ask the question that has an authoritative answer.
+bool SupportsUsageForExport(VkPhysicalDevice physical_device,
+                            VkFormat vk_format,
+                            VkImageUsageFlags usage,
+                            uint64_t modifier) {
+  VkPhysicalDeviceImageDrmFormatModifierInfoEXT mod_info{};
+  mod_info.sType =
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_DRM_FORMAT_MODIFIER_INFO_EXT;
+  mod_info.drmFormatModifier = modifier;
+  mod_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+  VkPhysicalDeviceExternalImageFormatInfo ext_info{};
+  ext_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO;
+  ext_info.pNext = &mod_info;
+  ext_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
+
+  VkPhysicalDeviceImageFormatInfo2 fi{};
+  fi.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2;
+  fi.pNext = &ext_info;
+  fi.format = vk_format;
+  fi.type = VK_IMAGE_TYPE_2D;
+  fi.tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT;
+  fi.usage = usage;
+
+  VkExternalImageFormatProperties ext_props{};
+  ext_props.sType = VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES;
+  VkImageFormatProperties2 props{};
+  props.sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2;
+  props.pNext = &ext_props;
+
+  if (d().vkGetPhysicalDeviceImageFormatProperties2(physical_device, &fi,
+                                                    &props) != VK_SUCCESS) {
+    return false;
+  }
+  return (ext_props.externalMemoryProperties.compatibleHandleTypes &
+          VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT) != 0;
+}
+
 }  // namespace
 
 std::vector<uint64_t> NegotiateModifiers(
@@ -162,14 +208,36 @@ std::unique_ptr<VulkanBackingStore> VulkanBackingStore::Create(
   store->vk_format_ = vk_format;
   store->drm_fourcc_ = drm_fourcc;
 
+  // The compositor samples every store that is not the base one, so a store
+  // without SAMPLED is read by a draw its usage never permitted -- two
+  // validation errors per frame, and undefined behavior whatever the driver
+  // does about it (#617).
+  //
+  // The bit cannot simply be added. The driver picks from the modifier list
+  // below, which is what the scanout plane accepts, and a modifier that scans
+  // out is not necessarily one that samples. Narrow the list to the candidates
+  // that do, so whichever the driver picks is sampleable; where that leaves
+  // nothing, keep scanout and mark the store honestly unsampleable.
+  constexpr VkImageUsageFlags kBaseUsage =
+      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+  std::vector<uint64_t> sampled_modifiers;
+  for (uint64_t m : allowed_modifiers) {
+    if (SupportsUsageForExport(physical_device, vk_format,
+                               kBaseUsage | VK_IMAGE_USAGE_SAMPLED_BIT, m)) {
+      sampled_modifiers.push_back(m);
+    }
+  }
+  store->sampleable_ = !sampled_modifiers.empty();
+  const std::vector<uint64_t>& candidates =
+      store->sampleable_ ? sampled_modifiers : allowed_modifiers;
+
   // Exported image constrained to the negotiated modifier set; the driver picks
   // one, read back below.
   VkImageDrmFormatModifierListCreateInfoEXT mod_list{};
   mod_list.sType =
       VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_LIST_CREATE_INFO_EXT;
-  mod_list.drmFormatModifierCount =
-      static_cast<uint32_t>(allowed_modifiers.size());
-  mod_list.pDrmFormatModifiers = allowed_modifiers.data();
+  mod_list.drmFormatModifierCount = static_cast<uint32_t>(candidates.size());
+  mod_list.pDrmFormatModifiers = candidates.data();
   VkExternalMemoryImageCreateInfo ext{};
   ext.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
   ext.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
@@ -186,7 +254,7 @@ std::unique_ptr<VulkanBackingStore> VulkanBackingStore::Create(
   ic.samples = VK_SAMPLE_COUNT_1_BIT;
   ic.tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT;
   ic.usage =
-      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+      store->sampleable_ ? kBaseUsage | VK_IMAGE_USAGE_SAMPLED_BIT : kBaseUsage;
   ic.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
   if (d().vkCreateImage(device, &ic, nullptr, &store->image_) != VK_SUCCESS) {
     err = "vkCreateImage with modifier list failed";
@@ -382,8 +450,16 @@ std::unique_ptr<VulkanBackingStore> VulkanBackingStore::CreateImported(
   ic.arrayLayers = 1;
   ic.samples = VK_SAMPLE_COUNT_1_BIT;
   ic.tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT;
-  ic.usage =
+  // SAMPLED for the same reason as the exported path above -- this store is
+  // composited like any other. The modifier is fixed by the buffer being
+  // imported, so there is one candidate to ask about rather than a list.
+  constexpr VkImageUsageFlags kBaseUsage =
       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+  store->sampleable_ = SupportsUsageForExport(
+      physical_device, vk_format, kBaseUsage | VK_IMAGE_USAGE_SAMPLED_BIT,
+      DRM_FORMAT_MOD_LINEAR);
+  ic.usage =
+      store->sampleable_ ? kBaseUsage | VK_IMAGE_USAGE_SAMPLED_BIT : kBaseUsage;
   ic.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
   if (d().vkCreateImage(device, &ic, nullptr, &store->image_) != VK_SUCCESS) {
     err =
