@@ -1256,6 +1256,46 @@ int HostQueryCapabilities(void* user_data, IhsPvCapabilities* out) {
   // would hand a plugin a format it can never submit.
   if ((out->kinds & IHS_PV_KIND_TEXTURE_DMABUF_IMPORT) != 0U ||
       (out->kinds & IHS_PV_KIND_DRM_PLANE) != 0U) {
+#if IVI_HAVE_VULKAN
+    // Offer what the device says it will import before what we assume it will
+    // (#597). The hardcoded list is LINEAR for every fourcc, and at least one
+    // driver does not advertise LINEAR as sampleable -- it imports the frame
+    // and samples it anyway, which is invalid however well it works.
+    //
+    // Preference, not a filter. A producer that can honor the order lands on
+    // a modifier the driver admits; one that can only make LINEAR -- anything
+    // filling pixels on the CPU -- still finds it further down the list and
+    // keeps working. Dropping the tolerated modifiers would impose tiling on
+    // every such producer to satisfy a rule nothing currently enforces.
+    static std::vector<IhsFormatModifier> offered;
+    static std::once_flag probed;
+    std::call_once(probed, [] {
+      if (!g_importer.ready()) {
+        return;
+      }
+      for (const IhsFormatModifier& f : kDmabufImportFormats) {
+        for (const uint64_t m : g_importer.ImportableModifiers(f.fourcc)) {
+          offered.push_back({f.fourcc, 0, m});
+        }
+      }
+      if (offered.empty()) {
+        return;  // nothing passed; the assumed list stands on its own
+      }
+      // The assumed entries stay, behind the probed ones. A duplicate is
+      // harmless -- it is the same offer twice, and the first wins.
+      for (const IhsFormatModifier& f : kDmabufImportFormats) {
+        offered.push_back(f);
+      }
+      ihs::log::debug("[ihs_pv] dma-buf formats: {} device-probed, {} assumed",
+                      offered.size() - std::size(kDmabufImportFormats),
+                      std::size(kDmabufImportFormats));
+    });
+    if (!offered.empty()) {
+      out->formats = offered.data();
+      out->format_count = offered.size();
+      return IHS_PV_OK;
+    }
+#endif
     out->formats = kDmabufImportFormats;
     out->format_count = std::size(kDmabufImportFormats);
   }

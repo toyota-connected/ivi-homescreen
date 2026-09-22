@@ -139,6 +139,14 @@ bool DmabufVulkanImporter::Init(VkInstance instance,
       reinterpret_cast<PFN_vkBindImageMemory>(device_fn("vkBindImageMemory"));
   get_memory_fd_properties_ = reinterpret_cast<PFN_vkGetMemoryFdPropertiesKHR>(
       device_fn("vkGetMemoryFdPropertiesKHR"));
+  // Optional: only ImportableModifiers uses these, and it degrades to "ask
+  // nothing, offer what we always did" without them.
+  get_format_properties2_ =
+      reinterpret_cast<PFN_vkGetPhysicalDeviceFormatProperties2>(
+          instance_fn("vkGetPhysicalDeviceFormatProperties2"));
+  get_image_format_properties2_ =
+      reinterpret_cast<PFN_vkGetPhysicalDeviceImageFormatProperties2>(
+          instance_fn("vkGetPhysicalDeviceImageFormatProperties2"));
 
   if (get_memory_properties_ == nullptr || create_image_ == nullptr ||
       destroy_image_ == nullptr || get_image_memory_requirements_ == nullptr ||
@@ -154,6 +162,80 @@ bool DmabufVulkanImporter::Init(VkInstance instance,
   physical_device_ = physical_device;
   device_ = device;
   return true;
+}
+
+std::vector<uint64_t> DmabufVulkanImporter::ImportableModifiers(
+    const uint32_t drm_fourcc) const {
+  std::vector<uint64_t> out;
+  if (get_format_properties2_ == nullptr ||
+      get_image_format_properties2_ == nullptr ||
+      physical_device_ == VK_NULL_HANDLE) {
+    return out;
+  }
+  bool is_yuv = false;
+  const VkFormat format = VkFormatFromFourcc(drm_fourcc, &is_yuv);
+  if (format == VK_FORMAT_UNDEFINED) {
+    return out;
+  }
+
+  // Everything the device knows about this format, then filtered by what it
+  // will actually import. The tiling-feature bits alone are not the answer --
+  // they say what the modifier can do, not whether a dma-buf carrying it can
+  // be brought in with this usage.
+  VkDrmFormatModifierPropertiesListEXT list{};
+  list.sType = VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_EXT;
+  VkFormatProperties2 fp{};
+  fp.sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2;
+  fp.pNext = &list;
+  get_format_properties2_(physical_device_, format, &fp);
+  if (list.drmFormatModifierCount == 0) {
+    return out;
+  }
+  std::vector<VkDrmFormatModifierPropertiesEXT> mods(
+      list.drmFormatModifierCount);
+  list.pDrmFormatModifierProperties = mods.data();
+  get_format_properties2_(physical_device_, format, &fp);
+
+  for (const auto& m : mods) {
+    VkPhysicalDeviceImageDrmFormatModifierInfoEXT mod_info{};
+    mod_info.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_DRM_FORMAT_MODIFIER_INFO_EXT;
+    mod_info.drmFormatModifier = m.drmFormatModifier;
+    mod_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VkPhysicalDeviceExternalImageFormatInfo ext_info{};
+    ext_info.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO;
+    ext_info.pNext = &mod_info;
+    ext_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
+
+    VkPhysicalDeviceImageFormatInfo2 fi{};
+    fi.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2;
+    fi.pNext = &ext_info;
+    fi.format = format;
+    fi.type = VK_IMAGE_TYPE_2D;
+    fi.tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT;
+    // The same usage Import asks for. Probing with anything else answers a
+    // question we are not going to ask at import time.
+    fi.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+
+    VkExternalImageFormatProperties ext_props{};
+    ext_props.sType = VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES;
+    VkImageFormatProperties2 props{};
+    props.sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2;
+    props.pNext = &ext_props;
+
+    if (get_image_format_properties2_(physical_device_, &fi, &props) !=
+        VK_SUCCESS) {
+      continue;
+    }
+    if ((ext_props.externalMemoryProperties.externalMemoryFeatures &
+         VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT) == 0) {
+      continue;
+    }
+    out.push_back(m.drmFormatModifier);
+  }
+  return out;
 }
 
 bool DmabufVulkanImporter::Import(const IhsFrame& frame,
