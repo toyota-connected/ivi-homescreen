@@ -134,6 +134,14 @@ bool EglDmabufImporter::Init(void* egl_display) {
         reinterpret_cast<void*>(eglGetProcAddress("eglDestroySyncKHR"));
     wait_sync_ = reinterpret_cast<void*>(eglGetProcAddress("eglWaitSyncKHR"));
   }
+  // The modifier query is optional too: without it the capability query offers
+  // its assumed LINEAR list, as it always has. Matched as a whole token --
+  // strstr would find it inside a longer name.
+  if (ihs::gl::ExtensionSupported(exts,
+                                  "EGL_EXT_image_dma_buf_import_modifiers")) {
+    query_modifiers_ = reinterpret_cast<void*>(
+        eglGetProcAddress("eglQueryDmaBufModifiersEXT"));
+  }
   // All three or none: a half-resolved set would let WaitAcquireFence create a
   // sync it cannot wait on or destroy, leaking the producer's fd every frame.
   if (!has_native_fence_sync()) {
@@ -314,4 +322,51 @@ bool EglDmabufImporter::WaitAcquireFence(int fence_fd) const {
         eglGetError());
   }
   return true;
+}
+
+std::vector<uint64_t> EglDmabufImporter::ImportableModifiers(
+    const uint32_t drm_fourcc) const {
+  std::vector<uint64_t> out;
+  if (query_modifiers_ == nullptr || egl_display_ == nullptr) {
+    return out;
+  }
+  auto query =
+      reinterpret_cast<PFNEGLQUERYDMABUFMODIFIERSEXTPROC>(query_modifiers_);
+  const auto display = static_cast<EGLDisplay>(egl_display_);
+  const auto format = static_cast<EGLint>(drm_fourcc);
+  EGLint count = 0;
+  if (query(display, format, 0, nullptr, nullptr, &count) != EGL_TRUE ||
+      count <= 0) {
+    return out;
+  }
+  std::vector<EGLuint64KHR> modifiers(static_cast<size_t>(count));
+  std::vector<EGLBoolean> external_only(static_cast<size_t>(count));
+  if (query(display, format, count, modifiers.data(), external_only.data(),
+            &count) != EGL_TRUE) {
+    return out;
+  }
+
+  // Import binds YUV through GL_TEXTURE_EXTERNAL_OES and packed RGB through
+  // GL_TEXTURE_2D; an external-only modifier suits the first and not the
+  // second.
+  const bool binds_external = NeedsExternalOes(drm_fourcc);
+  bool has_linear = false;
+  for (EGLint i = 0; i < count; ++i) {
+    const uint64_t m = modifiers[static_cast<size_t>(i)];
+    if (external_only[static_cast<size_t>(i)] == EGL_TRUE && !binds_external) {
+      continue;
+    }
+    if (m == DRM_FORMAT_MOD_INVALID) {
+      continue;  // not a layout a producer can allocate
+    }
+    if (m == DRM_FORMAT_MOD_LINEAR) {
+      has_linear = true;  // last: the one every layout can fall back to
+      continue;
+    }
+    out.push_back(m);
+  }
+  if (has_linear) {
+    out.push_back(DRM_FORMAT_MOD_LINEAR);
+  }
+  return out;
 }

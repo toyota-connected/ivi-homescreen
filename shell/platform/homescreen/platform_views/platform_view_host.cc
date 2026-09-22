@@ -44,6 +44,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <vector>
 
 #if IVI_HAVE_VULKAN
 #include <vulkan/vulkan.h>
@@ -1304,6 +1305,40 @@ constexpr IhsFormatModifier kDmabufImportFormats[] = {
     {HostFourcc('A', 'B', '2', '4'), 0, 0},  // DRM_FORMAT_ABGR8888, LINEAR
 };
 
+// The formats the dma-buf kinds offer when the active importer can say which
+// modifiers it will take: those first, best first, then the assumed list
+// behind them.
+//
+// Preference, not a filter. A producer that can honor the order lands on a
+// modifier the driver admits; one that can only make LINEAR -- anything
+// filling pixels on the CPU -- still finds it further down the list and keeps
+// working. Dropping the assumed entries would impose tiling on every such
+// producer to satisfy a rule nothing currently enforces. A duplicate is
+// harmless: it is the same offer twice, and the first wins.
+//
+// Empty when the probe found nothing, which leaves the assumed list to stand
+// on its own.
+template <typename Probe>
+std::vector<IhsFormatModifier> ProbedOffer(const char* importer,
+                                           const Probe& probe) {
+  std::vector<IhsFormatModifier> offered;
+  for (const IhsFormatModifier& f : kDmabufImportFormats) {
+    for (const uint64_t m : probe(f.fourcc)) {
+      offered.push_back({f.fourcc, 0, m});
+    }
+  }
+  if (offered.empty()) {
+    return offered;
+  }
+  for (const IhsFormatModifier& f : kDmabufImportFormats) {
+    offered.push_back(f);
+  }
+  ihs::log::debug("[ihs_pv] dma-buf formats ({}): {} device-probed, {} assumed",
+                  importer, offered.size() - std::size(kDmabufImportFormats),
+                  std::size(kDmabufImportFormats));
+  return offered;
+}
+
 int HostQueryCapabilities(void* user_data, IhsPvCapabilities* out) {
   out->backend_key = "";
   out->kinds =
@@ -1366,38 +1401,38 @@ int HostQueryCapabilities(void* user_data, IhsPvCapabilities* out) {
     // (#597). The hardcoded list is LINEAR for every fourcc, and at least one
     // driver does not advertise LINEAR as sampleable -- it imports the frame
     // and samples it anyway, which is invalid however well it works.
-    //
-    // Preference, not a filter. A producer that can honor the order lands on
-    // a modifier the driver admits; one that can only make LINEAR -- anything
-    // filling pixels on the CPU -- still finds it further down the list and
-    // keeps working. Dropping the tolerated modifiers would impose tiling on
-    // every such producer to satisfy a rule nothing currently enforces.
-    static std::vector<IhsFormatModifier> offered;
-    static std::once_flag probed;
-    std::call_once(probed, [] {
-      if (!g_importer.ready()) {
-        return;
+    static std::vector<IhsFormatModifier> offered_vk;
+    static std::once_flag probed_vk;
+    std::call_once(probed_vk, [] {
+      if (g_importer.ready()) {
+        offered_vk = ProbedOffer("vulkan", [](uint32_t fourcc) {
+          return g_importer.ImportableModifiers(fourcc);
+        });
       }
-      for (const IhsFormatModifier& f : kDmabufImportFormats) {
-        for (const uint64_t m : g_importer.ImportableModifiers(f.fourcc)) {
-          offered.push_back({f.fourcc, 0, m});
-        }
-      }
-      if (offered.empty()) {
-        return;  // nothing passed; the assumed list stands on its own
-      }
-      // The assumed entries stay, behind the probed ones. A duplicate is
-      // harmless -- it is the same offer twice, and the first wins.
-      for (const IhsFormatModifier& f : kDmabufImportFormats) {
-        offered.push_back(f);
-      }
-      ihs::log::debug("[ihs_pv] dma-buf formats: {} device-probed, {} assumed",
-                      offered.size() - std::size(kDmabufImportFormats),
-                      std::size(kDmabufImportFormats));
     });
-    if (!offered.empty()) {
-      out->formats = offered.data();
-      out->format_count = offered.size();
+    if (!offered_vk.empty()) {
+      out->formats = offered_vk.data();
+      out->format_count = offered_vk.size();
+      return IHS_PV_OK;
+    }
+#endif
+#if IVI_HAVE_EGL
+    // The same for an EGL backend. Without it the offer is LINEAR only, so a
+    // producer that could hand the compositor a tiled or compressed buffer
+    // (AFBC on Mali, UBWC on Adreno) is steered onto the layout that costs
+    // the most bandwidth to sample and to scan out.
+    static std::vector<IhsFormatModifier> offered_egl;
+    static std::once_flag probed_egl;
+    std::call_once(probed_egl, [] {
+      if (g_egl_importer.ready()) {
+        offered_egl = ProbedOffer("egl", [](uint32_t fourcc) {
+          return g_egl_importer.ImportableModifiers(fourcc);
+        });
+      }
+    });
+    if (!offered_egl.empty()) {
+      out->formats = offered_egl.data();
+      out->format_count = offered_egl.size();
       return IHS_PV_OK;
     }
 #endif
