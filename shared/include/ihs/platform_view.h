@@ -48,7 +48,9 @@
  * Threading: register/unregister-factory and negotiate are platform-thread
  * only. The factory and every IhsPvCallbacks entry are invoked on the platform
  * thread. Grant accessors are valid only between a successful negotiate and the
- * next renegotiate/dispose for that view.
+ * next renegotiate/dispose for that view. A plugin running on another thread
+ * -- an FFI plugin is called on the Dart UI thread -- reaches the platform
+ * thread with ihs_pv_post_platform_task.
  *
  * ihs_pv_submit is the exception: it may be called from any thread, which is
  * the point -- a producer drives it from whatever decode or render thread it
@@ -279,6 +281,47 @@ IHS_EXPORT int ihs_pv_query_capabilities(IhsPvCapabilities* out);
  *     const char* p = ihs_pv_assets_path ? ihs_pv_assets_path() : NULL;
  */
 IHS_EXPORT IHS_WEAK_IMPORT const char* ihs_pv_assets_path(void);
+
+/*
+ * A task for the platform thread; see ihs_pv_post_platform_task.
+ */
+typedef void (*IhsPvTaskFn)(void* user_data);
+
+/*
+ * Run @fn(@user_data) on the platform thread.
+ *
+ * Most of this surface -- register/unregister-factory, negotiate, the
+ * capability query and the native-context accessors -- is platform-thread
+ * only, but a plugin loaded over Dart FFI is called on the Dart UI thread and
+ * has no platform thread of its own to be on. This is how it gets there: post
+ * the work and let it run in order with the registry's own callbacks.
+ *
+ * Returns IHS_PV_OK when the task was queued, IHS_PV_ERR_INVALID for a NULL
+ * @fn, IHS_PV_ERR_NO_REGISTRY with no host installed, and
+ * IHS_PV_ERR_NO_BACKEND when the engine is not running (before start-up, or
+ * during shutdown). The task runs exactly once when this returns IHS_PV_OK,
+ * with one exception: a task still queued when the engine shuts down is
+ * dropped without running, so @user_data must not own anything that only
+ * @fn can release.
+ *
+ * Any thread may call this, including the platform thread itself; the task
+ * then runs after the current one returns, never inline. So never block the
+ * platform thread waiting for a task it posted -- check
+ * ihs_pv_is_platform_thread() and call directly instead.
+ *
+ * Added after 1.0; IHS_WEAK_IMPORT, so test the symbol before calling it.
+ */
+IHS_EXPORT IHS_WEAK_IMPORT int ihs_pv_post_platform_task(IhsPvTaskFn fn,
+                                                         void* user_data);
+
+/*
+ * 1 when the calling thread is the platform thread, else 0 (including with no
+ * host or no running engine). Lets a plugin that needs a platform-thread
+ * result synchronously run inline instead of posting and waiting on itself.
+ *
+ * Added after 1.0; IHS_WEAK_IMPORT, so test the symbol before calling it.
+ */
+IHS_EXPORT IHS_WEAK_IMPORT int ihs_pv_is_platform_thread(void);
 
 /*
  * The backend's Vulkan objects, offered to a plugin that renders on a Vulkan
@@ -654,6 +697,8 @@ typedef struct IhsPlatformViewApi {
 
   /* Appended after the initial layout; check struct_size before calling. */
   const char* (*assets_path)(void);
+  int (*post_platform_task)(IhsPvTaskFn fn, void* user_data);
+  int (*is_platform_thread)(void);
 } IhsPlatformViewApi;
 
 #ifdef __cplusplus

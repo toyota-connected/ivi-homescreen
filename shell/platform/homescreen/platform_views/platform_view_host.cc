@@ -30,6 +30,7 @@
 #if BUILD_COMPOSITOR
 
 #include <poll.h>
+#include <pthread.h>
 #include <sys/eventfd.h>
 #include <unistd.h>
 
@@ -61,6 +62,7 @@
 #include "platform_view.h"
 #include "platform_view_listener.h"
 #include "platform_view_registry.h"
+#include "task_runner.h"
 #include "view/compositor_surface_interface.h"
 #include "view/flutter_view.h"
 
@@ -1738,6 +1740,34 @@ const char* HostAssetsPath(void* user_data) {
   return state->flutter_asset_directory.c_str();
 }
 
+// Queue a plugin task on the platform runner's strand, the same one the
+// registry's callbacks and ScheduleEngineFrame run on, so it is ordered with
+// them. The task is the plugin's code; it does not touch the engine, so it
+// needs no shutdown re-check on arrival.
+int HostPostPlatformTask(void* user_data,
+                         IhsPvTaskFn fn,
+                         void* task_user_data) {
+  auto* state = static_cast<FlutterDesktopEngineState*>(user_data);
+  if (state == nullptr) {
+    return IHS_PV_ERR_NO_BACKEND;
+  }
+  TaskRunner* runner = state->platform_task_runner;
+  if (runner == nullptr || runner->GetStrandContext() == nullptr) {
+    return IHS_PV_ERR_NO_BACKEND;  // before start-up or after teardown
+  }
+  asio::post(*runner->GetStrandContext(),
+             [fn, task_user_data]() { fn(task_user_data); });
+  return IHS_PV_OK;
+}
+
+int HostIsPlatformThread(void* user_data) {
+  const auto* state = static_cast<FlutterDesktopEngineState*>(user_data);
+  if (state == nullptr || state->platform_task_runner == nullptr) {
+    return 0;
+  }
+  return state->platform_task_runner->IsThreadEqual(pthread_self()) ? 1 : 0;
+}
+
 IhsPvHost g_host{};
 
 }  // namespace
@@ -1760,6 +1790,8 @@ void InstallPlatformViewHost(FlutterDesktopEngineState* engine_state) {
   g_host.grant_drm_plane_id = HostGrantDrmPlaneId;
   g_host.grant_shm_fd = HostGrantShmFd;
   g_host.submit = HostSubmit;
+  g_host.post_platform_task = HostPostPlatformTask;
+  g_host.is_platform_thread = HostIsPlatformThread;
   ihs_pv_set_host(&g_host);
 
   // Bring up the dma-buf importer once, on this thread, from the backend's

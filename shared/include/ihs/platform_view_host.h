@@ -118,6 +118,14 @@ typedef struct IhsPvHost {
 
   /* Appended after the initial layout; read only when struct_size covers it. */
   const char* (*assets_path)(void* user_data);
+
+  /* Appended after assets_path; read only when struct_size covers it. Queue
+   * @fn(@task_user_data) on the platform thread, and answer whether the
+   * calling thread is that thread. See ihs_pv_post_platform_task. */
+  int (*post_platform_task)(void* user_data,
+                            IhsPvTaskFn fn,
+                            void* task_user_data);
+  int (*is_platform_thread)(void* user_data);
 } IhsPvHost;
 
 /*
