@@ -48,6 +48,8 @@
 #include <vulkan/vulkan.h>
 #endif
 
+#include "asio/post.hpp"
+
 #include "backend/backend.h"
 #if IVI_HAVE_VULKAN
 #include "dmabuf_vulkan_import.h"
@@ -93,7 +95,34 @@ void ScheduleEngineFrame(void* user_data) {
       state->texture_registrar->shutting_down.load(std::memory_order_acquire)) {
     return;  // tearing down: the engine handle is no longer safe to call
   }
-  LibFlutterEngine->ScheduleFrame(state->flutter_engine);
+  // Marshal onto the platform thread (#623). ihs_pv_submit is any-thread by
+  // contract and producers use that -- but FlutterEngineScheduleFrame is
+  // platform-thread-only in the engine, implicitly: it dereferences the
+  // shell's fml::WeakPtr<PlatformView>, which checks its creation thread, and
+  // Shell::OnPlatformViewScheduleFrame asserts the platform runner outright.
+  // Both are FML_DCHECKs, so a release engine never complains and a debug one
+  // asserts on the first producer frame; the release hazard is the WeakPtr
+  // deref racing platform-view teardown.
+  //
+  // Posting rather than blocking: the producer's thread carries a decode or
+  // render loop and has no business waiting on ours. ScheduleFrame is
+  // idempotent -- Animator::RequestFrame coalesces on a semaphore -- so a
+  // nudge that lands a beat late, or twice, costs nothing.
+  TaskRunner* runner = state->platform_task_runner;
+  if (runner == nullptr || runner->GetStrandContext() == nullptr) {
+    return;  // no runner yet; the next submit nudges
+  }
+  asio::post(*runner->GetStrandContext(), [state]() {
+    // Re-check on the platform thread: teardown may have run while this was
+    // queued, and that is the thread which latches it.
+    if (state->flutter_engine == nullptr ||
+        state->texture_registrar == nullptr ||
+        state->texture_registrar->shutting_down.load(
+            std::memory_order_acquire)) {
+      return;
+    }
+    LibFlutterEngine->ScheduleFrame(state->flutter_engine);
+  });
 }
 
 // Reaches the active Backend for the engine the host was installed for.
