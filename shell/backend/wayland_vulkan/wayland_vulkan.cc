@@ -424,18 +424,26 @@ void WaylandVulkanBackend::createInstance() {
       static_cast<uint32_t>(enabled_instance_extensions_.size());
   info.ppEnabledExtensionNames = enabled_instance_extensions_.data();
 
-  if (enable_validation_layers_) {
-    constexpr char layer_name[] = "VK_LAYER_KHRONOS_validation";
-    constexpr VkBool32 setting_validate_core = VK_TRUE;
-    constexpr VkBool32 setting_validate_sync = VK_TRUE;
-    constexpr VkBool32 setting_thread_safety = VK_TRUE;
-    const char* setting_debug_action[] = {"VK_DBG_LAYER_ACTION_LOG_MSG"};
-    const char* setting_report_flags[] = {"error", "warn", "info", "perf",
-                                          "verbose"};
-    constexpr VkBool32 setting_enable_message_limit = VK_TRUE;
-    constexpr uint32_t setting_duplicate_message_limit = 3;
+  // Function scope, not the `if` below: `info.pNext` keeps pointing at
+  // layer_settings_create_info, and that struct keeps pointing at `settings`,
+  // which points at each setting value -- all of it read by vkCreateInstance
+  // at the end of this function. Declared inside the `if`, the whole chain is
+  // dangling by the time it is walked, which is a segfault in the loader on
+  // every --debug-backend run.
+  static constexpr char layer_name[] = "VK_LAYER_KHRONOS_validation";
+  static constexpr VkBool32 setting_validate_core = VK_TRUE;
+  static constexpr VkBool32 setting_validate_sync = VK_TRUE;
+  static constexpr VkBool32 setting_thread_safety = VK_TRUE;
+  static const char* setting_debug_action[] = {"VK_DBG_LAYER_ACTION_LOG_MSG"};
+  static const char* setting_report_flags[] = {"error", "warn", "info", "perf",
+                                               "verbose"};
+  static constexpr VkBool32 setting_enable_message_limit = VK_TRUE;
+  static constexpr uint32_t setting_duplicate_message_limit = 3;
 
-    const VkLayerSettingEXT settings[] = {
+  VkLayerSettingsCreateInfoEXT layer_settings_create_info{};
+
+  if (enable_validation_layers_) {
+    static const VkLayerSettingEXT settings[] = {
         {layer_name, "validate_core", VK_LAYER_SETTING_TYPE_BOOL32_EXT, 1,
          &setting_validate_core},
         {layer_name, "validate_sync", VK_LAYER_SETTING_TYPE_BOOL32_EXT, 1,
@@ -453,7 +461,6 @@ void WaylandVulkanBackend::createInstance() {
          VK_LAYER_SETTING_TYPE_UINT32_EXT, 1, &setting_duplicate_message_limit},
     };
 
-    VkLayerSettingsCreateInfoEXT layer_settings_create_info{};
     layer_settings_create_info.sType =
         VK_STRUCTURE_TYPE_LAYER_SETTINGS_CREATE_INFO_EXT;
     layer_settings_create_info.settingCount =
