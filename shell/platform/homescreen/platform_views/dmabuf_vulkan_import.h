@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cstdint>
+#include <vector>
 
 #include <vulkan/vulkan.h>
 
@@ -78,6 +79,18 @@ class DmabufVulkanImporter {
   // sampler and descriptor layout there, not here.
   bool Import(const IhsFrame& frame, ImportedImage* out) const;
 
+  // Modifiers this device will actually import and sample for @p drm_fourcc,
+  // asked with the same usage Import creates the image with. Best first: the
+  // order the capability query offers them, so a producer that can honor a
+  // preference lands on one the driver admits.
+  //
+  // Empty is a real answer -- the device advertises no modifier it will import
+  // for that format -- and the caller keeps offering what it always did. A
+  // modifier the driver merely tolerates still works here (#597); offering
+  // nothing would take the view away entirely.
+  [[nodiscard]] std::vector<uint64_t> ImportableModifiers(
+      uint32_t drm_fourcc) const;
+
   void Destroy(ImportedImage* image) const;
 
  private:
@@ -93,4 +106,7 @@ class DmabufVulkanImporter {
   PFN_vkFreeMemory free_memory_{nullptr};
   PFN_vkBindImageMemory bind_image_memory_{nullptr};
   PFN_vkGetMemoryFdPropertiesKHR get_memory_fd_properties_{nullptr};
+  PFN_vkGetPhysicalDeviceFormatProperties2 get_format_properties2_{nullptr};
+  PFN_vkGetPhysicalDeviceImageFormatProperties2 get_image_format_properties2_{
+      nullptr};
 };
