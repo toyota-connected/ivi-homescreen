@@ -543,3 +543,69 @@ TEST(IhsPvSurface, SubTableCarriesPlatformTaskEntryPoints) {
   EXPECT_EQ(pv->post_platform_task, &ihs_pv_post_platform_task);
   EXPECT_EQ(pv->is_platform_thread, &ihs_pv_is_platform_thread);
 }
+
+// ---- buffer retirement ------------------------------------------------------
+
+namespace {
+
+struct RetireRecorder {
+  int calls = 0;
+  IhsPlatformView* last_view = nullptr;
+  uint32_t last_id = 0;
+};
+
+int mock_retire(void* u, IhsPlatformView* view, uint32_t buffer_id) {
+  auto* r = static_cast<RetireRecorder*>(u);
+  ++r->calls;
+  r->last_view = view;
+  r->last_id = buffer_id;
+  return IHS_PV_OK;
+}
+
+}  // namespace
+
+TEST(IhsPvSurface, RetireBufferForwardsToHost) {
+  RetireRecorder rec;
+  IhsPvHost host{};
+  host.struct_size = sizeof(host);
+  host.user_data = &rec;
+  host.retire_buffer = mock_retire;
+  ihs_pv_set_host(&host);
+
+  EXPECT_EQ(ihs_pv_retire_buffer(fake_view(), 41), IHS_PV_OK);
+  EXPECT_EQ(rec.calls, 1);
+  EXPECT_EQ(rec.last_view, fake_view());
+  EXPECT_EQ(rec.last_id, 41u);
+
+  EXPECT_EQ(ihs_pv_retire_buffer(nullptr, 41), IHS_PV_ERR_INVALID);
+  EXPECT_EQ(rec.calls, 1);
+
+  detach_host();
+  EXPECT_EQ(ihs_pv_retire_buffer(fake_view(), 41), IHS_PV_ERR_NO_REGISTRY);
+}
+
+// A shell whose IhsPvHost ends before retire_buffer (built against 1.8 or
+// earlier) cannot drop imports; the caller must hear that rather than OK.
+TEST(IhsPvSurface, RetireBufferAbsentOnOlderHost) {
+  RetireRecorder rec;
+  IhsPvHost host{};
+  host.struct_size = offsetof(IhsPvHost, retire_buffer);
+  host.user_data = &rec;
+  host.retire_buffer = mock_retire;
+  ihs_pv_set_host(&host);
+
+  EXPECT_EQ(ihs_pv_retire_buffer(fake_view(), 41), IHS_PV_ERR_NO_BACKEND);
+  EXPECT_EQ(rec.calls, 0);
+
+  detach_host();
+}
+
+TEST(IhsPvSurface, SubTableCarriesRetireBuffer) {
+  const IhsApi* api = ihs_get_api(IHS_SHARED_ABI_VERSION);
+  ASSERT_NE(api, nullptr);
+  const IhsPlatformViewApi* pv = api->platform_view;
+  ASSERT_NE(pv, nullptr);
+  ASSERT_GE(pv->struct_size, offsetof(IhsPlatformViewApi, retire_buffer) +
+                                 sizeof(pv->retire_buffer));
+  EXPECT_EQ(pv->retire_buffer, &ihs_pv_retire_buffer);
+}

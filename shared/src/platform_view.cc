@@ -229,6 +229,24 @@ extern "C" int ihs_pv_is_platform_thread(void) {
   return h->is_platform_thread(h->user_data) != 0 ? 1 : 0;
 }
 
+extern "C" int ihs_pv_retire_buffer(IhsPlatformView* view, uint32_t buffer_id) {
+  if (view == nullptr) {
+    return IHS_PV_ERR_INVALID;
+  }
+  const IhsPvHost* h = host();
+  if (h == nullptr) {
+    return IHS_PV_ERR_NO_REGISTRY;
+  }
+  // Appended after is_platform_thread; a host built against an older header
+  // has no such member.
+  constexpr size_t kNeeded =
+      offsetof(IhsPvHost, retire_buffer) + sizeof(IhsPvHost::retire_buffer);
+  if (h->struct_size < kNeeded || h->retire_buffer == nullptr) {
+    return IHS_PV_ERR_NO_BACKEND;
+  }
+  return h->retire_buffer(h->user_data, view, buffer_id);
+}
+
 extern "C" int ihs_pv_vulkan_context(IhsVulkanContext* out) {
   if (out == nullptr || out->struct_size == 0) {
     return IHS_PV_ERR_INVALID;
@@ -371,7 +389,7 @@ const IhsPlatformViewApi* platform_view_api() noexcept {
       &ihs_pv_negotiate,          &ihs_pv_grant_drm_plane_id,
       &ihs_pv_grant_shm_fd,       &ihs_pv_submit,
       &ihs_pv_assets_path,        &ihs_pv_post_platform_task,
-      &ihs_pv_is_platform_thread,
+      &ihs_pv_is_platform_thread, &ihs_pv_retire_buffer,
   };
   return &api;
 }

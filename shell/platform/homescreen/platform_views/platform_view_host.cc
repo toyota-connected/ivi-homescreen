@@ -52,6 +52,7 @@
 #include "asio/post.hpp"
 
 #include "backend/backend.h"
+#include "deferred_retire_set.h"
 #if IVI_HAVE_VULKAN
 #include "dmabuf_vulkan_import.h"
 #endif
@@ -232,6 +233,12 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   // Common retire clock for both import paths (incremented on every submit).
   uint64_t submit_seq{0};
 
+  // Ids the producer retired (ihs_pv_retire_buffer) while they were on screen;
+  // each is dropped when a later frame supersedes it. Shared by both import
+  // paths; mutable because the EGL path drains it from GetGlTextureName.
+  // Guarded by `mutex`.
+  mutable DeferredRetireSet deferred_retire;
+
   // Synthesised buffer_id for a plugin whose IhsFrame predates that field, so
   // each of its frames is imported afresh instead of aliasing cache slot 0.
   // Atomic: written on the plugin thread in HostSubmit (outside v->mutex) and,
@@ -309,6 +316,10 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     // rides OnScanoutRelease) from one superseded before it was ever scanned
     // out (its release eventfd must be signalled at supersede instead).
     uint64_t stash_seq{0};
+    // The producer retired this frame's buffer_id and then submitted it again,
+    // possibly for a different dma-buf, so a cached import under the id is
+    // stale and must not be reused.
+    bool reimport{false};
     // Owned copy of the frame's HDR metadata: frame.hdr points at plugin memory
     // we must not retain, so its contents are copied here at submit and
     // frame.hdr nulled. has_hdr is false for SDR frames.
@@ -744,7 +755,7 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   // Signal and drop the release eventfd for `buffer_id` (a no-op if there is
   // none). Writing wakes the producer's poll on its dup; closing our copy
   // retires it. Caller holds `mutex`.
-  void SignalRelease(uint32_t buffer_id) {
+  void SignalRelease(uint32_t buffer_id) const {
     const auto it = release_efds.find(buffer_id);
     if (it == release_efds.end()) {
       return;
@@ -761,6 +772,20 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     close(it->second);
     release_efds.erase(it);
   }
+
+#if IVI_HAVE_EGL
+  // Drop the GL import cached for `id` (it is destroyed on the raster thread
+  // once the reap margin has passed) and wake and forget the slot's release
+  // eventfd. Caller holds `mutex`.
+  void RetireEglImportLocked(uint32_t id) const;
+
+  // True while `id` is the frame waiting to be imported or the one being
+  // sampled. Caller holds `mutex`.
+  [[nodiscard]] bool OnScreenEglLocked(const uint32_t id) const {
+    return (pending_egl.valid && pending_egl.frame.buffer_id == id) ||
+           (current_egl != nullptr && current_egl_buffer_id == id);
+  }
+#endif
 
   // Create this frame's release eventfd, hand the producer a dup as its release
   // fence (via *out_fd), and keep our copy keyed on buffer_id to signal later.
@@ -816,6 +841,11 @@ DmabufVulkanImporter g_importer;
 // not-ready on a Vulkan backend.
 EglDmabufImporter g_egl_importer;
 #endif
+
+// Margin, in submits, before a retired import is destroyed: safely more than
+// the frames the compositor keeps in flight, so no present command buffer still
+// binds it by the time it is freed.
+constexpr uint64_t kImportRetireMargin = 8;
 
 IhsPluginView::~IhsPluginView() {
   // Stop any producer thread that still holds this view BEFORE freeing the
@@ -951,6 +981,42 @@ void CloseScanoutBuffer(IhsPluginView::ScanoutBuffer* sb) {
   }
   sb->plane_count = 0;
 }
+
+// True while `id` is the frame the compositor samples. Caller holds v->mutex.
+bool OnScreenVulkanLocked(const IhsPluginView* v, const uint32_t id) {
+  return v->current != nullptr && v->current_buffer_id == id;
+}
+
+// Drop the Vulkan import cached for `id` (destroyed on a later submit once the
+// reap margin has passed) and the scanout dups beside it. Caller holds
+// v->mutex.
+void RetireVulkanImportLocked(IhsPluginView* v, const uint32_t id) {
+  if (const auto it = v->buffers.find(id); it != v->buffers.end()) {
+    if (v->current == &it->second) {
+      v->current = nullptr;
+      v->current_buffer_valid = false;
+    }
+    v->retired.push_back({it->second, v->submit_seq + kImportRetireMargin});
+    v->buffers.erase(it);
+  }
+  if (const auto sit = v->scanout.find(id); sit != v->scanout.end()) {
+    CloseScanoutBuffer(&sit->second);
+    v->scanout.erase(sit);
+  }
+}
+#endif
+
+#if IVI_HAVE_EGL
+void IhsPluginView::RetireEglImportLocked(const uint32_t id) const {
+  if (const auto it = buffers_egl.find(id); it != buffers_egl.end()) {
+    if (current_egl == &it->second) {
+      current_egl = nullptr;
+    }
+    retired_egl.push_back({it->second, submit_seq + kImportRetireMargin});
+    buffers_egl.erase(it);
+  }
+  SignalRelease(id);
+}
 #endif
 
 #if IVI_HAVE_EGL
@@ -1005,10 +1071,9 @@ uint32_t IhsPluginView::GetGlTextureName() const {
     if (!pending_egl.valid) {
       return current_egl != nullptr ? current_egl->texture : 0;
     }
-    // Margin (in submits) before a resize-replaced import is destroyed; the
-    // compositor samples GetGlTextureName synchronously here, so GL's own
-    // deferred deletion already covers in-flight draws — the margin is safety.
-    constexpr uint64_t kImportRetireMargin = 8;
+    // The compositor samples GetGlTextureName synchronously here, so GL's own
+    // deferred deletion already covers in-flight draws; the reap margin is
+    // safety.
     for (auto rit = retired_egl.begin(); rit != retired_egl.end();) {
       if (submit_seq >= rit->reap_at) {
         g_egl_importer.Destroy(&rit->texture);  // GL context current here
@@ -1018,6 +1083,10 @@ uint32_t IhsPluginView::GetGlTextureName() const {
       }
     }
     IhsFrame& f = pending_egl.frame;
+    if (pending_egl.reimport) {
+      RetireEglImportLocked(f.buffer_id);
+      pending_egl.reimport = false;
+    }
     const auto it = buffers_egl.find(f.buffer_id);
     if (it != buffers_egl.end() && it->second.width == f.width &&
         it->second.height == f.height) {
@@ -1054,6 +1123,11 @@ uint32_t IhsPluginView::GetGlTextureName() const {
       }
     }
     pending_egl.valid = false;
+    // A retired frame that was on screen may be off it now.
+    for (const uint32_t id : deferred_retire.ReleaseOffScreen(
+             [this](uint32_t id) { return OnScreenEglLocked(id); })) {
+      RetireEglImportLocked(id);
+    }
   }
   return current_egl != nullptr ? current_egl->texture : 0;
 }
@@ -1551,7 +1625,15 @@ int HostSubmit(void* user_data,
     v->pending_egl.frame.hdr = nullptr;  // do not retain the plugin's hdr ptr
     v->pending_egl.acquire_fence_fd = acquire_fence_fd;  // ownership moves here
     v->pending_egl.stash_seq = v->submit_seq;
+    v->pending_egl.reimport = v->deferred_retire.Resubmitted(frame->buffer_id);
     v->pending_egl.valid = true;
+    // Release retired frames this one pushed off screen. Checked here as well
+    // as at import: a view on a KMS plane is fed through GetDmabuf and may
+    // never reach GetGlTextureName.
+    for (const uint32_t id : v->deferred_retire.ReleaseOffScreen(
+             [v](uint32_t id) { return v->OnScreenEglLocked(id); })) {
+      v->RetireEglImportLocked(id);
+    }
     // Per-frame release eventfd: hand the producer a dup to wait on before it
     // reuses this ring slot; the compositor signals our copy from
     // OnScanoutRelease. A stale entry for this buffer_id (the producer reused
@@ -1581,11 +1663,6 @@ int HostSubmit(void* user_data,
     }
     return IHS_PV_ERR_NO_BACKEND;
   }
-
-  // Margin, in submits, before a resize-replaced import is destroyed — safely
-  // more than the frames the compositor keeps in flight, so no present command
-  // buffer still binds it by the time it is freed.
-  constexpr uint64_t kImportRetireMargin = 8;
 
   std::unique_lock<std::mutex> lock(v->mutex);
   ++v->submit_seq;
@@ -1620,6 +1697,11 @@ int HostSubmit(void* user_data,
     }
   }
 
+  if (v->deferred_retire.Resubmitted(frame->buffer_id)) {
+    // Retired while on screen and now submitted again, possibly for a new
+    // dma-buf: the cached import is stale, so import afresh.
+    RetireVulkanImportLocked(v, frame->buffer_id);
+  }
   const auto it = v->buffers.find(frame->buffer_id);
   if (it != v->buffers.end() && it->second.width == frame->width &&
       it->second.height == frame->height) {
@@ -1719,6 +1801,12 @@ int HostSubmit(void* user_data,
     }
   }
 
+  // A retired frame that was on screen is off it now.
+  for (const uint32_t id : v->deferred_retire.ReleaseOffScreen(
+           [v](uint32_t id) { return OnScreenVulkanLocked(v, id); })) {
+    RetireVulkanImportLocked(v, id);
+  }
+
   // The plugin re-rendered the buffer before submitting, so the compositor
   // transitions from GENERAL to read it. A spec-correct foreign-queue-family
   // acquire from the producer is the explicit-sync increment.
@@ -1768,6 +1856,33 @@ int HostIsPlatformThread(void* user_data) {
   return state->platform_task_runner->IsThreadEqual(pthread_self()) ? 1 : 0;
 }
 
+// The producer will not submit `buffer_id` again. Drop its imports now, or --
+// when it is on screen -- once a later frame supersedes it. Any thread, under
+// the same dispose rule as submit.
+int HostRetireBuffer(void* /* user_data */,
+                     IhsPlatformView* view,
+                     const uint32_t buffer_id) {
+  auto* v = reinterpret_cast<IhsPluginView*>(view);
+  const std::lock_guard<std::mutex> lock(v->mutex);
+  bool on_screen = false;
+#if IVI_HAVE_VULKAN
+  on_screen = on_screen || OnScreenVulkanLocked(v, buffer_id);
+#endif
+#if IVI_HAVE_EGL
+  on_screen = on_screen || v->OnScreenEglLocked(buffer_id);
+#endif
+  if (!v->deferred_retire.Retire(buffer_id, on_screen)) {
+    return IHS_PV_OK;  // dropped when superseded
+  }
+#if IVI_HAVE_VULKAN
+  RetireVulkanImportLocked(v, buffer_id);
+#endif
+#if IVI_HAVE_EGL
+  v->RetireEglImportLocked(buffer_id);
+#endif
+  return IHS_PV_OK;
+}
+
 IhsPvHost g_host{};
 
 }  // namespace
@@ -1792,6 +1907,7 @@ void InstallPlatformViewHost(FlutterDesktopEngineState* engine_state) {
   g_host.submit = HostSubmit;
   g_host.post_platform_task = HostPostPlatformTask;
   g_host.is_platform_thread = HostIsPlatformThread;
+  g_host.retire_buffer = HostRetireBuffer;
   ihs_pv_set_host(&g_host);
 
   // Bring up the dma-buf importer once, on this thread, from the backend's

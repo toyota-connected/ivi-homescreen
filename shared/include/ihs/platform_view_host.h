@@ -126,6 +126,12 @@ typedef struct IhsPvHost {
                             IhsPvTaskFn fn,
                             void* task_user_data);
   int (*is_platform_thread)(void* user_data);
+
+  /* Appended after is_platform_thread; read only when struct_size covers it.
+   * Drop the imports cached for @buffer_id. See ihs_pv_retire_buffer. */
+  int (*retire_buffer)(void* user_data,
+                       IhsPlatformView* view,
+                       uint32_t buffer_id);
 } IhsPvHost;
 
 /*

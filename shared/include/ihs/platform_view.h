@@ -670,6 +670,41 @@ IHS_EXPORT int ihs_pv_submit(IhsPlatformView* view,
                              int* out_release_fence_fd);
 
 /*
+ * Tell the registry that @buffer_id will not be submitted again for @view, so
+ * it can drop what it cached for that buffer: the VkImage or GL texture the
+ * dma-buf was imported into, and the duplicate fds kept for direct scanout.
+ *
+ * The import cache is keyed by buffer_id and never forgets an id on its own,
+ * which is right for a fixed ring but not for a producer whose buffers come
+ * and go -- a Wayland server passing through its clients' buffers, or a
+ * decoder that reallocates on a rendition switch. Without this, such a
+ * producer either grows the cache by one import per buffer for the life of
+ * the view, or reuses ids and has a new dma-buf sampled through the stale
+ * import of an old one.
+ *
+ * Nothing is freed while a present can still use it. A buffer that is the
+ * view's current frame stays on screen until a later submit supersedes it and
+ * is dropped then; others are dropped after the in-flight frames that may
+ * still bind them have retired. Retiring an id the view never saw, or one
+ * already retired, is a no-op.
+ *
+ * Do not submit a retired id again. On the drm-kms backends the framebuffer
+ * a buffer was scanned out through is cached separately, keyed by the same
+ * id, and is not yet dropped by this call (that cache is bounded on its own),
+ * so a re-used id could reach a plane through the stale framebuffer.
+ *
+ * Callable from any thread, like ihs_pv_submit and under the same dispose
+ * rule: no call may be in flight once IhsPvCallbacks::dispose has returned.
+ * Returns IHS_PV_OK, IHS_PV_ERR_INVALID for a NULL @view,
+ * IHS_PV_ERR_NO_REGISTRY with no host, or IHS_PV_ERR_NO_BACKEND when the host
+ * predates this call.
+ *
+ * Added after 1.0; IHS_WEAK_IMPORT, so test the symbol before calling it.
+ */
+IHS_EXPORT IHS_WEAK_IMPORT int ihs_pv_retire_buffer(IhsPlatformView* view,
+                                                    uint32_t buffer_id);
+
+/*
  * The platform-view capability sub-table reachable through
  * IhsApi::platform_view. Pointers alias the flat entry points above; a consumer
  * may use either. Grows additively behind struct_size.
@@ -699,6 +734,7 @@ typedef struct IhsPlatformViewApi {
   const char* (*assets_path)(void);
   int (*post_platform_task)(IhsPvTaskFn fn, void* user_data);
   int (*is_platform_thread)(void);
+  int (*retire_buffer)(IhsPlatformView* view, uint32_t buffer_id);
 } IhsPlatformViewApi;
 
 #ifdef __cplusplus
