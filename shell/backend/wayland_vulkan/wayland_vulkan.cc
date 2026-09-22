@@ -22,6 +22,7 @@
 
 #include <cassert>
 #include <cstdlib>
+#include <cstring>
 #include <optional>
 #include <queue>
 #include <string_view>
@@ -151,6 +152,14 @@ WaylandVulkanBackend::PluginInstanceProcAddr(VkInstance instance,
   // PFN_vkGetInstanceProcAddr shape a plugin calls: swap vkQueue* (and
   // vkGetDeviceProcAddr) for the shared-queue locking trampolines, else fall
   // through to the real loader.
+  // Keep the caller on this resolver if it re-resolves the entry point itself:
+  // handing back the raw loader here would take every later lookup off the
+  // interposed path.
+  if (procname != nullptr &&
+      std::strcmp(procname, "vkGetInstanceProcAddr") == 0) {
+    return reinterpret_cast<PFN_vkVoidFunction>(
+        &WaylandVulkanBackend::PluginInstanceProcAddr);
+  }
   if (auto* interposed = wayland_vulkan::QueueInterposer::Interpose(
           instance, procname, d().vkGetInstanceProcAddr)) {
     return interposed;
@@ -1299,6 +1308,18 @@ void* WaylandVulkanBackend::GetInstanceProcAddressCallback(
   // to a VkQueue must be externally synchronized. Also shims
   // vkGetDeviceProcAddr so device-level resolution (Skia VulkanProcTable
   // path) is covered. See issue #208.
+  //
+  // The engine bootstraps once: the only name it asks this callback for is
+  // vkGetInstanceProcAddr, and it resolves everything else -- vkQueueSubmit
+  // included -- through whatever comes back. Handing out the raw loader there
+  // put every later lookup on the plain loader, so the queue lock covered this
+  // backend's own calls and nothing else. Hand back the interposing resolver
+  // so the chain survives the bootstrap.
+  if (procname != nullptr &&
+      std::strcmp(procname, "vkGetInstanceProcAddr") == 0) {
+    return reinterpret_cast<void*>(
+        &WaylandVulkanBackend::PluginInstanceProcAddr);
+  }
   if (auto* interposed = wayland_vulkan::QueueInterposer::Interpose(
           vk_instance, procname, d().vkGetInstanceProcAddr)) {
     return reinterpret_cast<void*>(interposed);
