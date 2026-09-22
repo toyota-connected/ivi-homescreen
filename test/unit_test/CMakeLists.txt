@@ -175,6 +175,10 @@ endif ()
 add_subdirectory(output_resolver-test)
 add_subdirectory(ihs_pv-test)
 add_subdirectory(deferred_retire_set-test)
+# The EGL dma-buf importer only exists when an EGL backend is built.
+if (BUILD_COMPOSITOR AND (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_DRM_KMS_EGL))
+    add_subdirectory(egl_import_modifiers-test)
+endif ()
 # The PAGE_FLIP_EVENT drain race behind #367. Drives libdrm and an eventfd
 # directly -- no shell sources -- so it builds wherever libdrm was found, not
 # only under a DRM-KMS backend. Skips itself without vkms + DRM master.

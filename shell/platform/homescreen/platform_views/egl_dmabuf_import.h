@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cstdint>
+#include <vector>
 
 #include "ihs/platform_view.h"
 
@@ -104,6 +105,20 @@ class EglDmabufImporter {
 
   void Destroy(ImportedTexture* out) const;
 
+  // Modifiers this display will import @p drm_fourcc with, and that Import can
+  // bind the way it binds that format: a packed RGB format goes to
+  // GL_TEXTURE_2D, so a modifier the driver restricts to
+  // GL_TEXTURE_EXTERNAL_OES is left out for it. Best first -- the driver's
+  // order, with LINEAR moved to the end -- which is the order the capability
+  // query offers them, so a producer that can honor a preference lands on a
+  // tiled or compressed layout rather than LINEAR.
+  //
+  // Empty without EGL_EXT_image_dma_buf_import_modifiers, or when the display
+  // lists nothing usable for the format; the caller then keeps offering what
+  // it always did. Needs no GL context.
+  [[nodiscard]] std::vector<uint64_t> ImportableModifiers(
+      uint32_t drm_fourcc) const;
+
  private:
   void* egl_display_{nullptr};  // EGLDisplay
   // Resolved via eglGetProcAddress; typed as void* to keep EGL/GL headers out
@@ -117,4 +132,7 @@ class EglDmabufImporter {
   void* create_sync_{nullptr};   // PFNEGLCREATESYNCKHRPROC
   void* destroy_sync_{nullptr};  // PFNEGLDESTROYSYNCKHRPROC
   void* wait_sync_{nullptr};     // PFNEGLWAITSYNCKHRPROC
+  // Optional: null without EGL_EXT_image_dma_buf_import_modifiers, which
+  // leaves ImportableModifiers empty.
+  void* query_modifiers_{nullptr};  // PFNEGLQUERYDMABUFMODIFIERSEXTPROC
 };
