@@ -23,6 +23,10 @@
  * shell, no backend, no compositor.
  */
 
+#include <cstddef>
+#include <utility>
+#include <vector>
+
 #include "gtest/gtest.h"
 
 #include "ihs/ihs.h"
@@ -422,4 +426,120 @@ TEST(IhsPvSurface, SubmitForwardsToHost) {
   EXPECT_EQ(release_fd, -1);
 
   detach_host();
+}
+
+// ---- platform-thread tasks --------------------------------------------------
+
+namespace {
+
+// Stands in for the shell's platform runner: queues rather than runs, so a
+// test can prove the task was not run inline.
+struct MockRunner {
+  std::vector<std::pair<IhsPvTaskFn, void*>> queued;
+  int on_platform_thread = 0;
+  int post_rc = IHS_PV_OK;
+};
+
+int mock_post(void* u, IhsPvTaskFn fn, void* task_user_data) {
+  auto* r = static_cast<MockRunner*>(u);
+  if (r->post_rc == IHS_PV_OK) {
+    r->queued.emplace_back(fn, task_user_data);
+  }
+  return r->post_rc;
+}
+
+int mock_is_platform(void* u) {
+  return static_cast<MockRunner*>(u)->on_platform_thread;
+}
+
+IhsPvHost make_task_host(MockRunner* r) {
+  IhsPvHost h{};
+  h.struct_size = sizeof(h);
+  h.user_data = r;
+  h.post_platform_task = mock_post;
+  h.is_platform_thread = mock_is_platform;
+  return h;
+}
+
+void count_task(void* u) {
+  ++*static_cast<int*>(u);
+}
+
+}  // namespace
+
+TEST(IhsPvSurface, PostPlatformTaskForwardsWithoutRunningInline) {
+  MockRunner runner;
+  const IhsPvHost host = make_task_host(&runner);
+  ihs_pv_set_host(&host);
+
+  int ran = 0;
+  EXPECT_EQ(ihs_pv_post_platform_task(count_task, &ran), IHS_PV_OK);
+  EXPECT_EQ(ran, 0);  // queued, not called
+  ASSERT_EQ(runner.queued.size(), 1u);
+  runner.queued[0].first(runner.queued[0].second);
+  EXPECT_EQ(ran, 1);
+
+  // The host's refusal (no running engine) is passed through.
+  runner.post_rc = IHS_PV_ERR_NO_BACKEND;
+  EXPECT_EQ(ihs_pv_post_platform_task(count_task, &ran), IHS_PV_ERR_NO_BACKEND);
+  EXPECT_EQ(runner.queued.size(), 1u);
+
+  detach_host();
+}
+
+TEST(IhsPvSurface, PostPlatformTaskRejectsNullAndHeadless) {
+  detach_host();
+  int ran = 0;
+  EXPECT_EQ(ihs_pv_post_platform_task(count_task, &ran),
+            IHS_PV_ERR_NO_REGISTRY);
+  EXPECT_EQ(ihs_pv_is_platform_thread(), 0);
+
+  MockRunner runner;
+  const IhsPvHost host = make_task_host(&runner);
+  ihs_pv_set_host(&host);
+  EXPECT_EQ(ihs_pv_post_platform_task(nullptr, &ran), IHS_PV_ERR_INVALID);
+  EXPECT_TRUE(runner.queued.empty());
+  detach_host();
+}
+
+TEST(IhsPvSurface, IsPlatformThreadForwardsToHost) {
+  MockRunner runner;
+  const IhsPvHost host = make_task_host(&runner);
+  ihs_pv_set_host(&host);
+
+  EXPECT_EQ(ihs_pv_is_platform_thread(), 0);
+  runner.on_platform_thread = 1;
+  EXPECT_EQ(ihs_pv_is_platform_thread(), 1);
+  runner.on_platform_thread = 7;  // any non-zero is normalized to 1
+  EXPECT_EQ(ihs_pv_is_platform_thread(), 1);
+
+  detach_host();
+}
+
+// A shell built against the header before these members existed passes a
+// shorter IhsPvHost. The forwarders must not read past its end.
+TEST(IhsPvSurface, PlatformTaskAbsentOnOlderHost) {
+  MockRunner runner;
+  IhsPvHost host = make_task_host(&runner);
+  host.struct_size = offsetof(IhsPvHost, post_platform_task);
+  ihs_pv_set_host(&host);
+
+  int ran = 0;
+  EXPECT_EQ(ihs_pv_post_platform_task(count_task, &ran),
+            IHS_PV_ERR_NO_REGISTRY);
+  EXPECT_EQ(ihs_pv_is_platform_thread(), 0);
+  EXPECT_TRUE(runner.queued.empty());
+
+  detach_host();
+}
+
+TEST(IhsPvSurface, SubTableCarriesPlatformTaskEntryPoints) {
+  const IhsApi* api = ihs_get_api(IHS_SHARED_ABI_VERSION);
+  ASSERT_NE(api, nullptr);
+  const IhsPlatformViewApi* pv = api->platform_view;
+  ASSERT_NE(pv, nullptr);
+  ASSERT_GE(pv->struct_size, offsetof(IhsPlatformViewApi, is_platform_thread) +
+                                 sizeof(pv->is_platform_thread));
+  EXPECT_EQ(pv->post_platform_task, &ihs_pv_post_platform_task);
+  EXPECT_EQ(pv->is_platform_thread, &ihs_pv_is_platform_thread);
 }

@@ -201,6 +201,34 @@ extern "C" const char* ihs_pv_assets_path(void) {
   return h->assets_path(h->user_data);
 }
 
+// The post_platform_task/is_platform_thread members were appended after
+// assets_path; a host built against an older header has neither.
+static const IhsPvHost* host_with_platform_thread() {
+  const IhsPvHost* h = host();
+  constexpr size_t kNeeded = offsetof(IhsPvHost, is_platform_thread) +
+                             sizeof(IhsPvHost::is_platform_thread);
+  return (h != nullptr && h->struct_size >= kNeeded) ? h : nullptr;
+}
+
+extern "C" int ihs_pv_post_platform_task(IhsPvTaskFn fn, void* user_data) {
+  if (fn == nullptr) {
+    return IHS_PV_ERR_INVALID;
+  }
+  const IhsPvHost* h = host_with_platform_thread();
+  if (h == nullptr || h->post_platform_task == nullptr) {
+    return IHS_PV_ERR_NO_REGISTRY;
+  }
+  return h->post_platform_task(h->user_data, fn, user_data);
+}
+
+extern "C" int ihs_pv_is_platform_thread(void) {
+  const IhsPvHost* h = host_with_platform_thread();
+  if (h == nullptr || h->is_platform_thread == nullptr) {
+    return 0;
+  }
+  return h->is_platform_thread(h->user_data) != 0 ? 1 : 0;
+}
+
 extern "C" int ihs_pv_vulkan_context(IhsVulkanContext* out) {
   if (out == nullptr || out->struct_size == 0) {
     return IHS_PV_ERR_INVALID;
@@ -342,7 +370,8 @@ const IhsPlatformViewApi* platform_view_api() noexcept {
       &ihs_pv_register_factory,   &ihs_pv_unregister_factory,
       &ihs_pv_negotiate,          &ihs_pv_grant_drm_plane_id,
       &ihs_pv_grant_shm_fd,       &ihs_pv_submit,
-      &ihs_pv_assets_path,
+      &ihs_pv_assets_path,        &ihs_pv_post_platform_task,
+      &ihs_pv_is_platform_thread,
   };
   return &api;
 }

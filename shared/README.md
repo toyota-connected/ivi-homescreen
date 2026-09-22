@@ -148,10 +148,14 @@ Module responsibilities:
 - **Tracing.** The enable check and the engine-procs pointer are relaxed/acquire
   atomics; emitting is safe from any thread. The `trace_marker` fd is opened once
   at load and only written thereafter.
-- **Platform views.** The entire `ihs_pv_*` surface — factory install/remove,
-  `negotiate`, the grant accessors, and every `IhsPvCallbacks` entry — is
-  **platform-thread only**. An internal mutex guards only the installed host
-  pointer.
+- **Platform views.** The `ihs_pv_*` surface — factory install/remove,
+  `negotiate`, the capability query, the native-context and grant accessors,
+  and every `IhsPvCallbacks` entry — is **platform-thread only**. The
+  exceptions are `ihs_pv_submit`, which any producer thread may call, and
+  `ihs_pv_post_platform_task` / `ihs_pv_is_platform_thread`, which exist so a
+  plugin called on another thread (the Dart UI thread, for an FFI plugin) can
+  get onto the platform thread. An internal mutex guards only the installed
+  host pointer.
 - **Config.** Snapshots are reference-counted with atomics; acquire/read/release
   are safe from any thread and a snapshot outlives a concurrent republish.
 
@@ -339,6 +343,9 @@ dlt-receive -a localhost
 - **The platform-view surface (`ihs_pv_*`) is platform-thread only.** All
   `negotiate`, factory, grant, and `IhsPvCallbacks` calls must originate on
   the platform thread. Calling from any other thread is undefined behavior.
+  A plugin on another thread posts the work with
+  `ihs_pv_post_platform_task()` (ABI 1.8); `ihs_pv_submit` alone is
+  any-thread.
 - **The library cannot be unloaded.** `libihs_shared.so.1` is linked with
   `-z nodelete` and remains mapped for the process lifetime. Even if every
   plugin that opened it is closed, the drain-thread TLS and per-thread rings
