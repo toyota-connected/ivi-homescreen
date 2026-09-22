@@ -151,7 +151,8 @@ Module responsibilities:
 - **Platform views.** The `ihs_pv_*` surface — factory install/remove,
   `negotiate`, the capability query, the native-context and grant accessors,
   and every `IhsPvCallbacks` entry — is **platform-thread only**. The
-  exceptions are `ihs_pv_submit`, which any producer thread may call, and
+  exceptions are `ihs_pv_submit` and `ihs_pv_retire_buffer`, which any
+  producer thread may call, and
   `ihs_pv_post_platform_task` / `ihs_pv_is_platform_thread`, which exist so a
   plugin called on another thread (the Dart UI thread, for an FFI plugin) can
   get onto the platform thread. An internal mutex guards only the installed
@@ -344,8 +345,8 @@ dlt-receive -a localhost
   `negotiate`, factory, grant, and `IhsPvCallbacks` calls must originate on
   the platform thread. Calling from any other thread is undefined behavior.
   A plugin on another thread posts the work with
-  `ihs_pv_post_platform_task()` (ABI 1.8); `ihs_pv_submit` alone is
-  any-thread.
+  `ihs_pv_post_platform_task()` (ABI 1.8); `ihs_pv_submit` and
+  `ihs_pv_retire_buffer` are any-thread.
 - **The library cannot be unloaded.** `libihs_shared.so.1` is linked with
   `-z nodelete` and remains mapped for the process lifetime. Even if every
   plugin that opened it is closed, the drain-thread TLS and per-thread rings

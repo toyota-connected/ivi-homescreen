@@ -174,6 +174,7 @@ if (ENABLE_OSGI)
 endif ()
 add_subdirectory(output_resolver-test)
 add_subdirectory(ihs_pv-test)
+add_subdirectory(deferred_retire_set-test)
 # The PAGE_FLIP_EVENT drain race behind #367. Drives libdrm and an eventfd
 # directly -- no shell sources -- so it builds wherever libdrm was found, not
 # only under a DRM-KMS backend. Skips itself without vkms + DRM master.
