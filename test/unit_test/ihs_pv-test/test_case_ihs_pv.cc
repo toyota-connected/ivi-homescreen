@@ -23,6 +23,9 @@
  * shell, no backend, no compositor.
  */
 
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <cstddef>
 #include <utility>
 #include <vector>
@@ -608,4 +611,187 @@ TEST(IhsPvSurface, SubTableCarriesRetireBuffer) {
   ASSERT_GE(pv->struct_size, offsetof(IhsPlatformViewApi, retire_buffer) +
                                  sizeof(pv->retire_buffer));
   EXPECT_EQ(pv->retire_buffer, &ihs_pv_retire_buffer);
+}
+
+// ---- layer lists
+// -------------------------------------------------------------
+
+namespace {
+
+struct LayersRecorder {
+  int calls = 0;
+  size_t count = 0;
+  uint64_t seq = 0;
+  uint32_t first_layer_id = 0;
+  bool out_prefilled = false;  // every out slot was -1 on arrival
+};
+
+int mock_submit_layers(
+    void* u,
+    IhsPlatformView* /*view*/,
+    const IhsLayer* layers,
+    size_t layer_count,
+    uint64_t seq,
+    // Non-const: the IhsPvHost::submit_layers signature.
+    int* out_release_fence_fds) {  // NOLINT(readability-non-const-parameter)
+  auto* r = static_cast<LayersRecorder*>(u);
+  ++r->calls;
+  r->count = layer_count;
+  r->seq = seq;
+  r->first_layer_id = layer_count > 0 ? layers[0].layer_id : 0;
+  r->out_prefilled = true;
+  for (size_t i = 0; out_release_fence_fds != nullptr && i < layer_count; ++i) {
+    r->out_prefilled = r->out_prefilled && out_release_fence_fds[i] == -1;
+  }
+  return IHS_PV_OK;
+}
+
+IhsFrame LayerFrame(int fd) {
+  IhsFrame f{};
+  f.struct_size = sizeof(f);
+  f.width = 16;
+  f.height = 16;
+  f.plane_count = 1;
+  f.plane_fd[0] = fd;
+  f.buffer_id = 1;
+  return f;
+}
+
+IhsLayer MakeLayer(const IhsFrame* frame, uint32_t id) {
+  IhsLayer l{};
+  l.struct_size = sizeof(l);
+  l.frame = frame;
+  l.acquire_fence_fd = -1;
+  l.layer_id = id;
+  return l;
+}
+
+// An fd the test can tell was closed: one end of a pipe.
+int OpenFd() {
+  int p[2] = {-1, -1};
+  EXPECT_EQ(pipe(p), 0);
+  close(p[1]);
+  return p[0];
+}
+
+bool IsOpen(int fd) {
+  return fcntl(fd, F_GETFD) != -1;
+}
+
+}  // namespace
+
+TEST(IhsPvSurface, SubmitLayersForwardsToHost) {
+  LayersRecorder rec;
+  IhsPvHost host{};
+  host.struct_size = sizeof(host);
+  host.user_data = &rec;
+  host.submit_layers = mock_submit_layers;
+  ihs_pv_set_host(&host);
+
+  const IhsFrame f0 = LayerFrame(-1);
+  const IhsFrame f1 = LayerFrame(-1);
+  const IhsLayer layers[2] = {MakeLayer(&f0, 5), MakeLayer(&f1, 9)};
+  int out[2] = {123, 456};
+  EXPECT_EQ(ihs_pv_submit_layers(fake_view(), layers, 2, 77, out), IHS_PV_OK);
+  EXPECT_EQ(rec.calls, 1);
+  EXPECT_EQ(rec.count, 2u);
+  EXPECT_EQ(rec.seq, 77u);
+  EXPECT_EQ(rec.first_layer_id, 5u);
+  EXPECT_TRUE(rec.out_prefilled);
+
+  // An empty list is a valid submit: the view shows nothing.
+  EXPECT_EQ(ihs_pv_submit_layers(fake_view(), nullptr, 0, 0, nullptr),
+            IHS_PV_OK);
+  EXPECT_EQ(rec.count, 0u);
+
+  detach_host();
+}
+
+// A list that cannot be trusted is refused whole, and -- the one exception to
+// the ownership rule -- none of its fds are closed.
+TEST(IhsPvSurface, SubmitLayersRejectsMalformedListsAndClosesNothing) {
+  LayersRecorder rec;
+  IhsPvHost host{};
+  host.struct_size = sizeof(host);
+  host.user_data = &rec;
+  host.submit_layers = mock_submit_layers;
+  ihs_pv_set_host(&host);
+
+  const int fd = OpenFd();
+  const IhsFrame f = LayerFrame(fd);
+  IhsLayer layer = MakeLayer(&f, 1);
+
+  EXPECT_EQ(ihs_pv_submit_layers(nullptr, &layer, 1, 0, nullptr),
+            IHS_PV_ERR_INVALID);
+  EXPECT_EQ(ihs_pv_submit_layers(fake_view(), nullptr, 1, 0, nullptr),
+            IHS_PV_ERR_INVALID);
+  std::vector<IhsLayer> too_many(IHS_PV_MAX_LAYERS + 1, layer);
+  EXPECT_EQ(ihs_pv_submit_layers(fake_view(), too_many.data(), too_many.size(),
+                                 0, nullptr),
+            IHS_PV_ERR_INVALID);
+  IhsLayer short_layer = layer;
+  short_layer.struct_size = 8;
+  EXPECT_EQ(ihs_pv_submit_layers(fake_view(), &short_layer, 1, 0, nullptr),
+            IHS_PV_ERR_INVALID);
+  IhsLayer no_frame = layer;
+  no_frame.frame = nullptr;
+  EXPECT_EQ(ihs_pv_submit_layers(fake_view(), &no_frame, 1, 0, nullptr),
+            IHS_PV_ERR_INVALID);
+  // A frame that ends before buffer_id: layers are keyed by it.
+  IhsFrame old_frame = f;
+  old_frame.struct_size = offsetof(IhsFrame, buffer_id);
+  IhsLayer old_layer = MakeLayer(&old_frame, 1);
+  EXPECT_EQ(ihs_pv_submit_layers(fake_view(), &old_layer, 1, 0, nullptr),
+            IHS_PV_ERR_INVALID);
+
+  EXPECT_EQ(rec.calls, 0);
+  EXPECT_TRUE(IsOpen(fd));
+  close(fd);
+  detach_host();
+}
+
+// With nowhere to send the list, its fds are still consumed.
+TEST(IhsPvSurface, SubmitLayersConsumesFdsWithNoHost) {
+  detach_host();
+  const int plane = OpenFd();
+  const int fence = OpenFd();
+  const IhsFrame f = LayerFrame(plane);
+  IhsLayer layer = MakeLayer(&f, 1);
+  layer.acquire_fence_fd = fence;
+  int out = 99;
+  EXPECT_EQ(ihs_pv_submit_layers(fake_view(), &layer, 1, 0, &out),
+            IHS_PV_ERR_NO_REGISTRY);
+  EXPECT_EQ(out, -1);
+  EXPECT_FALSE(IsOpen(plane));
+  EXPECT_FALSE(IsOpen(fence));
+}
+
+// A shell whose IhsPvHost ends before submit_layers: the list cannot be shown,
+// and the caller hears so; its fds are consumed all the same.
+TEST(IhsPvSurface, SubmitLayersAbsentOnOlderHost) {
+  LayersRecorder rec;
+  IhsPvHost host{};
+  host.struct_size = offsetof(IhsPvHost, submit_layers);
+  host.user_data = &rec;
+  host.submit_layers = mock_submit_layers;
+  ihs_pv_set_host(&host);
+
+  const int plane = OpenFd();
+  const IhsFrame f = LayerFrame(plane);
+  const IhsLayer layer = MakeLayer(&f, 1);
+  EXPECT_EQ(ihs_pv_submit_layers(fake_view(), &layer, 1, 0, nullptr),
+            IHS_PV_ERR_NO_BACKEND);
+  EXPECT_EQ(rec.calls, 0);
+  EXPECT_FALSE(IsOpen(plane));
+  detach_host();
+}
+
+TEST(IhsPvSurface, SubTableCarriesSubmitLayers) {
+  const IhsApi* api = ihs_get_api(IHS_SHARED_ABI_VERSION);
+  ASSERT_NE(api, nullptr);
+  const IhsPlatformViewApi* pv = api->platform_view;
+  ASSERT_NE(pv, nullptr);
+  ASSERT_GE(pv->struct_size, offsetof(IhsPlatformViewApi, submit_layers) +
+                                 sizeof(pv->submit_layers));
+  EXPECT_EQ(pv->submit_layers, &ihs_pv_submit_layers);
 }

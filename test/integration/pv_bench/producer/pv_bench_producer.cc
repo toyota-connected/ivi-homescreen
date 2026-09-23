@@ -113,7 +113,22 @@ class BenchView {
   BenchView(IhsPlatformView* view, uint32_t width, uint32_t height)
       : view_(view),
         width_(width ? width : 640),
-        height_(height ? height : 360) {}
+        height_(height ? height : 360) {
+    if (const char* env = ::getenv("PV_BENCH_LAYERS"); env != nullptr) {
+      const long n = std::strtol(env, nullptr, 10);  // junk reads as 0 -> 1
+      layers_ = n < 1 ? 1u : n > 3 ? 3u : static_cast<uint32_t>(n);
+    }
+    // The shell this runs in may predate layer lists; say so rather than
+    // measuring something other than what was asked for.
+    if (layers_ > 1 && ihs_pv_submit_layers == nullptr) {
+      Log("PV_BENCH_LAYERS=%u, but this shell has no ihs_pv_submit_layers; "
+          "submitting one layer",
+          layers_);
+      layers_ = 1;
+    } else if (layers_ > 1) {
+      Log("submitting %u layers per frame", layers_);
+    }
+  }
 
   ~BenchView() { Stop(); }
 
@@ -422,7 +437,8 @@ class BenchView {
     }
 
     int release_fence = -1;
-    const int rc = ihs_pv_submit(view_, &f, -1, &release_fence);
+    const int rc = layers_ > 1 ? SubmitLayers(f, &release_fence)
+                               : ihs_pv_submit(view_, &f, -1, &release_fence);
     if (rc != IHS_PV_OK) {
       /*
        * The dup is gone either way: submit consumes plane_fd whatever it
@@ -439,6 +455,65 @@ class BenchView {
     s.release_fence = release_fence;
     s.submitted = true;
     submitted_.fetch_add(1, std::memory_order_relaxed);
+  }
+
+  /*
+   * PV_BENCH_LAYERS: the same buffer as a stack of up to three layers -- the
+   * whole of it across the view, then its left half mirrored into the view's
+   * top-right quarter, then its top half turned a quarter into the bottom-left
+   * quarter. What a Wayland toplevel with subsurfaces costs, and a visual check
+   * that crop, placement and transform land where they should: the band sweeps
+   * sideways in the rotated layer.
+   *
+   * Each layer is handed its own dup of the buffer (the registry consumes the
+   * fds of every layer). The release that matters is the bottom layer's; the
+   * others name the same buffer, so their fences are closed.
+   */
+  int SubmitLayers(const IhsFrame& base, int* release_fence) {
+    IhsFrame frames[3] = {base, base, base};
+    IhsLayer layers[3]{};
+    const auto fixed = [](uint32_t px) { return px << 16; };  // 16.16
+    const uint32_t n = layers_;
+    for (uint32_t i = 0; i < n; ++i) {
+      if (i > 0) {
+        frames[i].plane_fd[0] = ::dup(base.plane_fd[0]);
+        if (frames[i].plane_fd[0] < 0) {
+          for (uint32_t j = 0; j < i; ++j) {
+            ::close(frames[j].plane_fd[0]);  // nothing handed over yet
+          }
+          return IHS_PV_ERR_INVALID;
+        }
+      }
+      layers[i].struct_size = sizeof(IhsLayer);
+      layers[i].frame = &frames[i];
+      layers[i].acquire_fence_fd = -1;
+      layers[i].layer_id = i;
+    }
+    if (n > 1) {
+      layers[1].src_w = fixed(width_ / 2);
+      layers[1].src_h = fixed(height_);
+      layers[1].dst_x = static_cast<int32_t>(width_ / 2);
+      layers[1].dst_w = width_ / 2;
+      layers[1].dst_h = height_ / 2;
+      layers[1].transform = IHS_TRANSFORM_FLIPPED;
+    }
+    if (n > 2) {
+      layers[2].src_w = fixed(width_);
+      layers[2].src_h = fixed(height_ / 2);
+      layers[2].dst_y = static_cast<int32_t>(height_ / 2);
+      layers[2].dst_w = width_ / 2;
+      layers[2].dst_h = height_ / 2;
+      layers[2].transform = IHS_TRANSFORM_90;
+    }
+    int fences[3] = {-1, -1, -1};
+    const int rc = ihs_pv_submit_layers(view_, layers, n, 0, fences);
+    *release_fence = fences[0];
+    for (uint32_t i = 1; i < n; ++i) {
+      if (fences[i] >= 0) {
+        ::close(fences[i]);
+      }
+    }
+    return rc;
   }
 
   void Run() {
@@ -519,6 +594,8 @@ class BenchView {
   std::atomic<bool> suspended_{false};
   std::atomic<uint64_t> submitted_{0};
   uint64_t submit_errors_ = 0;
+  // Layers per submit (PV_BENCH_LAYERS, 1..3); 1 is a plain ihs_pv_submit.
+  uint32_t layers_ = 1;
 };
 
 void OnResize(void* user_data, double w, double h) {

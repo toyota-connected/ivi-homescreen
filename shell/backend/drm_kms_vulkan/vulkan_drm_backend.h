@@ -431,7 +431,9 @@ class VulkanDrmBackend final : public Backend {
   // producer) as a semaphore for this frame's submit to wait on. A no-op when
   // the producer stalled instead of handing one over, which is what an
   // implicit-sync producer does. Raster thread.
-  void CollectAcquireWait(CompositorState& c, ICompositorSurface* surface);
+  void CollectAcquireWait(CompositorState& c,
+                          ICompositorSurface* surface,
+                          size_t layer = 0);
 
   // Platform-view surfaces this frame's blend sampled, collected by
   // CompositeOverlays and consumed by PublishReleaseFence once the submit that

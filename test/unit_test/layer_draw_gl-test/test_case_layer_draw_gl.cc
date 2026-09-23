@@ -28,6 +28,7 @@
 #include "gtest/gtest.h"
 
 #include "backend/wayland_egl/gl_compositor.h"
+#include "view/compositor_surface_interface.h"
 #include "view/layer_geometry.h"
 
 namespace {
@@ -253,4 +254,123 @@ TEST_F(LayerDrawGl, OpaqueForcesAlphaToOne) {
     EXPECT_EQ(opaque[static_cast<size_t>(i) * 4], 0x40) << "pixel " << i;
     EXPECT_EQ(passed[static_cast<size_t>(i) * 4 + 3], 0x10) << "pixel " << i;
   }
+}
+
+namespace {
+
+// A surface made of fixed textures and geometry, standing in for a plugin view
+// submitted through ihs_pv_submit_layers.
+class LayeredSurface : public ICompositorSurface {
+ public:
+  bool OnCreateBackingStore(const FlutterBackingStoreConfig*,
+                            FlutterBackingStore*) override {
+    return false;
+  }
+  bool OnCollectBackingStore(const FlutterBackingStore*) override {
+    return true;
+  }
+  bool OnPresent(const FlutterLayer*) override { return true; }
+  [[nodiscard]] FlutterPlatformViewIdentifier GetIdentifier() const override {
+    return 1;
+  }
+  [[nodiscard]] size_t GetLayerCount() const override { return layers.size(); }
+  [[nodiscard]] GlLayerTexture GetLayerGlTexture(size_t i) const override {
+    return i < layers.size() ? layers[i] : GlLayerTexture{};
+  }
+  std::vector<GlLayerTexture> layers;
+};
+
+// Draw `surface` into a kW x kH target through CompositeSurfaceLayers and read
+// it back top row first, for a target of either orientation.
+std::vector<uint8_t> DrawSurface(GlCompositor& compositor,
+                                 const ICompositorSurface& surface,
+                                 bool target_top_first) {
+  GLuint target = 0;
+  glGenTextures(1, &target);
+  glBindTexture(GL_TEXTURE_2D, target);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, kW, kH, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+               nullptr);
+  GLuint fbo = 0;
+  glGenFramebuffers(1, &fbo);
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                         target, 0);
+  glClearColor(0, 0, 0, 0);
+  glClear(GL_COLOR_BUFFER_BIT);
+  compositor.CompositeSurfaceLayers(fbo, surface, {0, 0, kW, kH}, kH,
+                                    target_top_first, /*blend_first=*/false);
+  std::vector<uint8_t> rows(Px(0, kH, kW));
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+  glReadPixels(0, 0, kW, kH, GL_RGBA, GL_UNSIGNED_BYTE, rows.data());
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  glDeleteFramebuffers(1, &fbo);
+  glDeleteTextures(1, &target);
+  if (target_top_first) {
+    return rows;  // GL row 0 is the target's top row
+  }
+  std::vector<uint8_t> top_down(rows.size());
+  for (int y = 0; y < kH; ++y) {
+    std::memcpy(&top_down[Px(0, y, kW)], &rows[Px(0, kH - 1 - y, kW)],
+                Px(kW, 0, 0));
+  }
+  return top_down;
+}
+
+}  // namespace
+
+// Two layers of one view: a full-view background, and above it a 2 x 1 strip
+// placed at view x = 4 -- half of it outside the view, so it is clipped -- and
+// drawn from a buffer that holds it rotated a quarter turn. Right for both
+// target orientations: a window's framebuffer, and an FBO scanned out top row
+// first.
+TEST_F(LayerDrawGl, SurfaceLayersStackClipAndOrientOnEitherTarget) {
+  std::vector<uint8_t> bg(Px(0, kH, kW));
+  for (int i = 0; i < kW * kH; ++i) {
+    const auto c = ColorOf(i);
+    std::memcpy(&bg[Px(i, 0, 0)], c.data(), 4);
+  }
+  // The strip shows colours A then B left to right. At IHS_TRANSFORM_90 the
+  // producer rotated it counter-clockwise into a 1 x 2 buffer: B above A.
+  const std::array<uint8_t, 4> kA = {250, 0, 0, 255};
+  const std::array<uint8_t, 4> kB = {0, 0, 250, 255};
+  std::vector<uint8_t> strip(8);
+  std::memcpy(&strip[0], kB.data(), 4);
+  std::memcpy(&strip[4], kA.data(), 4);
+
+  const GLuint bg_tex = MakeTexture(kW, kH, bg);
+  const GLuint strip_tex = MakeTexture(1, 2, strip);
+  LayeredSurface surface;
+  ICompositorSurface::GlLayerTexture base;
+  base.name = bg_tex;
+  base.width = kW;
+  base.height = kH;
+  base.top_first = true;
+  ICompositorSurface::GlLayerTexture top;
+  top.name = strip_tex;
+  top.width = 1;
+  top.height = 2;
+  top.top_first = true;
+  top.geometry.dst = {4, 1, 2, 1};
+  top.geometry.transform = BufferTransform::k90;
+  top.geometry.opaque = true;
+  surface.layers = {base, top};
+
+  for (const bool target_top_first : {false, true}) {
+    SCOPED_TRACE(target_top_first ? "top-first target" : "window target");
+    const auto out = DrawSurface(*compositor_, surface, target_top_first);
+    for (int y = 0; y < kH; ++y) {
+      for (int x = 0; x < kW; ++x) {
+        std::array<uint8_t, 4> want = ColorOf(y * kW + x);
+        if (y == 1 && x == 4) {
+          want = kA;  // the strip's left half; its right half is clipped
+        }
+        EXPECT_TRUE(std::memcmp(&out[Px(x, y, kW)], want.data(), 4) == 0)
+            << "(" << x << ", " << y << "): got " << int(out[Px(x, y, kW)])
+            << "," << int(out[Px(x, y, kW) + 1]) << ","
+            << int(out[Px(x, y, kW) + 2]);
+      }
+    }
+  }
+  glDeleteTextures(1, &bg_tex);
+  glDeleteTextures(1, &strip_tex);
 }

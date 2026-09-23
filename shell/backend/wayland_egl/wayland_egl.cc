@@ -1094,13 +1094,20 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
       if (surface_sp) {
         auto& surface = *surface_sp;
         ok = surface.OnPresent(layer) && ok;
-        // If the plugin exposed a GL texture, composite it onto FBO 0 at
-        // the layer's pixel rect. Plugins that handle their own
-        // presentation (legacy wl_subsurface path, etc.) return 0 here.
-        if (const auto tex = surface.GetGlTextureName(); tex != 0) {
+        // A single layer drawn whole across the view keeps the path a plugin
+        // texture always took, blit fast path included. Anything else --
+        // several layers, or one cropped, placed within the view, rotated or
+        // opaque -- is drawn layer by layer. Plugins that handle their own
+        // presentation (legacy wl_subsurface path, etc.) expose no texture.
+        const ICompositorSurface::GlLayerTexture first =
+            surface.GetLayerCount() == 1 ? surface.GetLayerGlTexture(0)
+                                         : ICompositorSurface::GlLayerTexture{};
+        if (first.name != 0 && first.geometry.IsWhole() &&
+            !first.geometry.opaque) {
           EnsureGlCapsProbed();
-          const auto sw = surface.GetGlTextureWidth();
-          const auto sh = surface.GetGlTextureHeight();
+          const auto tex = first.name;
+          const auto sw = first.width;
+          const auto sh = first.height;
           const auto dx = static_cast<GLint>(layer->offset.x);
           const auto dw = static_cast<GLsizei>(layer->size.width);
           const auto dh = static_cast<GLsizei>(layer->size.height);
@@ -1114,10 +1121,10 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
           // with no flip. Plugins that produce top-first textures (NV12
           // dmabuf, pre-flipped YUV shader) opt into a sampler V-invert by
           // overriding ICompositorSurface::TextureIsTopFirst() → true.
-          const bool flip_y = surface.TextureIsTopFirst();
+          const bool flip_y = first.top_first;
           // An external texture cannot be attached to an FBO or blitted; it
           // has to go through the external sampler.
-          const bool external = surface.TextureIsExternalOes();
+          const bool external = first.external;
           if (!external && !blend && m_gl_caps.has_blit_framebuffer) {
             if (!m_texture_blit_fbo_) {
               glGenFramebuffers(1, &m_texture_blit_fbo_);
@@ -1133,6 +1140,16 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
                                                 blend, flip_y, external);
           }
           composited_any = true;
+        } else {
+          const RectI view{static_cast<int32_t>(layer->offset.x),
+                           static_cast<int32_t>(layer->offset.y),
+                           static_cast<int32_t>(layer->size.width),
+                           static_cast<int32_t>(layer->size.height)};
+          if (m_gl_compositor->CompositeSurfaceLayers(
+                  0, surface, view, static_cast<GLint>(m_initial_height),
+                  /*target_top_first=*/false, blend) > 0) {
+            composited_any = true;
+          }
         }
       }
     }

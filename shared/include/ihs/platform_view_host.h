@@ -132,6 +132,19 @@ typedef struct IhsPvHost {
   int (*retire_buffer)(void* user_data,
                        IhsPlatformView* view,
                        uint32_t buffer_id);
+
+  /* Appended after retire_buffer; read only when struct_size covers it.
+   * Takes a list libihs_shared has already validated: a non-NULL @layers when
+   * @layer_count is non-zero, at most IHS_PV_MAX_LAYERS, each layer and frame
+   * with a sound struct_size, and @out_release_fence_fds (when not NULL)
+   * already set to -1. The host owns every fd in it from here, on every path.
+   * See ihs_pv_submit_layers. */
+  int (*submit_layers)(void* user_data,
+                       IhsPlatformView* view,
+                       const IhsLayer* layers,
+                       size_t layer_count,
+                       uint64_t seq,
+                       int* out_release_fence_fds);
 } IhsPvHost;
 
 /*

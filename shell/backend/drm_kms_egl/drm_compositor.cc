@@ -364,6 +364,42 @@ DrmCompositor::~DrmCompositor() {
 //
 // Raster thread only, like its three call sites.
 void DrmCompositor::NoteGlComposited(
+    const std::shared_ptr<ICompositorSurface>& surface,
+    const uint32_t buffer_id) {
+  if (!surface) {
+    return;
+  }
+  const std::scoped_lock rel(deferred_releases_mu_);
+  deferred_releases_.push_back({surface, buffer_id, drm::sync::SyncFence{}});
+}
+
+bool DrmCompositor::IsSingleWholeLayer(const ICompositorSurface& surface) {
+  if (surface.GetLayerCount() != 1) {
+    return false;
+  }
+  const auto t = surface.GetLayerGlTexture(0);
+  return t.geometry.IsWhole() && !t.geometry.opaque;
+}
+
+bool DrmCompositor::CompositeLayeredSurface(
+    GLuint target_fbo,
+    const std::shared_ptr<ICompositorSurface>& surface,
+    const FlutterLayer* layer,
+    GLint fb_height,
+    bool target_top_first,
+    bool blend) {
+  const RectI view{static_cast<int32_t>(layer->offset.x),
+                   static_cast<int32_t>(layer->offset.y),
+                   static_cast<int32_t>(layer->size.width),
+                   static_cast<int32_t>(layer->size.height)};
+  return gl_compositor_->CompositeSurfaceLayers(
+             target_fbo, *surface, view, fb_height, target_top_first, blend,
+             [this, &surface](const ICompositorSurface::GlLayerTexture& t) {
+               NoteGlComposited(surface, t.buffer_id);
+             }) > 0;
+}
+
+void DrmCompositor::NoteGlComposited(
     const std::shared_ptr<ICompositorSurface>& surface) {
   if (!surface) {
     return;
@@ -1283,7 +1319,14 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
         // would read as the zero-GPU path still being honored).
         surface_sp->SetScanoutPlane(0);
         surface_sp->OnPresent(layer);
-        if (const auto tex = surface_sp->GetGlTextureName(); tex != 0) {
+        if (!IsSingleWholeLayer(*surface_sp)) {
+          // FBO 0 of the gbm_surface: standard GL NDC, bottom-left origin.
+          if (CompositeLayeredSurface(0, surface_sp, layer,
+                                      static_cast<GLint>(out_.height()),
+                                      /*target_top_first=*/false, blend)) {
+            composited_any = true;
+          }
+        } else if (const auto tex = surface_sp->GetGlTextureName(); tex != 0) {
           const auto sw = surface_sp->GetGlTextureWidth();
           const auto sh = surface_sp->GetGlTextureHeight();
           const auto dx = static_cast<GLint>(layer->offset.x);
@@ -1462,6 +1505,16 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
         }
       } else {
         surface_sp->OnPresent(layer);
+        if (!IsSingleWholeLayer(*surface_sp)) {
+          // comp.fbo is scanned out top row first (see below).
+          surface_sp->SetScanoutPlane(0);
+          if (CompositeLayeredSurface(comp.fbo, surface_sp, layer,
+                                      /*fb_height=*/0,
+                                      /*target_top_first=*/true, blend)) {
+            composited_any = true;
+          }
+          continue;
+        }
         const auto tex = surface_sp->GetGlTextureName();
         if (tex == 0) {
           if (backend_->cfg_.debug_backend) {
@@ -2272,7 +2325,14 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
         }
         if (surface_sp) {
           surface_sp->OnPresent(flutter);
-          if (const auto tex = surface_sp->GetGlTextureName(); tex != 0) {
+          if (!IsSingleWholeLayer(*surface_sp)) {
+            if (CompositeLayeredSurface(comp.fbo, surface_sp, flutter,
+                                        /*fb_height=*/0,
+                                        /*target_top_first=*/true, blend)) {
+              any_composited = true;
+            }
+          } else if (const auto tex = surface_sp->GetGlTextureName();
+                     tex != 0) {
             // See comp.fbo rationale in PresentFramed's platform-view
             // branch.
             const bool flip_y = !surface_sp->TextureIsTopFirst();

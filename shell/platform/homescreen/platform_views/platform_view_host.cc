@@ -34,6 +34,7 @@
 #include <sys/eventfd.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <cstddef>
@@ -321,6 +322,9 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     // possibly for a different dma-buf, so a cached import under the id is
     // stale and must not be reused.
     bool reimport{false};
+    // Where the frame lands (ihs_pv_submit_layers); applied at import, so the
+    // geometry and the pixels it describes switch together.
+    ICompositorSurface::LayerGeometry geom;
     // Owned copy of the frame's HDR metadata: frame.hdr points at plugin memory
     // we must not retain, so its contents are copied here at submit and
     // frame.hdr nulled. has_hdr is false for SDR frames.
@@ -358,6 +362,54 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   // plane stops scanning that frame out, so the producer reuses the slot only
   // then. Guarded by `mutex`. Any left over are closed at dispose.
   mutable std::map<uint32_t, int> release_efds;
+
+  // ---- Layers (ihs_pv_submit_layers) --------------------------------------
+  //
+  // Layer 0 is the frame the single-frame state above holds: an ihs_pv_submit,
+  // or the bottom layer of a list. geom0 is the geometry of the frame layer 0
+  // is sampling -- set with `current` at submit on Vulkan, and on EGL carried
+  // on pending_egl and applied at import -- so the two never draw mismatched.
+  mutable ICompositorSurface::LayerGeometry geom0;
+  // A submit of 0 layers: nothing is drawn until the next submit.
+  bool layer0_hidden{false};
+
+  // The layers above the bottom one. They are GPU-composited only (never
+  // offered to a plane), each with its own frame, acquire fence and release;
+  // imports are shared with layer 0 through the buffer_id-keyed cache. Keyed
+  // by layer_id so a layer keeps its state while the list around it changes,
+  // and a map because GetLayerGlTexture drops the lock for a fence wait: a
+  // concurrent submit can then add or remove layers, and a node must not move
+  // underneath it.
+  struct ExtraLayer {
+    ICompositorSurface::LayerGeometry geom;  // of the frame being sampled
+#if IVI_HAVE_VULKAN
+    DmabufVulkanImporter::ImportedImage* current{nullptr};
+    uint32_t current_buffer_id{0};
+    uint32_t layout{VK_IMAGE_LAYOUT_UNDEFINED};
+    int acquire_fd{-1};  // taken by the compositor, like pending_acquire_fd
+#endif
+#if IVI_HAVE_EGL
+    PendingEglFrame pending;
+    EglDmabufImporter::ImportedTexture* current_egl{nullptr};
+    uint32_t current_egl_buffer_id{0};
+#endif
+  };
+  mutable std::map<uint32_t, ExtraLayer> extra_layers;
+  std::vector<uint32_t> extra_order;  // layer_ids, bottom to top
+
+  // The extra layer drawn at index @p index (1-based over layer 0), or null.
+  // Caller holds `mutex`.
+  [[nodiscard]] ExtraLayer* ExtraAtLocked(const size_t index) const {
+    if (index == 0 || index > extra_order.size()) {
+      return nullptr;
+    }
+    const auto it = extra_layers.find(extra_order[index - 1]);
+    return it == extra_layers.end() ? nullptr : &it->second;
+  }
+
+  // Drop every extra layer: a submit of a new list without them, a plain
+  // ihs_pv_submit, or 0 layers. Caller holds `mutex`.
+  void ClearExtraLayersLocked();
 
   // ICompositorSurface — a Vulkan producer (no backing store, no GL texture).
   bool OnCreateBackingStore(const FlutterBackingStoreConfig*,
@@ -483,6 +535,97 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
 
 #endif  // IVI_HAVE_EGL
 
+  [[nodiscard]] size_t GetLayerCount() const override {
+    const std::lock_guard<std::mutex> lock(mutex);
+    return layer0_hidden ? 0 : 1 + extra_order.size();
+  }
+
+#if IVI_HAVE_VULKAN
+  [[nodiscard]] VulkanLayerImage GetLayerVulkanImage(
+      const size_t index) const override {
+    const std::lock_guard<std::mutex> lock(mutex);
+    VulkanLayerImage out;
+    const DmabufVulkanImporter::ImportedImage* img = nullptr;
+    if (index == 0) {
+      if (layer0_hidden) {
+        return out;
+      }
+      img = current;
+      out.geometry = geom0;
+    } else if (const ExtraLayer* x = ExtraAtLocked(index); x != nullptr) {
+      img = x->current;
+      out.geometry = x->geom;
+    }
+    if (img == nullptr || img->image == VK_NULL_HANDLE) {
+      return out;
+    }
+    out.image = reinterpret_cast<void*>(img->image);
+    out.width = static_cast<int32_t>(img->width);
+    out.height = static_cast<int32_t>(img->height);
+    out.format = static_cast<uint32_t>(img->format);
+    out.ycbcr_model = img->yuv ? static_cast<uint32_t>(img->ycbcr_model) : 0;
+    out.ycbcr_range = img->yuv ? static_cast<uint32_t>(img->ycbcr_range) : 0;
+    return out;
+  }
+  [[nodiscard]] uint32_t GetLayerVulkanImageLayout(
+      const size_t index) const override {
+    const std::lock_guard<std::mutex> lock(mutex);
+    if (index == 0) {
+      return current_layout;
+    }
+    const ExtraLayer* x = ExtraAtLocked(index);
+    return x != nullptr ? x->layout : 0;
+  }
+  void SetLayerVulkanImageLayout(const size_t index,
+                                 const uint32_t layout) override {
+    const std::lock_guard<std::mutex> lock(mutex);
+    if (index == 0) {
+      current_layout = layout;
+    } else if (ExtraLayer* x = ExtraAtLocked(index); x != nullptr) {
+      x->layout = layout;
+    }
+  }
+  [[nodiscard]] int TakeLayerAcquireFenceFd(const size_t index) override {
+    const std::lock_guard<std::mutex> lock(mutex);
+    int* slot = nullptr;
+    if (index == 0) {
+      slot = &pending_acquire_fd;
+    } else if (ExtraLayer* x = ExtraAtLocked(index); x != nullptr) {
+      slot = &x->acquire_fd;
+    }
+    if (slot == nullptr) {
+      return -1;
+    }
+    const int fd = *slot;
+    *slot = -1;
+    return fd;
+  }
+#endif  // IVI_HAVE_VULKAN
+
+#if IVI_HAVE_EGL
+  // Defined out of line: it imports through g_egl_importer.
+  [[nodiscard]] GlLayerTexture GetLayerGlTexture(size_t index) const override;
+
+  // Where the frame a layer is about to import lives, re-found after every
+  // time the lock was dropped (see ImportPendingEglLocked).
+  struct EglSlot {
+    PendingEglFrame* pending{nullptr};
+    EglDmabufImporter::ImportedTexture** current{nullptr};
+    uint32_t* current_id{nullptr};
+    ICompositorSurface::LayerGeometry* geom{nullptr};
+  };
+  // Import the frame a layer has waiting, if any, and make it the layer's
+  // current texture: wait out its acquire fence, reuse or create the import,
+  // and apply its geometry. @p resolve fills an EglSlot for the layer and
+  // returns false when the layer is gone; it is called again whenever the lock
+  // has been dropped, because a concurrent submit may have replaced or removed
+  // the layer meanwhile. Raster thread, GL context current; caller holds
+  // @p lock.
+  template <typename Resolve>
+  void ImportPendingEglLocked(std::unique_lock<std::mutex>& lock,
+                              const Resolve& resolve) const;
+#endif  // IVI_HAVE_EGL
+
 // The direct-scanout seam is not EGL's alone: a Vulkan backend places the same
 // producer buffers on the same planes. Guarding it on IVI_HAVE_EGL left a
 // Vulkan-only build with the base class's "cannot scan out", so every platform
@@ -507,8 +650,32 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   // dynamic-producer follow-up.
   [[nodiscard]] DmabufState GetDmabuf(Dmabuf* out) const override {
     const std::lock_guard<std::mutex> lock(mutex);
-    if (out == nullptr) {
+    if (out == nullptr || layer0_hidden) {
       return DmabufState::kNoNewFrame;
+    }
+    // A plane takes one buffer, drawn whole across the view. Anything more --
+    // layers above the bottom one, or a bottom layer cropped, placed or
+    // rotated -- is the composite path's, so a new frame of it is reported as
+    // not scanout-capable and the view is composited.
+    {
+      bool fresh = false;
+      bool plain = extra_order.empty();
+#if IVI_HAVE_VULKAN
+      if (current != nullptr) {
+        fresh = dmabuf_delivered_seq != submit_seq;
+        plain = plain && geom0.IsWhole();
+      }
+#endif
+#if IVI_HAVE_EGL
+      if (pending_egl.valid) {
+        fresh = dmabuf_delivered_seq != submit_seq;
+        plain = plain && pending_egl.geom.IsWhole();
+      }
+#endif
+      if (!plain) {
+        return fresh ? DmabufState::kNotScanoutCapable
+                     : DmabufState::kNoNewFrame;
+      }
     }
 #if IVI_HAVE_VULKAN
     // Vulkan path: the frame was imported at submit and its fds consumed, so
@@ -648,6 +815,8 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
             errno);
       }
     }
+    // An older offer still open, for a frame since superseded, was abandoned.
+    AbandonStaleOfferLocked(f.buffer_id);
     // Offered, not delivered. The compositor commits this by acking the frame
     // onto a plane, or retires it by handing the slot back; until one of those
     // the frame stays eligible, so an import that fails downstream can retry.
@@ -737,7 +906,7 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
       return true;
     }
 #endif
-    return false;
+    return !extra_order.empty();
   }
 
   // Close out the outstanding GetDmabuf offer when it is for `buffer_id`,
@@ -751,6 +920,29 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     dmabuf_delivered_seq = dmabuf_offered_seq;
     dmabuf_offered_seq = 0;
     dmabuf_offered_buffer_id = 0;
+  }
+
+  // Answer an offer the compositor took and never answered -- neither placed
+  // nor released -- once a different frame is going to screen instead. That
+  // happens when a present drops its frame (GL fallback on a secondary
+  // output), a GL import fails, or GL fallback is latched and nothing asks for
+  // the dma-buf any more. Deliberately leaving an offer open to have it
+  // re-offered (a pool swap that failed) re-offers the same buffer, which
+  // @p keep_id spares.
+  //
+  // A superseding submit cannot release an open offer's frame itself: the
+  // compositor may be importing it at that moment. By the time the compositor
+  // offers or imports something newer it has finished with the old offer, so
+  // this is the first point the release is safe -- and without it the
+  // producer waits out its release timeout on that buffer. Caller holds
+  // `mutex`.
+  void AbandonStaleOfferLocked(const uint32_t keep_id) const {
+    if (dmabuf_offered_seq == 0 || dmabuf_offered_buffer_id == keep_id) {
+      return;
+    }
+    const uint32_t id = dmabuf_offered_buffer_id;
+    RetireOffer(id);
+    SignalRelease(id);
   }
 
   // Signal and drop the release eventfd for `buffer_id` (a no-op if there is
@@ -779,12 +971,25 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   // once the reap margin has passed) and wake and forget the slot's release
   // eventfd. Caller holds `mutex`.
   void RetireEglImportLocked(uint32_t id) const;
+  // Drop the GL import cached for `id` without touching its release eventfd:
+  // for an import replaced by a newer frame under the same id (a resize, or a
+  // re-used retired id), whose eventfd already belongs to that newer frame.
+  // Caller holds `mutex`.
+  void DropEglImportLocked(uint32_t id) const;
 
   // True while `id` is the frame waiting to be imported or the one being
   // sampled. Caller holds `mutex`.
   [[nodiscard]] bool OnScreenEglLocked(const uint32_t id) const {
-    return (pending_egl.valid && pending_egl.frame.buffer_id == id) ||
-           (current_egl != nullptr && current_egl_buffer_id == id);
+    if ((pending_egl.valid && pending_egl.frame.buffer_id == id) ||
+        (current_egl != nullptr && current_egl_buffer_id == id)) {
+      return true;
+    }
+    return std::any_of(
+        extra_layers.begin(), extra_layers.end(), [id](const auto& entry) {
+          const ExtraLayer& x = entry.second;
+          return (x.pending.valid && x.pending.frame.buffer_id == id) ||
+                 (x.current_egl != nullptr && x.current_egl_buffer_id == id);
+        });
   }
 #endif
 
@@ -862,6 +1067,8 @@ IhsPluginView::~IhsPluginView() {
     close(pending_acquire_fd);
     pending_acquire_fd = -1;
   }
+  // Extra layers first: dropping one signals its slot through release_efds.
+  ClearExtraLayersLocked();
   // The producer has been stopped (DisposePlugin above), so just retire any
   // release eventfds it never got to wait on; it owns and closes its own dups.
   for (const auto& [buffer_id, fd] : release_efds) {
@@ -985,7 +1192,14 @@ void CloseScanoutBuffer(IhsPluginView::ScanoutBuffer* sb) {
 
 // True while `id` is the frame the compositor samples. Caller holds v->mutex.
 bool OnScreenVulkanLocked(const IhsPluginView* v, const uint32_t id) {
-  return v->current != nullptr && v->current_buffer_id == id;
+  if (v->current != nullptr && v->current_buffer_id == id) {
+    return true;
+  }
+  return std::any_of(v->extra_layers.begin(), v->extra_layers.end(),
+                     [id](const auto& entry) {
+                       return entry.second.current != nullptr &&
+                              entry.second.current_buffer_id == id;
+                     });
 }
 
 // Drop the Vulkan import cached for `id` (destroyed on a later submit once the
@@ -996,6 +1210,13 @@ void RetireVulkanImportLocked(IhsPluginView* v, const uint32_t id) {
     if (v->current == &it->second) {
       v->current = nullptr;
       v->current_buffer_valid = false;
+    }
+    // An extra layer showing the same buffer loses it too, rather than keep a
+    // pointer into an erased node.
+    for (auto& [layer_id, x] : v->extra_layers) {
+      if (x.current == &it->second) {
+        x.current = nullptr;
+      }
     }
     v->retired.push_back({it->second, v->submit_seq + kImportRetireMargin});
     v->buffers.erase(it);
@@ -1008,129 +1229,238 @@ void RetireVulkanImportLocked(IhsPluginView* v, const uint32_t id) {
 #endif
 
 #if IVI_HAVE_EGL
-void IhsPluginView::RetireEglImportLocked(const uint32_t id) const {
+void IhsPluginView::DropEglImportLocked(const uint32_t id) const {
   if (const auto it = buffers_egl.find(id); it != buffers_egl.end()) {
     if (current_egl == &it->second) {
       current_egl = nullptr;
     }
+    for (auto& [layer_id, x] : extra_layers) {
+      if (x.current_egl == &it->second) {
+        x.current_egl = nullptr;
+      }
+    }
     retired_egl.push_back({it->second, submit_seq + kImportRetireMargin});
     buffers_egl.erase(it);
   }
+}
+
+void IhsPluginView::RetireEglImportLocked(const uint32_t id) const {
+  DropEglImportLocked(id);
   SignalRelease(id);
 }
 #endif
+
+void IhsPluginView::ClearExtraLayersLocked() {
+  for (auto& [layer_id, x] : extra_layers) {
+#if IVI_HAVE_VULKAN
+    if (x.acquire_fd >= 0) {
+      close(x.acquire_fd);
+    }
+#endif
+#if IVI_HAVE_EGL
+    if (x.pending.valid) {
+      // Never drawn, and never offered to a plane: nothing else will release
+      // its slot.
+      SignalRelease(x.pending.frame.buffer_id);
+      CloseFrameFds(&x.pending.frame);
+      if (x.pending.acquire_fence_fd >= 0) {
+        close(x.pending.acquire_fence_fd);
+      }
+    }
+#endif
+    (void)x;
+  }
+  extra_layers.clear();
+  extra_order.clear();
+}
 
 #if IVI_HAVE_EGL
 // Raster-thread lazy import for the EGL path: HostSubmit stashed the frame
 // (plugin thread, no GL context); import it here, where the EGL compositor
 // calls us with the context current, caching per ring buffer like the Vulkan
 // path.
-uint32_t IhsPluginView::GetGlTextureName() const {
-  std::unique_lock<std::mutex> lock(mutex);
-  if (pending_egl.valid) {
-    // The GL-texture fallback samples the buffer directly with no plane
-    // IN_FENCE_FD, so block until the producer's writes complete before
-    // sampling, then release the fence. Only reached when direct scanout is
-    // unavailable (the fence otherwise rides the plane's IN_FENCE_FD via
-    // GetDmabuf), so this wait is off the hot path. Drop the lock across the
-    // (bounded) wait so a wedged fence can't block HostSubmit or dispose; take
-    // ownership of the fd first so a superseding submit won't close it, and
-    // loop so a frame that arrived while unlocked is also waited on — we never
-    // sample ahead of the producer. On timeout/error we sample best-effort but
-    // warn.
-    while (pending_egl.valid && pending_egl.acquire_fence_fd >= 0) {
-      const int fence = pending_egl.acquire_fence_fd;
-      pending_egl.acquire_fence_fd = -1;
-      // Explicit sync (#513): hand the fence to the GL driver and let the GPU
-      // wait on it. Cheap and non-blocking, so it runs under the lock — unlike
-      // the CPU wait below, there is nothing to drop the lock across. On
-      // success EGL owns the fd, so we must not close it here.
-      if (g_egl_importer.WaitAcquireFence(fence)) {
-        continue;
-      }
-      // No native fence sync on this display (or the sync failed): fall back to
-      // the CPU wait, which still owns the fd.
-      lock.unlock();
-      pollfd pfd{fence, POLLIN, 0};
-      int pr = 0;
-      while ((pr = ::poll(&pfd, 1, 1000)) < 0 && errno == EINTR) {
-      }
-      // Only POLLIN means the fence signalled; poll() can also wake on
-      // POLLERR/POLLHUP/POLLNVAL (>0 with no POLLIN), which is a failure, not a
-      // signal. Sample best-effort either way, but warn.
-      if (pr <= 0 || (pfd.revents & POLLIN) == 0) {
-        ihs::log::warn(
-            "[ihs_pv] GL-fallback acquire-fence wait {} (fd={}, "
-            "revents=0x{:x});"
-            " sampling anyway — frame may tear",
-            pr == 0 ? "timed out" : "failed", fence, pfd.revents);
-      }
-      close(fence);
-      lock.lock();
+template <typename Resolve>
+void IhsPluginView::ImportPendingEglLocked(std::unique_lock<std::mutex>& lock,
+                                           const Resolve& resolve) const {
+  EglSlot slot;
+  if (!resolve(&slot) || !slot.pending->valid) {
+    return;
+  }
+  // The GL-texture fallback samples the buffer directly with no plane
+  // IN_FENCE_FD, so block until the producer's writes complete before
+  // sampling, then release the fence. Only reached when direct scanout is
+  // unavailable (the fence otherwise rides the plane's IN_FENCE_FD via
+  // GetDmabuf), so this wait is off the hot path. Drop the lock across the
+  // (bounded) wait so a wedged fence can't block HostSubmit or dispose; take
+  // ownership of the fd first so a superseding submit won't close it, and
+  // loop so a frame that arrived while unlocked is also waited on — we never
+  // sample ahead of the producer. On timeout/error we sample best-effort but
+  // warn.
+  while (slot.pending->valid && slot.pending->acquire_fence_fd >= 0) {
+    const int fence = slot.pending->acquire_fence_fd;
+    slot.pending->acquire_fence_fd = -1;
+    // Explicit sync (#513): hand the fence to the GL driver and let the GPU
+    // wait on it. Cheap and non-blocking, so it runs under the lock — unlike
+    // the CPU wait below, there is nothing to drop the lock across. On
+    // success EGL owns the fd, so we must not close it here.
+    if (g_egl_importer.WaitAcquireFence(fence)) {
+      continue;
     }
-    // The view may have been disposed while the lock was dropped for the wait.
-    if (!pending_egl.valid) {
-      return current_egl != nullptr ? current_egl->texture : 0;
+    // No native fence sync on this display (or the sync failed): fall back to
+    // the CPU wait, which still owns the fd.
+    lock.unlock();
+    pollfd pfd{fence, POLLIN, 0};
+    int pr = 0;
+    while ((pr = ::poll(&pfd, 1, 1000)) < 0 && errno == EINTR) {
     }
-    // The compositor samples GetGlTextureName synchronously here, so GL's own
-    // deferred deletion already covers in-flight draws; the reap margin is
-    // safety.
-    for (auto rit = retired_egl.begin(); rit != retired_egl.end();) {
-      if (submit_seq >= rit->reap_at) {
-        g_egl_importer.Destroy(&rit->texture);  // GL context current here
-        rit = retired_egl.erase(rit);
-      } else {
-        ++rit;
-      }
+    // Only POLLIN means the fence signalled; poll() can also wake on
+    // POLLERR/POLLHUP/POLLNVAL (>0 with no POLLIN), which is a failure, not a
+    // signal. Sample best-effort either way, but warn.
+    if (pr <= 0 || (pfd.revents & POLLIN) == 0) {
+      ihs::log::warn(
+          "[ihs_pv] GL-fallback acquire-fence wait {} (fd={}, "
+          "revents=0x{:x});"
+          " sampling anyway — frame may tear",
+          pr == 0 ? "timed out" : "failed", fence, pfd.revents);
     }
-    IhsFrame& f = pending_egl.frame;
-    if (pending_egl.reimport) {
-      RetireEglImportLocked(f.buffer_id);
-      pending_egl.reimport = false;
-    }
-    const auto it = buffers_egl.find(f.buffer_id);
-    if (it != buffers_egl.end() && it->second.width == f.width &&
-        it->second.height == f.height) {
-      CloseFrameFds(&f);  // redundant handle to the cached import
-      current_egl = &it->second;
-      current_egl_buffer_id = f.buffer_id;
-    } else {
-      if (it != buffers_egl.end()) {
-        retired_egl.push_back({it->second, submit_seq + kImportRetireMargin});
-        buffers_egl.erase(it);
-      }
-      EglDmabufImporter::ImportedTexture imported;
-      if (g_egl_importer.Import(f, &imported)) {
-        auto [pos, ins] = buffers_egl.emplace(f.buffer_id, imported);
-        current_egl = &pos->second;
-        current_egl_buffer_id = f.buffer_id;
-        // Synthesised ids never repeat, so every earlier entry is dead. Retire
-        // them (the reap margin covers a compositor present still binding one)
-        // so the cache holds just the current import rather than growing per
-        // frame.
-        if (synth_buffer_id.load(std::memory_order_relaxed)) {
-          for (auto bit = buffers_egl.begin(); bit != buffers_egl.end();) {
-            if (bit->first != f.buffer_id) {
-              retired_egl.push_back(
-                  {bit->second, submit_seq + kImportRetireMargin});
-              bit = buffers_egl.erase(bit);
-            } else {
-              ++bit;
-            }
-          }
-        }
-      } else {
-        CloseFrameFds(&f);  // import left the fds untouched on failure
-      }
-    }
-    pending_egl.valid = false;
-    // A retired frame that was on screen may be off it now.
-    for (const uint32_t id : deferred_retire.ReleaseOffScreen(
-             [this](uint32_t id) { return OnScreenEglLocked(id); })) {
-      RetireEglImportLocked(id);
+    close(fence);
+    lock.lock();
+    // The view may have been disposed, or this layer replaced or removed,
+    // while the lock was dropped for the wait.
+    if (!resolve(&slot)) {
+      return;
     }
   }
+  if (!slot.pending->valid) {
+    return;
+  }
+  // The compositor samples the texture synchronously after this, so GL's own
+  // deferred deletion already covers in-flight draws; the reap margin is
+  // safety.
+  for (auto rit = retired_egl.begin(); rit != retired_egl.end();) {
+    if (submit_seq >= rit->reap_at) {
+      g_egl_importer.Destroy(&rit->texture);  // GL context current here
+      rit = retired_egl.erase(rit);
+    } else {
+      ++rit;
+    }
+  }
+  IhsFrame& f = slot.pending->frame;
+  if (slot.pending->reimport) {
+    // Not RetireEglImportLocked: the id's release eventfd is this new frame's.
+    DropEglImportLocked(f.buffer_id);
+    slot.pending->reimport = false;
+  }
+  const auto it = buffers_egl.find(f.buffer_id);
+  if (it != buffers_egl.end() && it->second.width == f.width &&
+      it->second.height == f.height) {
+    CloseFrameFds(&f);  // redundant handle to the cached import
+    *slot.current = &it->second;
+    *slot.current_id = f.buffer_id;
+  } else {
+    if (it != buffers_egl.end()) {
+      // A resize: the old import goes, and every layer still pointing at it
+      // is cleared. Its release eventfd is this new frame's, so no release.
+      DropEglImportLocked(f.buffer_id);
+    }
+    EglDmabufImporter::ImportedTexture imported;
+    if (g_egl_importer.Import(f, &imported)) {
+      auto [pos, ins] = buffers_egl.emplace(f.buffer_id, imported);
+      *slot.current = &pos->second;
+      *slot.current_id = f.buffer_id;
+      // Synthesised ids never repeat, so every earlier entry is dead. Retire
+      // them (the reap margin covers a compositor present still binding one)
+      // so the cache holds just the current import rather than growing per
+      // frame. Only a plain ihs_pv_submit producer synthesises ids, and such
+      // a submit clears the extra layers, so no other layer holds one.
+      if (synth_buffer_id.load(std::memory_order_relaxed)) {
+        for (auto bit = buffers_egl.begin(); bit != buffers_egl.end();) {
+          if (bit->first != f.buffer_id) {
+            retired_egl.push_back(
+                {bit->second, submit_seq + kImportRetireMargin});
+            bit = buffers_egl.erase(bit);
+          } else {
+            ++bit;
+          }
+        }
+      }
+    } else {
+      CloseFrameFds(&f);  // import left the fds untouched on failure
+    }
+  }
+  *slot.geom = slot.pending->geom;
+  slot.pending->valid = false;
+  // A retired frame that was on screen may be off it now.
+  for (const uint32_t id : deferred_retire.ReleaseOffScreen(
+           [this](uint32_t id) { return OnScreenEglLocked(id); })) {
+    RetireEglImportLocked(id);
+  }
+}
+
+uint32_t IhsPluginView::GetGlTextureName() const {
+  std::unique_lock<std::mutex> lock(mutex);
+  // Layer 0 is the only layer ever offered for scanout. Importing a newer
+  // frame for it means any open offer for an older one was abandoned.
+  if (pending_egl.valid) {
+    AbandonStaleOfferLocked(pending_egl.frame.buffer_id);
+  }
+  ImportPendingEglLocked(lock, [this](EglSlot* s) {
+    s->pending = &pending_egl;
+    s->current = &current_egl;
+    s->current_id = &current_egl_buffer_id;
+    s->geom = &geom0;
+    return true;
+  });
   return current_egl != nullptr ? current_egl->texture : 0;
+}
+
+ICompositorSurface::GlLayerTexture IhsPluginView::GetLayerGlTexture(
+    const size_t index) const {
+  GlLayerTexture out;
+  if (index == 0) {
+    // Layer 0 is the single-frame path; GetGlTextureName imports its frame.
+    out.name = GetGlTextureName();
+    const std::lock_guard<std::mutex> lock(mutex);
+    if (layer0_hidden || out.name == 0 || current_egl == nullptr) {
+      return {};
+    }
+    out.width = static_cast<int32_t>(current_egl->width);
+    out.height = static_cast<int32_t>(current_egl->height);
+    out.external = current_egl->external;
+    out.top_first = true;  // imported dma-bufs are top-first
+    out.buffer_id = current_egl_buffer_id;
+    out.geometry = geom0;
+    return out;
+  }
+  std::unique_lock<std::mutex> lock(mutex);
+  if (index > extra_order.size()) {
+    return out;
+  }
+  const uint32_t layer_id = extra_order[index - 1];
+  ImportPendingEglLocked(lock, [this, layer_id](EglSlot* s) {
+    const auto it = extra_layers.find(layer_id);
+    if (it == extra_layers.end()) {
+      return false;
+    }
+    s->pending = &it->second.pending;
+    s->current = &it->second.current_egl;
+    s->current_id = &it->second.current_egl_buffer_id;
+    s->geom = &it->second.geom;
+    return true;
+  });
+  const auto it = extra_layers.find(layer_id);
+  if (it == extra_layers.end() || it->second.current_egl == nullptr) {
+    return out;
+  }
+  const ExtraLayer& x = it->second;
+  out.name = x.current_egl->texture;
+  out.width = static_cast<int32_t>(x.current_egl->width);
+  out.height = static_cast<int32_t>(x.current_egl->height);
+  out.external = x.current_egl->external;
+  out.top_first = true;
+  out.buffer_id = x.current_egl_buffer_id;
+  out.geometry = x.geom;
+  return out;
 }
 #endif
 
@@ -1546,54 +1876,189 @@ void HandBackReleaseFence(const IhsPluginView* v,
   *out_release_fence_fd = fd;
 }
 
-int HostSubmit(void* user_data,
-               IhsPlatformView* view,
-               const IhsFrame* frame,
-               int acquire_fence_fd,
-               int* out_release_fence_fd) {
-  // Release fence (compositor -> producer, #338): -1 by default, replaced under
-  // v->mutex in each backend path below with a dup of this view's latest fence
-  // (see HandBackReleaseFence). -1 stands until the first composite has run, or
-  // if the dup fails; the producer owns and closes any fd handed back.
-  if (out_release_fence_fd != nullptr) {
-    *out_release_fence_fd = -1;
-  }
+// The rest of a layer list, applied under the same hold of the view lock that
+// swaps in layer 0, so no present can draw one layer's new frame over another's
+// old one. Its frames and fences are owned here until ApplyLayerListLocked
+// takes them; a submit that fails before that leaves them to the caller.
+struct ExtraSubmit {
+  uint32_t layer_id{0};
+  IhsFrame frame{};
+  int acquire_fd{-1};
+  int* out_release_fd{nullptr};
+  ICompositorSurface::LayerGeometry geom;
+};
+struct LayerListUpdate {
+  std::vector<ExtraSubmit> extras;
+  bool applied{false};
+};
 
-  auto* v = reinterpret_cast<IhsPluginView*>(view);
-
-  // The plugin may be built against an older, smaller IhsFrame. Copying *frame
-  // whole would read past the end of its object, and the trailing buffer_id
-  // (the import-cache key) would be garbage. Copy only the bytes it provided
-  // into a full-size zeroed frame; fields its struct did not reach read as
-  // zero. A struct too small to even carry the plane data is rejected -- and
-  // not closed, since plane_count/plane_fd cannot be trusted either.
-  IhsFrame normalized{};
-  if (frame == nullptr ||
-      frame->struct_size <
-          offsetof(IhsFrame, plane_stride) + sizeof(normalized.plane_stride)) {
-    if (acquire_fence_fd >= 0) {
-      close(acquire_fence_fd);
-    }
-    ihs::log::warn(
-        "[ihs_pv] submit rejected: IhsFrame struct_size {} too small",
-        frame != nullptr ? frame->struct_size : 0);
-    return IHS_PV_ERR_INVALID;
+// Copy a producer's frame into a full-size one. It may be built against an
+// older, smaller IhsFrame: copying *in whole would read past the end of its
+// object, and the trailing buffer_id (the import-cache key) would be garbage.
+// Fields its struct did not reach read as zero, and a missing buffer_id is
+// synthesised (see synth_buffer_id). False for a struct too small to carry the
+// plane data, whose fds cannot be trusted either.
+bool NormalizeFrame(IhsPluginView* v, const IhsFrame* in, IhsFrame* out) {
+  *out = IhsFrame{};
+  if (in == nullptr || in->struct_size < offsetof(IhsFrame, plane_stride) +
+                                             sizeof(out->plane_stride)) {
+    return false;
   }
-  const size_t copy = frame->struct_size < sizeof(IhsFrame) ? frame->struct_size
-                                                            : sizeof(IhsFrame);
-  std::memcpy(&normalized, frame, copy);
-  normalized.struct_size = sizeof(IhsFrame);
+  const size_t copy =
+      in->struct_size < sizeof(IhsFrame) ? in->struct_size : sizeof(IhsFrame);
+  std::memcpy(out, in, copy);
+  out->struct_size = sizeof(IhsFrame);
   // buffer_id absent from the plugin's struct read as 0, which would key every
   // frame on one cache slot and freeze on the first. Give each such frame a
   // fresh id so it is imported rather than aliased.
-  if (frame->struct_size <
-      offsetof(IhsFrame, buffer_id) + sizeof(normalized.buffer_id)) {
-    normalized.buffer_id =
+  if (in->struct_size <
+      offsetof(IhsFrame, buffer_id) + sizeof(out->buffer_id)) {
+    out->buffer_id =
         v->rolling_buffer_id.fetch_add(1, std::memory_order_relaxed);
     v->synth_buffer_id.store(true, std::memory_order_relaxed);
   }
-  frame = &normalized;
+  return true;
+}
 
+#if IVI_HAVE_VULKAN
+// Import an extra layer's frame, or reuse the cached import of its buffer_id.
+// Consumes the frame's fds either way. Null when the import fails. Unlike layer
+// 0 there is no scanout copy: extra layers are never offered to a plane.
+// Caller holds v->mutex.
+DmabufVulkanImporter::ImportedImage* ImportOrReuseVulkanLocked(
+    IhsPluginView* v,
+    const IhsFrame& frame) {
+  const auto it = v->buffers.find(frame.buffer_id);
+  if (it != v->buffers.end() && it->second.width == frame.width &&
+      it->second.height == frame.height) {
+    CloseFrameFds(&frame);  // a redundant handle to the cached import
+    return &it->second;
+  }
+  if (it != v->buffers.end()) {
+    RetireVulkanImportLocked(v, frame.buffer_id);  // re-created at a new size
+  }
+  DmabufVulkanImporter::ImportedImage imported;
+  if (!g_importer.Import(frame, &imported)) {
+    CloseFrameFds(&frame);  // import left the fds untouched on failure
+    return nullptr;
+  }
+  return &v->buffers.emplace(frame.buffer_id, imported).first->second;
+}
+#endif
+
+// Take a layer list's extra layers (or, for a plain ihs_pv_submit, drop them)
+// in the same lock hold as layer 0. Caller holds v->mutex.
+void ApplyLayerListLocked(IhsPluginView* v,
+                          LayerListUpdate* update,
+                          const bool vulkan) {
+  (void)vulkan;
+  v->layer0_hidden = false;
+  if (update == nullptr) {
+    v->ClearExtraLayersLocked();
+    return;
+  }
+  std::vector<uint32_t> order;
+  order.reserve(update->extras.size());
+#if IVI_HAVE_EGL
+  // Buffers whose release eventfd this submit already created, starting with
+  // layer 0's. A buffer shown by two layers has one release: a second
+  // HandBackReleaseEventfd would signal the first as stale.
+  std::vector<uint32_t> released_here;
+  if (!vulkan && v->pending_egl.valid) {
+    released_here.push_back(v->pending_egl.frame.buffer_id);
+  }
+#endif
+  for (ExtraSubmit& es : update->extras) {
+    IhsPluginView::ExtraLayer& x = v->extra_layers[es.layer_id];
+    order.push_back(es.layer_id);
+    HandBackReleaseFence(v, es.acquire_fd, es.out_release_fd);
+#if IVI_HAVE_VULKAN
+    if (vulkan) {
+      if (x.acquire_fd >= 0) {
+        close(x.acquire_fd);  // superseded before the compositor took it
+      }
+      x.acquire_fd = es.acquire_fd;
+      if (v->deferred_retire.Resubmitted(es.frame.buffer_id)) {
+        RetireVulkanImportLocked(v, es.frame.buffer_id);
+      }
+      if (auto* img = ImportOrReuseVulkanLocked(v, es.frame); img != nullptr) {
+        x.current = img;
+        x.current_buffer_id = es.frame.buffer_id;
+        x.layout = VK_IMAGE_LAYOUT_GENERAL;
+        x.geom = es.geom;
+      }
+      continue;
+    }
+#endif
+#if IVI_HAVE_EGL
+    if (x.pending.valid) {
+      // Superseded before it was ever drawn, and extra layers are never on a
+      // plane, so nothing else will release its slot.
+      v->SignalRelease(x.pending.frame.buffer_id);
+      CloseFrameFds(&x.pending.frame);
+      if (x.pending.acquire_fence_fd >= 0) {
+        close(x.pending.acquire_fence_fd);
+      }
+    }
+    x.pending = {};
+    x.pending.frame = es.frame;     // takes the plane fds
+    x.pending.frame.hdr = nullptr;  // HDR metadata is the view's, from layer 0
+    x.pending.acquire_fence_fd = es.acquire_fd;
+    x.pending.stash_seq = v->submit_seq;
+    x.pending.reimport = v->deferred_retire.Resubmitted(es.frame.buffer_id);
+    x.pending.geom = es.geom;
+    x.pending.valid = true;
+    const uint32_t bid = es.frame.buffer_id;
+    if (std::find(released_here.begin(), released_here.end(), bid) ==
+        released_here.end()) {
+      v->HandBackReleaseEventfd(bid, es.out_release_fd);
+      released_here.push_back(bid);
+    } else if (const auto efd = v->release_efds.find(bid);
+               efd != v->release_efds.end() && es.out_release_fd != nullptr) {
+      // The same buffer again: hand back the same release, not a second one.
+      if (*es.out_release_fd >= 0) {
+        close(*es.out_release_fd);  // HandBackReleaseFence's dup, superseded
+      }
+      *es.out_release_fd = ::dup(efd->second);
+    }
+#endif
+  }
+  // Layers missing from this list are gone.
+  for (auto it = v->extra_layers.begin(); it != v->extra_layers.end();) {
+    if (std::find(order.begin(), order.end(), it->first) == order.end()) {
+#if IVI_HAVE_VULKAN
+      if (it->second.acquire_fd >= 0) {
+        close(it->second.acquire_fd);
+      }
+#endif
+#if IVI_HAVE_EGL
+      if (it->second.pending.valid) {
+        v->SignalRelease(it->second.pending.frame.buffer_id);
+        CloseFrameFds(&it->second.pending.frame);
+        if (it->second.pending.acquire_fence_fd >= 0) {
+          close(it->second.pending.acquire_fence_fd);
+        }
+      }
+#endif
+      it = v->extra_layers.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  v->extra_order = std::move(order);
+  update->applied = true;
+}
+
+// Swap in layer 0's frame (and, through @p update, the rest of the list).
+// Consumes @p frame's fds and @p acquire_fence_fd on every path; @p update's
+// only when it returns having applied it (update->applied).
+int SubmitFrame0(void* user_data,
+                 IhsPluginView* v,
+                 const IhsFrame* frame,
+                 int acquire_fence_fd,
+                 int* out_release_fence_fd,
+                 const ICompositorSurface::LayerGeometry& geom,
+                 LayerListUpdate* update) {
 #if IVI_HAVE_VULKAN
   const bool vulkan_ready = g_importer.ready();
 #else
@@ -1661,6 +2126,7 @@ int HostSubmit(void* user_data,
     v->pending_egl.acquire_fence_fd = acquire_fence_fd;  // ownership moves here
     v->pending_egl.stash_seq = v->submit_seq;
     v->pending_egl.reimport = v->deferred_retire.Resubmitted(frame->buffer_id);
+    v->pending_egl.geom = geom;
     v->pending_egl.valid = true;
     // Release retired frames this one pushed off screen. Checked here as well
     // as at import: a view on a KMS plane is fed through GetDmabuf and may
@@ -1674,6 +2140,12 @@ int HostSubmit(void* user_data,
     // OnScanoutRelease. A stale entry for this buffer_id (the producer reused
     // the slot without our having signalled) is retired first.
     v->HandBackReleaseEventfd(frame->buffer_id, out_release_fence_fd);
+    ApplyLayerListLocked(v, update, /*vulkan=*/false);
+    // Extra layers the list dropped may have been showing a retired frame.
+    for (const uint32_t id : v->deferred_retire.ReleaseOffScreen(
+             [v](uint32_t id) { return v->OnScreenEglLocked(id); })) {
+      v->RetireEglImportLocked(id);
+    }
     lock.unlock();  // don't call into the engine holding the view lock
     ScheduleEngineFrame(user_data);
     return IHS_PV_OK;
@@ -1846,11 +2318,136 @@ int HostSubmit(void* user_data,
   // transitions from GENERAL to read it. A spec-correct foreign-queue-family
   // acquire from the producer is the explicit-sync increment.
   v->current_layout = VK_IMAGE_LAYOUT_GENERAL;
+  v->geom0 = geom;
+  ApplyLayerListLocked(v, update, /*vulkan=*/true);
+  // A retired frame an extra layer was showing may be off screen now as well.
+  for (const uint32_t id : v->deferred_retire.ReleaseOffScreen(
+           [v](uint32_t id) { return OnScreenVulkanLocked(v, id); })) {
+    RetireVulkanImportLocked(v, id);
+  }
   lock.unlock();  // don't call into the engine holding the view lock
   ScheduleEngineFrame(user_data);
   return IHS_PV_OK;
 }
 #endif  // IVI_HAVE_VULKAN
+
+// ihs_pv_submit: one full-view layer, which also clears any layers a previous
+// ihs_pv_submit_layers left above it.
+int HostSubmit(void* user_data,
+               IhsPlatformView* view,
+               const IhsFrame* frame,
+               int acquire_fence_fd,
+               int* out_release_fence_fd) {
+  // Release fence (compositor -> producer, #338): -1 by default, replaced under
+  // v->mutex in each backend path with a dup of this view's latest fence (see
+  // HandBackReleaseFence). -1 stands until the first composite has run, or if
+  // the dup fails; the producer owns and closes any fd handed back.
+  if (out_release_fence_fd != nullptr) {
+    *out_release_fence_fd = -1;
+  }
+  auto* v = reinterpret_cast<IhsPluginView*>(view);
+  IhsFrame normalized{};
+  if (!NormalizeFrame(v, frame, &normalized)) {
+    // Rejected, and not closed: plane_count/plane_fd cannot be trusted.
+    if (acquire_fence_fd >= 0) {
+      close(acquire_fence_fd);
+    }
+    ihs::log::warn(
+        "[ihs_pv] submit rejected: IhsFrame struct_size {} too small",
+        frame != nullptr ? frame->struct_size : 0);
+    return IHS_PV_ERR_INVALID;
+  }
+  return SubmitFrame0(user_data, v, &normalized, acquire_fence_fd,
+                      out_release_fence_fd, ICompositorSurface::LayerGeometry{},
+                      nullptr);
+}
+
+// The geometry a layer asks for, in the form the compositor draws with.
+ICompositorSurface::LayerGeometry GeometryOf(const IhsLayer& l) {
+  ICompositorSurface::LayerGeometry g;
+  constexpr double kFixed = 65536.0;  // 16.16
+  g.src = {l.src_x / kFixed, l.src_y / kFixed, l.src_w / kFixed,
+           l.src_h / kFixed};
+  const auto clamp = [](uint32_t v) {
+    return static_cast<int32_t>(v > INT32_MAX ? INT32_MAX : v);
+  };
+  g.dst = {l.dst_x, l.dst_y, clamp(l.dst_w), clamp(l.dst_h)};
+  g.transform =
+      l.transform <= static_cast<uint32_t>(BufferTransform::kFlipped270)
+          ? static_cast<BufferTransform>(l.transform)
+          : BufferTransform::kNormal;
+  g.opaque = l.opaque != 0;
+  return g;
+}
+
+// ihs_pv_submit_layers. libihs_shared has validated the list's shape; this
+// owns every fd in it from here, on every path.
+int HostSubmitLayers(void* user_data,
+                     IhsPlatformView* view,
+                     const IhsLayer* layers,
+                     const size_t layer_count,
+                     uint64_t /* seq: reserved for presentation feedback */,
+                     int* out_release_fence_fds) {
+  auto* v = reinterpret_cast<IhsPluginView*>(view);
+  const auto close_from = [&](size_t first) {
+    for (size_t i = first; i < layer_count; ++i) {
+      CloseFrameFds(layers[i].frame);
+      if (layers[i].acquire_fence_fd >= 0) {
+        close(layers[i].acquire_fence_fd);
+      }
+    }
+  };
+  if (layer_count == 0) {
+    {
+      const std::lock_guard<std::mutex> lock(v->mutex);
+      v->ClearExtraLayersLocked();
+      v->layer0_hidden = true;
+    }
+    ScheduleEngineFrame(user_data);
+    return IHS_PV_OK;
+  }
+  // A layer_id twice would make two layers share one layer's state.
+  for (size_t i = 0; i < layer_count; ++i) {
+    for (size_t j = i + 1; j < layer_count; ++j) {
+      if (layers[i].layer_id == layers[j].layer_id) {
+        ihs::log::warn("[ihs_pv] submit_layers rejected: layer_id {} repeats",
+                       layers[i].layer_id);
+        close_from(0);
+        return IHS_PV_ERR_INVALID;
+      }
+    }
+  }
+  // Every frame here carries a buffer_id (libihs_shared checked), so none is
+  // synthesised, and the synthesised-id pruning -- which would retire other
+  // layers' imports -- stops applying to this view.
+  v->synth_buffer_id.store(false, std::memory_order_relaxed);
+  LayerListUpdate update;
+  update.extras.resize(layer_count - 1);
+  IhsFrame frame0{};
+  for (size_t i = 0; i < layer_count; ++i) {
+    IhsFrame* dst = i == 0 ? &frame0 : &update.extras[i - 1].frame;
+    if (!NormalizeFrame(v, layers[i].frame, dst)) {
+      close_from(0);  // cannot happen past libihs_shared's check; be safe
+      return IHS_PV_ERR_INVALID;
+    }
+  }
+  for (size_t i = 1; i < layer_count; ++i) {
+    ExtraSubmit& es = update.extras[i - 1];
+    es.layer_id = layers[i].layer_id;
+    es.acquire_fd = layers[i].acquire_fence_fd;
+    es.out_release_fd =
+        out_release_fence_fds != nullptr ? &out_release_fence_fds[i] : nullptr;
+    es.geom = GeometryOf(layers[i]);
+  }
+  const int rc = SubmitFrame0(
+      user_data, v, &frame0, layers[0].acquire_fence_fd,
+      out_release_fence_fds != nullptr ? &out_release_fence_fds[0] : nullptr,
+      GeometryOf(layers[0]), &update);
+  if (!update.applied) {
+    close_from(1);  // layer 0 failed; the rest were never taken
+  }
+  return rc;
+}
 
 // Process-global host; user_data re-points at the most recently installed
 // engine (single-engine today).
@@ -1943,6 +2540,7 @@ void InstallPlatformViewHost(FlutterDesktopEngineState* engine_state) {
   g_host.post_platform_task = HostPostPlatformTask;
   g_host.is_platform_thread = HostIsPlatformThread;
   g_host.retire_buffer = HostRetireBuffer;
+  g_host.submit_layers = HostSubmitLayers;
   ihs_pv_set_host(&g_host);
 
   // Bring up the dma-buf importer once, on this thread, from the backend's

@@ -73,6 +73,7 @@ previous process has released DRM master gives a run that produces no report.
 | `SUMMARY_FILE` | *(unset)* | the summary, written to a file as well as stdout |
 | `PV_BENCH_DRM_NODE` | *(unset)* | allocate on this node instead of probing |
 | `PV_BENCH_PAD_ROWS` | tile-rounded | rows of allocation headroom; 0 reproduces \#598 |
+| `PV_BENCH_LAYERS` | `1` | layers per submit (1..3) through `ihs_pv_submit_layers`: the buffer whole, then cropped, placed and mirrored, then cropped, placed and turned a quarter |
 
 `PV_BENCH_NO_PV=1` is the control: same Flutter content, no layer. The difference
 between the two runs is what the layer costs.

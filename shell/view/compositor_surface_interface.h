@@ -21,6 +21,8 @@
 
 #include <shell/platform/embedder/embedder.h>
 
+#include "view/layer_geometry.h"
+
 /**
  * @brief Plugin-facing interface for a platform-view backing store producer.
  *
@@ -448,4 +450,113 @@ class ICompositorSurface {
    * default ignores it.
    */
   virtual void SetScanoutPlane(uint32_t /*plane_id*/) {}
+
+  // ---- Layers --------------------------------------------------------------
+  //
+  // A surface draws as one or more layers, bottom to top, each a crop of its
+  // own image placed within the surface's rect and possibly rotated (see
+  // ihs_pv_submit_layers). The accessors above describe layer 0 drawn whole,
+  // which is what every surface was before layers existed; the defaults below
+  // say exactly that, so a surface that never overrides them is one full-rect
+  // layer, drawn the way it always was.
+  //
+  // The GPU composite paths draw every layer through these. The direct-scanout
+  // path still takes only GetDmabuf, which is layer 0 drawn whole: a surface
+  // with more than one layer, or a layer 0 that is cropped, placed or rotated,
+  // reports kNotScanoutCapable there and is composited.
+
+  // Where layer @p index's pixels come from and where they land.
+  struct LayerGeometry {
+    // The part of the image shown, in its own pixels (before @c transform).
+    // Zero width or height: the whole image.
+    RectF src;
+    // Where it lands, in surface-local physical pixels (the FlutterLayer's size
+    // spans the surface). Zero width or height: the whole surface.
+    RectI dst;
+    BufferTransform transform{BufferTransform::kNormal};
+    // Every pixel of @c dst is covered; the image's alpha is to be ignored.
+    bool opaque{false};
+
+    // Drawn the way a single full-surface image always was: the whole image
+    // across the whole surface, upright. (@c opaque does not change where
+    // pixels land, so it does not count.)
+    [[nodiscard]] bool IsWhole() const {
+      return (src.w <= 0 || src.h <= 0) && (dst.w <= 0 || dst.h <= 0) &&
+             transform == BufferTransform::kNormal;
+    }
+  };
+
+  // A layer's Vulkan image, for the Vulkan composite paths. Returned with the
+  // geometry of the very frame it holds, so the two cannot come from different
+  // submits.
+  struct VulkanLayerImage {
+    void* image{nullptr};  // VkImage; null: nothing to draw for this layer
+    int32_t width{0};
+    int32_t height{0};
+    uint32_t format{0};  // VkFormat; 0 = VK_FORMAT_B8G8R8A8_UNORM
+    uint32_t ycbcr_model{0};
+    uint32_t ycbcr_range{0};
+    LayerGeometry geometry;
+  };
+
+  // A layer's GL texture, for the GL composite paths, with its geometry.
+  struct GlLayerTexture {
+    uint32_t name{0};  // GLuint; 0: nothing to draw for this layer
+    int32_t width{0};
+    int32_t height{0};
+    bool external{false};  // bind as GL_TEXTURE_EXTERNAL_OES
+    bool top_first{false};
+    // The producer's buffer_id for the frame bound, for a deferred release.
+    uint32_t buffer_id{0};
+    LayerGeometry geometry;
+  };
+
+  // How many layers to draw this present. At least 1 for any surface that
+  // draws; 0 draws nothing.
+  [[nodiscard]] virtual size_t GetLayerCount() const { return 1; }
+
+  // Layer @p index's image and format. Compositor thread.
+  [[nodiscard]] virtual VulkanLayerImage GetLayerVulkanImage(
+      const size_t index) const {
+    VulkanLayerImage out;
+    if (index == 0) {
+      out.image = GetVulkanImage(&out.width, &out.height);
+      out.format = GetVulkanImageFormat();
+      out.ycbcr_model = GetVulkanYcbcrModel();
+      out.ycbcr_range = GetVulkanYcbcrRange();
+    }
+    return out;
+  }
+  [[nodiscard]] virtual uint32_t GetLayerVulkanImageLayout(
+      const size_t index) const {
+    return index == 0 ? GetVulkanImageLayout() : 0;
+  }
+  virtual void SetLayerVulkanImageLayout(const size_t index,
+                                         const uint32_t layout) {
+    if (index == 0) {
+      SetVulkanImageLayout(layout);
+    }
+  }
+  // Ownership moves to the caller, as with TakeAcquireFenceFd.
+  [[nodiscard]] virtual int TakeLayerAcquireFenceFd(const size_t index) {
+    return index == 0 ? TakeAcquireFenceFd() : -1;
+  }
+
+  // Layer @p index's texture. Raster thread with the GL context current: like
+  // GetGlTextureName, this may import the layer's latest frame.
+  [[nodiscard]] virtual GlLayerTexture GetLayerGlTexture(
+      const size_t index) const {
+    GlLayerTexture out;
+    if (index == 0) {
+      out.name = GetGlTextureName();
+      if (out.name != 0) {
+        out.width = GetGlTextureWidth();
+        out.height = GetGlTextureHeight();
+        out.external = TextureIsExternalOes();
+        out.top_first = TextureIsTopFirst();
+        out.buffer_id = GetGlTextureBufferId();
+      }
+    }
+    return out;
+  }
 };

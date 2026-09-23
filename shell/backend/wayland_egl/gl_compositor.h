@@ -18,6 +18,10 @@
 
 #include <GLES2/gl2.h>
 
+#include <cstddef>
+#include <functional>
+
+#include "view/compositor_surface_interface.h"
 #include "view/layer_geometry.h"
 
 struct GlCaps;
@@ -103,6 +107,34 @@ class GlCompositor {
                            GLsizei dst_h,
                            bool blend,
                            bool opaque);
+
+  /**
+   * @brief Draw every layer of @p surface, bottom to top, into its view rect.
+   *
+   * @param view        The view's rect on the target, in pixels with a
+   *                    top-left origin (the FlutterLayer's offset and size).
+   * @param fb_height   The target's height. Unused for a top-first target.
+   * @param target_top_first  The target is scanned out first row first, so
+   *                    GL's y = 0 is its top (an FBO fed to a KMS plane).
+   *                    False for a window's default framebuffer, where GL's
+   *                    bottom-left origin is the bottom.
+   * @param blend_first Whether the first layer drawn blends (something is
+   *                    already under it). Later layers blend unless opaque.
+   * @param on_drawn    Called for each layer drawn, e.g. to queue its release.
+   * @return            The number of layers drawn.
+   *
+   * Imports each layer's latest frame (GetLayerGlTexture), so it runs on the
+   * raster thread with the context current, like any texture composite.
+   */
+  size_t CompositeSurfaceLayers(
+      GLuint dst_fbo,
+      const ICompositorSurface& surface,
+      const RectI& view,
+      GLint fb_height,
+      bool target_top_first,
+      bool blend_first,
+      const std::function<void(const ICompositorSurface::GlLayerTexture&)>&
+          on_drawn = nullptr);
 
   // Thin wrapper: composite into the default framebuffer (FBO 0).
   void CompositeToDefault(GLuint src_fbo,

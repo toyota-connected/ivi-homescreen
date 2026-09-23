@@ -558,3 +558,54 @@ void GlCompositor::CompositeLayerToFbo(GLuint dst_fbo,
                    external);
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
+
+size_t GlCompositor::CompositeSurfaceLayers(
+    GLuint dst_fbo,
+    const ICompositorSurface& surface,
+    const RectI& view,
+    GLint fb_height,
+    bool target_top_first,
+    bool blend_first,
+    const std::function<void(const ICompositorSurface::GlLayerTexture&)>&
+        on_drawn) {
+  size_t drawn = 0;
+  const size_t count = surface.GetLayerCount();
+  for (size_t i = 0; i < count; ++i) {
+    const ICompositorSurface::GlLayerTexture t = surface.GetLayerGlTexture(i);
+    if (t.name == 0) {
+      continue;
+    }
+    const auto& g = t.geometry;
+    LayerPlacement p;
+    if (!PlaceLayer(g.src, g.dst, g.transform, g.opaque,
+                    static_cast<uint32_t>(t.width),
+                    static_cast<uint32_t>(t.height), view, &p)) {
+      continue;
+    }
+    // UvAffine counts rows from the buffer's first row in memory. A texture
+    // stored bottom row first (a GL render target) has that row at v = 1.
+    if (!t.top_first) {
+      p.uv.b = -p.uv.b;
+      p.uv.d = -p.uv.d;
+      p.uv.ty = 1.0f - p.uv.ty;
+    }
+    GLint gl_y = fb_height - p.dst.y - p.dst.h;
+    if (target_top_first) {
+      // GL's y = 0 is the target's top row, so the rect goes in unconverted
+      // and the quad's t axis (top to bottom in window terms) turns over.
+      gl_y = p.dst.y;
+      p.uv.tx += p.uv.c;
+      p.uv.c = -p.uv.c;
+      p.uv.ty += p.uv.d;
+      p.uv.d = -p.uv.d;
+    }
+    const bool blend = (blend_first || drawn > 0) && !p.opaque;
+    CompositeLayerToFbo(dst_fbo, t.name, t.external, p.uv, p.dst.x, gl_y,
+                        p.dst.w, p.dst.h, blend, p.opaque);
+    ++drawn;
+    if (on_drawn) {
+      on_drawn(t);
+    }
+  }
+  return drawn;
+}
