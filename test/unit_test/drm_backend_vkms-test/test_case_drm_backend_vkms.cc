@@ -78,6 +78,7 @@ extern "C" {
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -1248,6 +1249,7 @@ class PvHostVkms : public ::testing::Test {
     cfg.view.width = card_.mode_w;
     cfg.view.height = card_.mode_h;
     cfg.view.drm_no_seat = true;
+    Tune(cfg);
 
     view_ = std::make_unique<FlutterView>(cfg, 0, "pv-host-test", display_);
     ASSERT_NE(view_->GetBackend(), nullptr)
@@ -1274,6 +1276,9 @@ class PvHostVkms : public ::testing::Test {
     view_.reset();
     display_.reset();
   }
+
+  // A subclass's say in the configuration, before the backend is built.
+  virtual void Tune(Configuration::Config& /*cfg*/) {}
 
   static constexpr const char* kViewType = "views/fd-audit";
 
@@ -1485,6 +1490,317 @@ TEST_F(PvHostVkms, ExplicitSyncSubmitLoopDoesNotLeakFds) {
   }
 
   EXPECT_TRUE(state_.platform_view_registry->Dispose(1, false));
+}
+
+// What a plane is showing, read back from KMS rather than from what the
+// compositor believes it committed.
+struct PlaneState {
+  uint32_t fb_id{0};
+  uint64_t src_x{0};
+  uint64_t src_y{0};
+  uint64_t src_w{0};
+  uint64_t src_h{0};
+  int64_t crtc_x{0};
+  int64_t crtc_y{0};
+  uint64_t crtc_w{0};
+  uint64_t crtc_h{0};
+  uint64_t rotation{DRM_MODE_ROTATE_0};
+  bool has_rotation{false};
+};
+
+// Every plane on @p path with a framebuffer attached.
+std::vector<PlaneState> ActivePlanes(const std::string& path) {
+  std::vector<PlaneState> out;
+  const int fd = ::open(path.c_str(), O_RDWR | O_CLOEXEC);
+  if (fd < 0) {
+    return out;
+  }
+  // FB_ID, SRC_* and CRTC_* are atomic properties, listed only to a client
+  // that has asked for atomic.
+  drmSetClientCap(fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
+  drmSetClientCap(fd, DRM_CLIENT_CAP_ATOMIC, 1);
+  if (drmModePlaneRes* pres = drmModeGetPlaneResources(fd); pres != nullptr) {
+    for (uint32_t i = 0; i < pres->count_planes; ++i) {
+      drmModeObjectProperties* props = drmModeObjectGetProperties(
+          fd, pres->planes[i], DRM_MODE_OBJECT_PLANE);
+      if (props == nullptr) {
+        continue;
+      }
+      PlaneState st;
+      for (uint32_t p = 0; p < props->count_props; ++p) {
+        drmModePropertyRes* prop = drmModeGetProperty(fd, props->props[p]);
+        if (prop == nullptr) {
+          continue;
+        }
+        const std::string name = prop->name;
+        const uint64_t v = props->prop_values[p];
+        if (name == "FB_ID") {
+          st.fb_id = static_cast<uint32_t>(v);
+        } else if (name == "SRC_X") {
+          st.src_x = v;
+        } else if (name == "SRC_Y") {
+          st.src_y = v;
+        } else if (name == "SRC_W") {
+          st.src_w = v;
+        } else if (name == "SRC_H") {
+          st.src_h = v;
+        } else if (name == "CRTC_X") {
+          st.crtc_x = static_cast<int64_t>(v);
+        } else if (name == "CRTC_Y") {
+          st.crtc_y = static_cast<int64_t>(v);
+        } else if (name == "CRTC_W") {
+          st.crtc_w = v;
+        } else if (name == "CRTC_H") {
+          st.crtc_h = v;
+        } else if (name == "rotation") {
+          st.rotation = v;
+          st.has_rotation = true;
+        }
+        drmModeFreeProperty(prop);
+      }
+      drmModeFreeObjectProperties(props);
+      if (st.fb_id != 0) {
+        out.push_back(st);
+      }
+    }
+    drmModeFreePlaneResources(pres);
+  }
+  ::close(fd);
+  return out;
+}
+
+// Whether any plane on @p path can rotate.
+bool AnyPlaneRotates(const std::string& path) {
+  const int fd = ::open(path.c_str(), O_RDWR | O_CLOEXEC);
+  if (fd < 0) {
+    return false;
+  }
+  drmSetClientCap(fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
+  bool found = false;
+  if (drmModePlaneRes* pres = drmModeGetPlaneResources(fd); pres != nullptr) {
+    for (uint32_t i = 0; i < pres->count_planes && !found; ++i) {
+      drmModeObjectProperties* props = drmModeObjectGetProperties(
+          fd, pres->planes[i], DRM_MODE_OBJECT_PLANE);
+      if (props == nullptr) {
+        continue;
+      }
+      for (uint32_t p = 0; p < props->count_props && !found; ++p) {
+        drmModePropertyRes* prop = drmModeGetProperty(fd, props->props[p]);
+        if (prop != nullptr) {
+          found = std::string(prop->name) == "rotation";
+          drmModeFreeProperty(prop);
+        }
+      }
+      drmModeFreeObjectProperties(props);
+    }
+    drmModeFreePlaneResources(pres);
+  }
+  ::close(fd);
+  return found;
+}
+
+// The view host on the plane compositor, pinned rather than left to the driver
+// probe, with the helpers the layer cases share.
+class PvHostVkmsPlanes : public PvHostVkms {
+ protected:
+  void SetUp() override {
+    const VkmsCard card = FindVkms();
+    if (card.ok() && card.overlays < 2) {
+      GTEST_SKIP() << "vkms needs two overlay planes for a view's layers "
+                      "(modprobe vkms enable_overlay=1)";
+    }
+    PvHostVkms::SetUp();
+    if (IsSkipped()) {
+      return;
+    }
+    auto* drm = dynamic_cast<DrmBackend*>(view_->GetBackend());
+    ASSERT_NE(drm, nullptr) << "not a DrmBackend";
+    comp_ = drm->compositor();
+    ASSERT_NE(comp_, nullptr) << "built without BUILD_COMPOSITOR";
+    ASSERT_TRUE(drm->MakeCurrent());
+
+    ASSERT_EQ(ihs_pv_register_factory(kViewType, &fake_factory, &producer_),
+              IHS_PV_OK);
+    PlatformViewRegistry::CreateRequest req{};
+    req.id = 1;
+    req.view_type = kViewType;
+    req.width = kViewW;
+    req.height = kViewH;
+    ASSERT_TRUE(state_.platform_view_registry->CreateViaFactory(req));
+    ASSERT_NE(producer_.view, nullptr) << "the factory was never invoked";
+  }
+
+  void TearDown() override {
+    if (producer_.view != nullptr) {
+      state_.platform_view_registry->Dispose(1, false);
+      producer_.view = nullptr;
+    }
+    PvHostVkms::TearDown();
+  }
+
+  void Tune(Configuration::Config& cfg) override {
+    cfg.view.drm_compositor = "planes";
+  }
+
+  // A frame for @p buffer, which ihs_pv_submit_layers consumes.
+  static IhsFrame FrameOf(const GbmSolidBuffer& buffer, uint32_t buffer_id) {
+    IhsFrame frame{};
+    frame.struct_size = sizeof(frame);
+    frame.format.fourcc = DRM_FORMAT_XRGB8888;
+    frame.format.modifier = DRM_FORMAT_MOD_LINEAR;
+    frame.width = buffer.width();
+    frame.height = buffer.height();
+    frame.plane_count = 1;
+    frame.plane_fd[0] = buffer.ExportFd();
+    frame.plane_stride[0] = buffer.stride();
+    frame.buffer_id = buffer_id;
+    return frame;
+  }
+
+  static IhsLayer LayerOf(const IhsFrame* frame, uint32_t layer_id) {
+    IhsLayer layer{};
+    layer.struct_size = sizeof(layer);
+    layer.frame = frame;
+    layer.acquire_fence_fd = -1;
+    layer.layer_id = layer_id;
+    return layer;
+  }
+
+  bool Present() {
+    FlutterPlatformView pv{};
+    pv.struct_size = sizeof(FlutterPlatformView);
+    pv.identifier = 1;
+    FlutterLayer layer{};
+    layer.struct_size = sizeof(FlutterLayer);
+    layer.type = kFlutterLayerContentTypePlatformView;
+    layer.platform_view = &pv;
+    layer.offset = FlutterPoint{0.0, 0.0};
+    layer.size =
+        FlutterSize{static_cast<double>(kViewW), static_cast<double>(kViewH)};
+    const FlutterLayer* layers[] = {&layer};
+    return comp_->PresentLayers(layers, 1);
+  }
+
+  static bool Readable(int fd) {
+    pollfd pfd{fd, POLLIN, 0};
+    return ::poll(&pfd, 1, 0) == 1 && (pfd.revents & POLLIN) != 0;
+  }
+
+  static constexpr uint32_t kViewW = 128;
+  static constexpr uint32_t kViewH = 128;
+  DrmCompositor* comp_{nullptr};
+  FakeProducer producer_;
+};
+
+// Each layer of a view is scanned out on a plane of its own, with its own
+// crop, place and rotation -- read back from KMS, not from the compositor.
+TEST_F(PvHostVkmsPlanes, EachLayerOfAViewGetsItsOwnPlane) {
+  if (!AnyPlaneRotates(card_.path)) {
+    GTEST_SKIP() << "no plane on this vkms has a rotation property";
+  }
+  const int fd = display_->SharedDevice()->fd();
+  GbmSolidBuffer bottom;
+  GbmSolidBuffer top;
+  ASSERT_TRUE(bottom.Create(fd, kViewW, kViewH, 0xFF1E7A46u));
+  ASSERT_TRUE(top.Create(fd, 64, 32, 0xFF7A1E46u));
+
+  IhsFrame f0 = FrameOf(bottom, 0);
+  IhsFrame f1 = FrameOf(top, 1);
+  IhsLayer layers[2] = {LayerOf(&f0, 10), LayerOf(&f1, 11)};
+  // The top layer shows a 48x24 crop of its buffer at (4, 2), rotated: at 90
+  // degrees that is a 24x48 rect, placed at (16, 8) within the view.
+  layers[1].src_x = 4 << 16;
+  layers[1].src_y = 2 << 16;
+  layers[1].src_w = 48U << 16U;
+  layers[1].src_h = 24U << 16U;
+  layers[1].dst_x = 16;
+  layers[1].dst_y = 8;
+  layers[1].dst_w = 24;
+  layers[1].dst_h = 48;
+  layers[1].transform = IHS_TRANSFORM_90;
+  int release[2] = {-1, -1};
+  ASSERT_EQ(ihs_pv_submit_layers(producer_.view, layers, 2, 1, release),
+            IHS_PV_OK);
+  for (int& r : release) {
+    if (r >= 0) {
+      ::close(r);
+    }
+  }
+  ASSERT_TRUE(Present());
+
+  const std::vector<PlaneState> planes = ActivePlanes(card_.path);
+  ASSERT_EQ(planes.size(), 2U)
+      << "the view's two layers should be on two planes, and nothing else";
+  const auto whole =
+      std::find_if(planes.begin(), planes.end(), [](const PlaneState& p) {
+        return p.crtc_w == kViewW && p.crtc_h == kViewH;
+      });
+  const auto placed = std::find_if(
+      planes.begin(), planes.end(),
+      [](const PlaneState& p) { return p.crtc_w == 24 && p.crtc_h == 48; });
+  ASSERT_NE(whole, planes.end()) << "the bottom layer is not the whole view";
+  ASSERT_NE(placed, planes.end()) << "the top layer is not where it was put";
+  EXPECT_EQ(whole->src_w, uint64_t{kViewW} << 16U);
+  EXPECT_EQ(whole->src_h, uint64_t{kViewH} << 16U);
+  EXPECT_EQ(placed->crtc_x, 16);
+  EXPECT_EQ(placed->crtc_y, 8);
+  EXPECT_EQ(placed->src_x, uint64_t{4} << 16U);
+  EXPECT_EQ(placed->src_y, uint64_t{2} << 16U);
+  EXPECT_EQ(placed->src_w, uint64_t{48} << 16U);
+  EXPECT_EQ(placed->src_h, uint64_t{24} << 16U);
+  // Undoing a producer's counter-clockwise quarter turn is a clockwise one.
+  EXPECT_EQ(placed->rotation, static_cast<uint64_t>(DRM_MODE_ROTATE_270));
+}
+
+// A retired id submitted again for new memory scans out that memory -- the
+// plane path's framebuffer cache is keyed by generation, not by id alone --
+// and a late release of the old memory does not hand the new frame back while
+// it is on screen.
+TEST_F(PvHostVkmsPlanes, AReusedRetiredIdScansOutItsNewMemory) {
+  const int fd = display_->SharedDevice()->fd();
+  GbmSolidBuffer first;
+  GbmSolidBuffer second;
+  ASSERT_TRUE(first.Create(fd, kViewW, kViewH, 0xFF1E7A46u));
+  ASSERT_TRUE(second.Create(fd, kViewW, kViewH, 0xFF7A1E46u));
+
+  const auto submit = [&](const GbmSolidBuffer& buffer, int* release) {
+    IhsFrame f = FrameOf(buffer, 5);
+    IhsLayer layer = LayerOf(&f, 1);
+    return ihs_pv_submit_layers(producer_.view, &layer, 1, 0, release);
+  };
+
+  int first_release = -1;
+  ASSERT_EQ(submit(first, &first_release), IHS_PV_OK);
+  ASSERT_TRUE(Present());
+  std::vector<PlaneState> planes = ActivePlanes(card_.path);
+  ASSERT_EQ(planes.size(), 1U);
+  const uint32_t first_fb = planes[0].fb_id;
+
+  ASSERT_EQ(ihs_pv_retire_buffer(producer_.view, 5), IHS_PV_OK);
+  int second_release = -1;
+  ASSERT_EQ(submit(second, &second_release), IHS_PV_OK);
+  // One present places the new memory and displaces the old; the old memory's
+  // release arrives a present or two later, off the flip that retired it.
+  // Several, so it has certainly been and gone.
+  for (int i = 0; i < 6; ++i) {
+    ASSERT_TRUE(Present());
+  }
+
+  planes = ActivePlanes(card_.path);
+  ASSERT_EQ(planes.size(), 1U);
+  EXPECT_NE(planes[0].fb_id, first_fb)
+      << "the reused id is still scanned out through the framebuffer of the "
+         "memory it used to name";
+  if (second_release >= 0) {
+    EXPECT_FALSE(Readable(second_release))
+        << "the new frame was handed back while it is on the plane";
+  }
+
+  for (const int r : {first_release, second_release}) {
+    if (r >= 0) {
+      ::close(r);
+    }
+  }
 }
 
 }  // namespace

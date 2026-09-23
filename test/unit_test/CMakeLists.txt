@@ -175,6 +175,7 @@ endif ()
 add_subdirectory(output_resolver-test)
 add_subdirectory(ihs_pv-test)
 add_subdirectory(layer_geometry-test)
+add_subdirectory(layer_scanout-test)
 # GlCompositor exists wherever an EGL backend is built.
 if (BUILD_COMPOSITOR AND (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_DRM_KMS_EGL))
     add_subdirectory(layer_draw_gl-test)

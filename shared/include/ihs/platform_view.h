@@ -670,7 +670,7 @@ IHS_EXPORT int ihs_pv_submit(IhsPlatformView* view,
                              int* out_release_fence_fd);
 
 /*
- * Tell the registry that @buffer_id will not be submitted again for @view, so
+ * Tell the registry that @view is done with the dma-buf @buffer_id names, so
  * it can drop what it cached for that buffer: the VkImage or GL texture the
  * dma-buf was imported into, and the duplicate fds kept for direct scanout.
  *
@@ -688,10 +688,14 @@ IHS_EXPORT int ihs_pv_submit(IhsPlatformView* view,
  * still bind them have retired. Retiring an id the view never saw, or one
  * already retired, is a no-op.
  *
- * Do not submit a retired id again. On the drm-kms backends the framebuffer
- * a buffer was scanned out through is cached separately, keyed by the same
- * id, and is not yet dropped by this call (that cache is bounded on its own),
- * so a re-used id could reach a plane through the stale framebuffer.
+ * A retired id may be submitted again, for the same dma-buf or a different
+ * one: it is imported afresh either way, as if never seen. The drm-kms
+ * backends' framebuffer caches go the same way -- the plane path keys them on
+ * the id and how many times it has been retired, and drops a retired
+ * buffer's framebuffer once no plane still scans it out. (On a host with
+ * 32-bit pointers there is no room for that count, so there a reused id is
+ * composited rather than scanned out.) Allowed since ABI 1.11; against an
+ * older library, do not submit a retired id again.
  *
  * Callable from any thread, like ihs_pv_submit and under the same dispose
  * rule: no call may be in flight once IhsPvCallbacks::dispose has returned.

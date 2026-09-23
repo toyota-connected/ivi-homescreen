@@ -18,6 +18,7 @@
 
 #include <unistd.h>
 #include <cstdint>
+#include <vector>
 
 #include <shell/platform/embedder/embedder.h>
 
@@ -249,7 +250,42 @@ class ICompositorSurface {
     // slot). The compositor hands it back via OnScanoutRelease when the plane
     // stops scanning the frame out, so the producer can reuse that slot.
     uint32_t buffer_id{0};
+    // Which dma-buf @c buffer_id names. A producer may retire an id and later
+    // submit it again for different memory; each such reuse is a new
+    // generation. The plane path caches a framebuffer per buffer, so it keys
+    // that cache on @c ScanoutKey(buffer_id, generation) rather than the id,
+    // and a reused id is imported afresh instead of scanning out through the
+    // framebuffer of the memory it used to name.
+    uint32_t generation{0};
   };
+
+  /**
+   * @brief The key a plane path caches a buffer's framebuffer under, and hands
+   * back through @c OnScanoutKeyRelease.
+   *
+   * The buffer_id in the low 32 bits and the generation above them. Where a
+   * pointer is 32 bits wide there is no room for the generation, so the key is
+   * the id alone (see @c kScanoutKeyHasGeneration), and a surface there must
+   * not offer a buffer past generation 0 to a plane: its key would name the
+   * old memory's framebuffer.
+   */
+  static constexpr bool kScanoutKeyHasGeneration =
+      sizeof(std::uintptr_t) >= sizeof(uint64_t);
+  [[nodiscard]] static constexpr std::uintptr_t ScanoutKey(
+      const uint32_t buffer_id,
+      const uint32_t generation) {
+    if constexpr (kScanoutKeyHasGeneration) {
+      return static_cast<std::uintptr_t>(
+          (static_cast<uint64_t>(generation) << 32U) | buffer_id);
+    } else {
+      (void)generation;
+      return static_cast<std::uintptr_t>(buffer_id);
+    }
+  }
+  [[nodiscard]] static constexpr uint32_t ScanoutKeyBufferId(
+      const std::uintptr_t key) {
+    return static_cast<uint32_t>(key & 0xffffffffU);
+  }
 
   /**
    * @brief Why a present has no dma-buf for the plane, or that it has one.
@@ -384,6 +420,33 @@ class ICompositorSurface {
   virtual void OnScanoutRelease(uint32_t /*buffer_id*/) {}
 
   /**
+   * @brief The plane path's form of @c OnScanoutRelease: the frame it stopped
+   * scanning out, named by the @c ScanoutKey it was cached under.
+   *
+   * The key says which generation of the buffer left the plane, which the id
+   * alone cannot: once a retired id has been submitted again, a late release
+   * of its old memory must not hand back the new frame. The default drops the
+   * generation and forwards, which is right for a surface that never reuses a
+   * retired id.
+   */
+  virtual void OnScanoutKeyRelease(const std::uintptr_t key) {
+    OnScanoutRelease(ScanoutKeyBufferId(key));
+  }
+
+  /**
+   * @brief Keys of buffers the producer has retired since the last call, so the
+   * plane path can drop the framebuffers it cached for them.
+   *
+   * Nothing depends on this for correctness -- a reused id has a new key -- but
+   * without it a retired buffer's framebuffer and dma-buf stay referenced until
+   * the cache's own bound evicts them. The default has nothing to report.
+   * Compositor thread.
+   */
+  [[nodiscard]] virtual std::vector<std::uintptr_t> TakeRetiredScanoutKeys() {
+    return {};
+  }
+
+  /**
    * @brief Confirm the frame @c GetDmabuf handed out was taken for scanout.
    *
    * @c GetDmabuf is deliver-once, but handing a frame over is not the same as
@@ -460,10 +523,11 @@ class ICompositorSurface {
   // say exactly that, so a surface that never overrides them is one full-rect
   // layer, drawn the way it always was.
   //
-  // The GPU composite paths draw every layer through these. The direct-scanout
-  // path still takes only GetDmabuf, which is layer 0 drawn whole: a surface
-  // with more than one layer, or a layer 0 that is cropped, placed or rotated,
-  // reports kNotScanoutCapable there and is composited.
+  // The GPU composite paths draw every layer through these, and the plane
+  // paths place each layer on a plane of its own through GetLayerDmabuf.
+  // GetDmabuf is the single-layer form: layer 0 drawn whole, so a surface with
+  // more than one layer, or a layer 0 that is cropped, placed or rotated,
+  // reports kNotScanoutCapable there.
 
   // Where layer @p index's pixels come from and where they land.
   struct LayerGeometry {
@@ -510,6 +574,39 @@ class ICompositorSurface {
     uint32_t buffer_id{0};
     LayerGeometry geometry;
   };
+
+  // A layer's dma-buf, for the plane paths, with what places it.
+  struct LayerDmabuf {
+    // Filled, and owned by the caller, only when GetLayerDmabuf returns kFrame.
+    Dmabuf dmabuf;
+    // Names the layer across presents, so it keeps its plane while the layers
+    // around it come and go.
+    uint32_t layer_id{0};
+    // The geometry of the layer's newest frame, and the size of its buffer,
+    // whichever state is returned: a layer with no new frame is still placed
+    // every present, since the view it sits in can move.
+    LayerGeometry geometry;
+    uint32_t buffer_width{0};
+    uint32_t buffer_height{0};
+  };
+
+  // Layer @p index's newest frame as a dma-buf for a plane: GetDmabuf, per
+  // layer, with the same deliver-once rule and the same answer owed for a
+  // kFrame (AckDmabufScanout or OnScanoutRelease with its buffer_id). The
+  // default is GetDmabuf for layer 0 and kNotScanoutCapable for the rest.
+  // Compositor thread.
+  [[nodiscard]] virtual DmabufState GetLayerDmabuf(const size_t index,
+                                                   LayerDmabuf* out) const {
+    if (index != 0 || out == nullptr) {
+      return DmabufState::kNotScanoutCapable;
+    }
+    const DmabufState state = GetDmabuf(&out->dmabuf);
+    out->layer_id = 0;
+    out->geometry = {};
+    out->buffer_width = out->dmabuf.width;
+    out->buffer_height = out->dmabuf.height;
+    return state;
+  }
 
   // How many layers to draw this present. At least 1 for any surface that
   // draws; 0 draws nothing.
