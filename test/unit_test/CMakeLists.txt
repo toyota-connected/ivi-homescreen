@@ -174,6 +174,15 @@ if (ENABLE_OSGI)
 endif ()
 add_subdirectory(output_resolver-test)
 add_subdirectory(ihs_pv-test)
+add_subdirectory(layer_geometry-test)
+# GlCompositor exists wherever an EGL backend is built.
+if (BUILD_COMPOSITOR AND (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_DRM_KMS_EGL))
+    add_subdirectory(layer_draw_gl-test)
+endif ()
+# LayerCompositor exists wherever a Vulkan backend is built.
+if (BUILD_COMPOSITOR AND (BUILD_BACKEND_WAYLAND_VULKAN OR BUILD_BACKEND_DRM_KMS_VULKAN))
+    add_subdirectory(layer_draw_vk-test)
+endif ()
 add_subdirectory(deferred_retire_set-test)
 # The EGL dma-buf importer only exists when an EGL backend is built.
 if (BUILD_COMPOSITOR AND (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_DRM_KMS_EGL))
