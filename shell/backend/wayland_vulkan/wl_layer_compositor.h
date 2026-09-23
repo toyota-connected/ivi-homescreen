@@ -25,6 +25,8 @@
 
 #include <vulkan/vulkan.h>
 
+#include "view/layer_geometry.h"
+
 namespace wl_vulkan {
 
 // Draws the Flutter layer stack into a dma-buf slot image with src-over alpha
@@ -71,10 +73,15 @@ class LayerCompositor {
                   uint32_t height,
                   uint64_t frame);
 
-  // Blend one layer: sample all of @p src_image (already in
-  // SHADER_READ_ONLY_OPTIMAL, of format @p src_format — the view must match the
-  // image's own format) into the destination rect (pixels, top-left origin —
-  // matches the blit path, no Y flip).
+  // Blend one layer: sample @p src_image (already in SHADER_READ_ONLY_OPTIMAL,
+  // of format @p src_format — the view must match the image's own format) into
+  // the destination rect (pixels, top-left origin — matches the blit path, no Y
+  // flip).
+  //
+  // @p uv maps the destination rect to texture coordinates, which is how a
+  // source crop and a buffer transform are drawn; the default is the whole
+  // image, upright. @p opaque draws alpha as 1, for a buffer whose alpha
+  // channel is undefined (XRGB).
   //
   // A planar-YUV @p src_format is sampled through a VkSamplerYcbcrConversion of
   // @p ycbcr_model / @p ycbcr_range (built and cached on first use); packed RGB
@@ -88,7 +95,9 @@ class LayerCompositor {
                  int32_t dst_x,
                  int32_t dst_y,
                  int32_t dst_w,
-                 int32_t dst_h);
+                 int32_t dst_h,
+                 const UvAffine& uv = UvAffine{},
+                 bool opaque = false);
 
   static void EndFrame(VkCommandBuffer cmd);
 

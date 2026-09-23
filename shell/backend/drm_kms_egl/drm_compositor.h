@@ -291,6 +291,27 @@ class DrmCompositor : public IFlipSink {
   // the definition for why the GL path needs this at all, and why it is the
   // sampled frame rather than the one it displaced.
   void NoteGlComposited(const std::shared_ptr<ICompositorSurface>& surface);
+  // The same for one layer of a layered surface, naming its frame directly.
+  void NoteGlComposited(const std::shared_ptr<ICompositorSurface>& surface,
+                        uint32_t buffer_id);
+
+  // GL-composite every layer of a layered platform view into @p target_fbo --
+  // any surface GetLayerCount != 1, or whose one layer is cropped, placed,
+  // rotated or opaque -- queueing each drawn frame's release. False when there
+  // was nothing to draw, in which case the caller treats the view as it would
+  // a surface with no texture.
+  bool CompositeLayeredSurface(
+      GLuint target_fbo,
+      const std::shared_ptr<ICompositorSurface>& surface,
+      const FlutterLayer* layer,
+      GLint fb_height,
+      bool target_top_first,
+      bool blend);
+
+  // True for a surface the single-texture code paths draw as they always
+  // have: one layer, whole across the view, not opaque. Imports the layer's
+  // latest frame (it calls GetLayerGlTexture), so raster thread only.
+  static bool IsSingleWholeLayer(const ICompositorSurface& surface);
 
   // Post-first-commit sanity probe. Confirms the kernel actually honored
   // the modeset by reading CRTC.ACTIVE + primary plane.FB_ID via

@@ -20,7 +20,9 @@
 #include <asio/post.hpp>
 #include <mutex>
 
+#include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <optional>
@@ -2545,7 +2547,8 @@ bool WaylandVulkanBackend::PresentPlatformView(const FlutterLayer* layer) {
   return surface ? surface->OnPresent(layer) : true;
 }
 
-void WaylandVulkanBackend::CollectAcquireWait(ICompositorSurface* surface) {
+void WaylandVulkanBackend::CollectAcquireWait(ICompositorSurface* surface,
+                                              const size_t layer) {
   // Every composited platform view is handed a release fence (so the producer /
   // host can tell when this frame is done reading it). Create the shared,
   // SYNC_FD-exportable release semaphore lazily on first use.
@@ -2566,7 +2569,7 @@ void WaylandVulkanBackend::CollectAcquireWait(ICompositorSurface* surface) {
     frame_pv_surfaces_.push_back(surface);
   }
 
-  const int fd = surface->TakeAcquireFenceFd();
+  const int fd = surface->TakeLayerAcquireFenceFd(layer);
   if (fd < 0) {
     return;  // producer stalled synchronously (or no SYNC_FD support)
   }
@@ -2675,9 +2678,16 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
     VkSamplerYcbcrModelConversion ycbcr_model{
         VK_SAMPLER_YCBCR_MODEL_CONVERSION_RGB_IDENTITY};
     VkSamplerYcbcrRange ycbcr_range{VK_SAMPLER_YCBCR_RANGE_ITU_NARROW};
+    // A platform-view layer's crop, placement and orientation, and whether it
+    // covers its rect. The defaults draw the whole image, blended.
+    UvAffine uv{};
+    bool opaque{false};
   };
   std::vector<Draw> draws;
   draws.reserve(count);
+  // Images already moved to SHADER_READ_ONLY this frame, so a buffer shown by
+  // two layers is not given a second barrier from a layout it has left.
+  std::vector<VkImage> transitioned;
 
   const auto barrier =
       [&](VkImage image, VkImageLayout old_layout, VkImageLayout new_layout,
@@ -2740,39 +2750,55 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
       if (!surface) {
         continue;
       }
-      int32_t pw = 0;
-      int32_t ph = 0;
-      void* vk_img = surface->GetVulkanImage(&pw, &ph);
-      if (vk_img == nullptr || pw <= 0 || ph <= 0) {
-        continue;  // GL / subsurface platform view — nothing to sample
+      // Every layer of the view, bottom to top, each cropped, placed within
+      // the view and oriented as the producer asked (ihs_pv_submit_layers);
+      // a plain producer is one layer drawn whole.
+      const RectI view{dx, dy, dw, dh};
+      for (size_t li = 0, n = surface->GetLayerCount(); li < n; ++li) {
+        const auto img = surface->GetLayerVulkanImage(li);
+        if (img.image == nullptr || img.width <= 0 || img.height <= 0) {
+          continue;  // GL / subsurface platform view — nothing to sample
+        }
+        const auto& g = img.geometry;
+        LayerPlacement place;
+        if (!PlaceLayer(g.src, g.dst, g.transform, g.opaque,
+                        static_cast<uint32_t>(img.width),
+                        static_cast<uint32_t>(img.height), view, &place)) {
+          continue;  // entirely outside the view
+        }
+        auto src = reinterpret_cast<VkImage>(img.image);
+        // The image's real format: 0 keeps the historical B8G8R8A8_UNORM
+        // contract (RGB producers); a planar YUV producer reports its format
+        // plus the color model/range for the compositor's
+        // VkSamplerYcbcrConversion.
+        const VkFormat src_format = img.format != 0
+                                        ? static_cast<VkFormat>(img.format)
+                                        : VK_FORMAT_B8G8R8A8_UNORM;
+        // Wait the producer's acquire fence (if any) in this frame's submit.
+        CollectAcquireWait(surface.get(), li);
+        const auto cur =
+            static_cast<VkImageLayout>(surface->GetLayerVulkanImageLayout(li));
+        if (cur != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL &&
+            std::find(transitioned.begin(), transitioned.end(), src) ==
+                transitioned.end()) {
+          const bool from_preinit = cur == VK_IMAGE_LAYOUT_PREINITIALIZED;
+          barrier(src, cur, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                  from_preinit ? VK_ACCESS_HOST_WRITE_BIT : 0,
+                  from_preinit ? VK_PIPELINE_STAGE_HOST_BIT
+                               : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                  VK_ACCESS_SHADER_READ_BIT,
+                  VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+          transitioned.push_back(src);
+        }
+        surface->SetLayerVulkanImageLayout(
+            li, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        draws.push_back(
+            {src, src_format, place.dst.x, place.dst.y, place.dst.w,
+             place.dst.h, nullptr,
+             static_cast<VkSamplerYcbcrModelConversion>(img.ycbcr_model),
+             static_cast<VkSamplerYcbcrRange>(img.ycbcr_range), place.uv,
+             place.opaque});
       }
-      auto src = reinterpret_cast<VkImage>(vk_img);
-      // The image's real format: 0 keeps the historical B8G8R8A8_UNORM contract
-      // (RGB producers); a planar YUV producer reports its format plus the
-      // color model/range for the compositor's VkSamplerYcbcrConversion.
-      const uint32_t pv_fmt = surface->GetVulkanImageFormat();
-      const VkFormat src_format = pv_fmt != 0 ? static_cast<VkFormat>(pv_fmt)
-                                              : VK_FORMAT_B8G8R8A8_UNORM;
-      const auto ycbcr_model = static_cast<VkSamplerYcbcrModelConversion>(
-          surface->GetVulkanYcbcrModel());
-      const auto ycbcr_range =
-          static_cast<VkSamplerYcbcrRange>(surface->GetVulkanYcbcrRange());
-      // Wait the producer's acquire fence (if any) in this frame's submit.
-      CollectAcquireWait(surface.get());
-      const auto cur =
-          static_cast<VkImageLayout>(surface->GetVulkanImageLayout());
-      if (cur != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-        const bool from_preinit = cur == VK_IMAGE_LAYOUT_PREINITIALIZED;
-        barrier(src, cur, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                from_preinit ? VK_ACCESS_HOST_WRITE_BIT : 0,
-                from_preinit ? VK_PIPELINE_STAGE_HOST_BIT
-                             : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                VK_ACCESS_SHADER_READ_BIT,
-                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
-        surface->SetVulkanImageLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-      }
-      draws.push_back(
-          {src, src_format, dx, dy, dw, dh, nullptr, ycbcr_model, ycbcr_range});
       if (const int64_t us = ivi::pv_latency::FirstCompositeLatencyUs(
               layer->platform_view->identifier);
           us >= 0) {
@@ -2791,7 +2817,8 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
   if (layer_compositor_->BeginFrame(cmd, target_view, width, height, frame)) {
     for (const Draw& dr : draws) {
       layer_compositor_->DrawLayer(cmd, dr.src, dr.format, dr.ycbcr_model,
-                                   dr.ycbcr_range, dr.dx, dr.dy, dr.dw, dr.dh);
+                                   dr.ycbcr_range, dr.dx, dr.dy, dr.dw, dr.dh,
+                                   dr.uv, dr.opaque);
     }
     wl_vulkan::LayerCompositor::EndFrame(cmd);
   } else {
@@ -2830,100 +2857,139 @@ void WaylandVulkanBackend::BlitPlatformViewVulkan(VkCommandBuffer cmd,
   if (!surface) {
     return;
   }
-  int32_t pw = 0;
-  int32_t ph = 0;
-  void* vk_img = surface->GetVulkanImage(&pw, &ph);
-  if (vk_img == nullptr || pw <= 0 || ph <= 0) {
-    return;  // GL / subsurface platform view — nothing to blit here.
-  }
-  auto src = reinterpret_cast<VkImage>(vk_img);
-  // Wait the producer's acquire fence (if any) in this frame's submit.
-  CollectAcquireWait(surface.get());
-  const bool external = surface->NeedsExternalQueueAcquire();
-
-  if (external) {
-    // An imported dma-buf the producer rewrites every frame through an aliased
-    // image. Acquire ownership from VK_QUEUE_FAMILY_EXTERNAL and move it to a
-    // transfer source each frame (the producer released it to EXTERNAL after
-    // its render); it is handed back after the blit below.
-    VkImageMemoryBarrier acq{};
-    acq.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    acq.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    acq.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    acq.srcQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL;
-    acq.dstQueueFamilyIndex = queue_family_index_;
-    acq.srcAccessMask = 0;  // the release on the producer side owns src access
-    acq.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    acq.image = src;
-    acq.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
-                             nullptr, 1, &acq);
-  } else {
-    // The plugin's static image starts PREINITIALIZED (host-written, contents
-    // preserved). Transition it to a transfer source ONCE — a static image left
-    // in TRANSFER_SRC must not be re-transitioned every frame (that both
-    // corrupts the read and races the prior frame's blit). The surface tracks
-    // the layout.
-    const auto cur =
-        static_cast<VkImageLayout>(surface->GetVulkanImageLayout());
-    if (cur != VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
-      const bool from_preinit = cur == VK_IMAGE_LAYOUT_PREINITIALIZED;
-      VkImageMemoryBarrier to_src{};
-      to_src.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-      to_src.oldLayout = cur;
-      to_src.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-      to_src.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-      to_src.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-      to_src.image = src;
-      to_src.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-      // PREINITIALIZED carries host writes; make them visible to the transfer.
-      to_src.srcAccessMask = from_preinit ? VK_ACCESS_HOST_WRITE_BIT
-                                          : VK_ACCESS_TRANSFER_WRITE_BIT;
-      to_src.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-      d().vkCmdPipelineBarrier(cmd,
-                               from_preinit ? VK_PIPELINE_STAGE_HOST_BIT
-                                            : VK_PIPELINE_STAGE_TRANSFER_BIT,
-                               VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
-                               nullptr, 1, &to_src);
-      surface->SetVulkanImageLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+  // Each layer of the view, bottom to top. A blit crops and scales, and can
+  // mirror by reversing edges, but cannot rotate: a layer turned a quarter is
+  // skipped here. This path only runs when the layer compositor could not be
+  // built; that one draws every transform.
+  const RectI view{static_cast<int32_t>(layer->offset.x),
+                   static_cast<int32_t>(layer->offset.y),
+                   static_cast<int32_t>(layer->size.width),
+                   static_cast<int32_t>(layer->size.height)};
+  for (size_t li = 0, n = surface->GetLayerCount(); li < n; ++li) {
+    const auto img = surface->GetLayerVulkanImage(li);
+    if (img.image == nullptr || img.width <= 0 || img.height <= 0) {
+      continue;  // GL / subsurface platform view — nothing to blit here.
     }
-  }
+    const auto& g = img.geometry;
+    if (TransformSwapsAxes(g.transform)) {
+      static bool warned = false;
+      if (!warned) {
+        warned = true;
+        ihs::log::warn(
+            "[WaylandVulkanBackend] a platform-view layer is rotated a quarter "
+            "turn, which the blit fallback cannot draw; it is skipped");
+      }
+      continue;
+    }
+    RectF crop = g.src;
+    RectI place = g.dst;
+    if (place.w <= 0 || place.h <= 0) {
+      place = {0, 0, view.w, view.h};
+    }
+    if (!ClipLayerToView(&crop, &place, static_cast<uint32_t>(img.width),
+                         static_cast<uint32_t>(img.height), g.transform, view.w,
+                         view.h)) {
+      continue;
+    }
+    const auto sx0 = static_cast<int32_t>(std::lround(crop.x));
+    const auto sy0 = static_cast<int32_t>(std::lround(crop.y));
+    const auto sx1 = static_cast<int32_t>(std::lround(crop.x + crop.w));
+    const auto sy1 = static_cast<int32_t>(std::lround(crop.y + crop.h));
+    const bool mirror_x = g.transform == BufferTransform::kFlipped ||
+                          g.transform == BufferTransform::k180;
+    const bool mirror_y = g.transform == BufferTransform::kFlipped180 ||
+                          g.transform == BufferTransform::k180;
+    auto src = reinterpret_cast<VkImage>(img.image);
+    // Wait the producer's acquire fence (if any) in this frame's submit.
+    CollectAcquireWait(surface.get(), li);
+    const bool external = surface->NeedsExternalQueueAcquire();
 
-  // Blit the full platform-view image into the slot at the layer rect (scaling
-  // to size). dst is already in TRANSFER_DST_OPTIMAL for the backing-store
-  // blits in the same command buffer.
-  const auto dx = static_cast<int32_t>(layer->offset.x);
-  const auto dy = static_cast<int32_t>(layer->offset.y);
-  const auto dw = static_cast<int32_t>(layer->size.width);
-  const auto dh = static_cast<int32_t>(layer->size.height);
-  VkImageBlit region{};
-  region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-  region.srcOffsets[0] = {0, 0, 0};
-  region.srcOffsets[1] = {pw, ph, 1};
-  region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-  region.dstOffsets[0] = {dx, dy, 0};
-  region.dstOffsets[1] = {dx + dw, dy + dh, 1};
-  d().vkCmdBlitImage(cmd, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst,
-                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region,
-                     VK_FILTER_LINEAR);
+    if (external) {
+      // An imported dma-buf the producer rewrites every frame through an
+      // aliased image. Acquire ownership from VK_QUEUE_FAMILY_EXTERNAL and move
+      // it to a transfer source each frame (the producer released it to
+      // EXTERNAL after its render); it is handed back after the blit below.
+      VkImageMemoryBarrier acq{};
+      acq.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+      acq.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+      acq.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+      acq.srcQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL;
+      acq.dstQueueFamilyIndex = queue_family_index_;
+      acq.srcAccessMask =
+          0;  // the release on the producer side owns src access
+      acq.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+      acq.image = src;
+      acq.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+      d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                               VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                               nullptr, 1, &acq);
+    } else {
+      // The plugin's static image starts PREINITIALIZED (host-written, contents
+      // preserved). Transition it to a transfer source ONCE — a static image
+      // left in TRANSFER_SRC must not be re-transitioned every frame (that both
+      // corrupts the read and races the prior frame's blit). The surface tracks
+      // the layout.
+      const auto cur =
+          static_cast<VkImageLayout>(surface->GetLayerVulkanImageLayout(li));
+      if (cur != VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
+        const bool from_preinit = cur == VK_IMAGE_LAYOUT_PREINITIALIZED;
+        VkImageMemoryBarrier to_src{};
+        to_src.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        to_src.oldLayout = cur;
+        to_src.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        to_src.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        to_src.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        to_src.image = src;
+        to_src.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        // PREINITIALIZED carries host writes; make them visible to the
+        // transfer.
+        to_src.srcAccessMask = from_preinit ? VK_ACCESS_HOST_WRITE_BIT
+                                            : VK_ACCESS_TRANSFER_WRITE_BIT;
+        to_src.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        d().vkCmdPipelineBarrier(cmd,
+                                 from_preinit ? VK_PIPELINE_STAGE_HOST_BIT
+                                              : VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                 VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr,
+                                 0, nullptr, 1, &to_src);
+        surface->SetLayerVulkanImageLayout(
+            li, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+      }
+    }
 
-  if (external) {
-    // Release ownership back to VK_QUEUE_FAMILY_EXTERNAL so the producer can
-    // rewrite the buffer for the next frame.
-    VkImageMemoryBarrier rel{};
-    rel.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    rel.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    rel.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    rel.srcQueueFamilyIndex = queue_family_index_;
-    rel.dstQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL;
-    rel.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    rel.dstAccessMask = 0;  // the acquire on the producer side owns dst access
-    rel.image = src;
-    rel.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0,
-                             nullptr, 0, nullptr, 1, &rel);
+    // Blit the layer's crop into its place in the slot (scaling to size); a
+    // mirrored transform reverses the source edges. dst is already in
+    // TRANSFER_DST_OPTIMAL for the backing-store blits in the same command
+    // buffer.
+    VkImageBlit region{};
+    region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    region.srcOffsets[0] = {mirror_x ? sx1 : sx0, mirror_y ? sy1 : sy0, 0};
+    region.srcOffsets[1] = {mirror_x ? sx0 : sx1, mirror_y ? sy0 : sy1, 1};
+    region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    region.dstOffsets[0] = {view.x + place.x, view.y + place.y, 0};
+    region.dstOffsets[1] = {view.x + place.x + place.w,
+                            view.y + place.y + place.h, 1};
+    d().vkCmdBlitImage(cmd, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst,
+                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region,
+                       VK_FILTER_LINEAR);
+
+    if (external) {
+      // Release ownership back to VK_QUEUE_FAMILY_EXTERNAL so the producer can
+      // rewrite the buffer for the next frame.
+      VkImageMemoryBarrier rel{};
+      rel.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+      rel.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+      rel.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+      rel.srcQueueFamilyIndex = queue_family_index_;
+      rel.dstQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL;
+      rel.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+      rel.dstAccessMask =
+          0;  // the acquire on the producer side owns dst access
+      rel.image = src;
+      rel.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+      d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                               VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0,
+                               nullptr, 0, nullptr, 1, &rel);
+    }
   }
 }
 

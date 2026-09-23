@@ -247,6 +247,58 @@ extern "C" int ihs_pv_retire_buffer(IhsPlatformView* view, uint32_t buffer_id) {
   return h->retire_buffer(h->user_data, view, buffer_id);
 }
 
+// The fields of IhsLayer as first published; a caller built against that
+// header passes exactly this much.
+constexpr size_t kIhsLayerMinSize =
+    offsetof(IhsLayer, reserved) + sizeof(IhsLayer::reserved);
+
+extern "C" int ihs_pv_submit_layers(IhsPlatformView* view,
+                                    const IhsLayer* layers,
+                                    size_t layer_count,
+                                    uint64_t seq,
+                                    int* out_release_fence_fds) {
+  // Malformed: nothing in it can be trusted to close from, so this closes
+  // nothing and leaves every fd with the caller -- the one exception to the
+  // ownership rule, the same one ihs_pv_submit makes.
+  if (view == nullptr || (layers == nullptr && layer_count != 0) ||
+      layer_count > IHS_PV_MAX_LAYERS) {
+    return IHS_PV_ERR_INVALID;
+  }
+  for (size_t i = 0; i < layer_count; ++i) {
+    // Every frame of a list carries its buffer_id: the shell keys each layer's
+    // import on it, and never synthesises one here.
+    if (layers[i].struct_size < kIhsLayerMinSize ||
+        layers[i].frame == nullptr ||
+        layers[i].frame->struct_size <
+            offsetof(IhsFrame, buffer_id) + sizeof(IhsFrame::buffer_id)) {
+      return IHS_PV_ERR_INVALID;
+    }
+  }
+  if (out_release_fence_fds != nullptr) {
+    for (size_t i = 0; i < layer_count; ++i) {
+      out_release_fence_fds[i] = -1;
+    }
+  }
+  const auto close_all = [&] {
+    for (size_t i = 0; i < layer_count; ++i) {
+      close_frame_fds(layers[i].frame, layers[i].acquire_fence_fd);
+    }
+  };
+  const IhsPvHost* h = host();
+  if (h == nullptr) {
+    close_all();
+    return IHS_PV_ERR_NO_REGISTRY;
+  }
+  constexpr size_t kNeeded =
+      offsetof(IhsPvHost, submit_layers) + sizeof(IhsPvHost::submit_layers);
+  if (h->struct_size < kNeeded || h->submit_layers == nullptr) {
+    close_all();
+    return IHS_PV_ERR_NO_BACKEND;
+  }
+  return h->submit_layers(h->user_data, view, layers, layer_count, seq,
+                          out_release_fence_fds);
+}
+
 extern "C" int ihs_pv_vulkan_context(IhsVulkanContext* out) {
   if (out == nullptr || out->struct_size == 0) {
     return IHS_PV_ERR_INVALID;
@@ -390,6 +442,7 @@ const IhsPlatformViewApi* platform_view_api() noexcept {
       &ihs_pv_grant_shm_fd,       &ihs_pv_submit,
       &ihs_pv_assets_path,        &ihs_pv_post_platform_task,
       &ihs_pv_is_platform_thread, &ihs_pv_retire_buffer,
+      &ihs_pv_submit_layers,
   };
   return &api;
 }

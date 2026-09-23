@@ -18,6 +18,12 @@
 
 #include <GLES2/gl2.h>
 
+#include <cstddef>
+#include <functional>
+
+#include "view/compositor_surface_interface.h"
+#include "view/layer_geometry.h"
+
 struct GlCaps;
 
 /**
@@ -75,6 +81,60 @@ class GlCompositor {
                       bool blend = false,
                       bool flip_y = false,
                       bool external = false);
+
+  /**
+   * @brief Draw a platform-view layer: @p tex sampled through @p uv into the
+   *        destination rect of @p dst_fbo.
+   *
+   * @p uv maps the destination rect to texture coordinates (see UvAffine: its
+   * t axis runs top to bottom, and v = 0 is the texture's first row), which is
+   * how a source crop and a buffer transform reach the draw. Always the quad
+   * path: a blit can neither crop through a transform nor sample an external
+   * image.
+   *
+   * @param dst_x,dst_y  Destination origin, OpenGL coordinates (bottom-left).
+   * @param opaque       Draw alpha as 1, for an XRGB-style buffer whose alpha
+   *                     channel is undefined, and a layer known to cover its
+   *                     rect. Blending still follows @p blend.
+   */
+  void CompositeLayerToFbo(GLuint dst_fbo,
+                           GLuint tex,
+                           bool external,
+                           const UvAffine& uv,
+                           GLint dst_x,
+                           GLint dst_y,
+                           GLsizei dst_w,
+                           GLsizei dst_h,
+                           bool blend,
+                           bool opaque);
+
+  /**
+   * @brief Draw every layer of @p surface, bottom to top, into its view rect.
+   *
+   * @param view        The view's rect on the target, in pixels with a
+   *                    top-left origin (the FlutterLayer's offset and size).
+   * @param fb_height   The target's height. Unused for a top-first target.
+   * @param target_top_first  The target is scanned out first row first, so
+   *                    GL's y = 0 is its top (an FBO fed to a KMS plane).
+   *                    False for a window's default framebuffer, where GL's
+   *                    bottom-left origin is the bottom.
+   * @param blend_first Whether the first layer drawn blends (something is
+   *                    already under it). Later layers blend unless opaque.
+   * @param on_drawn    Called for each layer drawn, e.g. to queue its release.
+   * @return            The number of layers drawn.
+   *
+   * Imports each layer's latest frame (GetLayerGlTexture), so it runs on the
+   * raster thread with the context current, like any texture composite.
+   */
+  size_t CompositeSurfaceLayers(
+      GLuint dst_fbo,
+      const ICompositorSurface& surface,
+      const RectI& view,
+      GLint fb_height,
+      bool target_top_first,
+      bool blend_first,
+      const std::function<void(const ICompositorSurface::GlLayerTexture&)>&
+          on_drawn = nullptr);
 
   // Thin wrapper: composite into the default framebuffer (FBO 0).
   void CompositeToDefault(GLuint src_fbo,
@@ -139,7 +199,8 @@ class GlCompositor {
                                 GLsizei dst_w,
                                 GLsizei dst_h,
                                 bool blend,
-                                bool flip_y);
+                                const UvAffine& uv,
+                                bool opaque);
   // @external selects the samplerExternalOES program and the
   // GL_TEXTURE_EXTERNAL_OES bind target, which planar YUV requires.
   void CompositeViaQuad(GLuint src_color_tex,
@@ -148,13 +209,25 @@ class GlCompositor {
                         GLsizei dst_w,
                         GLsizei dst_h,
                         bool blend,
-                        bool flip_y,
+                        const UvAffine& uv,
+                        bool opaque,
                         bool external);
+  // The texture coordinates the legacy flip_y flag stood for: a top-first
+  // texture needs none, a bottom-first one (a GL render target) a V flip.
+  static UvAffine UvForFlip(bool flip_y);
+  // Upload @p uv and @p opaque to a program's uniforms.
+  static void SetLayerUniforms(GLint uni_uv_u,
+                               GLint uni_uv_v,
+                               GLint uni_opaque,
+                               const UvAffine& uv,
+                               bool opaque);
   void EmitPersistentQuadState();
   void TearDownPersistentQuadState();
 
-  GLint uni_uv_y_scale_{-1};
-  GLint uni_uv_y_offset_{-1};
+  // u = dot(u_uv_u, (s, t, 1)), v = dot(u_uv_v, (s, t, 1)); see UvAffine.
+  GLint uni_uv_u_{-1};
+  GLint uni_uv_v_{-1};
+  GLint uni_opaque_{-1};
 
   // The external-sampler variant. A planar YUV dma-buf is bound to
   // GL_TEXTURE_EXTERNAL_OES and can only be read through this program;
@@ -163,6 +236,7 @@ class GlCompositor {
   GLint attr_pos_external_{-1};
   GLint attr_uv_external_{-1};
   GLint uni_tex_external_{-1};
-  GLint uni_uv_y_scale_external_{-1};
-  GLint uni_uv_y_offset_external_{-1};
+  GLint uni_uv_u_external_{-1};
+  GLint uni_uv_v_external_{-1};
+  GLint uni_opaque_external_{-1};
 };

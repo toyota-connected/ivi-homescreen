@@ -33,6 +33,22 @@ const auto& d() {
   return vk::detail::defaultDispatchLoaderDynamic;
 }
 
+// The per-draw push constants, laid out as the PC block in
+// shaders/composite.{vert,frag}: std430 puts each vec4 on a 16-byte boundary,
+// and the trailing float pads the block to 64 bytes, well inside the 128 every
+// device guarantees.
+struct LayerPush {
+  std::array<float, 4> rect;  // destination, NDC x0, y0, x1, y1
+  std::array<float, 4> uv_u;  // (a, c, tx, -)
+  std::array<float, 4> uv_v;  // (b, d, ty, -)
+  float opaque;
+  std::array<float, 3> pad;
+};
+static_assert(sizeof(LayerPush) == 64, "must match the shaders' PC block");
+
+constexpr VkShaderStageFlags kPushStages =
+    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+
 // Precompiled SPIR-V (glslc -O -mfmt=c shaders/composite.{vert,frag}).
 // Regenerate with the same command if the .glsl sources change.
 constexpr uint32_t kVertSpv[] =
@@ -228,11 +244,12 @@ std::unique_ptr<LayerCompositor> LayerCompositor::Create(VkDevice device,
     return nullptr;
   }
 
-  // Push constant: the destination rect in NDC (vec4).
+  // Push constants: destination rect, texture-coordinate affine and opaque
+  // flag (LayerPush), read by both stages.
   VkPushConstantRange pc{};
-  pc.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+  pc.stageFlags = kPushStages;
   pc.offset = 0;
-  pc.size = sizeof(float) * 4;
+  pc.size = sizeof(LayerPush);
   VkPipelineLayoutCreateInfo pl{};
   pl.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
   pl.setLayoutCount = 1;
@@ -438,7 +455,9 @@ void LayerCompositor::DrawLayer(VkCommandBuffer cmd,
                                 int32_t dst_x,
                                 int32_t dst_y,
                                 int32_t dst_w,
-                                int32_t dst_h) {
+                                int32_t dst_h,
+                                const UvAffine& uv,
+                                bool opaque) {
   if (fb_width_ == 0 || fb_height_ == 0) {
     return;
   }
@@ -498,13 +517,16 @@ void LayerCompositor::DrawLayer(VkCommandBuffer cmd,
   // Destination rect -> NDC (top-left origin, y down; matches the blit path).
   const auto fw = static_cast<float>(fb_width_);
   const auto fh = static_cast<float>(fb_height_);
-  const std::array<float, 4> rect = {
-      2.0f * static_cast<float>(dst_x) / fw - 1.0f,
-      2.0f * static_cast<float>(dst_y) / fh - 1.0f,
-      2.0f * static_cast<float>(dst_x + dst_w) / fw - 1.0f,
-      2.0f * static_cast<float>(dst_y + dst_h) / fh - 1.0f};
-  d().vkCmdPushConstants(cmd, pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0,
-                         sizeof(rect), rect.data());
+  LayerPush push{};
+  push.rect = {2.0f * static_cast<float>(dst_x) / fw - 1.0f,
+               2.0f * static_cast<float>(dst_y) / fh - 1.0f,
+               2.0f * static_cast<float>(dst_x + dst_w) / fw - 1.0f,
+               2.0f * static_cast<float>(dst_y + dst_h) / fh - 1.0f};
+  push.uv_u = {uv.a, uv.c, uv.tx, 0.0f};
+  push.uv_v = {uv.b, uv.d, uv.ty, 0.0f};
+  push.opaque = opaque ? 1.0f : 0.0f;
+  d().vkCmdPushConstants(cmd, pipeline_layout, kPushStages, 0, sizeof(push),
+                         &push);
   d().vkCmdDraw(cmd, 4, 1, 0, 0);
 }
 
@@ -627,11 +649,11 @@ const LayerCompositor::YuvProgram* LayerCompositor::GetOrCreateYuvProgram(
     return fail("vkCreateDescriptorSetLayout");
   }
 
-  // Same push constant (dest rect NDC) as the RGB pipeline layout.
+  // Same push constants (LayerPush) as the RGB pipeline layout.
   VkPushConstantRange pc{};
-  pc.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+  pc.stageFlags = kPushStages;
   pc.offset = 0;
-  pc.size = sizeof(float) * 4;
+  pc.size = sizeof(LayerPush);
   VkPipelineLayoutCreateInfo pl{};
   pl.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
   pl.setLayoutCount = 1;

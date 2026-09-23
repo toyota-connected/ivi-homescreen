@@ -524,7 +524,7 @@ class WaylandVulkanBackend final : public Backend {
   /// semaphore and stash it in frame_acquire_waits_ so the frame's queue submit
   /// waits on it before sampling the view (no reliance on the producer having
   /// CPU-stalled). No-op when the surface has no acquire fence.
-  void CollectAcquireWait(ICompositorSurface* surface);
+  void CollectAcquireWait(ICompositorSurface* surface, size_t layer = 0);
   /// Destroy imported acquire semaphores whose frame has completed.
   void ReapAcquireWaits();
 

@@ -1897,8 +1897,9 @@ void VulkanDrmBackend::ResizeCompositorSurface(
 }
 
 void VulkanDrmBackend::CollectAcquireWait(CompositorState& c,
-                                          ICompositorSurface* surface) {
-  const int fd = surface->TakeAcquireFenceFd();
+                                          ICompositorSurface* surface,
+                                          const size_t layer) {
+  const int fd = surface->TakeLayerAcquireFenceFd(layer);
   if (fd < 0) {
     return;  // implicit-sync producer: it stalled before submitting
   }
@@ -2308,8 +2309,15 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
     VkImageLayout restore_from;
     VkSamplerYcbcrModelConversion ycbcr_model;
     VkSamplerYcbcrRange ycbcr_range;
+    // A platform-view layer's crop, placement and orientation, and whether it
+    // covers its rect. The defaults draw the whole image, blended.
+    UvAffine uv{};
+    bool opaque{false};
   };
   std::vector<Draw> draws;
+  // Images already moved to SHADER_READ_ONLY this frame, so a buffer shown by
+  // two layers is not given a second barrier from a layout it has left.
+  std::vector<VkImage> transitioned;
   draws.reserve(count);
 
   const auto barrier =
@@ -2440,41 +2448,63 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
       if (!surface) {
         continue;
       }
-      int32_t pw = 0;
-      int32_t ph = 0;
-      void* vk_img = surface->GetVulkanImage(&pw, &ph);
-      if (vk_img == nullptr || pw <= 0 || ph <= 0) {
-        continue;  // no Vulkan image yet, or a GL-only producer
+      // Every layer of the view, bottom to top, each cropped, placed within
+      // the view and oriented as the producer asked (ihs_pv_submit_layers);
+      // a plain producer is one layer drawn whole.
+      const RectI view{dx, dy, dw, dh};
+      bool sampled = false;
+      for (size_t li = 0, n = surface->GetLayerCount(); li < n; ++li) {
+        const auto img = surface->GetLayerVulkanImage(li);
+        if (img.image == nullptr || img.width <= 0 || img.height <= 0) {
+          continue;  // no Vulkan image yet, or a GL-only producer
+        }
+        const auto& g = img.geometry;
+        LayerPlacement place;
+        if (!PlaceLayer(g.src, g.dst, g.transform, g.opaque,
+                        static_cast<uint32_t>(img.width),
+                        static_cast<uint32_t>(img.height), view, &place)) {
+          continue;  // entirely outside the view
+        }
+        auto src = reinterpret_cast<VkImage>(img.image);
+        // Wait the producer's work before sampling. An implicit-sync producer
+        // stalls before submitting and hands back -1, which is why this path
+        // went unexercised; an explicit-sync one hands over a sync_file, and
+        // without this the blend samples a buffer the producer may still be
+        // writing.
+        CollectAcquireWait(c, surface.get(), li);
+        // 0 keeps the historical B8G8R8A8_UNORM contract for RGB producers; a
+        // planar producer reports its own format plus the conversion
+        // parameters.
+        const VkFormat src_format = img.format != 0
+                                        ? static_cast<VkFormat>(img.format)
+                                        : VK_FORMAT_B8G8R8A8_UNORM;
+        const auto cur =
+            static_cast<VkImageLayout>(surface->GetLayerVulkanImageLayout(li));
+        if (cur != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL &&
+            std::find(transitioned.begin(), transitioned.end(), src) ==
+                transitioned.end()) {
+          const bool from_preinit = cur == VK_IMAGE_LAYOUT_PREINITIALIZED;
+          barrier(src, cur, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                  from_preinit ? VK_ACCESS_HOST_WRITE_BIT : 0,
+                  from_preinit ? VK_PIPELINE_STAGE_HOST_BIT
+                               : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                  VK_ACCESS_SHADER_READ_BIT,
+                  VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+          transitioned.push_back(src);
+        }
+        surface->SetLayerVulkanImageLayout(
+            li, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        draws.push_back(
+            {src, src_format, place.dst.x, place.dst.y, place.dst.w,
+             place.dst.h, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED,
+             static_cast<VkSamplerYcbcrModelConversion>(img.ycbcr_model),
+             static_cast<VkSamplerYcbcrRange>(img.ycbcr_range), place.uv,
+             place.opaque});
+        sampled = true;
       }
-      auto src = reinterpret_cast<VkImage>(vk_img);
-      // Wait the producer's work before sampling. An implicit-sync producer
-      // stalls before submitting and hands back -1, which is why this path went
-      // unexercised; an explicit-sync one hands over a sync_file, and without
-      // this the blend samples a buffer the producer may still be writing.
-      CollectAcquireWait(c, surface.get());
-      // 0 keeps the historical B8G8R8A8_UNORM contract for RGB producers; a
-      // planar producer reports its own format plus the conversion parameters.
-      const uint32_t pv_fmt = surface->GetVulkanImageFormat();
-      const VkFormat src_format = pv_fmt != 0 ? static_cast<VkFormat>(pv_fmt)
-                                              : VK_FORMAT_B8G8R8A8_UNORM;
-      const auto cur =
-          static_cast<VkImageLayout>(surface->GetVulkanImageLayout());
-      if (cur != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-        const bool from_preinit = cur == VK_IMAGE_LAYOUT_PREINITIALIZED;
-        barrier(src, cur, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                from_preinit ? VK_ACCESS_HOST_WRITE_BIT : 0,
-                from_preinit ? VK_PIPELINE_STAGE_HOST_BIT
-                             : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                VK_ACCESS_SHADER_READ_BIT,
-                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
-        surface->SetVulkanImageLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+      if (!sampled) {
+        continue;
       }
-      draws.push_back(
-          {src, src_format, dx, dy, dw, dh, VK_NULL_HANDLE,
-           VK_IMAGE_LAYOUT_UNDEFINED,
-           static_cast<VkSamplerYcbcrModelConversion>(
-               surface->GetVulkanYcbcrModel()),
-           static_cast<VkSamplerYcbcrRange>(surface->GetVulkanYcbcrRange())});
       // This frame's submit reads the view's image, so its completion is what
       // frees the producer's ring slot. Keep the surface alive until that
       // fence has been handed over (the map entry can be erased meanwhile).
@@ -2511,7 +2541,8 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
     opened = true;
     for (const Draw& dr : draws) {
       layer_compositor_->DrawLayer(cmd, dr.src, dr.format, dr.ycbcr_model,
-                                   dr.ycbcr_range, dr.dx, dr.dy, dr.dw, dr.dh);
+                                   dr.ycbcr_range, dr.dx, dr.dy, dr.dw, dr.dh,
+                                   dr.uv, dr.opaque);
     }
     wl_vulkan::LayerCompositor::EndFrame(cmd);
   }

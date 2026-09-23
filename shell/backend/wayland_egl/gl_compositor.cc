@@ -35,23 +35,31 @@ namespace {
 constexpr GLenum kReadFramebuffer = 0x8CA8;
 constexpr GLenum kDrawFramebuffer = 0x8CA9;
 
+// a_uv is (0, 0) at the viewport's bottom-left. (s, t) is the same point with
+// t running top to bottom, which is the space UvAffine is written in, so a
+// source crop and a buffer transform are one affine away.
 constexpr char kVertSrc[] =
     "attribute vec2 a_pos;\n"
     "attribute vec2 a_uv;\n"
-    "uniform float u_uv_y_scale;\n"
-    "uniform float u_uv_y_offset;\n"
+    "uniform vec3 u_uv_u;\n"
+    "uniform vec3 u_uv_v;\n"
     "varying vec2 v_uv;\n"
     "void main() {\n"
-    "  v_uv = vec2(a_uv.x, a_uv.y * u_uv_y_scale + u_uv_y_offset);\n"
+    "  vec3 st = vec3(a_uv.x, 1.0 - a_uv.y, 1.0);\n"
+    "  v_uv = vec2(dot(u_uv_u, st), dot(u_uv_v, st));\n"
     "  gl_Position = vec4(a_pos, 0.0, 1.0);\n"
     "}\n";
 
+// u_opaque forces alpha to 1: an XRGB buffer's alpha is undefined, and
+// premultiplied colour is unchanged by it.
 constexpr char kFragSrc[] =
     "precision mediump float;\n"
     "varying vec2 v_uv;\n"
     "uniform sampler2D u_tex;\n"
+    "uniform float u_opaque;\n"
     "void main() {\n"
-    "  gl_FragColor = texture2D(u_tex, v_uv);\n"
+    "  vec4 c = texture2D(u_tex, v_uv);\n"
+    "  gl_FragColor = vec4(c.rgb, mix(c.a, 1.0, u_opaque));\n"
     "}\n";
 
 // The same quad, sampling an external image. A dma-buf holding planar YUV can
@@ -64,8 +72,10 @@ constexpr char kFragSrcExternal[] =
     "precision mediump float;\n"
     "varying vec2 v_uv;\n"
     "uniform samplerExternalOES u_tex;\n"
+    "uniform float u_opaque;\n"
     "void main() {\n"
-    "  gl_FragColor = texture2D(u_tex, v_uv);\n"
+    "  vec4 c = texture2D(u_tex, v_uv);\n"
+    "  gl_FragColor = vec4(c.rgb, mix(c.a, 1.0, u_opaque));\n"
     "}\n";
 
 GLuint CompileShader(GLenum type, const char* src) {
@@ -146,8 +156,9 @@ bool GlCompositor::EnsureQuad() {
   attr_uv_ = glGetAttribLocation(program_, "a_uv");
   uni_tex_ = glGetUniformLocation(program_, "u_tex");
   BuildExternalProgram();
-  uni_uv_y_scale_ = glGetUniformLocation(program_, "u_uv_y_scale");
-  uni_uv_y_offset_ = glGetUniformLocation(program_, "u_uv_y_offset");
+  uni_uv_u_ = glGetUniformLocation(program_, "u_uv_u");
+  uni_uv_v_ = glGetUniformLocation(program_, "u_uv_v");
+  uni_opaque_ = glGetUniformLocation(program_, "u_opaque");
 
   // Fullscreen triangle strip in NDC: (x, y, u, v) per vertex.
   constexpr std::array<GLfloat, 16> verts = {{
@@ -219,10 +230,9 @@ void GlCompositor::BuildExternalProgram() {
   attr_pos_external_ = glGetAttribLocation(program_external_, "a_pos");
   attr_uv_external_ = glGetAttribLocation(program_external_, "a_uv");
   uni_tex_external_ = glGetUniformLocation(program_external_, "u_tex");
-  uni_uv_y_scale_external_ =
-      glGetUniformLocation(program_external_, "u_uv_y_scale");
-  uni_uv_y_offset_external_ =
-      glGetUniformLocation(program_external_, "u_uv_y_offset");
+  uni_uv_u_external_ = glGetUniformLocation(program_external_, "u_uv_u");
+  uni_uv_v_external_ = glGetUniformLocation(program_external_, "u_uv_v");
+  uni_opaque_external_ = glGetUniformLocation(program_external_, "u_opaque");
 }
 
 void GlCompositor::EmitPersistentQuadState() {
@@ -277,13 +287,39 @@ void GlCompositor::TearDownPersistentQuadState() {
   bound_tex_ = 0;
 }
 
+UvAffine GlCompositor::UvForFlip(const bool flip_y) {
+  UvAffine uv;  // identity: a top-first texture maps straight through
+  if (!flip_y) {
+    uv.d = -1;  // bottom-first: t = 0 (the top) reads the last row
+    uv.ty = 1;
+  }
+  return uv;
+}
+
+void GlCompositor::SetLayerUniforms(const GLint uni_uv_u,
+                                    const GLint uni_uv_v,
+                                    const GLint uni_opaque,
+                                    const UvAffine& uv,
+                                    const bool opaque) {
+  if (uni_uv_u >= 0) {
+    glUniform3f(uni_uv_u, uv.a, uv.c, uv.tx);
+  }
+  if (uni_uv_v >= 0) {
+    glUniform3f(uni_uv_v, uv.b, uv.d, uv.ty);
+  }
+  if (uni_opaque >= 0) {
+    glUniform1f(uni_opaque, opaque ? 1.0f : 0.0f);
+  }
+}
+
 void GlCompositor::CompositeViaQuadExternal(GLuint tex,
                                             GLint dst_x,
                                             GLint dst_y,
                                             GLsizei dst_w,
                                             GLsizei dst_h,
                                             bool blend,
-                                            bool flip_y) {
+                                            const UvAffine& uv,
+                                            bool opaque) {
   // Self-contained: this program has its own attribute and uniform locations,
   // so it cannot ride the batched state emitted for the sampler2D program.
   if (persistent_state_emitted_) {
@@ -302,12 +338,8 @@ void GlCompositor::CompositeViaQuadExternal(GLuint tex,
   if (uni_tex_external_ >= 0) {
     glUniform1i(uni_tex_external_, 0);
   }
-  if (uni_uv_y_scale_external_ >= 0) {
-    glUniform1f(uni_uv_y_scale_external_, flip_y ? -1.f : 1.f);
-  }
-  if (uni_uv_y_offset_external_ >= 0) {
-    glUniform1f(uni_uv_y_offset_external_, flip_y ? 1.f : 0.f);
-  }
+  SetLayerUniforms(uni_uv_u_external_, uni_uv_v_external_, uni_opaque_external_,
+                   uv, opaque);
   if (blend) {
     glEnable(GL_BLEND);
     glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
@@ -368,7 +400,8 @@ void GlCompositor::CompositeViaQuad(GLuint src_color_tex,
                                     GLsizei dst_w,
                                     GLsizei dst_h,
                                     bool blend,
-                                    bool flip_y,
+                                    const UvAffine& uv,
+                                    bool opaque,
                                     bool external) {
   if (!EnsureQuad()) {
     return;
@@ -391,7 +424,7 @@ void GlCompositor::CompositeViaQuad(GLuint src_color_tex,
   // the batched baseline to be re-emitted for the next 2D layer.
   if (external) {
     CompositeViaQuadExternal(src_color_tex, dst_x, dst_y, dst_w, dst_h, blend,
-                             flip_y);
+                             uv, opaque);
     return;
   }
 
@@ -417,12 +450,7 @@ void GlCompositor::CompositeViaQuad(GLuint src_color_tex,
       glBindTexture(GL_TEXTURE_2D, src_color_tex);
       bound_tex_ = src_color_tex;
     }
-    if (uni_uv_y_scale_ >= 0) {
-      glUniform1f(uni_uv_y_scale_, flip_y ? -1.0f : 1.0f);
-    }
-    if (uni_uv_y_offset_ >= 0) {
-      glUniform1f(uni_uv_y_offset_, flip_y ? 1.0f : 0.0f);
-    }
+    SetLayerUniforms(uni_uv_u_, uni_uv_v_, uni_opaque_, uv, opaque);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     return;
   }
@@ -448,12 +476,7 @@ void GlCompositor::CompositeViaQuad(GLuint src_color_tex,
   if (uni_tex_ >= 0) {
     glUniform1i(uni_tex_, 0);
   }
-  if (uni_uv_y_scale_ >= 0) {
-    glUniform1f(uni_uv_y_scale_, flip_y ? -1.0f : 1.0f);
-  }
-  if (uni_uv_y_offset_ >= 0) {
-    glUniform1f(uni_uv_y_offset_, flip_y ? 1.0f : 0.0f);
-  }
+  SetLayerUniforms(uni_uv_u_, uni_uv_v_, uni_opaque_, uv, opaque);
 
   glBindBuffer(GL_ARRAY_BUFFER, vbo_);
   if (attr_pos_ >= 0) {
@@ -515,7 +538,74 @@ void GlCompositor::CompositeToFbo(GLuint dst_fbo,
   }
   // Quad path draws into whatever FBO is currently bound.
   glBindFramebuffer(GL_FRAMEBUFFER, dst_fbo);
-  CompositeViaQuad(src_color_tex, dst_x, dst_y, dst_w, dst_h, blend, flip_y,
+  CompositeViaQuad(src_color_tex, dst_x, dst_y, dst_w, dst_h, blend,
+                   UvForFlip(flip_y), /*opaque=*/false, external);
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void GlCompositor::CompositeLayerToFbo(GLuint dst_fbo,
+                                       GLuint tex,
+                                       bool external,
+                                       const UvAffine& uv,
+                                       GLint dst_x,
+                                       GLint dst_y,
+                                       GLsizei dst_w,
+                                       GLsizei dst_h,
+                                       bool blend,
+                                       bool opaque) {
+  glBindFramebuffer(GL_FRAMEBUFFER, dst_fbo);
+  CompositeViaQuad(tex, dst_x, dst_y, dst_w, dst_h, blend, uv, opaque,
                    external);
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+size_t GlCompositor::CompositeSurfaceLayers(
+    GLuint dst_fbo,
+    const ICompositorSurface& surface,
+    const RectI& view,
+    GLint fb_height,
+    bool target_top_first,
+    bool blend_first,
+    const std::function<void(const ICompositorSurface::GlLayerTexture&)>&
+        on_drawn) {
+  size_t drawn = 0;
+  const size_t count = surface.GetLayerCount();
+  for (size_t i = 0; i < count; ++i) {
+    const ICompositorSurface::GlLayerTexture t = surface.GetLayerGlTexture(i);
+    if (t.name == 0) {
+      continue;
+    }
+    const auto& g = t.geometry;
+    LayerPlacement p;
+    if (!PlaceLayer(g.src, g.dst, g.transform, g.opaque,
+                    static_cast<uint32_t>(t.width),
+                    static_cast<uint32_t>(t.height), view, &p)) {
+      continue;
+    }
+    // UvAffine counts rows from the buffer's first row in memory. A texture
+    // stored bottom row first (a GL render target) has that row at v = 1.
+    if (!t.top_first) {
+      p.uv.b = -p.uv.b;
+      p.uv.d = -p.uv.d;
+      p.uv.ty = 1.0f - p.uv.ty;
+    }
+    GLint gl_y = fb_height - p.dst.y - p.dst.h;
+    if (target_top_first) {
+      // GL's y = 0 is the target's top row, so the rect goes in unconverted
+      // and the quad's t axis (top to bottom in window terms) turns over.
+      gl_y = p.dst.y;
+      p.uv.tx += p.uv.c;
+      p.uv.c = -p.uv.c;
+      p.uv.ty += p.uv.d;
+      p.uv.d = -p.uv.d;
+    }
+    const bool blend = (blend_first || drawn > 0) && !p.opaque;
+    CompositeLayerToFbo(dst_fbo, t.name, t.external, p.uv, p.dst.x, gl_y,
+                        p.dst.w, p.dst.h, blend, p.opaque);
+    ++drawn;
+    if (on_drawn) {
+      on_drawn(t);
+    }
+  }
+  return drawn;
 }

@@ -705,6 +705,118 @@ IHS_EXPORT IHS_WEAK_IMPORT int ihs_pv_retire_buffer(IhsPlatformView* view,
                                                     uint32_t buffer_id);
 
 /*
+ * How a layer's buffer is oriented. The values and meaning are
+ * wl_output.transform's: the rotation (counter-clockwise) and reflection the
+ * producer already applied to the buffer, which the compositor undoes when it
+ * draws. FLIPPED mirrors around the vertical axis before rotating.
+ */
+typedef enum IhsTransform {
+  IHS_TRANSFORM_NORMAL = 0,
+  IHS_TRANSFORM_90 = 1,
+  IHS_TRANSFORM_180 = 2,
+  IHS_TRANSFORM_270 = 3,
+  IHS_TRANSFORM_FLIPPED = 4,
+  IHS_TRANSFORM_FLIPPED_90 = 5,
+  IHS_TRANSFORM_FLIPPED_180 = 6,
+  IHS_TRANSFORM_FLIPPED_270 = 7
+} IhsTransform;
+
+/* What a layer shows, as a hint for placement (wp_content_type_v1's values). */
+typedef enum IhsContentType {
+  IHS_CONTENT_TYPE_NONE = 0,
+  IHS_CONTENT_TYPE_PHOTO = 1,
+  IHS_CONTENT_TYPE_VIDEO = 2,
+  IHS_CONTENT_TYPE_GAME = 3
+} IhsContentType;
+
+/* The most layers one ihs_pv_submit_layers call may carry. */
+#define IHS_PV_MAX_LAYERS 8
+
+/*
+ * One layer of a view: a buffer, the part of it shown, where in the view it
+ * lands, and how it is oriented. struct_size-first; fields are only ever
+ * appended.
+ *
+ * @frame is the buffer, exactly as ihs_pv_submit takes it; its buffer_id keys
+ * the import cache across every layer of the view, and its fds are consumed.
+ * @acquire_fence_fd signals when the buffer is ready (-1: it already is) and
+ * is consumed too.
+ *
+ * @layer_id names the layer across submits (a Wayland subsurface keeps one for
+ * its life). The shell keys per-layer state on it, so an id that persists
+ * keeps its place -- and, where planes are used, its plane -- while the list
+ * around it changes.
+ *
+ * @src_* is the part of the buffer shown, in the buffer's own pixel grid
+ * (before @transform), in 16.16 fixed point. @src_w or @src_h of 0 means the
+ * whole buffer.
+ *
+ * @dst_* is where it lands, in view-local physical pixels (the space
+ * IhsPvCallbacks::resize reports). @dst_w or @dst_h of 0 means the whole view.
+ * A layer that reaches outside the view is clipped to it.
+ *
+ * @transform is an IhsTransform. @opaque says every pixel of @dst is covered
+ * and the buffer's alpha channel is to be ignored (it is undefined in an XRGB
+ * buffer). @content_type is an IhsContentType.
+ */
+typedef struct IhsLayer {
+  size_t struct_size;
+  const IhsFrame* frame;
+  int acquire_fence_fd;
+  uint32_t layer_id;
+  int32_t src_x;  /* 16.16 */
+  int32_t src_y;  /* 16.16 */
+  uint32_t src_w; /* 16.16 */
+  uint32_t src_h; /* 16.16 */
+  int32_t dst_x;
+  int32_t dst_y;
+  uint32_t dst_w;
+  uint32_t dst_h;
+  uint32_t transform;   /* IhsTransform */
+  uint8_t opaque;       /* 0 or 1 */
+  uint8_t content_type; /* IhsContentType */
+  uint8_t reserved[2];  /* must be 0 */
+} IhsLayer;
+
+/*
+ * Replace @view's contents with @layer_count layers, bottom to top.
+ *
+ * What ihs_pv_submit is for one full-view buffer, this is for a view built
+ * from several -- a Wayland toplevel with subsurfaces or popups -- or for one
+ * buffer shown cropped, placed within the view, or rotated. ihs_pv_submit is
+ * the one-layer case of it: layer 0, the whole buffer, the whole view,
+ * NORMAL.
+ *
+ * Each call is the complete list: a layer_id missing from it is gone, and its
+ * buffer is released. 0 layers shows nothing. At most IHS_PV_MAX_LAYERS.
+ *
+ * @seq is a producer-chosen frame number, reserved for presentation feedback
+ * to echo back; pass 0 when unused.
+ *
+ * @out_release_fence_fds, when not NULL, holds @layer_count entries that
+ * receive, per layer, what ihs_pv_submit's out_release_fence_fd would: a fence
+ * (owned by the caller) that fires when that layer's buffer may be reused, or
+ * -1.
+ *
+ * FD OWNERSHIP is ihs_pv_submit's, per layer: every plane fd and acquire fence
+ * is consumed whatever this returns, except when the list is rejected as
+ * malformed (NULL @view, NULL @layers with a non-zero count, a count above
+ * IHS_PV_MAX_LAYERS, a layer with a bad struct_size or no frame, or a frame
+ * whose struct_size does not reach buffer_id), which closes nothing.
+ *
+ * Callable from any thread, under the same dispose rule as ihs_pv_submit.
+ * Returns IHS_PV_OK, IHS_PV_ERR_INVALID, IHS_PV_ERR_NO_REGISTRY with no host,
+ * or IHS_PV_ERR_NO_BACKEND when the host predates this call.
+ *
+ * Added after 1.0; IHS_WEAK_IMPORT, so test the symbol before calling it.
+ */
+IHS_EXPORT IHS_WEAK_IMPORT int ihs_pv_submit_layers(IhsPlatformView* view,
+                                                    const IhsLayer* layers,
+                                                    size_t layer_count,
+                                                    uint64_t seq,
+                                                    int* out_release_fence_fds);
+
+/*
  * The platform-view capability sub-table reachable through
  * IhsApi::platform_view. Pointers alias the flat entry points above; a consumer
  * may use either. Grows additively behind struct_size.
@@ -735,6 +847,11 @@ typedef struct IhsPlatformViewApi {
   int (*post_platform_task)(IhsPvTaskFn fn, void* user_data);
   int (*is_platform_thread)(void);
   int (*retire_buffer)(IhsPlatformView* view, uint32_t buffer_id);
+  int (*submit_layers)(IhsPlatformView* view,
+                       const IhsLayer* layers,
+                       size_t layer_count,
+                       uint64_t seq,
+                       int* out_release_fence_fds);
 } IhsPlatformViewApi;
 
 #ifdef __cplusplus
