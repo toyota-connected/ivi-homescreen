@@ -56,6 +56,14 @@
 #include "logging.h"
 #include "profiling/frame_profile.h"
 #include "view/compositor_surface_interface.h"
+#include "view/layer_scanout.h"
+
+static_assert(kDrmRotate0 == DRM_MODE_ROTATE_0 &&
+                  kDrmRotate90 == DRM_MODE_ROTATE_90 &&
+                  kDrmRotate180 == DRM_MODE_ROTATE_180 &&
+                  kDrmRotate270 == DRM_MODE_ROTATE_270 &&
+                  kDrmReflectX == DRM_MODE_REFLECT_X,
+              "layer_scanout.h rotation bits must match the kernel's");
 
 namespace {
 
@@ -370,7 +378,8 @@ void DrmCompositor::NoteGlComposited(
     return;
   }
   const std::scoped_lock rel(deferred_releases_mu_);
-  deferred_releases_.push_back({surface, buffer_id, drm::sync::SyncFence{}});
+  deferred_releases_.push_back(
+      {surface, buffer_id, drm::sync::SyncFence{}, /*from_plane=*/false});
 }
 
 bool DrmCompositor::IsSingleWholeLayer(const ICompositorSurface& surface) {
@@ -436,7 +445,8 @@ void DrmCompositor::NoteGlComposited(
   const std::scoped_lock rel(deferred_releases_mu_);
   // No fence: a GL-composited view never reached a commit, so there is no
   // OUT_FENCE to hand back. Its release is the eventfd edge alone.
-  deferred_releases_.push_back({surface, bid, drm::sync::SyncFence{}});
+  deferred_releases_.push_back(
+      {surface, bid, drm::sync::SyncFence{}, /*from_plane=*/false});
 }
 
 std::vector<DrmCompositor::DeferredScanoutRelease>
@@ -477,7 +487,58 @@ void DrmCompositor::FireDeferredScanoutReleases(
         r.surface->SetReleaseFenceFd(fd);  // takes ownership
       }
     }
-    r.surface->OnScanoutRelease(r.buffer_id);
+    if (r.from_plane) {
+      r.surface->OnScanoutKeyRelease(r.key);
+    } else {
+      r.surface->OnScanoutRelease(
+          ICompositorSurface::ScanoutKeyBufferId(r.key));
+    }
+  }
+}
+
+void DrmCompositor::CloseDmabufFds(ICompositorSurface::Dmabuf* db) {
+  // Close each distinct fd once. The offer dups every plane, so these are
+  // normally all distinct, but the Dmabuf contract permits a single-handle
+  // layout to repeat one fd across planes -- closing it twice could reap an
+  // unrelated fd that reused the number. Clear every entry holding a value as
+  // it is closed.
+  for (int& pfd : db->fd) {
+    if (pfd < 0) {
+      continue;
+    }
+    const int fd = pfd;
+    ::close(fd);
+    for (int& other : db->fd) {
+      if (other == fd) {
+        other = -1;
+      }
+    }
+  }
+  if (db->acquire_fence_fd >= 0) {
+    ::close(db->acquire_fence_fd);
+    db->acquire_fence_fd = -1;
+  }
+}
+
+void DrmCompositor::RetireScanoutKeys(ICompositorSurface& surface) {
+  const std::vector<std::uintptr_t> keys = surface.TakeRetiredScanoutKeys();
+  if (keys.empty()) {
+    return;
+  }
+  // A key is cached by whichever of the view's layers showed the buffer, and
+  // retiring an unknown key is a no-op, so every layer's pool is told.
+  for (void* tag : pv_layer_tags_.TagsOf(&surface)) {
+    auto* layer = scene_->find_by_identity_tag(tag);
+    auto* pool =
+        layer != nullptr
+            ? dynamic_cast<drm::scene::ExternalDmaBufPool*>(&layer->source())
+            : nullptr;
+    if (pool == nullptr) {
+      continue;
+    }
+    for (const std::uintptr_t key : keys) {
+      pool->retire(key);
+    }
   }
 }
 
@@ -2648,20 +2709,24 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   // is bottom). Sync scene_'s layer set against the current frame: add
   // new, update geometry/zpos on existing, remove any scene layer whose
   // tag didn't appear this frame. Backing stores are keyed by their
-  // StoreBaton; platform views by their ICompositorSurface pointer. A
-  // platform view that exports a dma-buf goes onto a KMS overlay plane
-  // via an ExternalDmaBufPool; one that can't (GL-only, or no frame yet)
-  // drops the whole frame to GL composition — the same all-or-nothing
-  // rule the backing-store overflow uses below.
+  // StoreBaton; platform views get one entry, and one scene layer, per layer
+  // of the view, tagged by (surface, layer_id). A platform-view layer that
+  // exports a dma-buf goes onto a KMS overlay plane via an
+  // ExternalDmaBufPool; one that can't (GL-only, or no frame yet) drops the
+  // whole frame to GL composition — the same all-or-nothing rule the
+  // backing-store overflow uses below.
   struct FrameLayer {
     const FlutterLayer* flutter;
     StoreBaton* baton;                 // non-null for backing-store layers
     GbmBackingStore* store;            // non-null for backing-store layers
-    void* pv_tag;                      // PV surface* identity tag (null for BS)
+    void* pv_tag;                      // PV layer identity tag (null for BS)
     ICompositorSurface::Dmabuf pv_db;  // PV frame (valid when pv_tag != null)
     // Keeps the PV surface alive so the pool's OnBufferRelease (which calls
     // back into it) is safe even if the view is disposed this frame.
     std::shared_ptr<ICompositorSurface> pv_surface;
+    size_t pv_index;      // which layer of the view, 0 = its bottom
+    LayerPlane pv_place;  // where it lands
+    uint32_t pv_fourcc;   // the format to scan out as (see OpaqueScanoutFourcc)
   };
   std::vector<FrameLayer> frame_layers;
   frame_layers.reserve(layer_count);
@@ -2685,38 +2750,17 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   // every exit path (each GL-fallback return below, and the normal exit). The
   // pool's first-sight import dups again for the KMS framebuffer, so closing
   // after the frame is submitted is correct.
+  //
+  // The acquire fence too: drm::sync::SyncFence::import_fd (used by the pool
+  // submit below) DUPS the fd rather than taking ownership, so this original
+  // is always ours to close. Also covers the paths where the source failed to
+  // build.
   struct PvFdCloser {
     std::vector<FrameLayer>& fls;
     ~PvFdCloser() {
       for (auto& fl : fls) {
         if (fl.pv_tag != nullptr) {
-          // Close each distinct fd once. GetDmabuf dups every plane, so these
-          // are normally all distinct, but the Dmabuf contract permits a
-          // single-handle layout to repeat one fd across planes -- closing it
-          // twice could reap an unrelated fd that reused the number. Clear
-          // every entry holding a value as it is closed.
-          for (int& pfd : fl.pv_db.fd) {
-            if (pfd < 0) {
-              continue;
-            }
-            const int fd = pfd;
-            ::close(fd);
-            for (int& other : fl.pv_db.fd) {
-              if (other == fd) {
-                other = -1;
-              }
-            }
-          }
-        }
-        // Close the producer's acquire fence. drm::sync::SyncFence::import_fd
-        // (used by set_acquire_fence below) DUPS the fd rather than taking
-        // ownership, so this original is always ours to close — the same
-        // pattern vulkan_drm_backend.cc follows (it also ::close()s its fd
-        // after import_fd). Also covers the paths where the source failed to
-        // build.
-        if (fl.pv_tag != nullptr && fl.pv_db.acquire_fence_fd >= 0) {
-          ::close(fl.pv_db.acquire_fence_fd);
-          fl.pv_db.acquire_fence_fd = -1;
+          CloseDmabufFds(&fl.pv_db);
         }
       }
     }
@@ -2732,7 +2776,8 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       if (!baton || !baton->store) {
         continue;
       }
-      frame_layers.push_back({fl, baton, baton->store, nullptr, {}, nullptr});
+      frame_layers.push_back(
+          {fl, baton, baton->store, nullptr, {}, nullptr, 0, {}, 0});
       frame_batons.push_back(baton);
     } else if (fl->type == kFlutterLayerContentTypePlatformView &&
                fl->platform_view) {
@@ -2754,74 +2799,125 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       // reached it yet).
       surface->OnResize(static_cast<int32_t>(fl->size.width),
                         static_cast<int32_t>(fl->size.height));
-      // Pull this present's dma-buf for every platform view, new or reused: a
-      // per-frame producer (a decoder, a camera) hands a fresh buffer each
-      // present, and the reuse path in the add loop swaps it in via
-      // replace_source. GetDmabuf is deliver-once (keyed on the producer's
-      // submit_seq), so on a present with no new frame it returns false and the
-      // layer keeps its current source. find_by_identity_tag reflects last
-      // frame's layers; this PV survives the prune and the add loop finds it.
-      ICompositorSurface::Dmabuf db{};
-      const bool is_new =
-          scene_->find_by_identity_tag(surface.get()) == nullptr;
-      const auto db_state = surface->GetDmabuf(&db);
-      const bool have_db = db_state == ICompositorSurface::DmabufState::kFrame;
-      // A reused layer with new content that cannot be scanned out. Holding the
-      // plane here -- which is what a bare "no dma-buf" answer used to mean --
-      // freezes the view on its last scannable frame while the producer goes on
-      // emitting content the plane path cannot carry (a format switch, or a
-      // producer that moved to a GL-only surface). Composite the frame through
-      // GL instead; the view returns to its plane on the next frame the plane
-      // can take.
-      //
-      // Only for a reused layer: an is_new view has nothing latched in the
-      // scene to go stale, and the branch below deliberately keeps a
-      // not-yet-ready producer on the plane path to avoid startup flicker.
-      if (!is_new &&
-          db_state == ICompositorSurface::DmabufState::kNotScanoutCapable) {
-        // Rare by construction -- a producer that submits a frame the plane
-        // path cannot carry. Log it: without this the fallback is
-        // indistinguishable from any other GL present, and this branch is the
-        // one a producer-side regression would silently stop reaching.
-        ihs::log::debug(
-            "[DrmCompositor] pv {}: new frame is not scanout-capable; "
-            "compositing this present through GL",
-            static_cast<const void*>(surface.get()));
-        return PresentViaGlFallback(layers, layer_count);
-      }
-      if (is_new && !have_db) {
-        // New platform view with no dma-buf to place this present.
+      RetireScanoutKeys(*surface);
+      const RectI view_rect{static_cast<int32_t>(fl->offset.x),
+                            static_cast<int32_t>(fl->offset.y),
+                            static_cast<int32_t>(fl->size.width),
+                            static_cast<int32_t>(fl->size.height)};
+      // One scene layer per layer of the view, bottom to top, each on a plane
+      // of its own.
+      const size_t pv_layer_count = surface->GetLayerCount();
+      for (size_t li = 0; li < pv_layer_count; ++li) {
+        // Pull this present's dma-buf for every layer, new or reused: a
+        // per-frame producer (a decoder, a camera) hands a fresh buffer each
+        // present, and the reuse path in the add loop swaps it in via
+        // replace_source. The offer is deliver-once (keyed on the producer's
+        // submit_seq), so on a present with no new frame the layer keeps its
+        // current source. find_by_identity_tag reflects last frame's layers;
+        // this layer survives the prune and the add loop finds it.
+        ICompositorSurface::LayerDmabuf ld{};
+        const auto db_state = surface->GetLayerDmabuf(li, &ld);
+        const bool have_db =
+            db_state == ICompositorSurface::DmabufState::kFrame;
+        void* tag = pv_layer_tags_.Get(surface.get(), ld.layer_id);
+        auto* scene_layer = scene_->find_by_identity_tag(tag);
+        const bool is_new = scene_layer == nullptr;
+        // A reused layer with new content that cannot be scanned out. Holding
+        // the plane here -- which is what a bare "no dma-buf" answer used to
+        // mean -- freezes the layer on its last scannable frame while the
+        // producer goes on emitting content the plane path cannot carry (a
+        // format switch, or a producer that moved to a GL-only surface).
+        // Composite the frame through GL instead; the layer returns to its
+        // plane on the next frame the plane can take.
         //
-        // On a plane-capable target (planes_available_) this is a dma-buf
-        // producer -- a decoder/camera -- that just hasn't delivered its first
-        // frame, or is momentarily between frames while its layer is not yet in
-        // the scene. Such a producer also exposes a GL-fallback texture, so a
-        // GetGlTextureName()!=0 test can't tell it apart from a genuine GL-only
-        // surface -- but routing the whole frame through GL here would flip the
-        // primary via GL on every such present until a buffer lands: the
-        // startup flicker. Skip the not-ready view and keep the frame on the
-        // plane/scene path; its plane lights up once GetDmabuf starts returning
-        // frames. Nothing is latched in the scene for an is_new view, so
-        // skipping it turns no plane off (the prune runs over this frame's tags
-        // only).
-        //
-        // With no overlay planes (e.g. software vkms) GL composition of the
-        // surface's texture is the only way to show it, so fall back.
-        //
-        // Unless the view has shown content before. Then this is not a
-        // producer waiting to start, it is an idle one whose last frame was
-        // consumed -- by a GL fallback, or by an import that failed after
-        // GetDmabuf had handed the frame over. Skipping it there blanks the
-        // view until the producer submits again, which for a static producer
-        // is never, so composite what it already has.
-        if (planes_available_ && !(surface && surface->HasContent())) {
+        // Only for a reused layer: an is_new one has nothing latched in the
+        // scene to go stale, and the branch below deliberately keeps a
+        // not-yet-ready producer on the plane path to avoid startup flicker.
+        if (!is_new &&
+            db_state == ICompositorSurface::DmabufState::kNotScanoutCapable) {
+          // Rare by construction -- a producer that submits a frame the plane
+          // path cannot carry. Log it: without this the fallback is
+          // indistinguishable from any other GL present, and this branch is
+          // the one a producer-side regression would silently stop reaching.
+          ihs::log::debug(
+              "[DrmCompositor] pv {} layer {}: new frame is not "
+              "scanout-capable; compositing this present through GL",
+              static_cast<const void*>(surface.get()), ld.layer_id);
+          return PresentViaGlFallback(layers, layer_count);
+        }
+        if (is_new && !have_db) {
+          // New layer with no dma-buf to place this present.
+          //
+          // On a plane-capable target (planes_available_) this is a dma-buf
+          // producer -- a decoder/camera -- that just hasn't delivered its
+          // first frame, or is momentarily between frames while its layer is
+          // not yet in the scene. Such a producer also exposes a GL-fallback
+          // texture, so a GetGlTextureName()!=0 test can't tell it apart from a
+          // genuine GL-only surface -- but routing the whole frame through GL
+          // here would flip the primary via GL on every such present until a
+          // buffer lands: the startup flicker. Skip the not-ready layer and
+          // keep the frame on the plane/scene path; its plane lights up once a
+          // frame is offered. Nothing is latched in the scene for an is_new
+          // layer, so skipping it turns no plane off (the prune runs over this
+          // frame's tags only).
+          //
+          // With no overlay planes (e.g. software vkms) GL composition of the
+          // surface's texture is the only way to show it, so fall back.
+          //
+          // Unless the view has shown content before. Then this is not a
+          // producer waiting to start, it is an idle one whose last frame was
+          // consumed -- by a GL fallback, or by an import that failed after the
+          // frame had been handed over. Skipping it there blanks the view
+          // until the producer submits again, which for a static producer is
+          // never, so composite what it already has.
+          if (planes_available_ && !surface->HasContent()) {
+            continue;
+          }
+          return PresentViaGlFallback(layers, layer_count);
+        }
+        ICompositorSurface::Dmabuf& db = ld.dmabuf;
+        // The buffer's extent: the new frame's, else what the surface reports
+        // for the frame on the plane, else the pool's (a surface that does not
+        // report it).
+        uint32_t buf_w = have_db ? db.width : ld.buffer_width;
+        uint32_t buf_h = have_db ? db.height : ld.buffer_height;
+        if ((buf_w == 0 || buf_h == 0) && scene_layer != nullptr) {
+          if (const auto* pool = dynamic_cast<drm::scene::ExternalDmaBufPool*>(
+                  &scene_layer->source())) {
+            buf_w = pool->format().width;
+            buf_h = pool->format().height;
+          }
+        }
+        if (buf_w == 0 || buf_h == 0) {
+          // A frame with no extent cannot be imported, let alone placed.
+          // Hand it back -- it will never reach a plane -- and composite.
+          if (have_db) {
+            surface->OnScanoutRelease(db.buffer_id);
+            CloseDmabufFds(&db);
+          }
+          return PresentViaGlFallback(layers, layer_count);
+        }
+        LayerPlane place;
+        if (!PlaceLayerOnPlane(ld.geometry.src, ld.geometry.dst,
+                               ld.geometry.transform, buf_w, buf_h, view_rect,
+                               &place)) {
+          // Nothing of it shows. It takes no plane this present (a reused
+          // layer is pruned below), and a frame it was handed goes straight
+          // back: it will never be scanned out.
+          if (have_db) {
+            surface->OnScanoutRelease(db.buffer_id);
+            CloseDmabufFds(&db);
+          }
           continue;
         }
-        return PresentViaGlFallback(layers, layer_count);
+        const uint32_t fourcc =
+            have_db ? (ld.geometry.opaque ? OpaqueScanoutFourcc(db.fourcc)
+                                          : db.fourcc)
+                    : 0;
+        frame_layers.push_back(
+            {fl, nullptr, nullptr, tag, db, surface, li, place, fourcc});
+        frame_pv_tags.push_back(tag);
       }
-      frame_layers.push_back(
-          {fl, nullptr, nullptr, surface.get(), db, surface});
-      frame_pv_tags.push_back(surface.get());
     }
   }
 
@@ -2853,6 +2949,9 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   // geometry change under a fixed-generation pool), which is also a plane-
   // topology change and must feed the blocking-modeset decision at commit time.
   int pv_pruned = prune(scene_pv_tags_, frame_pv_tags);
+  // Every tag still in the scene is in this frame, so the rest -- layers
+  // pruned just now, and ones made for a layer that was skipped -- can go.
+  pv_layer_tags_.RetainOnly(frame_pv_tags);
   // A pruned PV's layer (removed above) carries its ExternalDmaBufPool into the
   // scene's source-retire ring; the scene release_with_fence()es the pool's
   // in-flight buffer as it retires, firing OnBufferRelease back to the
@@ -2883,6 +2982,10 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   // rides submit; the pool's OnBufferRelease returns each buffer_id to the
   // producer when it leaves scanout. import_fd / the pool's dup keep our fds
   // valid, so PvFdCloser still closes the originals at scope exit.
+  //
+  // The pool key is the buffer's ScanoutKey, not its bare id: a producer may
+  // retire an id and submit it again for new memory, which must be imported
+  // afresh rather than scanned out through the old framebuffer.
   const auto submit_pv_pool = [](drm::scene::ExternalDmaBufPool* pool,
                                  const ICompositorSurface::Dmabuf& db) {
     const uint32_t np = db.plane_count < 4 ? db.plane_count : 4;
@@ -2903,17 +3006,19 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       }
     }
     pool->submit(
-        db.buffer_id,
+        ICompositorSurface::ScanoutKey(db.buffer_id, db.generation),
         drm::span<const drm::scene::ExternalPlaneInfo>(planes.data(), np),
         std::move(acquire));
   };
-  // Stand up a fresh ExternalDmaBufPool for a PV's decoder ring at the frame's
-  // geometry. Used both on first sight and when a live PV's buffer geometry
-  // changes (swapped in place via replace_source). The deferred on_release
-  // holds a displaced buffer until the next present's flip completes, then
-  // returns it to the producer (see deferred_releases_).
+  // Stand up a fresh ExternalDmaBufPool for a PV layer's decoder ring at the
+  // frame's geometry, scanning it out as @p fourcc. Used both on first sight
+  // and when a live PV's buffer geometry changes (swapped in place via
+  // replace_source). The deferred on_release holds a displaced buffer until the
+  // next present's flip completes, then returns it to the producer (see
+  // deferred_releases_).
   const auto make_pv_pool = [this](
                                 const ICompositorSurface::Dmabuf& db,
+                                const uint32_t fourcc,
                                 std::shared_ptr<ICompositorSurface> surface) {
     drm::scene::ExternalDmaBufPool::Options opts{};
     opts.on_release = [this, surface = std::move(surface)](
@@ -2932,10 +3037,10 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       }
       const std::scoped_lock lock(deferred_releases_mu_);
       deferred_releases_.push_back(
-          {surface, static_cast<uint32_t>(key), std::move(fence)});
+          {surface, key, std::move(fence), /*from_plane=*/true});
     };
     return drm::scene::ExternalDmaBufPool::create(backend_->device(), db.width,
-                                                  db.height, db.fourcc,
+                                                  db.height, fourcc,
                                                   db.modifier, std::move(opts));
   };
   for (auto& fl : frame_layers) {
@@ -2989,6 +3094,15 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       scene_layer_batons_.push_back(fl.baton);
     } else {
       // ── Platform view: wrap the dma-buf as a scene buffer source ──
+      // One layer of the view: its own crop, place and rotation within it.
+      const LayerPlane& place = fl.pv_place;
+      const drm::scene::Rect pv_dst{place.dst.x, place.dst.y,
+                                    static_cast<uint32_t>(place.dst.w),
+                                    static_cast<uint32_t>(place.dst.h)};
+      const drm::scene::FixedRect pv_src{place.src.x, place.src.y, place.src.w,
+                                         place.src.h};
+      // The view's HDR state is its video's, which is its bottom layer.
+      const bool pv_drives_hdr = fl.pv_index == 0;
       if (auto* layer = scene_->find_by_identity_tag(fl.pv_tag)) {
         // Reused layer: the pool created on first sight owns this PV's imports.
         // Submit this frame's buffer_id; the pool reuses the cached fb_id when
@@ -3006,7 +3120,7 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
               dynamic_cast<drm::scene::ExternalDmaBufPool*>(&layer->source());
           if (pool != nullptr && pool->format().width == db.width &&
               pool->format().height == db.height &&
-              pool->format().drm_fourcc == db.fourcc &&
+              pool->format().drm_fourcc == fl.pv_fourcc &&
               pool->format().modifier == db.modifier) {
             submit_pv_pool(pool, db);
             if (fl.pv_surface) {
@@ -3023,7 +3137,8 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
             // and no per-jitter modeset. The displaced pool is retired by the
             // scene as its in-flight buffers drain.
             bool swapped = false;
-            if (auto new_pool = make_pv_pool(db, fl.pv_surface); new_pool) {
+            if (auto new_pool = make_pv_pool(db, fl.pv_fourcc, fl.pv_surface);
+                new_pool) {
               auto* np_raw = new_pool.value().get();
               if (scene_->replace_source(layer->handle(),
                                          std::move(new_pool.value()))) {
@@ -3054,14 +3169,17 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
             }
           }
         }
-        layer->set_dst_rect_if_changed(dst_rect);
+        layer->set_src_rect_fixed_if_changed(pv_src);
+        layer->set_dst_rect_if_changed(pv_dst);
+        layer->set_rotation_if_changed(place.rotation);
         layer->set_zpos_if_changed(overlay_zpos);  // restack on reorder
         // This PV survives into the committed scene, so it drives the
         // connector's HDR_OUTPUT_METADATA (persisted metadata, steady across
         // reuse presents). A PV pruned above (replace_source fallback) never
         // reaches here, so it can't signal HDR over content it isn't showing.
         ICompositorSurface::Dmabuf::HdrMetadata reused_hdr{};
-        if (fl.pv_surface && fl.pv_surface->GetHdrMetadata(&reused_hdr)) {
+        if (pv_drives_hdr && fl.pv_surface &&
+            fl.pv_surface->GetHdrMetadata(&reused_hdr)) {
           output_hdr = ToHdrSourceMetadata(reused_hdr);
         }
         ++pv_reused;
@@ -3079,7 +3197,7 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       // First sight: stand up the pool at this frame's geometry (deferred
       // release holds a displaced buffer until the next present's flip; see
       // deferred_releases_).
-      auto pool = make_pv_pool(db, fl.pv_surface);
+      auto pool = make_pv_pool(db, fl.pv_fourcc, fl.pv_surface);
       if (!pool) {
         ihs::log::warn(
             "[DrmCompositor] ExternalDmaBufPool::create (pv): {}; routing "
@@ -3096,10 +3214,11 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       auto* pool_raw = pool.value().get();
       drm::scene::LayerDesc desc{};
       desc.source = std::move(pool.value());
-      desc.display.dst_rect = dst_rect;
+      desc.display.src_rect_fixed = pv_src;
+      desc.display.dst_rect = pv_dst;
       // Producer hands scanout-oriented (top-down) pixels — no REFLECT_Y,
-      // unlike GL backing stores.
-      desc.display.rotation = DRM_MODE_ROTATE_0;
+      // unlike GL backing stores -- so the only rotation is the layer's own.
+      desc.display.rotation = place.rotation;
       desc.display.zpos = overlay_zpos;
       // YUV video: hint the allocator toward a YUV-capable overlay and set the
       // plane's YCbCr->RGB CSC from the frame's colorimetry. RGB stays Generic
@@ -3116,8 +3235,8 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       // colorimetry and stays in SDR. The frame's mastering metadata
       // (luminance / MaxCLL) rides set_output_metadata above.
       ICompositorSurface::Dmabuf::HdrMetadata hmeta{};
-      const bool pv_is_hdr =
-          fl.pv_surface && fl.pv_surface->GetHdrMetadata(&hmeta);
+      const bool pv_is_hdr = pv_drives_hdr && fl.pv_surface &&
+                             fl.pv_surface->GetHdrMetadata(&hmeta);
       if (pv_is_hdr) {
         desc.display.color_primaries = drm::scene::ColorPrimaries::Bt2020;
         desc.display.source_eotf =
@@ -3148,13 +3267,10 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       }
       if (backend_->cfg_.debug_backend) {
         ihs::log::debug(
-            "[DrmCompositor] platform-view scene layer added: {}x{} "
-            "fmt=0x{:08x} mod=0x{:016x} dst=({},{} {}x{})",
-            db.width, db.height, db.fourcc, db.modifier,
-            static_cast<int32_t>(fl.flutter->offset.x),
-            static_cast<int32_t>(fl.flutter->offset.y),
-            static_cast<uint32_t>(fl.flutter->size.width),
-            static_cast<uint32_t>(fl.flutter->size.height));
+            "[DrmCompositor] platform-view scene layer added: layer {} {}x{} "
+            "fmt=0x{:08x} mod=0x{:016x} dst=({},{} {}x{}) rot=0x{:x}",
+            fl.pv_index, db.width, db.height, fl.pv_fourcc, db.modifier,
+            pv_dst.x, pv_dst.y, pv_dst.w, pv_dst.h, place.rotation);
       }
     }
   }
@@ -3304,10 +3420,17 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   // layer is on a plane here -- the test() check above routes to GL fallback if
   // any layer would be composited -- so PVs get their non-zero plane id; the
   // fallback path reports 0 for them.
+  //
+  // A view with several layers has several planes; it reports its lowest
+  // placed layer's, which is where a direct-scanout producer's video is.
+  std::vector<const ICompositorSurface*> reported;
   for (const auto& fl : frame_layers) {
-    if (fl.pv_tag == nullptr || !fl.pv_surface) {
+    if (fl.pv_tag == nullptr || !fl.pv_surface ||
+        std::find(reported.begin(), reported.end(), fl.pv_surface.get()) !=
+            reported.end()) {
       continue;
     }
+    reported.push_back(fl.pv_surface.get());
     uint32_t plane_id = 0;
     if (const auto* layer = scene_->find_by_identity_tag(fl.pv_tag)) {
       plane_id = layer->last_assigned_plane_id().value_or(0);

@@ -481,13 +481,14 @@ class VulkanDrmBackend final : public Backend {
                         size_t count,
                         size_t assigned);
 
-  // One platform-view layer within ReconcilePlaneLayers: add or update the
-  // scene layer and submit the view's newest dma-buf to its pool. False means
-  // the frame cannot take the plane path.
-  bool ReconcilePlatformViewLayer(CompositorState& c,
-                                  const FlutterLayer& fl,
-                                  int z_index,
-                                  std::vector<const void*>& present);
+  // One platform view within ReconcilePlaneLayers: add or update a scene
+  // layer for each of the view's layers and submit each one's newest dma-buf
+  // to its pool. Each placed layer takes the next @p z_index. False means the
+  // frame cannot take the plane path.
+  bool ReconcilePlatformViewLayers(CompositorState& c,
+                                   const FlutterLayer& fl,
+                                   int& z_index,
+                                   std::vector<const void*>& present);
 
   // Remove every scene layer ReconcilePlaneLayers added and forget them.
   static void DropPlaneLayers(CompositorState& c);

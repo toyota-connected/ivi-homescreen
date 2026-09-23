@@ -27,9 +27,12 @@
  * library SOVERSION. A plugin built against an older minor keeps working
  * against a newer library; a plugin requiring a newer major is rejected at
  * ihs_get_api().
+ *
+ * A minor also marks a relaxed rule a plugin may want to rely on: 1.11 allows
+ * a retired buffer id to be submitted again (see ihs_pv_retire_buffer).
  */
 #define IHS_SHARED_ABI_MAJOR 1u
-#define IHS_SHARED_ABI_MINOR 10u
+#define IHS_SHARED_ABI_MINOR 11u
 #define IHS_SHARED_ABI_VERSION \
   ((IHS_SHARED_ABI_MAJOR << 16) | IHS_SHARED_ABI_MINOR)
 

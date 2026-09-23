@@ -48,6 +48,7 @@
 #include "backend/drm_kms_egl/flip_sink.h"
 #include "backend/wayland_egl/gl_caps.h"
 #include "backend/wayland_egl/gl_compositor.h"
+#include "view/layer_scanout.h"
 
 class DrmBackend;
 class ICompositorSurface;
@@ -494,10 +495,14 @@ class DrmCompositor : public IFlipSink {
   // cannot still gets the held eventfd. Empty when the driver has no
   // OUT_FENCE_PTR, when explicit sync is configured off, or on the release
   // paths that never reached a commit.
+  //
+  // `key` is the ScanoutKey a plane's pool cached the buffer under when
+  // `from_plane`, and the bare buffer_id for a GL-composited frame.
   struct DeferredScanoutRelease {
     std::shared_ptr<ICompositorSurface> surface;
-    std::uint32_t buffer_id;
+    std::uintptr_t key;
     drm::sync::SyncFence fence;
+    bool from_plane;
   };
   std::mutex deferred_releases_mu_;
   std::vector<DeferredScanoutRelease> deferred_releases_;
@@ -529,11 +534,18 @@ class DrmCompositor : public IFlipSink {
   // than any hashing for that size.
   std::vector<StoreBaton*> scene_layer_batons_;
 
-  // Sibling prune list for platform-view scene layers, keyed by the
-  // ICompositorSurface pointer (its scene identity_tag). Same rationale as
-  // scene_layer_batons_ — the scene retains layers across commits, so a PV
-  // that vanished from the frame must be pruned by tag.
+  // Sibling prune list for platform-view scene layers, keyed by their scene
+  // identity_tag (one per layer of a view, from pv_layer_tags_). Same
+  // rationale as scene_layer_batons_ — the scene retains layers across
+  // commits, so a layer that vanished from the frame must be pruned by tag.
   std::vector<void*> scene_pv_tags_;
+  PvLayerTags pv_layer_tags_;
+
+  // Hand the pools of @p surface's scene layers the scanout keys of the
+  // buffers its producer retired, so they drop those framebuffers.
+  void RetireScanoutKeys(ICompositorSurface& surface);
+  // Close every fd a platform-view offer handed over, each distinct one once.
+  static void CloseDmabufFds(ICompositorSurface::Dmabuf* db);
 
   // Per-platform-view buffer release is handled by each PV layer's
   // ExternalDmaBufPool (its OnBufferRelease returns a buffer_id to the producer

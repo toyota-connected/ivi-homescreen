@@ -69,6 +69,14 @@
 #include "logging.h"
 #include "shell/platform/homescreen/flutter_desktop_engine_state.h"
 #include "task_runner.h"
+#include "view/layer_scanout.h"
+
+static_assert(kDrmRotate0 == DRM_MODE_ROTATE_0 &&
+                  kDrmRotate90 == DRM_MODE_ROTATE_90 &&
+                  kDrmRotate180 == DRM_MODE_ROTATE_180 &&
+                  kDrmRotate270 == DRM_MODE_ROTATE_270 &&
+                  kDrmReflectX == DRM_MODE_REFLECT_X,
+              "layer_scanout.h rotation bits must match the kernel's");
 
 namespace {
 
@@ -745,17 +753,22 @@ struct VulkanDrmBackend::CompositorState {
   VkScanoutRing* ring = nullptr;  // stable; owned by the scene layer
   std::optional<drm::scene::LayerHandle> layer;
   // Plane path: identity tags the scene currently holds a layer for -- store
-  // pointers for backing stores, ICompositorSurface pointers for platform
-  // views. drm-cxx retains layers across commits and exposes no iteration
-  // beyond find_by_identity_tag, so the prune list lives here.
+  // pointers for backing stores, pv_layer_tags entries for the layers of
+  // platform views. drm-cxx retains layers across commits and exposes no
+  // iteration beyond find_by_identity_tag, so the prune list lives here.
   std::vector<const void*> plane_layer_keys;
+  PvLayerTags pv_layer_tags;
+  // What this frame's platform-view layers look like on their planes (crop,
+  // place, rotation, format), folded into the plan signature: those can move
+  // while every FlutterLayer stays put.
+  size_t pv_plan_sig = 0;
   // Buffers a platform view's pool displaced, held until the next flip
   // completes. drm-cxx fires on_release at displacement, not at flip, so
   // returning one straight away hands the producer a slot KMS is still
   // scanning out.
   struct DeferredRelease {
     std::shared_ptr<ICompositorSurface> surface;
-    uint32_t buffer_id = 0;
+    std::uintptr_t key = 0;  // the ScanoutKey the pool cached the buffer under
     drm::sync::SyncFence fence;
   };
   std::mutex deferred_releases_mu;
@@ -1938,6 +1951,7 @@ void VulkanDrmBackend::DropPlaneLayers(CompositorState& c) {
     }
   }
   c.plane_layer_keys.clear();
+  c.pv_layer_tags.Clear();
 }
 
 // Hand @p db's planes and acquire fence to @p pool. The fence rides the
@@ -1963,17 +1977,44 @@ void SubmitPvPool(drm::scene::ExternalDmaBufPool* pool,
           f.error().message());
     }
   }
+  // Keyed by ScanoutKey, not the bare id: a retired id submitted again for new
+  // memory must be imported afresh, not scanned out through the old
+  // framebuffer.
   pool->submit(
-      db.buffer_id,
+      ICompositorSurface::ScanoutKey(db.buffer_id, db.generation),
       drm::span<const drm::scene::ExternalPlaneInfo>(planes.data(), np),
       std::move(acquire));
 }
+
+// Close every fd @p db owns, each distinct one once.
+void CloseDmabufFds(ICompositorSurface::Dmabuf* db) {
+  for (int& pfd : db->fd) {
+    if (pfd < 0) {
+      continue;
+    }
+    const int fd = pfd;
+    ::close(fd);
+    for (int& other : db->fd) {
+      if (other == fd) {
+        other = -1;
+      }
+    }
+  }
+  if (db->acquire_fence_fd >= 0) {
+    ::close(db->acquire_fence_fd);
+    db->acquire_fence_fd = -1;
+  }
+}
+
+size_t MixSig(const size_t sig, const uint64_t v) {
+  return (sig * 1000003U) ^ static_cast<size_t>(v);
+}
 }  // namespace
 
-bool VulkanDrmBackend::ReconcilePlatformViewLayer(
+bool VulkanDrmBackend::ReconcilePlatformViewLayers(
     CompositorState& c,
     const FlutterLayer& fl,
-    const int z_index,
+    int& z_index,
     std::vector<const void*>& present) {
   std::shared_ptr<ICompositorSurface> surface;
   {
@@ -1986,103 +2027,204 @@ bool VulkanDrmBackend::ReconcilePlatformViewLayer(
   if (!surface) {
     return false;
   }
-  const void* key = surface.get();
-  present.push_back(key);
-
   surface->OnResize(static_cast<int32_t>(fl.size.width),
                     static_cast<int32_t>(fl.size.height));
-  ICompositorSurface::Dmabuf db{};
-  const auto state = surface->GetDmabuf(&db);
-  // Every populated fd in db is ours now; the pool dups what it keeps.
-  const auto close_fds = [&db] {
-    for (uint32_t p = 0; p < db.plane_count && p < 4; ++p) {
-      if (db.fd[p] >= 0) {
-        ::close(db.fd[p]);
+
+  // Drop the framebuffers the pools cached for buffers the producer retired.
+  // A key is cached by whichever layer showed the buffer, and retiring an
+  // unknown key is a no-op, so every layer's pool is told.
+  if (const auto retired = surface->TakeRetiredScanoutKeys();
+      !retired.empty()) {
+    for (void* tag : c.pv_layer_tags.TagsOf(surface.get())) {
+      auto* layer = c.scene->find_by_identity_tag(tag);
+      auto* pool =
+          layer != nullptr
+              ? dynamic_cast<drm::scene::ExternalDmaBufPool*>(&layer->source())
+              : nullptr;
+      if (pool != nullptr) {
+        for (const std::uintptr_t key : retired) {
+          pool->retire(key);
+        }
       }
     }
-    if (db.acquire_fence_fd >= 0) {
-      ::close(db.acquire_fence_fd);
-    }
-  };
+  }
 
-  const drm::planes::Rect dst{static_cast<int32_t>(fl.offset.x),
-                              static_cast<int32_t>(fl.offset.y),
-                              static_cast<uint32_t>(fl.size.width),
-                              static_cast<uint32_t>(fl.size.height)};
-  const std::optional<int> zpos(primary_zpos_ + z_index);
-
-  if (auto* layer = c.scene->find_by_identity_tag(const_cast<void*>(key))) {
-    layer->set_dst_rect_if_changed(dst);
-    layer->set_zpos_if_changed(zpos);
-    if (state != ICompositorSurface::DmabufState::kFrame) {
-      // No new frame this vblank is flow control, not a failure -- the plane
-      // keeps scanning what it already has. Anything else (a producer that
-      // cannot scan out) has to go back to the blend.
-      return state == ICompositorSurface::DmabufState::kNoNewFrame;
-    }
+  const RectI view{static_cast<int32_t>(fl.offset.x),
+                   static_cast<int32_t>(fl.offset.y),
+                   static_cast<int32_t>(fl.size.width),
+                   static_cast<int32_t>(fl.size.height)};
+  // One scene layer per layer of the view, bottom to top, each on a plane of
+  // its own.
+  const size_t count = surface->GetLayerCount();
+  for (size_t li = 0; li < count; ++li) {
+    ICompositorSurface::LayerDmabuf ld{};
+    const auto state = surface->GetLayerDmabuf(li, &ld);
+    // Every populated fd in ld.dmabuf is ours now; the pool dups what it
+    // keeps.
+    ICompositorSurface::Dmabuf& db = ld.dmabuf;
+    const bool have_db = state == ICompositorSurface::DmabufState::kFrame;
+    void* tag = c.pv_layer_tags.Get(surface.get(), ld.layer_id);
+    auto* layer = c.scene->find_by_identity_tag(tag);
     auto* pool =
-        dynamic_cast<drm::scene::ExternalDmaBufPool*>(&layer->source());
-    if (pool == nullptr) {
-      close_fds();
+        layer != nullptr
+            ? dynamic_cast<drm::scene::ExternalDmaBufPool*>(&layer->source())
+            : nullptr;
+    if (layer != nullptr && pool == nullptr) {
+      CloseDmabufFds(&db);
       return false;
     }
-    SubmitPvPool(pool, db);
-    surface->AckDmabufScanout(db.buffer_id);
-    close_fds();
-    return true;
-  }
-
-  if (state != ICompositorSurface::DmabufState::kFrame) {
-    // A view with nothing to show yet: let the blend path handle the frame
-    // rather than adding a layer with no buffer.
-    return false;
-  }
-  // The pool caches one fb_id per producer buffer and hands each back through
-  // on_release. drm-cxx fires that at displacement rather than at flip, so
-  // park it until the next flip completes instead of returning the producer a
-  // slot KMS is still scanning.
-  drm::scene::ExternalDmaBufPool::Options opts{};
-  opts.on_release = [&c, surface](
-                        std::uintptr_t rkey,
-                        std::optional<drm::sync::SyncFence> release_fence) {
-    drm::sync::SyncFence fence;
-    if (release_fence.has_value()) {
-      fence = std::move(*release_fence);
+    if (!have_db && (layer == nullptr ||
+                     state != ICompositorSurface::DmabufState::kNoNewFrame)) {
+      // A layer with nothing to show yet, or new content a plane cannot take:
+      // let the blend path handle the frame. No new frame on a layer that has
+      // one is flow control, not a failure -- the plane keeps scanning what it
+      // already has.
+      return false;
     }
-    const std::scoped_lock lock(c.deferred_releases_mu);
-    c.deferred_releases.push_back(
-        {surface, static_cast<uint32_t>(rkey), std::move(fence)});
-  };
-  auto pool_exp = drm::scene::ExternalDmaBufPool::create(
-      c.device, db.width, db.height, db.fourcc, db.modifier, std::move(opts));
-  if (!pool_exp) {
-    ihs::log::debug("[VulkanDrmBackend] pv pool: {}",
-                    pool_exp.error().message());
-    close_fds();
-    return false;
+
+    uint32_t buf_w = have_db ? db.width : ld.buffer_width;
+    uint32_t buf_h = have_db ? db.height : ld.buffer_height;
+    if ((buf_w == 0 || buf_h == 0) && pool != nullptr) {
+      buf_w = pool->format().width;
+      buf_h = pool->format().height;
+    }
+    if (buf_w == 0 || buf_h == 0) {
+      // A frame with no extent cannot be imported, let alone placed.
+      if (have_db) {
+        surface->OnScanoutRelease(db.buffer_id);
+        CloseDmabufFds(&db);
+      }
+      return false;
+    }
+    LayerPlane place;
+    if (!PlaceLayerOnPlane(ld.geometry.src, ld.geometry.dst,
+                           ld.geometry.transform, buf_w, buf_h, view, &place)) {
+      // Nothing of it shows: no plane for it this present (a layer already in
+      // the scene is pruned), and a frame it was handed goes straight back.
+      if (have_db) {
+        surface->OnScanoutRelease(db.buffer_id);
+        CloseDmabufFds(&db);
+      }
+      continue;
+    }
+    present.push_back(tag);
+    const drm::planes::Rect dst{place.dst.x, place.dst.y,
+                                static_cast<uint32_t>(place.dst.w),
+                                static_cast<uint32_t>(place.dst.h)};
+    const drm::scene::FixedRect src{place.src.x, place.src.y, place.src.w,
+                                    place.src.h};
+    const std::optional<int> zpos(primary_zpos_ + z_index);
+    ++z_index;
+    const uint32_t fourcc =
+        have_db
+            ? (ld.geometry.opaque ? OpaqueScanoutFourcc(db.fourcc) : db.fourcc)
+            : (pool != nullptr ? pool->format().drm_fourcc : 0);
+    c.pv_plan_sig = MixSig(c.pv_plan_sig, reinterpret_cast<uintptr_t>(tag));
+    c.pv_plan_sig =
+        MixSig(c.pv_plan_sig, (uint64_t{place.src.x} << 32U) | place.src.y);
+    c.pv_plan_sig =
+        MixSig(c.pv_plan_sig, (uint64_t{place.src.w} << 32U) | place.src.h);
+    c.pv_plan_sig = MixSig(
+        c.pv_plan_sig, (uint64_t{static_cast<uint32_t>(place.dst.x)} << 32U) |
+                           static_cast<uint32_t>(place.dst.y));
+    c.pv_plan_sig = MixSig(
+        c.pv_plan_sig, (uint64_t{static_cast<uint32_t>(place.dst.w)} << 32U) |
+                           static_cast<uint32_t>(place.dst.h));
+    c.pv_plan_sig =
+        MixSig(c.pv_plan_sig, (uint64_t{place.rotation} << 32U) | fourcc);
+
+    // The pool caches one fb_id per producer buffer and hands each back
+    // through on_release. drm-cxx fires that at displacement rather than at
+    // flip, so park it until the next flip completes instead of returning the
+    // producer a slot KMS is still scanning.
+    const auto make_pool = [&c, &surface, &db, fourcc] {
+      drm::scene::ExternalDmaBufPool::Options opts{};
+      opts.on_release = [&c, surface](
+                            std::uintptr_t rkey,
+                            std::optional<drm::sync::SyncFence> release_fence) {
+        drm::sync::SyncFence fence;
+        if (release_fence.has_value()) {
+          fence = std::move(*release_fence);
+        }
+        const std::scoped_lock lock(c.deferred_releases_mu);
+        c.deferred_releases.push_back({surface, rkey, std::move(fence)});
+      };
+      return drm::scene::ExternalDmaBufPool::create(
+          c.device, db.width, db.height, fourcc, db.modifier, std::move(opts));
+    };
+
+    if (layer != nullptr) {
+      layer->set_src_rect_fixed_if_changed(src);
+      layer->set_dst_rect_if_changed(dst);
+      layer->set_rotation_if_changed(place.rotation);
+      layer->set_zpos_if_changed(zpos);
+      if (!have_db) {
+        continue;
+      }
+      if (pool->format().width != db.width ||
+          pool->format().height != db.height ||
+          pool->format().drm_fourcc != fourcc ||
+          pool->format().modifier != db.modifier) {
+        // The buffer's geometry or format changed: swap in a pool for the new
+        // one in place, keeping the layer's plane, rather than scanning the new
+        // memory out through a framebuffer made for the old.
+        auto fresh = make_pool();
+        if (!fresh) {
+          ihs::log::debug("[VulkanDrmBackend] pv pool: {}",
+                          fresh.error().message());
+          surface->OnScanoutRelease(db.buffer_id);
+          CloseDmabufFds(&db);
+          return false;
+        }
+        pool = fresh.value().get();
+        if (!c.scene->replace_source(layer->handle(),
+                                     std::move(fresh.value()))) {
+          surface->OnScanoutRelease(db.buffer_id);
+          CloseDmabufFds(&db);
+          return false;
+        }
+        c.plane_plan_sig_valid = false;
+      }
+      SubmitPvPool(pool, db);
+      surface->AckDmabufScanout(db.buffer_id);
+      CloseDmabufFds(&db);
+      continue;
+    }
+
+    auto pool_exp = make_pool();
+    if (!pool_exp) {
+      ihs::log::debug("[VulkanDrmBackend] pv pool: {}",
+                      pool_exp.error().message());
+      surface->OnScanoutRelease(db.buffer_id);
+      CloseDmabufFds(&db);
+      return false;
+    }
+    auto new_pool = std::move(pool_exp.value());
+    auto* pool_raw = new_pool.get();
+    drm::scene::LayerDesc desc{};
+    desc.source = std::move(new_pool);
+    desc.display.src_rect_fixed = src;
+    desc.display.dst_rect = dst;
+    // The producer hands over scanout-oriented (top-down) pixels, so the only
+    // rotation is the layer's own.
+    desc.display.rotation = place.rotation;
+    desc.display.zpos = zpos;
+    desc.content_type = drm::planes::ContentType::Generic;
+    desc.identity_tag = tag;
+    auto handle = c.scene->add_layer(std::move(desc));
+    if (!handle) {
+      ihs::log::debug("[VulkanDrmBackend] pv add_layer: {}",
+                      handle.error().message());
+      surface->OnScanoutRelease(db.buffer_id);
+      CloseDmabufFds(&db);
+      return false;
+    }
+    c.plane_layer_keys.push_back(tag);
+    c.plane_topology_changed = true;
+    SubmitPvPool(pool_raw, db);
+    surface->AckDmabufScanout(db.buffer_id);
+    CloseDmabufFds(&db);
   }
-  auto pool = std::move(pool_exp.value());
-  auto* pool_raw = pool.get();
-  drm::scene::LayerDesc desc{};
-  desc.source = std::move(pool);
-  desc.display.dst_rect = dst;
-  // The producer hands over scanout-oriented (top-down) pixels.
-  desc.display.rotation = DRM_MODE_ROTATE_0;
-  desc.display.zpos = zpos;
-  desc.content_type = drm::planes::ContentType::Generic;
-  desc.identity_tag = const_cast<void*>(key);
-  auto handle = c.scene->add_layer(std::move(desc));
-  if (!handle) {
-    ihs::log::debug("[VulkanDrmBackend] pv add_layer: {}",
-                    handle.error().message());
-    close_fds();
-    return false;
-  }
-  c.plane_layer_keys.push_back(key);
-  c.plane_topology_changed = true;
-  SubmitPvPool(pool_raw, db);
-  surface->AckDmabufScanout(db.buffer_id);
-  close_fds();
   return true;
 }
 
@@ -2095,6 +2237,7 @@ bool VulkanDrmBackend::ReconcilePlaneLayers(CompositorState& c,
   // path and its presence is what forces this frame to bail out below.
   std::vector<const void*> present;
   present.reserve(count);
+  c.pv_plan_sig = 0;
 
   int z_index = 0;
   for (size_t i = 0; i < count; ++i) {
@@ -2104,10 +2247,9 @@ bool VulkanDrmBackend::ReconcilePlaneLayers(CompositorState& c,
     }
     if (fl->type == kFlutterLayerContentTypePlatformView &&
         fl->platform_view != nullptr) {
-      if (!ReconcilePlatformViewLayer(c, *fl, z_index, present)) {
+      if (!ReconcilePlatformViewLayers(c, *fl, z_index, present)) {
         return false;
       }
-      ++z_index;
       continue;
     }
     if (fl->type != kFlutterLayerContentTypeBackingStore ||
@@ -2196,6 +2338,8 @@ bool VulkanDrmBackend::ReconcilePlaneLayers(CompositorState& c,
     }
     it = c.plane_layer_keys.erase(it);
   }
+  // Every tag still in the scene is in this frame; the rest can go.
+  c.pv_layer_tags.RetainOnly(present);
   return true;
 }
 
@@ -2654,7 +2798,7 @@ void VulkanDrmBackend::DrainDeferredScanoutReleases(CompositorState& c) {
         r.surface->SetReleaseFenceFd(fd);
       }
     }
-    r.surface->OnScanoutRelease(r.buffer_id);
+    r.surface->OnScanoutKeyRelease(r.key);
   }
 }
 
@@ -2683,7 +2827,7 @@ bool VulkanDrmBackend::PresentLayersViaPlanes(const FlutterLayer** layers,
   // allocator is deterministic for a given layer set, so cache the verdict
   // against a signature of it and skip the ioctl while that holds; a topology
   // change or any geometry move invalidates it.
-  size_t sig = c.plane_layer_keys.size();
+  size_t sig = MixSig(c.plane_layer_keys.size(), c.pv_plan_sig);
   for (const void* k : c.plane_layer_keys) {
     sig = sig * 1000003U ^ reinterpret_cast<uintptr_t>(k);
   }

@@ -257,25 +257,59 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   // v->mutex).
   std::atomic<bool> synth_buffer_id{false};
 
-  // Deliver-once guard for the direct-scanout path: the submit_seq last handed
-  // to GetDmabuf. The compositor commits faster than a 30fps producer submits,
-  // so a reused overlay layer polls GetDmabuf every present; without this it
-  // would re-import the same buffer each time, churning AddFB2/retire for no
-  // new content. Set when the compositor confirms the frame reached a plane
-  // (AckDmabufScanout) or hands its slot back (OnScanoutRelease); a fresh
-  // submit bumps submit_seq past it, re-arming delivery.
-  mutable uint64_t dmabuf_delivered_seq{0};
+  // The direct-scanout path's view of one layer's frames. Each layer that can
+  // reach a plane has one: layer 0 below, and each extra layer its own.
+  struct ScanoutOffer {
+    // Deliver-once guard: the submit_seq last handed to the plane path. The
+    // compositor commits faster than a 30fps producer submits, so a reused
+    // overlay layer polls every present; without this it would re-import the
+    // same buffer each time, churning AddFB2/retire for no new content. Set
+    // when the compositor confirms the frame reached a plane
+    // (AckDmabufScanout) or hands its slot back (OnScanoutRelease); a fresh
+    // submit bumps submit_seq past it, re-arming delivery.
+    uint64_t delivered_seq{0};
+    // The submit_seq last handed out, which is not yet the same as delivered:
+    // the compositor's import can fail after the hand-off, and a frame that
+    // never reached a plane has to be offered again or a producer that does
+    // not submit again never returns to scanout. Committed into delivered_seq
+    // by AckDmabufScanout (placed) or OnScanoutRelease (given back). Zero when
+    // nothing is outstanding.
+    uint64_t offered_seq{0};
+    // buffer_id of that outstanding offer, so a release for some other slot
+    // (a stale retire) does not retire the offer.
+    uint32_t offered_buffer_id{0};
+  };
+  mutable ScanoutOffer offer0;
+  // Layer 0's layer_id (ihs_pv_submit_layers), which names its plane.
+  uint32_t layer0_id{0};
 
-  // The submit_seq GetDmabuf last handed out, which is not yet the same as
-  // delivered: the compositor's import can fail after the hand-off, and a
-  // frame that never reached a plane has to be offered again or a producer
-  // that does not submit again never returns to scanout. Committed into
-  // dmabuf_delivered_seq by AckDmabufScanout (placed) or OnScanoutRelease
-  // (given back). Zero when nothing is outstanding.
-  mutable uint64_t dmabuf_offered_seq{0};
-  // buffer_id of that outstanding offer, so a release for some other slot
-  // (a stale retire) does not retire the offer.
-  mutable uint32_t dmabuf_offered_buffer_id{0};
+  // Generation of each retired buffer_id (see
+  // ICompositorSurface::Dmabuf::generation); an id missing here is at 0.
+  // Bounded, since a producer may never reuse an id and so retire an endless
+  // run of them. Forgetting an entry puts its id back at generation 0, which
+  // can only cost a reuse of that id a held frame on the plane path while the
+  // old framebuffer drains. Guarded by `mutex`.
+  std::map<uint32_t, uint32_t> scanout_generation;
+  static constexpr size_t kMaxScanoutGenerations = 1024;
+
+  // Generation of @p buffer_id's current dma-buf. Caller holds `mutex`.
+  [[nodiscard]] uint32_t GenerationLocked(const uint32_t buffer_id) const {
+    const auto it = scanout_generation.find(buffer_id);
+    return it == scanout_generation.end() ? 0 : it->second;
+  }
+
+  // Move @p buffer_id to its next generation. Caller holds `mutex`.
+  void BumpGenerationLocked(const uint32_t buffer_id) {
+    if (scanout_generation.size() >= kMaxScanoutGenerations &&
+        scanout_generation.count(buffer_id) == 0) {
+      scanout_generation.erase(scanout_generation.begin());
+    }
+    ++scanout_generation[buffer_id];
+  }
+  // Scanout keys of retired buffers, for TakeRetiredScanoutKeys. Bounded: on a
+  // backend with no plane path nothing drains it. Guarded by `mutex`.
+  std::vector<std::uintptr_t> retired_scanout_keys;
+  static constexpr size_t kMaxRetiredScanoutKeys = 256;
 
 #if IVI_HAVE_VULKAN
   // A resize re-creates a ring slot's dma-buf at a new size, replacing the
@@ -313,10 +347,10 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     // dispose, or by the GL-fallback wait in GetGlTextureName. -1 when the
     // producer synced before submit.
     int acquire_fence_fd{-1};
-    // submit_seq when this frame was stashed. Compared against
-    // dmabuf_delivered_seq to tell a frame the DRM scene path took (its release
-    // rides OnScanoutRelease) from one superseded before it was ever scanned
-    // out (its release eventfd must be signalled at supersede instead).
+    // submit_seq when this frame was stashed. Compared against the layer's
+    // ScanoutOffer::delivered_seq to tell a frame the DRM scene path took (its
+    // release rides OnScanoutRelease) from one superseded before it was ever
+    // scanned out (its release eventfd must be signaled at supersede instead).
     uint64_t stash_seq{0};
     // The producer retired this frame's buffer_id and then submitted it again,
     // possibly for a different dma-buf, so a cached import under the id is
@@ -373,15 +407,16 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   // A submit of 0 layers: nothing is drawn until the next submit.
   bool layer0_hidden{false};
 
-  // The layers above the bottom one. They are GPU-composited only (never
-  // offered to a plane), each with its own frame, acquire fence and release;
-  // imports are shared with layer 0 through the buffer_id-keyed cache. Keyed
+  // The layers above the bottom one, each with its own frame, acquire fence,
+  // release and plane offer; imports are shared with layer 0 through the
+  // buffer_id-keyed cache. Keyed
   // by layer_id so a layer keeps its state while the list around it changes,
   // and a map because GetLayerGlTexture drops the lock for a fence wait: a
   // concurrent submit can then add or remove layers, and a node must not move
   // underneath it.
   struct ExtraLayer {
     ICompositorSurface::LayerGeometry geom;  // of the frame being sampled
+    ScanoutOffer offer;
 #if IVI_HAVE_VULKAN
     DmabufVulkanImporter::ImportedImage* current{nullptr};
     uint32_t current_buffer_id{0};
@@ -631,71 +666,136 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
 // Vulkan-only build with the base class's "cannot scan out", so every platform
 // view composited however many planes were free.
 #if IVI_HAVE_VULKAN || IVI_HAVE_EGL
-  // Direct-scanout seam for the DRM compositor: expose the latest submitted
-  // frame's dma-buf so it can be placed on a KMS overlay plane instead of being
-  // GL-composited. Reads the frame stashed by HostSubmit and returns a *dup* of
-  // its dma-buf fd — owned by the caller, which must close it. Duping under the
-  // lock keeps the fd valid even if a concurrent HostSubmit supersedes and
-  // closes the plugin's original before the compositor imports it. The
-  // compositor still plane-routes XOR GL-imports a given surface per present so
-  // the two paths don't both consume a frame. Producers submit top-down pixels
-  // (no REFLECT_Y), so the plane scans the buffer out as-is.
+  // Direct-scanout seam for the DRM compositor: expose a layer's latest
+  // submitted frame as a dma-buf so it can be placed on a KMS plane instead of
+  // being composited. Hands back *dups* of the frame's fds, owned by the
+  // caller: duping under the lock keeps them valid even if a concurrent submit
+  // supersedes and closes the originals before the compositor imports them.
+  // The compositor plane-routes XOR composites a given surface per present, so
+  // the two paths don't both consume a frame. Producers submit top-down
+  // pixels (no REFLECT_Y), so the plane scans the buffer out as-is.
   //
-  // A GL fallback for a frame (no overlay plane fits) imports the stashed frame
-  // via GetGlTextureName, which consumes it — so GetDmabuf then returns false
-  // until the producer submits again. A continuous producer resumes direct
-  // scanout on its next submit; a static producer stays GL-composited (still
-  // correct, just not zero-copy) until it resubmits. Retaining the dma-buf
-  // across a GL import so a static producer returns to scanout is part of the
-  // dynamic-producer follow-up.
-  [[nodiscard]] DmabufState GetDmabuf(Dmabuf* out) const override {
-    const std::lock_guard<std::mutex> lock(mutex);
-    if (out == nullptr || layer0_hidden) {
-      return DmabufState::kNoNewFrame;
-    }
-    // A plane takes one buffer, drawn whole across the view. Anything more --
-    // layers above the bottom one, or a bottom layer cropped, placed or
-    // rotated -- is the composite path's, so a new frame of it is reported as
-    // not scanout-capable and the view is composited.
-    {
-      bool fresh = false;
-      bool plain = extra_order.empty();
+  // On EGL a composite of a frame imports it (GetGlTextureName), which
+  // consumes it, so the frame is not offered to a plane after that until the
+  // producer submits again. A continuous producer resumes direct scanout on
+  // its next submit; a static one stays composited (still correct, just not
+  // zero-copy) until it resubmits.
+
+  // One layer, as the offer path reads it. Caller holds `mutex`.
+  struct LayerRef {
+    ScanoutOffer* offer{nullptr};
+    uint32_t layer_id{0};
+    uint32_t buffer_id{0};
+    // A frame submitted and not yet taken by the plane path.
+    bool fresh{false};
+    ICompositorSurface::LayerGeometry geom;
+    uint32_t width{0};
+    uint32_t height{0};
+    int acquire_fd{-1};  // borrowed; an offer hands out a dup
 #if IVI_HAVE_VULKAN
-      if (current != nullptr) {
-        fresh = dmabuf_delivered_seq != submit_seq;
-        plain = plain && geom0.IsWhole();
-      }
+    bool vulkan{false};  // imported at submit, scanout dups in `scanout`
 #endif
 #if IVI_HAVE_EGL
-      if (pending_egl.valid) {
-        fresh = dmabuf_delivered_seq != submit_seq;
-        plain = plain && pending_egl.geom.IsWhole();
-      }
+    const PendingEglFrame* pending{nullptr};  // the stashed frame on offer
 #endif
-      if (!plain) {
-        return fresh ? DmabufState::kNotScanoutCapable
-                     : DmabufState::kNoNewFrame;
+  };
+
+  // Resolve layer @p index (0 = the bottom). False when there is no such layer
+  // or nothing has been submitted for it. Caller holds `mutex`.
+  bool ResolveLayerLocked(const size_t index, LayerRef* ref) const {
+    if (layer0_hidden) {
+      return false;
+    }
+    ExtraLayer* x = nullptr;
+    if (index == 0) {
+      ref->offer = &offer0;
+      ref->layer_id = layer0_id;
+    } else {
+      x = ExtraAtLocked(index);
+      if (x == nullptr) {
+        return false;
+      }
+      ref->offer = &x->offer;
+      ref->layer_id = extra_order[index - 1];
+    }
+    const bool undelivered = ref->offer->delivered_seq != submit_seq;
+#if IVI_HAVE_VULKAN
+    const DmabufVulkanImporter::ImportedImage* img =
+        x == nullptr ? current : x->current;
+    if (img != nullptr) {
+      ref->vulkan = true;
+      ref->buffer_id = x == nullptr ? current_buffer_id : x->current_buffer_id;
+      ref->geom = x == nullptr ? geom0 : x->geom;
+      ref->width = img->width;
+      ref->height = img->height;
+      ref->acquire_fd = x == nullptr ? pending_acquire_fd : x->acquire_fd;
+      ref->fresh = undelivered;
+      return true;
+    }
+#endif
+#if IVI_HAVE_EGL
+    const PendingEglFrame& pending = x == nullptr ? pending_egl : x->pending;
+    if (pending.valid) {
+      ref->pending = &pending;
+      ref->buffer_id = pending.frame.buffer_id;
+      ref->geom = pending.geom;
+      ref->width = pending.frame.width;
+      ref->height = pending.frame.height;
+      ref->acquire_fd = pending.acquire_fence_fd;
+      ref->fresh = undelivered;
+      return true;
+    }
+    // Already imported for a composite: placeable, but not offered again.
+    const EglDmabufImporter::ImportedTexture* tex =
+        x == nullptr ? current_egl : x->current_egl;
+    if (tex != nullptr) {
+      ref->buffer_id =
+          x == nullptr ? current_egl_buffer_id : x->current_egl_buffer_id;
+      ref->geom = x == nullptr ? geom0 : x->geom;
+      ref->width = tex->width;
+      ref->height = tex->height;
+      return true;
+    }
+#endif
+    (void)undelivered;
+    return false;
+  }
+
+  // How many layers show @p id. Caller holds `mutex`.
+  [[nodiscard]] size_t LayersShowingLocked(const uint32_t id) const {
+    size_t n = 0;
+    const size_t count = 1 + extra_order.size();
+    for (size_t i = 0; i < count; ++i) {
+      LayerRef r;
+      if (ResolveLayerLocked(i, &r) && r.buffer_id == id) {
+        ++n;
+      }
+    }
+    return n;
+  }
+
+  // Hand @p ref's frame to the plane path, once. Caller holds `mutex`.
+  DmabufState OfferLayerLocked(const LayerRef& ref, Dmabuf* out) const {
+    if (!ref.fresh) {
+      return DmabufState::kNoNewFrame;
+    }
+    if constexpr (!kScanoutKeyHasGeneration) {
+      // No room in a key for the generation, so a reused id would reach the
+      // plane under its old memory's key. Composite it instead.
+      if (GenerationLocked(ref.buffer_id) != 0) {
+        return DmabufState::kNotScanoutCapable;
       }
     }
 #if IVI_HAVE_VULKAN
-    // Vulkan path: the frame was imported at submit and its fds consumed, so
-    // what a plane can be given is the dup retained beside that import rather
-    // than a stashed frame. Same deliver-once rule as below: the compositor
-    // polls every present but only wants a buffer the producer has refreshed.
-    if (current != nullptr) {
-      if (!current_buffer_valid) {
+    // The frame was imported at submit and its fds consumed, so what a plane
+    // can be given is the dup retained beside that import rather than a
+    // stashed frame.
+    if (ref.vulkan) {
+      const auto sit = scanout.find(ref.buffer_id);
+      if (sit == scanout.end() || sit->second.plane_count == 0) {
         // Imported but not dup'd -- a producer whose fds could not be
         // duplicated. New content exists and cannot be scanned out, which is
         // exactly what the composite fallback is for.
-        return dmabuf_delivered_seq == submit_seq
-                   ? DmabufState::kNoNewFrame
-                   : DmabufState::kNotScanoutCapable;
-      }
-      if (dmabuf_delivered_seq == submit_seq) {
-        return DmabufState::kNoNewFrame;
-      }
-      const auto sit = scanout.find(current_buffer_id);
-      if (sit == scanout.end() || sit->second.plane_count == 0) {
         return DmabufState::kNotScanoutCapable;
       }
       const ScanoutBuffer& sb = sit->second;
@@ -720,31 +820,25 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
         out->offset[i] = sb.offset[i];
         out->stride[i] = sb.stride[i];
       }
-      out->buffer_id = current_buffer_id;
+      out->buffer_id = ref.buffer_id;
+      out->generation = GenerationLocked(ref.buffer_id);
       // The acquire fence is the producer's, and the compositor lowers it to
-      // the plane's IN_FENCE_FD. dup: pending_acquire_fd stays ours, and the
+      // the plane's IN_FENCE_FD. dup: the layer's copy stays ours, and the
       // blend path may still want it if this frame ends up composited.
-      out->acquire_fence_fd =
-          pending_acquire_fd >= 0 ? ::dup(pending_acquire_fd) : -1;
-      dmabuf_offered_seq = submit_seq;
+      out->acquire_fence_fd = ref.acquire_fd >= 0 ? ::dup(ref.acquire_fd) : -1;
+      ref.offer->offered_seq = submit_seq;
+      ref.offer->offered_buffer_id = ref.buffer_id;
       return DmabufState::kFrame;
     }
 #endif
 #if IVI_HAVE_EGL
-    // Nothing submitted yet. Not "cannot scan out" -- this producer is simply
-    // not ready, and its plane lights up on its first submit.
-    if (!pending_egl.valid) {
+    if (ref.pending == nullptr) {
       return DmabufState::kNoNewFrame;
     }
-    // Hand each submitted frame to the scanout path at most once — the reuse
-    // branch polls this every present but only wants a fresh buffer.
-    if (dmabuf_delivered_seq == submit_seq) {
-      return DmabufState::kNoNewFrame;
-    }
-    const IhsFrame& f = pending_egl.frame;
+    const IhsFrame& f = ref.pending->frame;
     // From here on there *is* a new frame, so every remaining bail-out is a
     // frame that cannot be scanned out rather than an absent one. Saying so
-    // lets the compositor GL-composite the new content instead of holding the
+    // lets the compositor composite the new content instead of holding the
     // plane on the last scannable frame.
     if (f.plane_count == 0 || f.plane_fd[0] < 0) {
       return DmabufState::kNotScanoutCapable;
@@ -777,6 +871,7 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
         return DmabufState::kNoNewFrame;
       }
     }
+    *out = Dmabuf{};
     for (uint32_t i = 0; i < np; ++i) {
       out->fd[i] = duped[i];  // owned by the caller
     }
@@ -790,8 +885,8 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     out->width = f.width;
     out->height = f.height;
     out->plane_count = np;
-    out->buffer_id =
-        f.buffer_id;  // the compositor hands it to OnScanoutRelease
+    out->buffer_id = f.buffer_id;  // the compositor hands it back on release
+    out->generation = GenerationLocked(f.buffer_id);
     for (uint32_t i = 0; i < np; ++i) {
       out->offset[i] = f.plane_offset[i];
       out->stride[i] = f.plane_stride[i];
@@ -800,13 +895,13 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     // which wires it to the plane's IN_FENCE_FD (or CPU-waits as a fallback).
     // Per the ICompositorSurface::Dmabuf contract the surface keeps ownership
     // and the compositor gets a dup; retaining it here also lets the GL-texture
-    // fallback (GetGlTextureName) still wait on the fence if this present later
-    // falls back after GetDmabuf. The surface's copy is closed on the next
-    // superseding submit, on dispose, or by the fallback wait. -1 when the
-    // producer synced before submit.
+    // fallback still wait on the fence if this present later falls back after
+    // the offer. The surface's copy is closed on the next superseding submit,
+    // on dispose, or by the fallback wait. -1 when the producer synced before
+    // submit.
     out->acquire_fence_fd = -1;
-    if (pending_egl.acquire_fence_fd >= 0) {
-      out->acquire_fence_fd = ::dup(pending_egl.acquire_fence_fd);
+    if (ref.acquire_fd >= 0) {
+      out->acquire_fence_fd = ::dup(ref.acquire_fd);
       if (out->acquire_fence_fd < 0) {
         // Fall back to implicit sync for this frame; log so it's diagnosable.
         ihs::log::warn(
@@ -816,16 +911,59 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
       }
     }
     // An older offer still open, for a frame since superseded, was abandoned.
-    AbandonStaleOfferLocked(f.buffer_id);
+    AbandonStaleOfferLocked(*ref.offer, f.buffer_id);
     // Offered, not delivered. The compositor commits this by acking the frame
     // onto a plane, or retires it by handing the slot back; until one of those
     // the frame stays eligible, so an import that fails downstream can retry.
-    dmabuf_offered_seq = submit_seq;
-    dmabuf_offered_buffer_id = f.buffer_id;
+    ref.offer->offered_seq = submit_seq;
+    ref.offer->offered_buffer_id = f.buffer_id;
     return DmabufState::kFrame;
 #else
     return DmabufState::kNoNewFrame;
 #endif
+  }
+
+  // The single-layer form: layer 0 drawn whole, or nothing. A plane takes one
+  // buffer drawn across the whole view here, so a new frame of anything more
+  // -- layers above the bottom one, or a bottom layer cropped, placed or
+  // rotated -- is reported as not scanout-capable and the view is composited.
+  [[nodiscard]] DmabufState GetDmabuf(Dmabuf* out) const override {
+    const std::lock_guard<std::mutex> lock(mutex);
+    LayerRef ref;
+    if (out == nullptr || !ResolveLayerLocked(0, &ref)) {
+      return DmabufState::kNoNewFrame;
+    }
+    if (!extra_order.empty() || !ref.geom.IsWhole()) {
+      return ref.fresh ? DmabufState::kNotScanoutCapable
+                       : DmabufState::kNoNewFrame;
+    }
+    return OfferLayerLocked(ref, out);
+  }
+
+  [[nodiscard]] DmabufState GetLayerDmabuf(const size_t index,
+                                           LayerDmabuf* out) const override {
+    const std::lock_guard<std::mutex> lock(mutex);
+    LayerRef ref;
+    if (out == nullptr || !ResolveLayerLocked(index, &ref)) {
+      return DmabufState::kNoNewFrame;
+    }
+    out->layer_id = ref.layer_id;
+    out->geometry = ref.geom;
+    out->buffer_width = ref.width;
+    out->buffer_height = ref.height;
+    // One buffer in two layers has one release, and two planes would each
+    // report it, the first while the second still scans it out.
+    if (ref.fresh && LayersShowingLocked(ref.buffer_id) > 1) {
+      return DmabufState::kNotScanoutCapable;
+    }
+    return OfferLayerLocked(ref, &out->dmabuf);
+  }
+
+  [[nodiscard]] std::vector<std::uintptr_t> TakeRetiredScanoutKeys() override {
+    const std::lock_guard<std::mutex> lock(mutex);
+    std::vector<std::uintptr_t> out;
+    out.swap(retired_scanout_keys);
+    return out;
   }
 #endif  // IVI_HAVE_VULKAN || IVI_HAVE_EGL
 
@@ -883,6 +1021,20 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     SignalRelease(buffer_id);
   }
 
+  // The plane path's release, naming the generation that left the plane. A
+  // release for an older generation of a reused id is for memory the producer
+  // already retired -- the retire answered its release -- so it must not hand
+  // back the id's current frame. Compositor thread.
+  void OnScanoutKeyRelease(const std::uintptr_t key) override {
+    const std::lock_guard<std::mutex> lock(mutex);
+    const uint32_t buffer_id = ScanoutKeyBufferId(key);
+    if (key != ScanoutKey(buffer_id, GenerationLocked(buffer_id))) {
+      return;
+    }
+    RetireOffer(buffer_id);
+    SignalRelease(buffer_id);
+  }
+
   // The compositor placed the offered frame on a plane. Commit the
   // deliver-once guard, which until now was only provisional. Compositor
   // thread.
@@ -909,17 +1061,25 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     return !extra_order.empty();
   }
 
-  // Close out the outstanding GetDmabuf offer when it is for `buffer_id`,
-  // whether it was placed or given back -- both mean the frame will not be
-  // offered again. A release for any other slot is a stale retire and leaves
-  // the offer alone. Caller holds `mutex`.
+  // Close out the outstanding offer for `buffer_id`, whether it was placed or
+  // given back -- both mean the frame will not be offered again. Offers are
+  // per layer, and a buffer is offered by at most one layer at a time (see
+  // GetLayerDmabuf), so whichever layer holds it is the one. A release for
+  // any other slot is a stale retire and leaves the offers alone. Caller holds
+  // `mutex`.
   void RetireOffer(uint32_t buffer_id) const {
-    if (dmabuf_offered_seq == 0 || dmabuf_offered_buffer_id != buffer_id) {
-      return;
+    const auto retire = [buffer_id](ScanoutOffer& o) {
+      if (o.offered_seq == 0 || o.offered_buffer_id != buffer_id) {
+        return;
+      }
+      o.delivered_seq = o.offered_seq;
+      o.offered_seq = 0;
+      o.offered_buffer_id = 0;
+    };
+    retire(offer0);
+    for (auto& [layer_id, x] : extra_layers) {
+      retire(x.offer);
     }
-    dmabuf_delivered_seq = dmabuf_offered_seq;
-    dmabuf_offered_seq = 0;
-    dmabuf_offered_buffer_id = 0;
   }
 
   // Answer an offer the compositor took and never answered -- neither placed
@@ -932,18 +1092,48 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   //
   // A superseding submit cannot release an open offer's frame itself: the
   // compositor may be importing it at that moment. By the time the compositor
-  // offers or imports something newer it has finished with the old offer, so
-  // this is the first point the release is safe -- and without it the
-  // producer waits out its release timeout on that buffer. Caller holds
-  // `mutex`.
-  void AbandonStaleOfferLocked(const uint32_t keep_id) const {
-    if (dmabuf_offered_seq == 0 || dmabuf_offered_buffer_id == keep_id) {
+  // offers or imports something newer for the same layer it has finished with
+  // the old offer, so this is the first point the release is safe -- and
+  // without it the producer waits out its release timeout on that buffer.
+  // Caller holds `mutex`.
+  void AbandonStaleOfferLocked(ScanoutOffer& offer,
+                               const uint32_t keep_id) const {
+    if (offer.offered_seq == 0 || offer.offered_buffer_id == keep_id) {
       return;
     }
-    const uint32_t id = dmabuf_offered_buffer_id;
-    RetireOffer(id);
+    const uint32_t id = offer.offered_buffer_id;
+    offer.delivered_seq = offer.offered_seq;
+    offer.offered_seq = 0;
+    offer.offered_buffer_id = 0;
     SignalRelease(id);
   }
+
+#if IVI_HAVE_EGL
+  // Whether a stashed frame being superseded (or dropped with its layer) is
+  // this side's to release. Not when it is on a plane, where the plane path's
+  // release will do it, and not while an offer of it is open: the compositor
+  // owes an ack or a release either way, and releasing here would hand the
+  // slot back to the producer mid-import, with the producer by definition
+  // writing a new frame right now.
+  //
+  // `delivered_seq` moves only when the compositor acks the frame onto a
+  // plane or hands its slot back, so it does mean "reached a plane" (#332).
+  // The `!on_a_plane` arm is the belt-and-braces half: a compositor that
+  // takes a frame and answers neither would otherwise leave the producer
+  // waiting out an eventfd that never fires. SignalRelease is idempotent, so
+  // releasing a slot twice costs nothing. drm_plane_id is 0 exactly when the
+  // last present composited this view (SetScanoutPlane(0)), which is the case
+  // where no retire is coming. Caller holds `mutex`.
+  [[nodiscard]] bool OwnsSupersededReleaseLocked(
+      const ScanoutOffer& offer,
+      const PendingEglFrame& pending) const {
+    const bool on_a_plane = drm_plane_id.load(std::memory_order_relaxed) != 0;
+    const bool offer_outstanding =
+        offer.offered_seq != 0 && offer.offered_seq >= pending.stash_seq;
+    return !offer_outstanding &&
+           (offer.delivered_seq < pending.stash_seq || !on_a_plane);
+  }
+#endif
 
   // Signal and drop the release eventfd for `buffer_id` (a no-op if there is
   // none). Writing wakes the producer's poll on its dup; closing our copy
@@ -1190,6 +1380,31 @@ void CloseScanoutBuffer(IhsPluginView::ScanoutBuffer* sb) {
   sb->plane_count = 0;
 }
 
+// Dup @p frame's plane fds for direct scanout, before an import consumes
+// them. False, with nothing left open, when a plane has no fd or a dup fails;
+// the frame is then composited rather than placed, which is not fatal.
+bool DupForScanout(const IhsFrame& frame, IhsPluginView::ScanoutBuffer* sb) {
+  *sb = {};
+  sb->plane_count = frame.plane_count < 4 ? frame.plane_count : 4;
+  sb->width = frame.width;
+  sb->height = frame.height;
+  sb->fourcc = frame.format.fourcc;
+  sb->modifier = frame.format.modifier;
+  bool ok = sb->plane_count > 0;
+  for (uint32_t pi = 0; pi < sb->plane_count; ++pi) {
+    sb->offset[pi] = frame.plane_offset[pi];
+    sb->stride[pi] = frame.plane_stride[pi];
+    sb->fd[pi] = frame.plane_fd[pi] >= 0 ? ::dup(frame.plane_fd[pi]) : -1;
+    if (sb->fd[pi] < 0) {
+      ok = false;
+    }
+  }
+  if (!ok) {
+    CloseScanoutBuffer(sb);
+  }
+  return ok;
+}
+
 // True while `id` is the frame the compositor samples. Caller holds v->mutex.
 bool OnScreenVulkanLocked(const IhsPluginView* v, const uint32_t id) {
   if (v->current != nullptr && v->current_buffer_id == id) {
@@ -1259,9 +1474,11 @@ void IhsPluginView::ClearExtraLayersLocked() {
 #endif
 #if IVI_HAVE_EGL
     if (x.pending.valid) {
-      // Never drawn, and never offered to a plane: nothing else will release
-      // its slot.
-      SignalRelease(x.pending.frame.buffer_id);
+      // Never drawn: unless a plane has it, nothing else will release its
+      // slot.
+      if (OwnsSupersededReleaseLocked(x.offer, x.pending)) {
+        SignalRelease(x.pending.frame.buffer_id);
+      }
       CloseFrameFds(&x.pending.frame);
       if (x.pending.acquire_fence_fd >= 0) {
         close(x.pending.acquire_fence_fd);
@@ -1399,10 +1616,10 @@ void IhsPluginView::ImportPendingEglLocked(std::unique_lock<std::mutex>& lock,
 
 uint32_t IhsPluginView::GetGlTextureName() const {
   std::unique_lock<std::mutex> lock(mutex);
-  // Layer 0 is the only layer ever offered for scanout. Importing a newer
-  // frame for it means any open offer for an older one was abandoned.
+  // Importing a newer frame for layer 0 means any open offer of an older one
+  // was abandoned.
   if (pending_egl.valid) {
-    AbandonStaleOfferLocked(pending_egl.frame.buffer_id);
+    AbandonStaleOfferLocked(offer0, pending_egl.frame.buffer_id);
   }
   ImportPendingEglLocked(lock, [this](EglSlot* s) {
     s->pending = &pending_egl;
@@ -1437,6 +1654,11 @@ ICompositorSurface::GlLayerTexture IhsPluginView::GetLayerGlTexture(
     return out;
   }
   const uint32_t layer_id = extra_order[index - 1];
+  if (const auto it = extra_layers.find(layer_id);
+      it != extra_layers.end() && it->second.pending.valid) {
+    AbandonStaleOfferLocked(it->second.offer,
+                            it->second.pending.frame.buffer_id);
+  }
   ImportPendingEglLocked(lock, [this, layer_id](EglSlot* s) {
     const auto it = extra_layers.find(layer_id);
     if (it == extra_layers.end()) {
@@ -1922,9 +2144,9 @@ bool NormalizeFrame(IhsPluginView* v, const IhsFrame* in, IhsFrame* out) {
 
 #if IVI_HAVE_VULKAN
 // Import an extra layer's frame, or reuse the cached import of its buffer_id.
-// Consumes the frame's fds either way. Null when the import fails. Unlike layer
-// 0 there is no scanout copy: extra layers are never offered to a plane.
-// Caller holds v->mutex.
+// Consumes the frame's fds either way. Null when the import fails. A fresh
+// import keeps scanout dups beside it, as layer 0's does. Caller holds
+// v->mutex.
 DmabufVulkanImporter::ImportedImage* ImportOrReuseVulkanLocked(
     IhsPluginView* v,
     const IhsFrame& frame) {
@@ -1937,10 +2159,21 @@ DmabufVulkanImporter::ImportedImage* ImportOrReuseVulkanLocked(
   if (it != v->buffers.end()) {
     RetireVulkanImportLocked(v, frame.buffer_id);  // re-created at a new size
   }
+  IhsPluginView::ScanoutBuffer sb;
+  const bool scanout_ok = DupForScanout(frame, &sb);
   DmabufVulkanImporter::ImportedImage imported;
   if (!g_importer.Import(frame, &imported)) {
     CloseFrameFds(&frame);  // import left the fds untouched on failure
+    CloseScanoutBuffer(&sb);
     return nullptr;
+  }
+  if (scanout_ok) {
+    CloseScanoutBuffer(&v->scanout[frame.buffer_id]);
+    v->scanout[frame.buffer_id] = sb;
+  } else if (const auto sit = v->scanout.find(frame.buffer_id);
+             sit != v->scanout.end()) {
+    CloseScanoutBuffer(&sit->second);
+    v->scanout.erase(sit);
   }
   return &v->buffers.emplace(frame.buffer_id, imported).first->second;
 }
@@ -1992,9 +2225,11 @@ void ApplyLayerListLocked(IhsPluginView* v,
 #endif
 #if IVI_HAVE_EGL
     if (x.pending.valid) {
-      // Superseded before it was ever drawn, and extra layers are never on a
-      // plane, so nothing else will release its slot.
-      v->SignalRelease(x.pending.frame.buffer_id);
+      // Superseded before it was ever drawn: unless a plane has it, nothing
+      // else will release its slot.
+      if (v->OwnsSupersededReleaseLocked(x.offer, x.pending)) {
+        v->SignalRelease(x.pending.frame.buffer_id);
+      }
       CloseFrameFds(&x.pending.frame);
       if (x.pending.acquire_fence_fd >= 0) {
         close(x.pending.acquire_fence_fd);
@@ -2033,7 +2268,10 @@ void ApplyLayerListLocked(IhsPluginView* v,
 #endif
 #if IVI_HAVE_EGL
       if (it->second.pending.valid) {
-        v->SignalRelease(it->second.pending.frame.buffer_id);
+        if (v->OwnsSupersededReleaseLocked(it->second.offer,
+                                           it->second.pending)) {
+          v->SignalRelease(it->second.pending.frame.buffer_id);
+        }
         CloseFrameFds(&it->second.pending.frame);
         if (it->second.pending.acquire_fence_fd >= 0) {
           close(it->second.pending.acquire_fence_fd);
@@ -2057,6 +2295,7 @@ int SubmitFrame0(void* user_data,
                  const IhsFrame* frame,
                  int acquire_fence_fd,
                  int* out_release_fence_fd,
+                 const uint32_t layer_id,
                  const ICompositorSurface::LayerGeometry& geom,
                  LayerListUpdate* update) {
 #if IVI_HAVE_VULKAN
@@ -2077,37 +2316,12 @@ int SubmitFrame0(void* user_data,
     ++v->submit_seq;
     HandBackReleaseFence(v, acquire_fence_fd, out_release_fence_fd);
     if (v->pending_egl.valid) {
-      // A frame the DRM scene path never took (superseded before GetDmabuf
-      // delivered it) is never scanned out, so no OnScanoutRelease will fire
-      // for it -- signal its release here so the producer reclaims that slot. A
-      // frame that WAS delivered rides OnScanoutRelease and must not be
+      // A frame the DRM scene path never took (superseded before it was
+      // offered) is never scanned out, so no plane release will fire for it --
+      // signal its release here so the producer reclaims that slot. A frame
+      // that WAS delivered rides the plane release and must not be
       // double-signalled.
-      // Release the superseded frame unless it is on a plane, where
-      // OnScanoutRelease will do it.
-      //
-      // `dmabuf_delivered_seq` now moves only when the compositor acks the
-      // frame onto a plane or hands its slot back, so it does mean "reached a
-      // plane" (#332) -- the case #530 hit, where a GL-composited frame read
-      // as delivered and nothing ever released it, no longer arises. The
-      // `!on_a_plane` arm stays as the belt-and-braces half: a compositor that
-      // takes a frame and answers neither would otherwise leave the producer
-      // waiting out an eventfd that never fires. SignalRelease is idempotent,
-      // so releasing a slot twice costs nothing.
-      //
-      // drm_plane_id is 0 exactly when the last present GL-composited this view
-      // (SetScanoutPlane(0)), which is the case where no retire is coming.
-      const bool on_a_plane =
-          v->drm_plane_id.load(std::memory_order_relaxed) != 0;
-      // An offer the compositor has taken but not yet answered is its to
-      // account for -- it owes an ack or a release either way. Releasing the
-      // slot here would hand it back to the producer mid-import, and the
-      // producer is by definition writing a new frame right now, so the buffer
-      // being scanned out could be overwritten under it.
-      const bool offer_outstanding =
-          v->dmabuf_offered_seq != 0 &&
-          v->dmabuf_offered_seq >= v->pending_egl.stash_seq;
-      if (!offer_outstanding &&
-          (v->dmabuf_delivered_seq < v->pending_egl.stash_seq || !on_a_plane)) {
+      if (v->OwnsSupersededReleaseLocked(v->offer0, v->pending_egl)) {
         v->SignalRelease(v->pending_egl.frame.buffer_id);
       }
       CloseFrameFds(&v->pending_egl.frame);  // superseded before import
@@ -2128,6 +2342,7 @@ int SubmitFrame0(void* user_data,
     v->pending_egl.reimport = v->deferred_retire.Resubmitted(frame->buffer_id);
     v->pending_egl.geom = geom;
     v->pending_egl.valid = true;
+    v->layer0_id = layer_id;
     // Release retired frames this one pushed off screen. Checked here as well
     // as at import: a view on a KMS plane is fed through GetDmabuf and may
     // never reach GetGlTextureName.
@@ -2243,37 +2458,12 @@ int SubmitFrame0(void* user_data,
     // nothing left to give a plane. A dup that fails is not fatal -- the view
     // is simply composited rather than placed -- so the frame still imports.
     IhsPluginView::ScanoutBuffer sb;
-    sb.plane_count = frame->plane_count < 4 ? frame->plane_count : 4;
-    sb.width = frame->width;
-    sb.height = frame->height;
-    sb.fourcc = frame->format.fourcc;
-    sb.modifier = frame->format.modifier;
-    bool scanout_ok = sb.plane_count > 0;
-    for (uint32_t pi = 0; pi < sb.plane_count; ++pi) {
-      sb.offset[pi] = frame->plane_offset[pi];
-      sb.stride[pi] = frame->plane_stride[pi];
-      sb.fd[pi] = frame->plane_fd[pi] >= 0 ? ::dup(frame->plane_fd[pi]) : -1;
-      if (sb.fd[pi] < 0) {
-        scanout_ok = false;
-      }
-    }
-    if (!scanout_ok) {
-      for (int& fd : sb.fd) {
-        if (fd >= 0) {
-          ::close(fd);
-          fd = -1;
-        }
-      }
-    }
+    const bool scanout_ok = DupForScanout(*frame, &sb);
 
     DmabufVulkanImporter::ImportedImage imported;
     if (!g_importer.Import(*frame, &imported)) {
       CloseFrameFds(frame);  // import left the fds untouched on failure
-      for (int& fd : sb.fd) {
-        if (fd >= 0) {
-          ::close(fd);
-        }
-      }
+      CloseScanoutBuffer(&sb);
       return IHS_PV_ERR_INVALID;
     }
     if (scanout_ok) {
@@ -2319,6 +2509,7 @@ int SubmitFrame0(void* user_data,
   // acquire from the producer is the explicit-sync increment.
   v->current_layout = VK_IMAGE_LAYOUT_GENERAL;
   v->geom0 = geom;
+  v->layer0_id = layer_id;
   ApplyLayerListLocked(v, update, /*vulkan=*/true);
   // A retired frame an extra layer was showing may be off screen now as well.
   for (const uint32_t id : v->deferred_retire.ReleaseOffScreen(
@@ -2358,8 +2549,8 @@ int HostSubmit(void* user_data,
     return IHS_PV_ERR_INVALID;
   }
   return SubmitFrame0(user_data, v, &normalized, acquire_fence_fd,
-                      out_release_fence_fd, ICompositorSurface::LayerGeometry{},
-                      nullptr);
+                      out_release_fence_fd, /*layer_id=*/0,
+                      ICompositorSurface::LayerGeometry{}, nullptr);
 }
 
 // The geometry a layer asks for, in the form the compositor draws with.
@@ -2442,7 +2633,7 @@ int HostSubmitLayers(void* user_data,
   const int rc = SubmitFrame0(
       user_data, v, &frame0, layers[0].acquire_fence_fd,
       out_release_fence_fds != nullptr ? &out_release_fence_fds[0] : nullptr,
-      GeometryOf(layers[0]), &update);
+      layers[0].layer_id, GeometryOf(layers[0]), &update);
   if (!update.applied) {
     close_from(1);  // layer 0 failed; the rest were never taken
   }
@@ -2488,14 +2679,24 @@ int HostIsPlatformThread(void* user_data) {
   return state->platform_task_runner->IsThreadEqual(pthread_self()) ? 1 : 0;
 }
 
-// The producer will not submit `buffer_id` again. Drop its imports now, or --
-// when it is on screen -- once a later frame supersedes it. Any thread, under
-// the same dispose rule as submit.
+// The producer is done with the dma-buf `buffer_id` names. Drop its imports
+// now, or -- when it is on screen -- once a later frame supersedes it. Any
+// thread, under the same dispose rule as submit.
 int HostRetireBuffer(void* /* user_data */,
                      IhsPlatformView* view,
                      const uint32_t buffer_id) {
   auto* v = reinterpret_cast<IhsPluginView*>(view);
   const std::lock_guard<std::mutex> lock(v->mutex);
+  // The plane path caches a framebuffer per scanout key. Tell it this one is
+  // finished with, and move the id to a new generation, so that if it is
+  // submitted again -- for this memory or another -- its frames reach a plane
+  // under a new key and are imported afresh.
+  if (v->retired_scanout_keys.size() >= IhsPluginView::kMaxRetiredScanoutKeys) {
+    v->retired_scanout_keys.erase(v->retired_scanout_keys.begin());
+  }
+  v->retired_scanout_keys.push_back(ICompositorSurface::ScanoutKey(
+      buffer_id, v->GenerationLocked(buffer_id)));
+  v->BumpGenerationLocked(buffer_id);
   bool on_screen = false;
 #if IVI_HAVE_VULKAN
   on_screen = on_screen || OnScreenVulkanLocked(v, buffer_id);
