@@ -25,5 +25,9 @@
 class IFlipSink {
  public:
   virtual ~IFlipSink() = default;
-  virtual void OnFlipEvent(unsigned int tv_sec, unsigned int tv_usec) = 0;
+  // @p sequence is the CRTC's vblank counter at the flip; @p tv_sec/@p tv_usec
+  // the CLOCK_MONOTONIC time it took effect.
+  virtual void OnFlipEvent(unsigned int sequence,
+                           unsigned int tv_sec,
+                           unsigned int tv_usec) = 0;
 };

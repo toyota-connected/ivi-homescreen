@@ -18,11 +18,13 @@
 
 #include <unistd.h>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include <shell/platform/embedder/embedder.h>
 
 #include "view/layer_geometry.h"
+#include "view/presentation.h"
 
 /**
  * @brief Plugin-facing interface for a platform-view backing store producer.
@@ -257,6 +259,9 @@ class ICompositorSurface {
     // and a reused id is imported afresh instead of scanning out through the
     // framebuffer of the memory it used to name.
     uint32_t generation{0};
+    // Which submitted frame this is, for presentation reports (see
+    // GetPresentationSink); 0 when the surface does not track it.
+    uint64_t frame{0};
   };
 
   /**
@@ -501,6 +506,30 @@ class ICompositorSurface {
   [[nodiscard]] virtual uint32_t GetGlTextureBufferId() const { return 0; }
 
   /**
+   * @brief Where reports of this surface's frames reaching the screen go, or
+   * null (the default) for a surface that does not want them.
+   *
+   * Each frame a surface hands out -- a GL texture, a Vulkan image, a dma-buf
+   * for a plane -- carries a frame token (@c GetGlTextureFrame and the @c
+   * frame fields). A backend notes the token of every frame it puts on screen
+   * and, once the display shows it, hands the token to this sink. The sink is
+   * owned apart from the surface, so a report still in flight when the surface
+   * is disposed lands somewhere safe; hold it by the returned pointer, not
+   * through the surface.
+   */
+  [[nodiscard]] virtual std::shared_ptr<IPresentationSink> GetPresentationSink()
+      const {
+    return nullptr;
+  }
+
+  /**
+   * @brief The frame token of the texture @c GetGlTextureName last bound, for
+   * presentation reports; 0 when untracked. Raster thread, like
+   * @c GetGlTextureBufferId.
+   */
+  [[nodiscard]] virtual uint64_t GetGlTextureFrame() const { return 0; }
+
+  /**
    * @brief Report which KMS plane the surface's frame was scanned out on this
    * present, or 0 when it was GL-composited (no plane) this present.
    *
@@ -561,6 +590,7 @@ class ICompositorSurface {
     uint32_t ycbcr_model{0};
     uint32_t ycbcr_range{0};
     LayerGeometry geometry;
+    uint64_t frame{0};  // presentation token (see GetPresentationSink)
   };
 
   // A layer's GL texture, for the GL composite paths, with its geometry.
@@ -573,6 +603,7 @@ class ICompositorSurface {
     // The producer's buffer_id for the frame bound, for a deferred release.
     uint32_t buffer_id{0};
     LayerGeometry geometry;
+    uint64_t frame{0};  // presentation token (see GetPresentationSink)
   };
 
   // A layer's dma-buf, for the plane paths, with what places it.
@@ -652,6 +683,7 @@ class ICompositorSurface {
         out.external = TextureIsExternalOes();
         out.top_first = TextureIsTopFirst();
         out.buffer_id = GetGlTextureBufferId();
+        out.frame = GetGlTextureFrame();
       }
     }
     return out;

@@ -79,6 +79,7 @@ extern "C" {
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <atomic>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -1381,7 +1382,28 @@ class PvHostVkms : public ::testing::Test {
 // can submit against it, and counts the callbacks the registry drives.
 struct FakeProducer {
   IhsPlatformView* view{nullptr};
-  int disposed{0};
+  // Atomic: presented reads it from the display thread.
+  std::atomic<int> disposed{0};
+  // Reports that arrived once dispose had started.
+  std::atomic<int> late_reports{0};
+
+  // IhsPvCallbacks::presented, which arrives on the display thread.
+  struct Presented {
+    uint64_t seq;
+    uint64_t ust_ns;
+    uint32_t refresh_ns;
+    uint64_t msc;
+    uint32_t flags;
+  };
+  std::mutex mu;
+  std::vector<Presented> presented;
+
+  std::vector<Presented> TakePresented() {
+    const std::lock_guard<std::mutex> lock(mu);
+    std::vector<Presented> out;
+    out.swap(presented);
+    return out;
+  }
 };
 
 int fake_factory(const IhsPvCreateInfo* /*info*/,
@@ -1394,6 +1416,16 @@ int fake_factory(const IhsPvCreateInfo* /*info*/,
   out_callbacks->struct_size = sizeof(*out_callbacks);
   out_callbacks->dispose = [](void* u) {
     static_cast<FakeProducer*>(u)->disposed++;
+  };
+  out_callbacks->presented = [](void* u, uint64_t seq, uint64_t ust_ns,
+                                uint32_t refresh_ns, uint64_t msc,
+                                uint32_t flags) {
+    auto* producer = static_cast<FakeProducer*>(u);
+    if (producer->disposed.load() != 0) {
+      producer->late_reports.fetch_add(1);
+    }
+    const std::lock_guard<std::mutex> lock(producer->mu);
+    producer->presented.push_back({seq, ust_ns, refresh_ns, msc, flags});
   };
   *out_user_data = p;
   return IHS_PV_OK;
@@ -1690,9 +1722,13 @@ bool AnyPlaneRotates(const std::string& path) {
 // probe, with the helpers the layer cases share.
 class PvHostVkmsPlanes : public PvHostVkms {
  protected:
+  // The present path the case runs on.
+  [[nodiscard]] virtual const char* CompositorMode() const { return "planes"; }
+
   void SetUp() override {
     const VkmsCard card = FindVkms();
-    if (card.ok() && card.overlays < 2) {
+    if (card.ok() && card.overlays < 2 &&
+        std::string(CompositorMode()) == "planes") {
       GTEST_SKIP() << "vkms needs two overlay planes for a view's layers "
                       "(modprobe vkms enable_overlay=1)";
     }
@@ -1726,7 +1762,37 @@ class PvHostVkmsPlanes : public PvHostVkms {
   }
 
   void Tune(Configuration::Config& cfg) override {
-    cfg.view.drm_compositor = "planes";
+    cfg.view.drm_compositor = CompositorMode();
+  }
+
+  // Submit @p buffer whole as one layer, under @p seq.
+  int SubmitSeq(const GbmSolidBuffer& buffer,
+                const uint32_t buffer_id,
+                const uint64_t seq) const {
+    IhsFrame f = FrameOf(buffer, buffer_id);
+    IhsLayer layer = LayerOf(&f, 1);
+    int release = -1;
+    const int rc =
+        ihs_pv_submit_layers(producer_.view, &layer, 1, seq, &release);
+    if (release >= 0) {
+      ::close(release);
+    }
+    return rc;
+  }
+
+  // Present until the producer has been told about @p want frames, or give up.
+  std::vector<FakeProducer::Presented> PresentUntilReported(size_t want,
+                                                            int max = 10) {
+    std::vector<FakeProducer::Presented> got;
+    for (int i = 0; i < max && got.size() < want; ++i) {
+      if (!Present()) {
+        break;
+      }
+      for (const auto& p : producer_.TakePresented()) {
+        got.push_back(p);
+      }
+    }
+    return got;
   }
 
   // A frame for @p buffer, which ihs_pv_submit_layers consumes.
@@ -1888,6 +1954,117 @@ TEST_F(PvHostVkmsPlanes, AReusedRetiredIdScansOutItsNewMemory) {
       ::close(r);
     }
   }
+}
+
+// A frame reaches the producer's presented callback with the seq it was
+// submitted under, timed by the flip that showed it.
+TEST_F(PvHostVkmsPlanes, AFrameOnAPlaneIsReportedPresented) {
+  const int fd = display_->SharedDevice()->fd();
+  GbmSolidBuffer a;
+  GbmSolidBuffer b;
+  ASSERT_TRUE(a.Create(fd, kViewW, kViewH, 0xFF1E7A46u));
+  ASSERT_TRUE(b.Create(fd, kViewW, kViewH, 0xFF7A1E46u));
+
+  // The first present is the blocking modeset, which has no flip event to
+  // time it; the next one flips.
+  ASSERT_EQ(SubmitSeq(a, 0, 41), IHS_PV_OK);
+  auto got = PresentUntilReported(1);
+  ASSERT_EQ(got.size(), 1U) << "the first frame was never reported";
+  EXPECT_EQ(got[0].seq, 41U);
+  EXPECT_NE(got[0].flags & IHS_PV_PRESENTED_ZERO_COPY, 0U)
+      << "a frame scanned out from the producer's buffer is zero-copy";
+
+  ASSERT_EQ(SubmitSeq(b, 1, 42), IHS_PV_OK);
+  got = PresentUntilReported(1);
+  ASSERT_EQ(got.size(), 1U) << "the flipped frame was never reported";
+  EXPECT_EQ(got[0].seq, 42U);
+  constexpr uint32_t kFlipped =
+      IHS_PV_PRESENTED_VSYNC | IHS_PV_PRESENTED_HW_CLOCK |
+      IHS_PV_PRESENTED_HW_COMPLETION | IHS_PV_PRESENTED_ZERO_COPY;
+  EXPECT_EQ(got[0].flags, kFlipped);
+  EXPECT_NE(got[0].msc, 0U) << "a flip carries the CRTC's vblank count";
+  EXPECT_NE(got[0].ust_ns, 0U);
+  EXPECT_GT(got[0].refresh_ns, 10'000'000U) << "vkms runs at 60 Hz";
+  EXPECT_LT(got[0].refresh_ns, 20'000'000U);
+
+  // Nothing new: nothing more to report however often the view is presented.
+  EXPECT_TRUE(PresentUntilReported(1, 3).empty())
+      << "a frame already reported was reported again";
+}
+
+// A frame replaced before any present took it is never reported; the one that
+// replaced it is.
+TEST_F(PvHostVkmsPlanes, AFrameReplacedBeforeItWasShownIsNotReported) {
+  const int fd = display_->SharedDevice()->fd();
+  GbmSolidBuffer a;
+  GbmSolidBuffer b;
+  GbmSolidBuffer c;
+  ASSERT_TRUE(a.Create(fd, kViewW, kViewH, 0xFF1E7A46u));
+  ASSERT_TRUE(b.Create(fd, kViewW, kViewH, 0xFF7A1E46u));
+  ASSERT_TRUE(c.Create(fd, kViewW, kViewH, 0xFF461E7Au));
+  ASSERT_EQ(SubmitSeq(a, 0, 1), IHS_PV_OK);
+  ASSERT_EQ(PresentUntilReported(1).size(), 1U);
+
+  ASSERT_EQ(SubmitSeq(b, 1, 2), IHS_PV_OK);
+  ASSERT_EQ(SubmitSeq(c, 2, 3), IHS_PV_OK);
+  const auto got = PresentUntilReported(2, 4);
+  ASSERT_EQ(got.size(), 1U);
+  EXPECT_EQ(got[0].seq, 3U) << "seq 2 was never on screen";
+}
+
+// A frame still on its way to the screen when its view is disposed is never
+// reported: the plugin may already have freed what the report would reach.
+TEST_F(PvHostVkmsPlanes, NoReportReachesAPluginOnceItsDisposeHasStarted) {
+  const int fd = display_->SharedDevice()->fd();
+  GbmSolidBuffer a;
+  GbmSolidBuffer b;
+  ASSERT_TRUE(a.Create(fd, kViewW, kViewH, 0xFF1E7A46u));
+  ASSERT_TRUE(b.Create(fd, kViewW, kViewH, 0xFF7A1E46u));
+  ASSERT_EQ(SubmitSeq(a, 0, 1), IHS_PV_OK);
+  ASSERT_EQ(PresentUntilReported(1).size(), 1U);
+
+  // Committed, its flip not yet complete, and then the view goes away.
+  ASSERT_EQ(SubmitSeq(b, 1, 2), IHS_PV_OK);
+  ASSERT_TRUE(Present());
+  ASSERT_TRUE(state_.platform_view_registry->Dispose(1, false));
+  producer_.view = nullptr;
+  ASSERT_EQ(producer_.disposed.load(), 1);
+
+  // Let the flip complete, and a few more.
+  for (int i = 0; i < 3; ++i) {
+    Present();
+  }
+  EXPECT_EQ(producer_.late_reports.load(), 0)
+      << "a presented report reached the plugin after its dispose";
+}
+
+// The same through the GL compositor: the frame is composited, so it is not
+// zero-copy, and it reaches the screen through the backend's own page flip.
+class PvHostVkmsGl : public PvHostVkmsPlanes {
+ protected:
+  [[nodiscard]] const char* CompositorMode() const override { return "gl"; }
+};
+
+TEST_F(PvHostVkmsGl, ACompositedFrameIsReportedPresented) {
+  const int fd = display_->SharedDevice()->fd();
+  GbmSolidBuffer a;
+  GbmSolidBuffer b;
+  ASSERT_TRUE(a.Create(fd, kViewW, kViewH, 0xFF1E7A46u));
+  ASSERT_TRUE(b.Create(fd, kViewW, kViewH, 0xFF7A1E46u));
+
+  ASSERT_EQ(SubmitSeq(a, 0, 7), IHS_PV_OK);
+  auto got = PresentUntilReported(1);
+  ASSERT_EQ(got.size(), 1U) << "the first frame was never reported";
+  EXPECT_EQ(got[0].seq, 7U);
+
+  ASSERT_EQ(SubmitSeq(b, 1, 8), IHS_PV_OK);
+  got = PresentUntilReported(1);
+  ASSERT_EQ(got.size(), 1U) << "the flipped frame was never reported";
+  EXPECT_EQ(got[0].seq, 8U);
+  EXPECT_EQ(got[0].flags, IHS_PV_PRESENTED_VSYNC | IHS_PV_PRESENTED_HW_CLOCK |
+                              IHS_PV_PRESENTED_HW_COMPLETION)
+      << "composited, so not zero-copy";
+  EXPECT_NE(got[0].msc, 0U);
 }
 
 }  // namespace

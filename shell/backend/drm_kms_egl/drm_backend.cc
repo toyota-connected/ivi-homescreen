@@ -1395,6 +1395,7 @@ void DrmBackend::OnLegacyFlipComplete() {
                         static_cast<IFlipSink*>(this)) == 0) {
       pending_bo_ = queued_bo;
       pending_fb_ = queued_fb;
+      pending_serial_ = queued_serial_;
       flip_pending_.store(true, std::memory_order_release);
     } else {
       // The frame is unpresentable; drop it rather than leak the buffer, and
@@ -1414,7 +1415,7 @@ void DrmBackend::OnLegacyFlipComplete() {
 }
 
 void DrmBackend::UnifiedPageFlipHandler(int /*fd*/,
-                                        unsigned int /*sequence*/,
+                                        unsigned int sequence,
                                         unsigned int tv_sec,
                                         unsigned int tv_usec,
                                         void* user_data) {
@@ -1450,7 +1451,7 @@ void DrmBackend::UnifiedPageFlipHandler(int /*fd*/,
   // for the vsync-driving output, returns the baton (see DeliverVsyncFromFlip).
   // This lets one backend's flip reader serve several compositors (one per
   // output) without a CRTC id in the v2 event.
-  static_cast<IFlipSink*>(user_data)->OnFlipEvent(tv_sec, tv_usec);
+  static_cast<IFlipSink*>(user_data)->OnFlipEvent(sequence, tv_sec, tv_usec);
 }
 
 void DrmBackend::DeliverVsyncFromFlip(const unsigned int tv_sec,
@@ -1473,9 +1474,18 @@ void DrmBackend::DeliverVsyncFromFlip(const unsigned int tv_sec,
   vsync_.DeliverVsync(tv_ns);
 }
 
-void DrmBackend::OnFlipEvent(const unsigned int tv_sec,
+void DrmBackend::OnFlipEvent(const unsigned int sequence,
+                             const unsigned int tv_sec,
                              const unsigned int tv_usec) {
+  // The frame this flip shows, read before the completion promotes a queued
+  // one into pending.
+  const uint64_t shown = pending_serial_;
   OnLegacyFlipComplete();
+  // A legacy Present() is the primary compositor's GL fallback; tell it which
+  // of its frames is on screen.
+  if (compositor_ != nullptr) {
+    compositor_->OnLegacyFlipPresented(shown, sequence, tv_sec, tv_usec);
+  }
   // A legacy Present() flip belongs to this backend's own (primary) output, so
   // it always drives vsync.
   DeliverVsyncFromFlip(tv_sec, tv_usec);
@@ -1687,6 +1697,8 @@ unsigned int DrmBackend::RenderHudTexture(uint32_t width, uint32_t height) {
 #endif  // BUILD_HUD
 
 bool DrmBackend::Present() {
+  last_present_serial_ = 0;
+  last_present_immediate_ = false;
   // Session-pause gate (mirrors DrmCompositor::PresentLayers). While the VT is
   // switched away, scanout is revoked and page flips never complete, so the
   // gbm_surface's buffers are never released. eglSwapBuffers would then block
@@ -1838,6 +1850,8 @@ bool DrmBackend::Present() {
     if (!SetInitialMode()) {
       return false;
     }
+    last_present_serial_ = ++present_serial_;
+    last_present_immediate_ = true;
     RecordFlipComplete();
     // Mirror the compositor's first-commit drain: drmModeSetCrtc produces no
     // PAGE_FLIP_EVENT, so the next baton (Flutter requested it after the first
@@ -1860,6 +1874,8 @@ bool DrmBackend::Present() {
           queued_bo_ == nullptr) {
         queued_bo_ = next_bo;
         queued_fb_ = next_fb;
+        queued_serial_ = ++present_serial_;
+        last_present_serial_ = queued_serial_;
         queued = true;
       }
     }
@@ -1889,6 +1905,8 @@ bool DrmBackend::Present() {
   // fires. current_bo_/current_fb_ remain the live scanout until then.
   pending_bo_ = next_bo;
   pending_fb_ = next_fb;
+  pending_serial_ = ++present_serial_;
+  last_present_serial_ = pending_serial_;
   flip_pending_.store(true, std::memory_order_release);
   trace_present("flipped");
   return true;

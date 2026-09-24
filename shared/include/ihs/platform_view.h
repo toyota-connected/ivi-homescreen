@@ -461,12 +461,28 @@ typedef struct IhsPvGrant {
   IhsFormatModifier format;
 } IhsPvGrant;
 
+/*
+ * How a presented frame reached the screen (IhsPvCallbacks::presented's
+ * @flags): wp_presentation_feedback.kind's bits, with the same values.
+ *
+ *   VSYNC          shown at a vertical blank, so it did not tear.
+ *   HW_CLOCK       @ust_ns comes from the display hardware's clock.
+ *   HW_COMPLETION  the display signaled completion, rather than the shell
+ *                  estimating it.
+ *   ZERO_COPY      every layer of the view was scanned out from the
+ *                  producer's own buffer: no composition touched it.
+ */
+#define IHS_PV_PRESENTED_VSYNC 0x1u
+#define IHS_PV_PRESENTED_HW_CLOCK 0x2u
+#define IHS_PV_PRESENTED_HW_COMPLETION 0x4u
+#define IHS_PV_PRESENTED_ZERO_COPY 0x8u
+
 /* clang-format off */
 /*
  * Per-view event callbacks the factory fills. The registry drives these on the
  * platform thread, in response to the flutter/platform_views channel and to
- * backend changes. All optional (leave NULL). @user_data is the handle the
- * factory returned.
+ * backend changes -- all but @presented, which comes from the display (below).
+ * All optional (leave NULL). @user_data is the handle the factory returned.
  *
  *   resize                           the view's new size in PHYSICAL device
  *                                    pixels (already DPR-scaled) — a GPU
@@ -502,6 +518,26 @@ typedef struct IhsPvGrant {
  *   dispose                          the view is closing — the last call; the
  *                                    registry frees the instance and releases
  *                                    the grant after it returns.
+ *   presented                        a submitted frame is on screen: the frame
+ *                                    ihs_pv_submit_layers was given @seq with
+ *                                    (0 for ihs_pv_submit), reported once, on
+ *                                    the display refresh that first shows it.
+ *                                    A frame replaced before it was shown is
+ *                                    never reported, so a @seq skipped over
+ *                                    was not shown; a view not on screen
+ *                                    (suspended, scrolled off) gets no
+ *                                    reports. @ust_ns is CLOCK_MONOTONIC
+ *                                    nanoseconds at which the frame started to
+ *                                    be shown, @refresh_ns the output's
+ *                                    refresh period (0 when unknown), @msc
+ *                                    its vblank counter (0 when it has none),
+ *                                    and @flags IHS_PV_PRESENTED_* bits. Called
+ *                                    from the shell's display thread, not the
+ *                                    platform thread: keep it short and do not
+ *                                    block on the platform thread. ihs_pv_*
+ *                                    calls are allowed. Never after dispose
+ *                                    has started. Added in 1.12; the shell
+ *                                    reads it only when @struct_size covers it.
  */
 /* clang-format on */
 typedef struct IhsPvCallbacks {
@@ -519,6 +555,12 @@ typedef struct IhsPvCallbacks {
   void (*set_suspended)(void* user_data, uint8_t suspended);
   void (*renegotiate)(void* user_data);
   void (*dispose)(void* user_data);
+  void (*presented)(void* user_data,
+                    uint64_t seq,
+                    uint64_t ust_ns,
+                    uint32_t refresh_ns,
+                    uint64_t msc,
+                    uint32_t flags);
 } IhsPvCallbacks;
 
 /*
@@ -794,8 +836,9 @@ typedef struct IhsLayer {
  * Each call is the complete list: a layer_id missing from it is gone, and its
  * buffer is released. 0 layers shows nothing. At most IHS_PV_MAX_LAYERS.
  *
- * @seq is a producer-chosen frame number, reserved for presentation feedback
- * to echo back; pass 0 when unused.
+ * @seq is a producer-chosen frame number, echoed back by
+ * IhsPvCallbacks::presented when the frame reaches the screen; pass 0 when
+ * unused.
  *
  * @out_release_fence_fds, when not NULL, holds @layer_count entries that
  * receive, per layer, what ihs_pv_submit's out_release_fence_fd would: a fence

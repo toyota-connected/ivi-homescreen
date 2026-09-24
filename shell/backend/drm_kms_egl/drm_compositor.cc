@@ -362,7 +362,10 @@ DrmCompositor::DrmCompositor(DrmBackend* backend, DrmOutputContext out)
     : backend_(backend),
       out_(out),
       profile_(ProfileEnabled() ? std::make_unique<FrameProfileState>()
-                                : nullptr) {}
+                                : nullptr) {
+  refresh_ns_ = RefreshPeriodNs(out_.mode().clock, out_.mode().htotal,
+                                out_.mode().vtotal);
+}
 
 DrmCompositor::~DrmCompositor() {
   (void)WaitForPendingFlip();
@@ -420,10 +423,13 @@ DrmCompositor::~DrmCompositor() {
 // Raster thread only, like its three call sites.
 void DrmCompositor::NoteGlComposited(
     const std::shared_ptr<ICompositorSurface>& surface,
-    const uint32_t buffer_id) {
+    const ICompositorSurface::GlLayerTexture& texture) {
   if (!surface) {
     return;
   }
+  const uint32_t buffer_id = texture.buffer_id;
+  presentation_.Note(surface->GetPresentationSink(), texture.frame,
+                     /*zero_copy=*/false);
   const std::scoped_lock rel(deferred_releases_mu_);
   deferred_releases_.push_back(
       {surface, buffer_id, drm::sync::SyncFence{}, /*from_plane=*/false});
@@ -451,7 +457,7 @@ bool DrmCompositor::CompositeLayeredSurface(
   return gl_compositor_->CompositeSurfaceLayers(
              target_fbo, *surface, view, fb_height, target_top_first, blend,
              [this, &surface](const ICompositorSurface::GlLayerTexture& t) {
-               NoteGlComposited(surface, t.buffer_id);
+               NoteGlComposited(surface, t);
              }) > 0;
 }
 
@@ -470,6 +476,8 @@ void DrmCompositor::NoteGlComposited(
   // has no eventfd registered under it, so the release finds nothing and costs
   // nothing.
   const uint32_t bid = surface->GetGlTextureBufferId();
+  presentation_.Note(surface->GetPresentationSink(),
+                     surface->GetGlTextureFrame(), /*zero_copy=*/false);
   // The frame just sampled, deferred to after this present's flip -- not the
   // frame it displaced.
   //
@@ -1318,13 +1326,59 @@ void DrmCompositor::DestroyGbmStore(GbmBackingStore& store) const {
 
 // ─── Page-flip synchronization ───────────────────────────────────────────
 
-void DrmCompositor::OnFlipEvent(const unsigned int tv_sec,
+void DrmCompositor::OnFlipEvent(const unsigned int sequence,
+                                const unsigned int tv_sec,
                                 const unsigned int tv_usec) {
   OnFlipComplete();
+  presentation_.Presented(atomic_serial_.load(std::memory_order_acquire),
+                          FlipTime(sequence, tv_sec, tv_usec));
   // Only the vsync-driving (primary) output returns the baton; additional
   // outputs present off the same engine tick and must not double-deliver.
   if (drives_vsync_) {
     backend_->DeliverVsyncFromFlip(tv_sec, tv_usec);
+  }
+}
+
+void DrmCompositor::OnLegacyFlipPresented(const uint64_t serial,
+                                          const unsigned int sequence,
+                                          const unsigned int tv_sec,
+                                          const unsigned int tv_usec) {
+  presentation_.Presented(serial, FlipTime(sequence, tv_sec, tv_usec));
+}
+
+PresentationTime DrmCompositor::FlipTime(const unsigned int sequence,
+                                         const unsigned int tv_sec,
+                                         const unsigned int tv_usec) const {
+  // A flip event's time is the kernel's vblank timestamp on CLOCK_MONOTONIC,
+  // and it arrives because the display completed the flip, at a vblank.
+  PresentationTime t;
+  t.ust_ns = static_cast<uint64_t>(tv_sec) * 1'000'000'000ULL +
+             static_cast<uint64_t>(tv_usec) * 1000ULL;
+  t.refresh_ns = refresh_ns_;
+  t.msc = sequence;
+  t.flags = kPresentedVsync | kPresentedHwClock | kPresentedHwCompletion;
+  return t;
+}
+
+PresentationTime DrmCompositor::NowTime() const {
+  timespec ts{};
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  PresentationTime t;
+  t.ust_ns = static_cast<uint64_t>(ts.tv_sec) * 1'000'000'000ULL +
+             static_cast<uint64_t>(ts.tv_nsec);
+  t.refresh_ns = refresh_ns_;
+  return t;
+}
+
+void DrmCompositor::CommitPresentation(const bool blocking) {
+  const uint64_t serial = atomic_serial_.load(std::memory_order_relaxed) + 1;
+  presentation_.Commit(serial);
+  // Published before any flip event for this commit can arrive: the commit
+  // has returned, but the event is read on another thread.
+  atomic_serial_.store(serial, std::memory_order_release);
+  if (blocking) {
+    // A blocking commit has taken effect when it returns and sends no event.
+    presentation_.Presented(serial, NowTime());
   }
 }
 
@@ -1512,6 +1566,18 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
 
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   const bool presented = backend_->Present();
+  // Hand this frame's platform views to the flip that shows it, or report
+  // them now for a frame shown with no flip to follow.
+  bool immediate = false;
+  if (const uint64_t serial = backend_->last_present_serial(&immediate);
+      serial != 0) {
+    presentation_.Commit(serial);
+    if (immediate) {
+      presentation_.Presented(serial, NowTime());
+    }
+  } else {
+    presentation_.Discard();
+  }
   // After Present, not before: its own WaitForPendingFlip is what confirms the
   // flip that sampled these completed. Fired even when the present failed --
   // the buffers are off the display either way, and holding them back would
@@ -1536,6 +1602,7 @@ bool DrmCompositor::StageCursorInto(drm::AtomicRequest& req) {
 }
 
 void DrmCompositor::SettleAtomicCommit(const bool blocking) {
+  CommitPresentation(blocking);
   if (blocking) {
     // A blocking commit (initial modeset or a cursor first-enable) lands
     // synchronously with no PAGE_FLIP_EVENT. The genuine first modeset
@@ -2168,6 +2235,9 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
   // parked in the provider; the backend's OnSessionResumed drains it to
   // restart the pacer, after which the next Present does a full
   // re-modeset (plane_mode_set_ is cleared in OnResume).
+  // Notes left by a present that returned without committing (a skipped
+  // frame, a failed commit) belong to a frame that never reached the display.
+  presentation_.Discard();
   if (paused_.load(std::memory_order_acquire)) {
     return true;
   }
@@ -3284,6 +3354,8 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
               scene_pv_tags_.erase(std::remove(scene_pv_tags_.begin(),
                                                scene_pv_tags_.end(), fl.pv_tag),
                                    scene_pv_tags_.end());
+              // Not on screen this present, so not reported as presented.
+              fl.pv_db.frame = 0;
               // Neither acked nor released: the frame never reached a plane,
               // so leave it outstanding and the next present re-offers it.
               // That present sees no scene layer for this view, so it takes
@@ -3503,6 +3575,15 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
                        : (DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK);
   const uint64_t t2 = profile ? NsNow() : 0;
 
+  // Every platform-view layer with a new frame goes to the screen on its own
+  // plane, straight from the producer's buffer.
+  for (const auto& fl : frame_layers) {
+    if (fl.pv_tag != nullptr && fl.pv_surface && fl.pv_db.plane_count > 0) {
+      presentation_.Note(fl.pv_surface->GetPresentationSink(), fl.pv_db.frame,
+                         /*zero_copy=*/true);
+    }
+  }
+
   // Signal this frame's HDR metadata on the connector (or clear to SDR when no
   // HDR PV). The scene wires it into the commit below; a no-op on connectors
   // without HDR_OUTPUT_METADATA, and content-hashed so an unchanged value is
@@ -3548,6 +3629,7 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   }
   scene_ebusy_streak_ = 0;  // a clean commit clears the transient-EBUSY streak
   scene_backoff_.Accepted();
+  CommitPresentation(blocking_modeset);
 
   // Report each platform view's scanout plane back through its surface (feeds
   // the DRM_PLANE grant accessor, ihs_pv_grant_drm_plane_id). commit() ran

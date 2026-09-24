@@ -773,6 +773,12 @@ struct VulkanDrmBackend::CompositorState {
   };
   std::mutex deferred_releases_mu;
   std::vector<DeferredRelease> deferred_releases;
+  // Platform-view frames on their way to the screen, reported through each
+  // view's presentation sink when the flip that shows them completes.
+  PresentationTracker presentation;
+  // Serial of the latest commit handed to it, which the next flip event
+  // reports. Raster thread writes, flip thread reads.
+  std::atomic<uint64_t> presentation_serial{0};
   // A layer entered or left the scene, so the next commit must be a blocking
   // modeset: a plane appearing or leaving under NONBLOCK returns EBUSY.
   bool plane_topology_changed = false;
@@ -1172,10 +1178,11 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   // present), so the handler recovers the backend and returns the vsync baton
   // with the kernel scanout time.
   state->evctx.version = 2;
-  state->evctx.page_flip_handler = [](int /*fd*/, unsigned int /*sequence*/,
+  state->evctx.page_flip_handler = [](int /*fd*/, unsigned int sequence,
                                       unsigned int tv_sec, unsigned int tv_usec,
                                       void* user_data) {
-    static_cast<VulkanDrmBackend*>(user_data)->OnFlipEvent(tv_sec, tv_usec);
+    static_cast<VulkanDrmBackend*>(user_data)->OnFlipEvent(sequence, tv_sec,
+                                                           tv_usec);
   };
 
   if (drmSetMaster(state->device.fd()) != 0) {
@@ -1523,7 +1530,8 @@ void VulkanDrmBackend::ArmFlipRead() {
                          });
 }
 
-void VulkanDrmBackend::OnFlipEvent(const unsigned int tv_sec,
+void VulkanDrmBackend::OnFlipEvent(const unsigned int sequence,
+                                   const unsigned int tv_sec,
                                    const unsigned int tv_usec) {
   CompositorState* c = compositor_.get();
   if (c == nullptr) {
@@ -1533,6 +1541,14 @@ void VulkanDrmBackend::OnFlipEvent(const unsigned int tv_sec,
   vsync_.SetSourcePending(false);
   const uint64_t tv_ns = static_cast<uint64_t>(tv_sec) * 1'000'000'000ULL +
                          static_cast<uint64_t>(tv_usec) * 1000ULL;
+  // The kernel's vblank timestamp for a flip the display completed.
+  PresentationTime shown;
+  shown.ust_ns = tv_ns;
+  shown.refresh_ns = c->period_ns;
+  shown.msc = sequence;
+  shown.flags = kPresentedVsync | kPresentedHwClock | kPresentedHwCompletion;
+  c->presentation.Presented(
+      c->presentation_serial.load(std::memory_order_acquire), shown);
   // Motion-to-photon scanout endpoint (IVI_M2P_PROFILE). The cutoff is the
   // frame_start of the baton this flip presents; marshaled onto the platform
   // runner so it joins DrmSeat's RecordInput on the same thread.
@@ -1998,6 +2014,24 @@ std::pair<size_t, size_t> VulkanDrmBackend::FramePlaneDemand(
   return {needed, shape};
 }
 
+void VulkanDrmBackend::CommitPresentation(CompositorState& c,
+                                          const bool blocking) {
+  const uint64_t serial =
+      c.presentation_serial.load(std::memory_order_relaxed) + 1;
+  c.presentation.Commit(serial);
+  c.presentation_serial.store(serial, std::memory_order_release);
+  if (blocking) {
+    // A blocking commit has taken effect when it returns and sends no event.
+    timespec ts{};
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    PresentationTime now;
+    now.ust_ns = static_cast<uint64_t>(ts.tv_sec) * 1'000'000'000ULL +
+                 static_cast<uint64_t>(ts.tv_nsec);
+    now.refresh_ns = c.period_ns;
+    c.presentation.Presented(serial, now);
+  }
+}
+
 void VulkanDrmBackend::DropPlaneLayers(CompositorState& c) {
   c.plane_plan_sig_valid = false;
   for (const void* key : c.plane_layer_keys) {
@@ -2239,6 +2273,8 @@ bool VulkanDrmBackend::ReconcilePlatformViewLayers(
       }
       SubmitPvPool(pool, db);
       surface->AckDmabufScanout(db.buffer_id);
+      c.presentation.Note(surface->GetPresentationSink(), db.frame,
+                          /*zero_copy=*/true);
       CloseDmabufFds(&db);
       continue;
     }
@@ -2275,6 +2311,8 @@ bool VulkanDrmBackend::ReconcilePlatformViewLayers(
     c.plane_topology_changed = true;
     SubmitPvPool(pool_raw, db);
     surface->AckDmabufScanout(db.buffer_id);
+    c.presentation.Note(surface->GetPresentationSink(), db.frame,
+                        /*zero_copy=*/true);
     CloseDmabufFds(&db);
   }
   return true;
@@ -2696,6 +2734,8 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
              static_cast<VkSamplerYcbcrModelConversion>(img.ycbcr_model),
              static_cast<VkSamplerYcbcrRange>(img.ycbcr_range), place.uv,
              place.opaque});
+        compositor_->presentation.Note(surface->GetPresentationSink(),
+                                       img.frame, /*zero_copy=*/false);
         sampled = true;
       }
       if (!sampled) {
@@ -2777,6 +2817,9 @@ bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
   if (!compositor_ || !compositor_->scene) {
     return false;
   }
+  // Notes a previous present left without committing were for a frame that
+  // never reached the display.
+  compositor_->presentation.Discard();
   // Lease revoked: the leased KMS objects are gone from this fd's view, so
   // every atomic commit naming them fails -- and a failed commit produces no
   // PAGE_FLIP_EVENT, so the flip path would churn rather than settle. Park the
@@ -2817,6 +2860,9 @@ bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
       PresentLayersViaPlanes(layers, count)) {
     return true;
   }
+  // The plane attempt, if any, did not commit: what it noted is not going to
+  // be shown that way.
+  c.presentation.Discard();
   const auto it = c.key_to_slot.find(bs_layer->backing_store->user_data);
   if (it == c.key_to_slot.end()) {
     return false;
@@ -3028,6 +3074,7 @@ bool VulkanDrmBackend::CommitPlaneFrame(CompositorState& c,
         assigned);
   }
   c.plane_topology_changed = false;
+  CommitPresentation(c, modeset);
   if (modeset) {
     // Blocking modeset: no flip event, so these slots are already scanning.
     c.first_commit = false;
@@ -3145,6 +3192,7 @@ bool VulkanDrmBackend::PresentSlot(const size_t slot,
     ihs::log::error("[VulkanDrmBackend] commit: {}", report.error().message());
     return false;
   }
+  CommitPresentation(c, c.first_commit);
   if (c.first_commit) {
     // Blocking modeset: no flip event. Leave the source not-pending so the
     // provider drains the next baton inline and the async loop starts.

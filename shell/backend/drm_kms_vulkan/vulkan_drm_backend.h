@@ -509,6 +509,10 @@ class VulkanDrmBackend final : public Backend {
   std::pair<size_t, size_t> FramePlaneDemand(const FlutterLayer** layers,
                                              size_t count);
 
+  // A commit just landed: hand the frame's presentation notes to the tracker
+  // under a new serial, and report them at once when no flip event follows.
+  static void CommitPresentation(CompositorState& c, bool blocking);
+
   // Remove every scene layer ReconcilePlaneLayers added and forget them.
   static void DropPlaneLayers(CompositorState& c);
 
@@ -543,7 +547,9 @@ class VulkanDrmBackend final : public Backend {
   // commit's user_data). Clears the pending flag and returns the baton with the
   // kernel scanout time; touches no slot state (that stays
   // raster-thread-local).
-  void OnFlipEvent(unsigned int tv_sec, unsigned int tv_usec);
+  void OnFlipEvent(unsigned int sequence,
+                   unsigned int tv_sec,
+                   unsigned int tv_usec);
 
   // Backend-spanning vsync baton machinery; the async flip reader feeds it.
   ivi::IVsyncProvider vsync_;
