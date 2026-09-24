@@ -244,7 +244,19 @@ void WaylandVsyncProvider::OnPresented(const uint64_t present_ns,
 }
 
 void WaylandVsyncProvider::OnDiscarded(WpFeedbackHandler* fb) {
+  // The host dropped this commit without showing it -- the window is hidden,
+  // or a later commit replaced it first. Nothing to report, but what it used
+  // is free, which is what keeps an occluded shell's producers from stalling.
+  const uint64_t serial = fb->serial_;
   RetireFeedback(fb);
+  std::shared_ptr<PresentationTracker> tracker;
+  {
+    const std::lock_guard<std::mutex> lock(tracker_mu_);
+    tracker = tracker_;
+  }
+  if (tracker) {
+    tracker->Discarded(serial);
+  }
   DeliverDiscard();  // base records the discard + returns the baton (wall
                      // clock)
 }

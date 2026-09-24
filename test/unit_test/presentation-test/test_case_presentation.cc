@@ -144,3 +144,88 @@ TEST(Presentation, RefreshPeriodFromAMode) {
   EXPECT_EQ(RefreshPeriodNs(148500, 2200, 1125), 16'666'666U);
   EXPECT_EQ(RefreshPeriodNs(0, 2200, 1125), 0U);
 }
+
+// Retire actions -- a producer's buffer handed back -- run once the frame that
+// used them is off the display's hands, and exactly once.
+TEST(Presentation, RetiresRunWhenTheirCommitIsShown) {
+  PresentationTracker tracker;
+  int ran = 0;
+  tracker.NoteRetire([&ran] { ++ran; });
+  tracker.Commit(1);
+  EXPECT_EQ(ran, 0) << "ran before the frame was shown";
+  tracker.Presented(1, At(1));
+  EXPECT_EQ(ran, 1);
+  tracker.Presented(1, At(2));
+  EXPECT_EQ(ran, 1) << "ran twice";
+}
+
+// Overtaken or discarded, a commit is as done with as a shown one: what it
+// used is free, even though it is never reported. Without this a hidden
+// window's producers never get their buffers back.
+TEST(Presentation, RetiresRunForOvertakenAndDiscardedCommits) {
+  PresentationTracker tracker;
+  int a = 0;
+  int b = 0;
+  int c = 0;
+  tracker.NoteRetire([&a] { ++a; });
+  tracker.Commit(1);
+  tracker.NoteRetire([&b] { ++b; });
+  tracker.Commit(2);
+  tracker.Presented(2, At(2));
+  EXPECT_EQ(a, 1) << "an overtaken commit's retire did not run";
+  EXPECT_EQ(b, 1);
+
+  auto sink = std::make_shared<RecordingSink>();
+  tracker.Note(sink, 7, false);
+  tracker.NoteRetire([&c] { ++c; });
+  tracker.Commit(3);
+  tracker.Discarded(3);
+  EXPECT_EQ(c, 1) << "a discarded commit's retire did not run";
+  EXPECT_TRUE(sink->reports.empty()) << "a discarded frame was reported";
+}
+
+// A frame that never reached the display may still have work in flight that
+// uses what it noted, so its retires wait for the next frame that does.
+TEST(Presentation, ADiscardedFrameCarriesItsRetiresForward) {
+  PresentationTracker tracker;
+  int ran = 0;
+  tracker.NoteRetire([&ran] { ++ran; });
+  tracker.Discard();
+  tracker.Commit(1);
+  EXPECT_EQ(ran, 0);
+  tracker.Presented(1, At(1));
+  EXPECT_EQ(ran, 1);
+}
+
+// Reported early -- the time is the handover, not the display's word -- a
+// frame's retires wait exactly one more frame, however long that goes on.
+TEST(Presentation, EarlyReportsHoldRetiresOneFrame) {
+  PresentationTracker tracker;
+  auto sink = std::make_shared<RecordingSink>();
+  std::vector<int> ran(4, 0);
+  for (size_t i = 0; i < ran.size(); ++i) {
+    tracker.Note(sink, i + 1, false);
+    tracker.NoteRetire([&ran, i] { ++ran[i]; });
+    tracker.Commit(100 + i);
+    tracker.PresentedEarly(100 + i, At(i));
+    EXPECT_EQ(sink->reports.size(), i + 1)
+        << "an early report was not made at once";
+    EXPECT_EQ(ran[i], 0) << "frame " << i << " released at once";
+    if (i > 0) {
+      EXPECT_EQ(ran[i - 1], 1)
+          << "frame " << i - 1 << " still held a frame later";
+    }
+  }
+}
+
+// A display that stops answering does not hold buffers forever either.
+TEST(Presentation, RetiresRunWhenTheQueueOverflows) {
+  PresentationTracker tracker;
+  int ran = 0;
+  for (uint64_t i = 1; i <= 10; ++i) {
+    tracker.NoteRetire([&ran] { ++ran; });
+    tracker.Commit(i);
+  }
+  EXPECT_EQ(ran, 6) << "retires of the commits that fell off did not run";
+  EXPECT_LE(tracker.in_flight(), 4U);
+}

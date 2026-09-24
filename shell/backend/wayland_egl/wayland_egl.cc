@@ -556,7 +556,27 @@ void WaylandEglBackend::FinishPresentation(const uint64_t serial,
   PresentationTime now;
   now.ust_ns = static_cast<uint64_t>(ts.tv_sec) * 1'000'000'000ULL +
                static_cast<uint64_t>(ts.tv_nsec);
-  presentation_->Presented(key, now);
+  // Early: the swap is not proof the GPU has finished with the frame's
+  // platform-view buffers, so their release waits a frame.
+  presentation_->PresentedEarly(key, now);
+}
+
+void WaylandEglBackend::NoteSampled(
+    const std::shared_ptr<ICompositorSurface>& surface,
+    const ICompositorSurface::GlLayerTexture& texture) {
+  presentation_->Note(surface->GetPresentationSink(), texture.frame,
+                      /*zero_copy=*/false);
+  // Hand the producer its buffer back once this frame is off the host's hands
+  // (presented, overtaken or discarded). The GL path has no plane to release
+  // it, and a producer that waits on its release fence -- the eventfd the view
+  // host handed it at submit -- otherwise waits out the fence's timeout every
+  // frame. The frame just sampled, not the one it displaced: it stays bound
+  // and is sampled again until a newer one arrives, and the producer's ring is
+  // what makes returning it safe, the same as the drm-kms-egl path. A repeat
+  // release of the same buffer finds nothing and costs nothing.
+  const uint32_t buffer_id = texture.buffer_id;
+  presentation_->NoteRetire(
+      [surface, buffer_id] { surface->OnScanoutRelease(buffer_id); });
 }
 
 void WaylandEglBackend::StopVsyncMonitor() {
@@ -1136,8 +1156,7 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
                                          : ICompositorSurface::GlLayerTexture{};
         if (first.name != 0 && first.geometry.IsWhole() &&
             !first.geometry.opaque) {
-          presentation_->Note(surface.GetPresentationSink(), first.frame,
-                              /*zero_copy=*/false);
+          NoteSampled(surface_sp, first);
           EnsureGlCapsProbed();
           const auto tex = first.name;
           const auto sw = first.width;
@@ -1179,12 +1198,12 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
                            static_cast<int32_t>(layer->offset.y),
                            static_cast<int32_t>(layer->size.width),
                            static_cast<int32_t>(layer->size.height)};
-          const auto sink = surface.GetPresentationSink();
           if (m_gl_compositor->CompositeSurfaceLayers(
                   0, surface, view, static_cast<GLint>(m_initial_height),
                   /*target_top_first=*/false, blend,
-                  [this, &sink](const ICompositorSurface::GlLayerTexture& t) {
-                    presentation_->Note(sink, t.frame, /*zero_copy=*/false);
+                  [this,
+                   &surface_sp](const ICompositorSurface::GlLayerTexture& t) {
+                    NoteSampled(surface_sp, t);
                   }) > 0) {
             composited_any = true;
           }

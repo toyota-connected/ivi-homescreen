@@ -19,6 +19,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <utility>
@@ -63,8 +64,16 @@ class IPresentationSink {
 };
 
 // The frames a backend has built or committed, until the display shows them.
+//
+// A frame can also carry retire actions: work that must wait until the display
+// no longer needs something the frame used -- handing a producer's buffer back
+// once the frame that sampled it is on screen. They run when their commit is
+// shown, overtaken by a later one that is, or discarded by the display, and
+// every one runs exactly once (Reset aside).
 class PresentationTracker {
  public:
+  using Retire = std::function<void()>;
+
   // A frame is being built, and it shows @p frame of the view behind @p sink.
   // Called once per layer: a view whose layers came from different submits is
   // reported as its oldest, and as zero-copy only if every layer was scanned
@@ -87,7 +96,19 @@ class PresentationTracker {
     building_.push_back({sink, frame, zero_copy});
   }
 
-  // The frame being built will not reach the display: forget its notes.
+  // Once the frame being built is off screen, run @p retire. Compositor
+  // thread.
+  void NoteRetire(Retire retire) {
+    if (!retire) {
+      return;
+    }
+    const std::lock_guard<std::mutex> lock(mu_);
+    retires_.push_back(std::move(retire));
+  }
+
+  // The frame being built will not reach the display: forget its notes. Its
+  // retire actions ride on the next commit instead -- what it used may still
+  // be in use by work already submitted.
   void Discard() {
     const std::lock_guard<std::mutex> lock(mu_);
     building_.clear();
@@ -96,18 +117,25 @@ class PresentationTracker {
   // The frame being built was handed to the display under @p key, which
   // Presented names again when it is shown. An empty frame is not queued.
   void Commit(const uint64_t key) {
-    const std::lock_guard<std::mutex> lock(mu_);
-    if (building_.empty()) {
-      return;
+    std::vector<Retire> dropped;
+    {
+      const std::lock_guard<std::mutex> lock(mu_);
+      if (building_.empty() && retires_.empty()) {
+        return;
+      }
+      in_flight_.push_back({key, std::move(building_), std::move(retires_)});
+      building_.clear();
+      retires_.clear();
+      // A display that stops reporting (a flip event lost to a driver bug, a
+      // session paused mid-flip) must not grow this without bound. What falls
+      // off was never reported, which a producer reads as not shown; its
+      // retires run, the frame being long gone.
+      while (in_flight_.size() > kMaxInFlight) {
+        TakeRetires(in_flight_.front(), &dropped);
+        in_flight_.pop_front();
+      }
     }
-    in_flight_.push_back({key, std::move(building_)});
-    building_.clear();
-    // A display that stops reporting (a flip event lost to a driver bug, a
-    // session paused mid-flip) must not grow this without bound. What falls
-    // off was never reported, which a producer reads as not shown.
-    while (in_flight_.size() > kMaxInFlight) {
-      in_flight_.pop_front();
-    }
+    RunRetires(dropped);
   }
 
   // The frame committed under @p key is on screen. Frames committed before it
@@ -115,33 +143,28 @@ class PresentationTracker {
   // A key never committed (a frame with nothing to report) changes nothing.
   // Any thread; the sinks are called without the lock held.
   void Presented(const uint64_t key, const PresentationTime& when) {
-    std::vector<Entry> shown;
-    {
-      const std::lock_guard<std::mutex> lock(mu_);
-      auto it = in_flight_.begin();
-      while (it != in_flight_.end() && it->key != key) {
-        ++it;
-      }
-      if (it == in_flight_.end()) {
-        return;
-      }
-      shown = std::move(it->entries);
-      in_flight_.erase(in_flight_.begin(), it + 1);
-    }
-    for (const Entry& e : shown) {
-      PresentationTime t = when;
-      if (e.zero_copy) {
-        t.flags |= kPresentedZeroCopy;
-      }
-      e.sink->OnPresented(e.frame, t);
-    }
+    Finish(key, &when, /*retire=*/true);
   }
 
+  // Presented, but the time is an estimate taken when the frame was handed
+  // over rather than the display's word that it is showing: report it now,
+  // and hold its retire actions until the next frame is handed over -- one
+  // frame later, when the work that used them has certainly finished.
+  void PresentedEarly(const uint64_t key, const PresentationTime& when) {
+    Finish(key, &when, /*retire=*/false);
+  }
+
+  // The display dropped the frame committed under @p key without showing it:
+  // nothing to report, but what it used is free.
+  void Discarded(const uint64_t key) { Finish(key, nullptr, /*retire=*/true); }
+
   // Everything committed, however long it has waited. For teardown, which
-  // drops reports rather than make them.
+  // drops reports and retire actions rather than make them.
   void Reset() {
     const std::lock_guard<std::mutex> lock(mu_);
     building_.clear();
+    retires_.clear();
+    held_.clear();
     in_flight_.clear();
   }
 
@@ -159,11 +182,74 @@ class PresentationTracker {
   struct Committed {
     uint64_t key;
     std::vector<Entry> entries;
+    std::vector<Retire> retires;
   };
   static constexpr size_t kMaxInFlight = 4;
 
+  static void TakeRetires(Committed& c, std::vector<Retire>* out) {
+    for (Retire& r : c.retires) {
+      out->push_back(std::move(r));
+    }
+    c.retires.clear();
+  }
+
+  static void RunRetires(const std::vector<Retire>& retires) {
+    for (const Retire& r : retires) {
+      r();
+    }
+  }
+
+  // The commit under @p key is done with: report it at @p when (null: not
+  // shown), and run its retires and those of every commit it overtook -- or,
+  // without @p retire, hold its own for the next frame. Sinks and retires are
+  // called without the lock held.
+  void Finish(const uint64_t key,
+              const PresentationTime* when,
+              const bool retire) {
+    std::vector<Entry> shown;
+    std::vector<Retire> retires;
+    {
+      const std::lock_guard<std::mutex> lock(mu_);
+      auto it = in_flight_.begin();
+      while (it != in_flight_.end() && it->key != key) {
+        ++it;
+      }
+      if (it == in_flight_.end()) {
+        return;
+      }
+      shown = std::move(it->entries);
+      // Whatever an earlier early report held is a frame older than this one.
+      for (Retire& r : held_) {
+        retires.push_back(std::move(r));
+      }
+      held_.clear();
+      for (auto o = in_flight_.begin(); o != it; ++o) {
+        TakeRetires(*o, &retires);
+      }
+      if (retire) {
+        TakeRetires(*it, &retires);
+      } else {
+        held_ = std::move(it->retires);
+      }
+      in_flight_.erase(in_flight_.begin(), it + 1);
+    }
+    if (when != nullptr) {
+      for (const Entry& e : shown) {
+        PresentationTime t = *when;
+        if (e.zero_copy) {
+          t.flags |= kPresentedZeroCopy;
+        }
+        e.sink->OnPresented(e.frame, t);
+      }
+    }
+    RunRetires(retires);
+  }
+
   mutable std::mutex mu_;
   std::vector<Entry> building_;
+  std::vector<Retire> retires_;
+  // Retires of the last frame reported early, run by the next report.
+  std::vector<Retire> held_;
   std::deque<Committed> in_flight_;
 };
 
