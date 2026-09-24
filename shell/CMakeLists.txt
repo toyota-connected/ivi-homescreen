@@ -107,7 +107,7 @@ set_target_properties(${PROJECT_NAME}
 if (BUILD_BACKEND_WAYLAND_VULKAN)
     target_sources(${PROJECT_NAME} PRIVATE
             backend/wayland_vulkan/wayland_vulkan.cc
-            backend/wayland_vulkan/vulkan_queue_interposer.cc
+            backend/vulkan/queue_interposer.cc
             backend/wayland_vulkan/wl_dmabuf_present.cc
             backend/wayland_vulkan/wl_explicit_sync.cc
             backend/wayland_vulkan/wl_layer_compositor.cc
@@ -404,6 +404,9 @@ if (BUILD_BACKEND_DRM_KMS_VULKAN)
     # (they sit below the pixel layer and are GL-free).
     target_sources(${PROJECT_NAME} PRIVATE
             backend/drm_kms_vulkan/vulkan_drm_backend.cc
+            # Shared with wayland_vulkan, as wl_layer_compositor already is:
+            # the interposer is pure Vulkan and carries no wayland dependency.
+            backend/vulkan/queue_interposer.cc
             backend/drm_kms_vulkan/device_caps.cc
             backend/drm_kms_vulkan/vulkan_backing_store.cc
             backend/drm_kms_vulkan/contiguous_allocator.cc

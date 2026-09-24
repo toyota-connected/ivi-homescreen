@@ -14,14 +14,14 @@
  * limitations under the License.
  */
 
-#ifndef SHELL_BACKEND_WAYLAND_VULKAN_VULKAN_QUEUE_INTERPOSER_H_
-#define SHELL_BACKEND_WAYLAND_VULKAN_VULKAN_QUEUE_INTERPOSER_H_
+#ifndef SHELL_BACKEND_VULKAN_QUEUE_INTERPOSER_H_
+#define SHELL_BACKEND_VULKAN_QUEUE_INTERPOSER_H_
 
 #include <mutex>
 
 #include <vulkan/vulkan.h>
 
-namespace wayland_vulkan {
+namespace ihs::vulkan {
 
 /**
  * @brief Serializes host access to a VkQueue shared between the Flutter
@@ -92,6 +92,6 @@ class QueueInterposer {
                                       PFN_vkGetInstanceProcAddr gipa);
 };
 
-}  // namespace wayland_vulkan
+}  // namespace ihs::vulkan
 
-#endif  // SHELL_BACKEND_WAYLAND_VULKAN_VULKAN_QUEUE_INTERPOSER_H_
+#endif  // SHELL_BACKEND_VULKAN_QUEUE_INTERPOSER_H_

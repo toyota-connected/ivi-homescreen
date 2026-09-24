@@ -38,6 +38,7 @@
 // Pure-Vulkan blend pipeline; despite living beside the Wayland backend it
 // pulls in no Wayland headers, so the DRM backend shares it rather than
 // carrying a second copy of the same render pass.
+#include "backend/vulkan/queue_interposer.h"
 #include "backend/wayland_vulkan/wl_layer_compositor.h"
 #include "view/compositor_surface_interface.h"
 #include "view/layer_scanout.h"
@@ -330,6 +331,12 @@ class VulkanDrmBackend final : public Backend {
   VkDevice device_ = VK_NULL_HANDLE;
   uint32_t graphics_queue_family_ = UINT32_MAX;
   VkQueue graphics_queue_ = VK_NULL_HANDLE;
+  // Guards every host access to graphics_queue_. The engine, this backend and
+  // a platform-view plugin all submit to it; Vulkan requires host access to a
+  // VkQueue to be externally synchronized. Registered with QueueInterposer so
+  // the trampolines handed to the engine and to plugins take *this* mutex --
+  // a second lock over the same queue would serialize nothing.
+  std::mutex queue_mutex_;
 
   // Give each Flutter layer its own KMS plane rather than blending them all
   // into the bottom one (IVI_DRMVK_PLANE_LAYERS). Resolved once at compositor

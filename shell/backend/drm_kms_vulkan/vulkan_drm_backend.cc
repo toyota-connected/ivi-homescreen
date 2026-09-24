@@ -211,11 +211,33 @@ DebugUtilsCallback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
 
 // Matches FlutterVulkanInstanceProcAddressCallback: the instance handle is an
 // opaque void* (FlutterVulkanInstanceHandle), cast back to VkInstance here.
+VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
+PluginInstanceProcAddr(VkInstance instance, const char* procname) {
+  // Keep the caller on this resolver if it re-resolves the entry point itself:
+  // handing back the raw loader here would take every later lookup off the
+  // interposed path.
+  if (procname != nullptr &&
+      std::strcmp(procname, "vkGetInstanceProcAddr") == 0) {
+    return reinterpret_cast<PFN_vkVoidFunction>(&PluginInstanceProcAddr);
+  }
+  if (auto* interposed = ihs::vulkan::QueueInterposer::Interpose(
+          instance, procname, d().vkGetInstanceProcAddr)) {
+    return interposed;
+  }
+  return d().vkGetInstanceProcAddr(instance, procname);
+}
+
 void* GetInstanceProcAddressCallback(void* /*user_data*/,
                                      void* instance,
                                      const char* procname) {
+  // The engine bootstraps once: the only name it asks this callback for is
+  // vkGetInstanceProcAddr, and it resolves everything else -- vkQueueSubmit
+  // included -- through whatever comes back. Handing out the raw loader there
+  // puts every later lookup on the plain loader, which is how the wayland
+  // backend's queue lock ended up covering its own calls and nothing else
+  // (#629).
   return reinterpret_cast<void*>(
-      d().vkGetInstanceProcAddr(static_cast<VkInstance>(instance), procname));
+      PluginInstanceProcAddr(static_cast<VkInstance>(instance), procname));
 }
 
 // Build a whole-color-aspect image-memory barrier.
@@ -251,6 +273,7 @@ void SubmitOneShot(
     VkCommandPool pool,
     VkFence fence,
     VkQueue queue,
+    std::mutex& queue_mutex,
     Record&& record,
     const std::vector<VkSemaphore>& waits = {},
     VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT) {
@@ -279,7 +302,13 @@ void SubmitOneShot(
   si.pWaitSemaphores = waits.empty() ? nullptr : waits.data();
   si.pWaitDstStageMask = waits.empty() ? nullptr : wait_stages.data();
   d().vkResetFences(device, 1, &fence);
-  d().vkQueueSubmit(queue, 1, &si, fence);
+  {
+    // Only the submit: host access to a VkQueue needs external
+    // synchronization, waiting on a fence does not, and holding the lock
+    // across a GPU wait would stall every other submitter for its duration.
+    const std::lock_guard<std::mutex> queue_lock(queue_mutex);
+    d().vkQueueSubmit(queue, 1, &si, fence);
+  }
   d().vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
   d().vkFreeCommandBuffers(device, pool, 1, &cmd);
 }
@@ -288,13 +317,15 @@ void SubmitImageBarrier(VkDevice device,
                         VkCommandPool pool,
                         VkFence fence,
                         VkQueue queue,
+                        std::mutex& queue_mutex,
                         const VkImageMemoryBarrier& barrier,
                         VkPipelineStageFlags src_stage,
                         VkPipelineStageFlags dst_stage) {
-  SubmitOneShot(device, pool, fence, queue, [&](VkCommandBuffer cmd) {
-    d().vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 0, nullptr, 0,
-                             nullptr, 1, &barrier);
-  });
+  SubmitOneShot(device, pool, fence, queue, queue_mutex,
+                [&](VkCommandBuffer cmd) {
+                  d().vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 0,
+                                           nullptr, 0, nullptr, 1, &barrier);
+                });
 }
 
 // One layer, many buffers: a LayerBufferSource that owns a ring of
@@ -1441,6 +1472,7 @@ bool VulkanDrmBackend::FinishBackingStore(const int slot,
   // old layout discards the slot's prior contents — the engine fully repaints
   // each frame (avoid_backing_store_cache), so nothing is lost.
   SubmitImageBarrier(device_, c.barrier_pool, c.barrier_fence, graphics_queue_,
+                     queue_mutex_,
                      ColorBarrier(store->image(), VK_IMAGE_LAYOUT_UNDEFINED,
                                   VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 0,
                                   VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT),
@@ -1599,7 +1631,7 @@ int VulkanDrmBackend::SubmitScanoutBarrier(
     // black views. This branch used to return before reaching it, so any target
     // without IN_FENCE_FD composited the base backing store alone.
     SubmitOneShot(
-        device_, c.barrier_pool, c.barrier_fence, graphics_queue_,
+        device_, c.barrier_pool, c.barrier_fence, graphics_queue_, queue_mutex_,
         [&](VkCommandBuffer cmd) {
           NormalizeEngineOutputLayout(cmd, image);
           bool composited = false;
@@ -1742,9 +1774,12 @@ int VulkanDrmBackend::SubmitSyncRing(CompositorState& c, const size_t i) {
   si.pWaitDstStageMask = waits.empty() ? nullptr : wait_stages.data();
   si.signalSemaphoreCount = 1;
   si.pSignalSemaphores = &c.sync_sem[i];
-  if (d().vkQueueSubmit(graphics_queue_, 1, &si, c.sync_fence[i]) !=
-      VK_SUCCESS) {
-    return -1;
+  {
+    const std::lock_guard<std::mutex> queue_lock(queue_mutex_);
+    if (d().vkQueueSubmit(graphics_queue_, 1, &si, c.sync_fence[i]) !=
+        VK_SUCCESS) {
+      return -1;
+    }
   }
   // Export the just-signaled semaphore as a sync_file. SYNC_FD export transfers
   // the payload out, resetting the semaphore for its next turn in the ring.
@@ -3561,6 +3596,9 @@ bool VulkanDrmBackend::CreateLogicalDevice(std::string& refusal_reason) {
   }
   VULKAN_HPP_DEFAULT_DISPATCHER.init(vk::Device(device_));
   d().vkGetDeviceQueue(device_, graphics_queue_family_, 0, &graphics_queue_);
+  // Before anything can submit. The trampolines look the mutex up by queue, so
+  // an unregistered queue passes through unlocked and serializes nothing.
+  ihs::vulkan::QueueInterposer::RegisterQueue(graphics_queue_, &queue_mutex_);
   return true;
 }
 
@@ -3641,6 +3679,10 @@ void VulkanDrmBackend::PopulateCaps() {
 }
 
 void VulkanDrmBackend::Teardown() {
+  if (graphics_queue_ != VK_NULL_HANDLE) {
+    ihs::vulkan::QueueInterposer::UnregisterQueue(graphics_queue_);
+    graphics_queue_ = VK_NULL_HANDLE;
+  }
   if (device_ != VK_NULL_HANDLE) {
     d().vkDestroyDevice(device_, nullptr);
     device_ = VK_NULL_HANDLE;
@@ -3688,19 +3730,12 @@ bool VulkanDrmBackend::GetVulkanContext(BackendVulkanContext* out) const {
   out->device = device_;
   out->queue = graphics_queue_;
   out->queue_family_index = graphics_queue_family_;
-  // KNOWN CONTRACT GAP (issue #208): this hands back the raw loader, but
-  // ihs/platform_view.h requires get_instance_proc_addr to be an INTERPOSED
-  // loader that serializes vkQueueSubmit/vkQueuePresentKHR on the shared
-  // graphics queue (as WaylandVulkanBackend does via QueueInterposer). This
-  // backend has no queue mutex yet, so a plugin resolving through this loader
-  // would submit unsynchronized against the compositor/engine — undefined
-  // behavior per the Vulkan external-synchronization rules. Latent today (no
-  // Vulkan-on-DRM plugin is wired to this ABI), but it MUST be interposed
-  // before one is. Fixing it means adding a queue mutex, wrapping this
-  // backend's own submit/present sites in it, and returning the interposed
-  // loader here and to the engine — tracked under #208.
+  // The INTERPOSED loader (not the raw d().vkGetInstanceProcAddr): a plugin
+  // reusing the shared queue must resolve vkQueue* through the locking
+  // trampolines, or its submits race the engine's and this backend's on the
+  // one graphics queue (issue #208).
   out->get_instance_proc_addr =
-      reinterpret_cast<void*>(d().vkGetInstanceProcAddr);
+      reinterpret_cast<void*>(&PluginInstanceProcAddr);
   out->device_extensions = enabled_device_extensions_.data();
   out->device_extension_count = enabled_device_extensions_.size();
   return true;

@@ -45,8 +45,8 @@
 #if BUILD_HUD
 #include "backend/hud/vulkan_hud.h"
 #endif
+#include "backend/vulkan/queue_interposer.h"
 #include "backend/wayland_vulkan/wl_layer_compositor.h"
-#include "vulkan_queue_interposer.h"
 
 // The vulkan.hpp dynamic dispatcher needs its storage defined in exactly ONE
 // TU per binary. When the drm-kms-vulkan backend is also compiled in, that
@@ -162,7 +162,7 @@ WaylandVulkanBackend::PluginInstanceProcAddr(VkInstance instance,
     return reinterpret_cast<PFN_vkVoidFunction>(
         &WaylandVulkanBackend::PluginInstanceProcAddr);
   }
-  if (auto* interposed = wayland_vulkan::QueueInterposer::Interpose(
+  if (auto* interposed = ihs::vulkan::QueueInterposer::Interpose(
           instance, procname, d().vkGetInstanceProcAddr)) {
     return interposed;
   }
@@ -343,7 +343,7 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
     // queue's device — and with it the queue handle — goes away. Any
     // stale-handle call after this point (there should be none) passes
     // through unlocked rather than dereferencing a dead mutex mapping.
-    wayland_vulkan::QueueInterposer::UnregisterQueue(queue_);
+    ihs::vulkan::QueueInterposer::UnregisterQueue(queue_);
     d().vkDestroyDevice(device_, nullptr);
   }
   if (surface_ != nullptr) {
@@ -836,7 +836,7 @@ void WaylandVulkanBackend::createLogicalDevice() {
   // entry points handed out by GetInstanceProcAddressCallback serialize the
   // engine's submissions on the same queue_mutex_ the backend already
   // takes. See issue #208.
-  wayland_vulkan::QueueInterposer::RegisterQueue(queue_, &queue_mutex_);
+  ihs::vulkan::QueueInterposer::RegisterQueue(queue_, &queue_mutex_);
 }
 
 bool WaylandVulkanBackend::InitializeSwapChain() {
@@ -1322,7 +1322,7 @@ void* WaylandVulkanBackend::GetInstanceProcAddressCallback(
     return reinterpret_cast<void*>(
         &WaylandVulkanBackend::PluginInstanceProcAddr);
   }
-  if (auto* interposed = wayland_vulkan::QueueInterposer::Interpose(
+  if (auto* interposed = ihs::vulkan::QueueInterposer::Interpose(
           vk_instance, procname, d().vkGetInstanceProcAddr)) {
     return reinterpret_cast<void*>(interposed);
   }
