@@ -417,8 +417,10 @@ class WaylandEglBackend : public Egl, public Backend {
   uint64_t presentation_fallback_serial_{0};
   // The frame was swapped (or not, @p swapped false) under feedback @p serial.
   void FinishPresentation(uint64_t serial, bool swapped);
+#if BUILD_COMPOSITOR
   // A platform view's frame was drawn into this frame: note it for the
   // presentation report and for its release. Raster thread.
   void NoteSampled(const std::shared_ptr<ICompositorSurface>& surface,
                    const ICompositorSurface::GlLayerTexture& texture);
+#endif
 };

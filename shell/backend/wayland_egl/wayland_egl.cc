@@ -561,6 +561,7 @@ void WaylandEglBackend::FinishPresentation(const uint64_t serial,
   presentation_->PresentedEarly(key, now);
 }
 
+#if BUILD_COMPOSITOR
 void WaylandEglBackend::NoteSampled(
     const std::shared_ptr<ICompositorSurface>& surface,
     const ICompositorSurface::GlLayerTexture& texture) {
@@ -578,6 +579,7 @@ void WaylandEglBackend::NoteSampled(
   presentation_->NoteRetire(
       [surface, buffer_id] { surface->OnScanoutRelease(buffer_id); });
 }
+#endif  // BUILD_COMPOSITOR
 
 void WaylandEglBackend::StopVsyncMonitor() {
   // Called from FlutterView::~FlutterView before the engine destructs. The
