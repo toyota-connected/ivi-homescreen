@@ -634,6 +634,23 @@ void OnPresented(void* user_data,
   static_cast<BenchView*>(user_data)->Presented(flags);
 }
 
+/* The shell would scan this layer out on a plane but for its format. This
+ * producer allocates what it was granted and does not switch mid-run -- that
+ * would change what is being measured -- so it only says so. */
+void OnScanoutHint(void* /*user_data*/,
+                   uint32_t layer_id,
+                   uint64_t /*dev*/,
+                   const IhsFormatModifier* formats,
+                   size_t count) {
+  if (count == 0) {
+    Log("scanout hint for layer %u withdrawn", layer_id);
+    return;
+  }
+  Log("scanout hint for layer %u: %zu plane formats, first 0x%08x/0x%llx",
+      layer_id, count, formats[0].fourcc,
+      static_cast<unsigned long long>(formats[0].modifier));
+}
+
 void OnSuspended(void* user_data, uint8_t suspended) {
   static_cast<BenchView*>(user_data)->Suspend(suspended != 0);
 }
@@ -670,6 +687,7 @@ int Factory(const IhsPvCreateInfo* info,
   out_callbacks->renegotiate = OnRenegotiate;
   out_callbacks->dispose = OnDispose;
   out_callbacks->presented = OnPresented;
+  out_callbacks->scanout_hint = OnScanoutHint;
   *out_user_data = bench;
   return IHS_PV_OK;
 }

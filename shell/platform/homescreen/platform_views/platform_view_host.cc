@@ -142,10 +142,10 @@ Backend* BackendOf(void* user_data) {
 }
 
 // A registry-owned PlatformView that fronts an ihs_pv plugin: it holds the
-// Where a view's presentation reports land (IhsPvCallbacks::presented). Owned
-// apart from the view: the compositor holds it until the display has shown a
-// frame, which may be after the view was disposed, so the reports stop by
-// Close() rather than by the view going away.
+// Where the display's feedback about a view lands (IhsPvCallbacks::presented
+// and scanout_hint). Owned apart from the view: the compositor holds it until
+// the display has shown a frame, which may be after the view was disposed, so
+// the feedback stops by Close() rather than by the view going away.
 class PvPresentationSink final : public IPresentationSink {
  public:
   // The plugin's callback, once the factory has filled the callback table.
@@ -157,6 +157,10 @@ class PvPresentationSink final : public IPresentationSink {
     constexpr size_t kReach =
         offsetof(IhsPvCallbacks, presented) + sizeof(callbacks.presented);
     fn_ = callbacks.struct_size >= kReach ? callbacks.presented : nullptr;
+    constexpr size_t kHintReach =
+        offsetof(IhsPvCallbacks, scanout_hint) + sizeof(callbacks.scanout_hint);
+    hint_fn_ =
+        callbacks.struct_size >= kHintReach ? callbacks.scanout_hint : nullptr;
     user_data_ = user_data;
   }
 
@@ -166,7 +170,9 @@ class PvPresentationSink final : public IPresentationSink {
     const std::lock_guard<std::mutex> call(call_mu_);
     const std::lock_guard<std::mutex> lock(mu_);
     fn_ = nullptr;
+    hint_fn_ = nullptr;
     seqs_.clear();
+    hints_.clear();
   }
 
   // @p frame (the view's submit counter) was submitted with the producer's
@@ -220,12 +226,66 @@ class PvPresentationSink final : public IPresentationSink {
     fn(user_data, seq, when.ust_ns, when.refresh_ns, when.msc, when.flags);
   }
 
+  // Display thread. The compositor asks every present a layer brings a new
+  // frame; the plugin hears only when the answer changes.
+  void OnScanoutHint(const uint32_t layer_id,
+                     const uint64_t dev,
+                     const std::vector<FormatModifierPair>& formats) override {
+    const std::lock_guard<std::mutex> call(call_mu_);
+    decltype(hint_fn_) fn = nullptr;
+    void* user_data = nullptr;
+    std::vector<IhsFormatModifier> out;
+    {
+      const std::lock_guard<std::mutex> lock(mu_);
+      if (hint_fn_ == nullptr) {
+        return;
+      }
+      const auto it = hints_.find(layer_id);
+      if (formats.empty()) {
+        // Nothing to withdraw unless something was hinted.
+        if (it == hints_.end()) {
+          return;
+        }
+        hints_.erase(it);
+      } else {
+        if (it != hints_.end() && it->second.dev == dev &&
+            it->second.formats == formats) {
+          return;
+        }
+        // A producer churning layer_ids must not grow this without bound.
+        if (it == hints_.end() && hints_.size() >= kMaxHints) {
+          hints_.erase(hints_.begin());
+        }
+        hints_[layer_id] = {dev, formats};
+        out.reserve(formats.size());
+        for (const auto& [fourcc, modifier] : formats) {
+          IhsFormatModifier fm{};
+          fm.fourcc = fourcc;
+          fm.modifier = modifier;
+          out.push_back(fm);
+        }
+      }
+      fn = hint_fn_;
+      user_data = user_data_;
+    }
+    fn(user_data, layer_id, dev, out.data(), out.size());
+  }
+
  private:
   static constexpr size_t kMaxPending = 64;
+  static constexpr size_t kMaxHints = 64;
+  struct Hint {
+    uint64_t dev{0};
+    std::vector<FormatModifierPair> formats;
+  };
 
   std::mutex call_mu_;  // held while the plugin is being called
   std::mutex mu_;
   void (*fn_)(void*, uint64_t, uint64_t, uint32_t, uint64_t, uint32_t){nullptr};
+  void (*hint_fn_)(void*, uint32_t, uint64_t, const IhsFormatModifier*, size_t){
+      nullptr};
+  // What each layer was last hinted; a layer missing here has no hint out.
+  std::map<uint32_t, Hint> hints_;
   void* user_data_{nullptr};
   uint64_t last_frame_{0};
   std::deque<std::pair<uint64_t, uint64_t>> seqs_;  // (frame, seq)

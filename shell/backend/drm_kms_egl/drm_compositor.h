@@ -47,6 +47,7 @@
 
 #include "backend/drm_kms_egl/drm_output_context.h"
 #include "backend/drm_kms_egl/flip_sink.h"
+#include "backend/drm_plane_formats.h"
 #include "backend/wayland_egl/gl_caps.h"
 #include "backend/wayland_egl/gl_compositor.h"
 #include "view/layer_scanout.h"
@@ -566,6 +567,8 @@ class DrmCompositor : public IFlipSink {
                                              size_t layer_count);
   // Planes enumerated for this CRTC at allocator init, cursor included.
   size_t crtc_plane_count_{0};
+  // What those planes scan out, for the producers' scanout hints.
+  PlaneFormats plane_formats_;
   // Set while frames have more layers than PlaneBudget, so that is logged
   // once per run of such frames.
   bool plane_budget_exceeded_{false};

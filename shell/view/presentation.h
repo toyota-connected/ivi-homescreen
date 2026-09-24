@@ -51,9 +51,13 @@ struct PresentationTime {
   uint32_t flags{0};
 };
 
-// Where a view's presentation reports go. Owned apart from the view, so a
-// report still in flight when the view is disposed has something safe to land
-// on. Any thread.
+// A DRM fourcc and modifier.
+using FormatModifierPair = std::pair<uint32_t, uint64_t>;
+
+// Where the display's feedback about a view goes: its frames reaching the
+// screen, and hints about how they could reach it more cheaply. Owned apart
+// from the view, so feedback still in flight when the view is disposed has
+// something safe to land on. Any thread.
 class IPresentationSink {
  public:
   virtual ~IPresentationSink() = default;
@@ -61,6 +65,14 @@ class IPresentationSink {
   // ICompositorSurface), and every frame before it that was never reported
   // was not shown.
   virtual void OnPresented(uint64_t frame, const PresentationTime& when) = 0;
+  // Layer @p layer_id could go on a plane of device @p dev, but no plane that
+  // could take it scans out its format; they scan out @p formats. Empty
+  // @p formats: the layer's format fits. Called every present a layer brings a
+  // new frame, whether or not the answer changed.
+  virtual void OnScanoutHint(
+      uint32_t /*layer_id*/,
+      uint64_t /*dev*/,
+      const std::vector<FormatModifierPair>& /*formats*/) {}
 };
 
 // The frames a backend has built or committed, until the display shows them.

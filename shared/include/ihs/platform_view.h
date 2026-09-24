@@ -481,7 +481,8 @@ typedef struct IhsPvGrant {
 /*
  * Per-view event callbacks the factory fills. The registry drives these on the
  * platform thread, in response to the flutter/platform_views channel and to
- * backend changes -- all but @presented, which comes from the display (below).
+ * backend changes -- all but @presented and @scanout_hint, which come from the
+ * display (below).
  * All optional (leave NULL). @user_data is the handle the factory returned.
  *
  *   resize                           the view's new size in PHYSICAL device
@@ -538,6 +539,27 @@ typedef struct IhsPvGrant {
  *                                    calls are allowed. Never after dispose
  *                                    has started. Added in 1.12; the shell
  *                                    reads it only when @struct_size covers it.
+ *   scanout_hint                     layer @layer_id (its IhsLayer.layer_id; 0
+ *                                    for ihs_pv_submit) could be scanned out
+ *                                    on a KMS plane, sparing its composition,
+ *                                    but no plane that could take it scans out
+ *                                    its buffer's format and modifier. Those
+ *                                    planes scan out the @count pairs in
+ *                                    @formats instead; @dev is the dev_t of
+ *                                    the KMS device they belong to, to
+ *                                    allocate against. A producer that can
+ *                                    switch its buffers to one of them lets
+ *                                    the layer bypass composition -- a Wayland
+ *                                    server offers them as a scanout tranche.
+ *                                    Sent when the answer changes; @count 0
+ *                                    withdraws it (the layer's format now
+ *                                    fits). @formats is valid for the call
+ *                                    only. Only a backend with planes of its
+ *                                    own sends it, and a hint is no promise
+ *                                    of a plane: other layers compete for
+ *                                    them. Same thread and dispose rules as
+ *                                    @presented. Added in 1.13; read only when
+ *                                    @struct_size covers it.
  */
 /* clang-format on */
 typedef struct IhsPvCallbacks {
@@ -561,6 +583,11 @@ typedef struct IhsPvCallbacks {
                     uint32_t refresh_ns,
                     uint64_t msc,
                     uint32_t flags);
+  void (*scanout_hint)(void* user_data,
+                       uint32_t layer_id,
+                       uint64_t dev,
+                       const IhsFormatModifier* formats,
+                       size_t count);
 } IhsPvCallbacks;
 
 /*
