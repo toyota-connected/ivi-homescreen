@@ -231,3 +231,21 @@ TEST(LayerScanout, TagsAreStablePerViewAndLayer) {
   EXPECT_EQ(tags.Get(&a, 2), a2);
   EXPECT_TRUE(tags.TagsOf(&b).empty());
 }
+
+TEST(LayerScanout, BackoffSkipsARejectedShapeUntilTheRetry) {
+  PlanePathBackoff backoff(3);
+  EXPECT_TRUE(backoff.ShouldTry(7));
+  backoff.Rejected(7);
+  EXPECT_FALSE(backoff.ShouldTry(7));
+  EXPECT_FALSE(backoff.ShouldTry(7));
+  // The third present after the refusal asks again.
+  EXPECT_TRUE(backoff.ShouldTry(7));
+  backoff.Rejected(7);
+  EXPECT_FALSE(backoff.ShouldTry(7));
+  // Another shape is tried at once, and clears the refusal.
+  EXPECT_TRUE(backoff.ShouldTry(8));
+  EXPECT_TRUE(backoff.ShouldTry(7));
+  backoff.Rejected(7);
+  backoff.Accepted();
+  EXPECT_TRUE(backoff.ShouldTry(7));
+}

@@ -58,6 +58,53 @@
 #include "view/compositor_surface_interface.h"
 #include "view/layer_scanout.h"
 
+namespace {
+
+// Put back whatever EGL context was current on this thread when it was made,
+// if something in between changed it.
+//
+// The scene composites a layer no plane can take on a GL context of its own,
+// which it brings up inside test() or commit() on the calling thread -- the
+// raster thread, where the engine's context is current -- and does not restore
+// ours afterwards. With a software renderer it then tears its own down again,
+// leaving no context current at all, and the next eglSwapBuffers fails with
+// EGL_BAD_SURFACE; with a hardware one, our following GL calls go to its
+// context instead of ours.
+class EglCurrentGuard {
+ public:
+  EglCurrentGuard()
+      : display_(eglGetCurrentDisplay()),
+        draw_(eglGetCurrentSurface(EGL_DRAW)),
+        read_(eglGetCurrentSurface(EGL_READ)),
+        context_(eglGetCurrentContext()) {}
+  ~EglCurrentGuard() {
+    if (eglGetCurrentContext() == context_ &&
+        eglGetCurrentSurface(EGL_DRAW) == draw_ &&
+        eglGetCurrentSurface(EGL_READ) == read_) {
+      return;
+    }
+    if (display_ == EGL_NO_DISPLAY) {
+      return;  // nothing was current; nothing to restore
+    }
+    if (eglMakeCurrent(display_, draw_, read_, context_) != EGL_TRUE) {
+      ihs::log::warn(
+          "[DrmCompositor] restoring the EGL context after a scene call "
+          "failed (0x{:x})",
+          eglGetError());
+    }
+  }
+  EglCurrentGuard(const EglCurrentGuard&) = delete;
+  EglCurrentGuard& operator=(const EglCurrentGuard&) = delete;
+
+ private:
+  EGLDisplay display_;
+  EGLSurface draw_;
+  EGLSurface read_;
+  EGLContext context_;
+};
+
+}  // namespace
+
 static_assert(kDrmRotate0 == DRM_MODE_ROTATE_0 &&
                   kDrmRotate90 == DRM_MODE_ROTATE_90 &&
                   kDrmRotate180 == DRM_MODE_ROTATE_180 &&
@@ -520,6 +567,59 @@ void DrmCompositor::CloseDmabufFds(ICompositorSurface::Dmabuf* db) {
   }
 }
 
+size_t DrmCompositor::PlaneBudget() const {
+  // Every plane on the CRTC can take a layer -- the scene puts one small
+  // enough on a cursor plane -- except a cursor plane held for the pointer.
+  const size_t reserved = cursor_reserved_plane_ != 0 ? 1 : 0;
+  return crtc_plane_count_ > reserved ? crtc_plane_count_ - reserved : 0;
+}
+
+std::pair<size_t, size_t> DrmCompositor::FramePlaneDemand(
+    const FlutterLayer** layers,
+    const size_t layer_count) {
+  // A plane per backing store and per layer of each platform view. An upper
+  // bound: a layer that turns out to be off screen, or not ready, takes none.
+  size_t needed = 0;
+  size_t shape = layer_count;
+  for (size_t i = 0; i < layer_count; ++i) {
+    const FlutterLayer* fl = layers[i];
+    if (fl == nullptr) {
+      continue;
+    }
+    shape = MixShape(shape, static_cast<uint64_t>(fl->type));
+    // Through int64: an offset can be negative, and converting a negative
+    // double straight to an unsigned type is undefined.
+    const auto bits = [](const double v) {
+      return static_cast<uint64_t>(static_cast<int64_t>(v));
+    };
+    shape = MixShape(shape, (bits(fl->offset.x) << 32U) ^ bits(fl->offset.y));
+    shape =
+        MixShape(shape, (bits(fl->size.width) << 32U) ^ bits(fl->size.height));
+    if (fl->type == kFlutterLayerContentTypeBackingStore) {
+      ++needed;
+      continue;
+    }
+    if (fl->type != kFlutterLayerContentTypePlatformView ||
+        fl->platform_view == nullptr) {
+      continue;
+    }
+    std::shared_ptr<ICompositorSurface> surface;
+    {
+      const std::lock_guard<std::mutex> lock(surfaces_mu_);
+      if (auto it = surfaces_.find(fl->platform_view->identifier);
+          it != surfaces_.end()) {
+        surface = it->second;
+      }
+    }
+    const size_t n = surface ? surface->GetLayerCount() : 0;
+    needed += n;
+    shape =
+        MixShape(shape, static_cast<uint64_t>(fl->platform_view->identifier));
+    shape = MixShape(shape, n);
+  }
+  return {needed, shape};
+}
+
 void DrmCompositor::RetireScanoutKeys(ICompositorSurface& surface) {
   const std::vector<std::uintptr_t> keys = surface.TakeRetiredScanoutKeys();
   if (keys.empty()) {
@@ -596,6 +696,7 @@ bool DrmCompositor::InitPlaneAllocator() {
   plane_registry_.emplace(std::move(*reg));
 
   const auto available = plane_registry_->for_crtc(out_.crtc_index());
+  crtc_plane_count_ = available.size();
   ihs::log::info(
       "[DrmCompositor] {} planes available for CRTC {} (crtc_index={})",
       available.size(), out_.crtc_id(), out_.crtc_index());
@@ -2705,6 +2806,31 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   // deferred_releases_.
   DrainDeferredScanoutReleases();
 
+  // Whether this frame can go on planes at all, decided before any frame is
+  // taken from a producer or imported. A frame with more layers than the CRTC
+  // has planes cannot -- on a SoC with a primary and nothing else that is every
+  // frame with a platform view in it -- and neither, for a while, can one
+  // shaped like a frame the allocator just turned down. Both go straight to
+  // composition rather than paying for imports and a TEST_ONLY commit to be
+  // told so again.
+  const auto [needed_planes, frame_shape] =
+      FramePlaneDemand(layers, layer_count);
+  const size_t plane_budget = PlaneBudget();
+  if (needed_planes > plane_budget) {
+    if (!plane_budget_exceeded_) {
+      plane_budget_exceeded_ = true;
+      ihs::log::info(
+          "[DrmCompositor] {} layers for {} planes; compositing through GL "
+          "(logged once until a frame fits)",
+          needed_planes, plane_budget);
+    }
+    return PresentViaGlFallback(layers, layer_count);
+  }
+  plane_budget_exceeded_ = false;
+  if (!scene_backoff_.ShouldTry(frame_shape)) {
+    return PresentViaGlFallback(layers, layer_count);
+  }
+
   // Walk the FlutterLayer[] in z-order (Flutter's convention: layer 0
   // is bottom). Sync scene_'s layer set against the current frame: add
   // new, update geometry/zpos on existing, remove any scene layer whose
@@ -3287,7 +3413,10 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   // composite path is materially faster than drm-cxx's CompositeCanvas
   // over uncached GBM read-back for backing-store layers, and PVs
   // already short-circuited above.
-  auto test = scene_->test();
+  auto test = [this] {
+    const EglCurrentGuard keep_context;
+    return scene_->test();
+  }();
   if (!test) {
     if (test.error() == std::errc::permission_denied) {
       if (!paused_.load(std::memory_order_acquire)) {
@@ -3310,6 +3439,7 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
           "(logged once until it succeeds again)",
           test.error().message());
     }
+    scene_backoff_.Rejected(frame_shape);
     return PresentViaGlFallback(layers, layer_count);
   }
   if (scene_test_rejected_) {
@@ -3329,6 +3459,7 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
                 ? "composited"
                 : "unassigned");
       }
+      scene_backoff_.Rejected(frame_shape);
       return PresentViaGlFallback(layers, layer_count);
     }
   }
@@ -3378,7 +3509,10 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   // cheap on repeat.
   scene_->set_output_metadata(output_hdr);
 
-  auto report = scene_->commit(commit_flags, static_cast<IFlipSink*>(this));
+  auto report = [this, commit_flags] {
+    const EglCurrentGuard keep_context;
+    return scene_->commit(commit_flags, static_cast<IFlipSink*>(this));
+  }();
   if (!report) {
     if (report.error() == std::errc::permission_denied) {
       if (!paused_.load(std::memory_order_acquire)) {
@@ -3413,6 +3547,7 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
     return PresentViaGlFallback(layers, layer_count);
   }
   scene_ebusy_streak_ = 0;  // a clean commit clears the transient-EBUSY streak
+  scene_backoff_.Accepted();
 
   // Report each platform view's scanout plane back through its surface (feeds
   // the DRM_PLANE grant accessor, ihs_pv_grant_drm_plane_id). commit() ran

@@ -24,6 +24,7 @@
 #include <mutex>
 #include <optional>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <EGL/egl.h>
@@ -544,6 +545,23 @@ class DrmCompositor : public IFlipSink {
   // Hand the pools of @p surface's scene layers the scanout keys of the
   // buffers its producer retired, so they drop those framebuffers.
   void RetireScanoutKeys(ICompositorSurface& surface);
+
+  // Planes the scene can give layers on this CRTC.
+  [[nodiscard]] size_t PlaneBudget() const;
+  // The planes a frame would take, and a hash of its shape (its layers'
+  // kinds, places, platform views and their layer counts). Takes nothing
+  // from the producers.
+  std::pair<size_t, size_t> FramePlaneDemand(const FlutterLayer** layers,
+                                             size_t layer_count);
+  // Planes enumerated for this CRTC at allocator init, cursor included.
+  size_t crtc_plane_count_{0};
+  // Set while frames have more layers than PlaneBudget, so that is logged
+  // once per run of such frames.
+  bool plane_budget_exceeded_{false};
+  // Frames the scene's test() turned down, and when to ask again: about two
+  // seconds at 60 Hz.
+  static constexpr uint64_t kScenePlaneRetryPresents = 120;
+  PlanePathBackoff scene_backoff_{kScenePlaneRetryPresents};
   // Close every fd a platform-view offer handed over, each distinct one once.
   static void CloseDmabufFds(ICompositorSurface::Dmabuf* db);
 

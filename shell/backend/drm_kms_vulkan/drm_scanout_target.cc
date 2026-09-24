@@ -303,6 +303,7 @@ bool DiscoverScanoutTargetOnFd(int fd,
     if (!usable) {
       continue;
     }
+    ++out.plane_count;
     const uint64_t type =
         PropValue(fd, pres->planes[i], DRM_MODE_OBJECT_PLANE, "type");
     if (type == DRM_PLANE_TYPE_CURSOR) {

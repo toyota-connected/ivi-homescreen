@@ -1008,10 +1008,11 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
         }
       }
     }
+    crtc_plane_count_ = target.plane_count;
     ihs::log::info(
         "[VulkanDrmBackend] plane layers enabled (IVI_DRMVK_PLANE_LAYERS); "
-        "primary zpos {}, backing stores ARGB8888",
-        primary_zpos_);
+        "primary zpos {}, {} planes, backing stores ARGB8888",
+        primary_zpos_, crtc_plane_count_);
   }
 
   // Probe the scanout path once: allocate a mode-sized backing store and try to
@@ -1943,6 +1944,60 @@ void VulkanDrmBackend::CollectAcquireWait(CompositorState& c,
   c.pending_acquire_waits.push_back(sem);
 }
 
+size_t VulkanDrmBackend::PlaneBudget() const {
+  // Every plane on the CRTC can take a layer -- the scene puts one small
+  // enough on a cursor plane -- except the cursor plane the pointer holds.
+  const size_t reserved = cursor_ != nullptr ? 1 : 0;
+  return crtc_plane_count_ > reserved ? crtc_plane_count_ - reserved : 0;
+}
+
+std::pair<size_t, size_t> VulkanDrmBackend::FramePlaneDemand(
+    const FlutterLayer** layers,
+    const size_t count) {
+  // A plane per backing store and per layer of each platform view. An upper
+  // bound: a layer that turns out to be off screen takes none.
+  size_t needed = 0;
+  size_t shape = count;
+  // Through int64: an offset can be negative, and converting a negative double
+  // straight to an unsigned type is undefined.
+  const auto bits = [](const double v) {
+    return static_cast<uint64_t>(static_cast<int64_t>(v));
+  };
+  for (size_t i = 0; i < count; ++i) {
+    const FlutterLayer* fl = layers[i];
+    if (fl == nullptr) {
+      continue;
+    }
+    shape = MixShape(shape, static_cast<uint64_t>(fl->type));
+    shape = MixShape(shape, (bits(fl->offset.x) << 32U) ^ bits(fl->offset.y));
+    shape =
+        MixShape(shape, (bits(fl->size.width) << 32U) ^ bits(fl->size.height));
+    if (fl->type == kFlutterLayerContentTypeBackingStore) {
+      ++needed;
+      continue;
+    }
+    if (fl->type != kFlutterLayerContentTypePlatformView ||
+        fl->platform_view == nullptr) {
+      continue;
+    }
+    std::shared_ptr<ICompositorSurface> surface;
+    {
+      const std::lock_guard<std::mutex> lock(compositor_surfaces_mu_);
+      if (const auto it =
+              compositor_surfaces_.find(fl->platform_view->identifier);
+          it != compositor_surfaces_.end()) {
+        surface = it->second;
+      }
+    }
+    const size_t n = surface ? surface->GetLayerCount() : 0;
+    needed += n;
+    shape =
+        MixShape(shape, static_cast<uint64_t>(fl->platform_view->identifier));
+    shape = MixShape(shape, n);
+  }
+  return {needed, shape};
+}
+
 void VulkanDrmBackend::DropPlaneLayers(CompositorState& c) {
   c.plane_plan_sig_valid = false;
   for (const void* key : c.plane_layer_keys) {
@@ -2006,9 +2061,6 @@ void CloseDmabufFds(ICompositorSurface::Dmabuf* db) {
   }
 }
 
-size_t MixSig(const size_t sig, const uint64_t v) {
-  return (sig * 1000003U) ^ static_cast<size_t>(v);
-}
 }  // namespace
 
 bool VulkanDrmBackend::ReconcilePlatformViewLayers(
@@ -2119,19 +2171,19 @@ bool VulkanDrmBackend::ReconcilePlatformViewLayers(
         have_db
             ? (ld.geometry.opaque ? OpaqueScanoutFourcc(db.fourcc) : db.fourcc)
             : (pool != nullptr ? pool->format().drm_fourcc : 0);
-    c.pv_plan_sig = MixSig(c.pv_plan_sig, reinterpret_cast<uintptr_t>(tag));
+    c.pv_plan_sig = MixShape(c.pv_plan_sig, reinterpret_cast<uintptr_t>(tag));
     c.pv_plan_sig =
-        MixSig(c.pv_plan_sig, (uint64_t{place.src.x} << 32U) | place.src.y);
+        MixShape(c.pv_plan_sig, (uint64_t{place.src.x} << 32U) | place.src.y);
     c.pv_plan_sig =
-        MixSig(c.pv_plan_sig, (uint64_t{place.src.w} << 32U) | place.src.h);
-    c.pv_plan_sig = MixSig(
+        MixShape(c.pv_plan_sig, (uint64_t{place.src.w} << 32U) | place.src.h);
+    c.pv_plan_sig = MixShape(
         c.pv_plan_sig, (uint64_t{static_cast<uint32_t>(place.dst.x)} << 32U) |
                            static_cast<uint32_t>(place.dst.y));
-    c.pv_plan_sig = MixSig(
+    c.pv_plan_sig = MixShape(
         c.pv_plan_sig, (uint64_t{static_cast<uint32_t>(place.dst.w)} << 32U) |
                            static_cast<uint32_t>(place.dst.h));
     c.pv_plan_sig =
-        MixSig(c.pv_plan_sig, (uint64_t{place.rotation} << 32U) | fourcc);
+        MixShape(c.pv_plan_sig, (uint64_t{place.rotation} << 32U) | fourcc);
 
     // The pool caches one fb_id per producer buffer and hands each back
     // through on_release. drm-cxx fires that at displacement rather than at
@@ -2809,6 +2861,30 @@ bool VulkanDrmBackend::PresentLayersViaPlanes(const FlutterLayer** layers,
   // displacement, not at flip, so this is deliberately one present late: the
   // flip that retired them is the one waited on just below.
   DrainDeferredScanoutReleases(c);
+
+  // Whether this frame can go on planes at all, decided before any frame is
+  // taken from a producer or any layer is built: one with more layers than the
+  // CRTC has planes cannot, and neither, for a while, can one shaped like a
+  // frame the allocator just turned down. Rejected layers are torn down, so
+  // asking again would rebuild every pool and import every buffer first.
+  const auto [needed_planes, frame_shape] = FramePlaneDemand(layers, count);
+  const size_t plane_budget = PlaneBudget();
+  if (needed_planes > plane_budget) {
+    if (!plane_budget_exceeded_) {
+      plane_budget_exceeded_ = true;
+      ihs::log::info(
+          "[VulkanDrmBackend] {} layers for {} planes; blending (said once "
+          "until a frame fits)",
+          needed_planes, plane_budget);
+    }
+    DropPlaneLayers(c);
+    return false;
+  }
+  plane_budget_exceeded_ = false;
+  if (!plane_backoff_.ShouldTry(frame_shape)) {
+    return false;
+  }
+
   if (!ReconcilePlaneLayers(c, layers, count)) {
     DropPlaneLayers(c);
     return false;
@@ -2827,19 +2903,11 @@ bool VulkanDrmBackend::PresentLayersViaPlanes(const FlutterLayer** layers,
   // allocator is deterministic for a given layer set, so cache the verdict
   // against a signature of it and skip the ioctl while that holds; a topology
   // change or any geometry move invalidates it.
-  size_t sig = MixSig(c.plane_layer_keys.size(), c.pv_plan_sig);
+  size_t sig = MixShape(c.plane_layer_keys.size(), c.pv_plan_sig);
   for (const void* k : c.plane_layer_keys) {
-    sig = sig * 1000003U ^ reinterpret_cast<uintptr_t>(k);
+    sig = MixShape(sig, reinterpret_cast<uintptr_t>(k));
   }
-  for (size_t li = 0; li < count; ++li) {
-    if (layers[li] == nullptr) {
-      continue;
-    }
-    sig = sig * 1000003U ^ static_cast<size_t>(layers[li]->offset.x);
-    sig = sig * 1000003U ^ static_cast<size_t>(layers[li]->offset.y);
-    sig = sig * 1000003U ^ static_cast<size_t>(layers[li]->size.width);
-    sig = sig * 1000003U ^ static_cast<size_t>(layers[li]->size.height);
-  }
+  sig = MixShape(sig, frame_shape);
   if (!c.plane_topology_changed && c.plane_plan_sig_valid &&
       c.plane_plan_sig == sig) {
     return CommitPlaneFrame(c, layers, count, /*assigned=*/0);
@@ -2849,6 +2917,7 @@ bool VulkanDrmBackend::PresentLayersViaPlanes(const FlutterLayer** layers,
   if (!test) {
     if (test.error() != std::errc::permission_denied) {
       DropPlaneLayers(c);
+      plane_backoff_.Rejected(frame_shape);
     }
     return false;
   }
@@ -2862,10 +2931,12 @@ bool VulkanDrmBackend::PresentLayersViaPlanes(const FlutterLayer** layers,
             test->layers_total - test->layers_assigned, test->layers_total);
       }
       DropPlaneLayers(c);
+      plane_backoff_.Rejected(frame_shape);
       return false;
     }
   }
 
+  plane_backoff_.Accepted();
   c.plane_plan_sig = sig;
   c.plane_plan_sig_valid = true;
   return CommitPlaneFrame(c, layers, count, test->layers_assigned);
