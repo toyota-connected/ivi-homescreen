@@ -24,6 +24,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <vulkan/vulkan.h>
@@ -39,6 +40,7 @@
 // carrying a second copy of the same render pass.
 #include "backend/wayland_vulkan/wl_layer_compositor.h"
 #include "view/compositor_surface_interface.h"
+#include "view/layer_scanout.h"
 #endif
 #include "profiling/frame_profile.h"
 #include "vsync/ivsync_provider.h"
@@ -336,6 +338,15 @@ class VulkanDrmBackend final : public Backend {
   // Latched off after a commit failure the plane path cannot be blamed out of,
   // so a bad frame does not become a bad session of retry churn.
   bool plane_layers_latched_off_ = false;
+  // Planes the scanout CRTC can drive, cursor included (plane layers only).
+  size_t crtc_plane_count_ = 0;
+  // Set while frames have more layers than PlaneBudget, so that is said once
+  // per run of such frames.
+  bool plane_budget_exceeded_ = false;
+  // Frames the allocator turned down, and when to ask again: about two
+  // seconds at 60 Hz.
+  static constexpr uint64_t kPlaneRetryPresents = 120;
+  PlanePathBackoff plane_backoff_{kPlaneRetryPresents};
   // The primary plane's own zpos; overlays are placed above it, not above 0.
   int primary_zpos_ = 0;
   // Said once: a frame shape whose layers the allocator would not all place.
@@ -489,6 +500,14 @@ class VulkanDrmBackend final : public Backend {
                                    const FlutterLayer& fl,
                                    int& z_index,
                                    std::vector<const void*>& present);
+
+  // Planes the scene can give layers on the scanout CRTC.
+  [[nodiscard]] size_t PlaneBudget() const;
+  // The planes a frame would take, and a hash of its shape (its layers'
+  // kinds, places, platform views and their layer counts). Takes nothing from
+  // the producers.
+  std::pair<size_t, size_t> FramePlaneDemand(const FlutterLayer** layers,
+                                             size_t count);
 
   // Remove every scene layer ReconcilePlaneLayers added and forget them.
   static void DropPlaneLayers(CompositorState& c);

@@ -32,6 +32,9 @@ struct ScanoutTarget {
   uint32_t connector_id = 0;
   uint32_t crtc_id = 0;
   uint32_t primary_plane_id = 0;
+  // Planes this CRTC can drive, cursor included: what a plane-per-layer
+  // present has to fit in.
+  uint32_t plane_count = 0;
   uint32_t mode_width = 0;
   uint32_t mode_height = 0;
   drmModeModeInfo mode{};  // full mode for the LayerScene modeset

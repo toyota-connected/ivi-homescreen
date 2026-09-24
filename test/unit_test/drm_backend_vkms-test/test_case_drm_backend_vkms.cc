@@ -364,6 +364,7 @@ class FakeDmabufPlatformView : public ICompositorSurface {
   // same buffer over twice.
   [[nodiscard]] DmabufState GetDmabuf(Dmabuf* out) const override {
     const std::lock_guard<std::mutex> lock(mu_);
+    ++polls_;
     if (!fresh_) {
       return DmabufState::kNoNewFrame;
     }
@@ -461,7 +462,23 @@ class FakeDmabufPlatformView : public ICompositorSurface {
     fresh_ = true;
   }
 
+  // How many layers the view says it draws. The plane path wants a plane for
+  // each; only layer 0 has a frame.
+  [[nodiscard]] size_t GetLayerCount() const override {
+    const std::lock_guard<std::mutex> lock(mu_);
+    return layer_count_;
+  }
+  void set_layer_count(size_t n) {
+    const std::lock_guard<std::mutex> lock(mu_);
+    layer_count_ = n;
+  }
+
   [[nodiscard]] int presents() const { return presents_; }
+  // Times the plane path asked for a frame, fresh or not.
+  [[nodiscard]] int polls() const {
+    const std::lock_guard<std::mutex> lock(mu_);
+    return polls_;
+  }
   [[nodiscard]] int delivered() const {
     const std::lock_guard<std::mutex> lock(mu_);
     return delivered_;
@@ -495,6 +512,8 @@ class FakeDmabufPlatformView : public ICompositorSurface {
   mutable bool had_content_{false};
   bool bad_frame_{false};
   mutable int delivered_{0};
+  mutable int polls_{0};
+  size_t layer_count_{1};
   std::vector<uint32_t> acked_;
   std::vector<uint32_t> released_;
   std::vector<uint32_t> planes_;
@@ -983,6 +1002,74 @@ TEST_F(DrmBackendVkmsScene, TheDisplacedSlotComesBackToTheProducer) {
 #endif
 
   compositor_->UnregisterSurface(23);
+}
+
+// More layers than the CRTC has planes: the frame is composited without the
+// plane path taking a frame from the producer or importing anything, and the
+// view is told it is on no plane.
+TEST_F(DrmBackendVkmsScene, MoreLayersThanPlanesSkipsThePlanePath) {
+  GbmSolidBuffer buffer;
+  ASSERT_TRUE(buffer.Create(backend_->device().fd(), content_w_, content_h_,
+                            0xFF1E7A46u));
+  auto view = std::make_shared<FakeDmabufPlatformView>(25, buffer, 0);
+  view->set_layer_count(64);  // more than any vkms has planes
+  layer_w_ = content_w_;
+  layer_h_ = content_h_;
+  compositor_->RegisterSurface(25, view);
+
+  ASSERT_TRUE(PresentPlatformView(25));
+  ASSERT_TRUE(PresentPlatformView(25));
+
+  EXPECT_EQ(view->polls(), 0)
+      << "the plane path asked for a frame it could never place";
+  const std::vector<uint32_t> planes = view->planes();
+  ASSERT_FALSE(planes.empty());
+  EXPECT_EQ(planes.back(), 0U) << "composited, so on no plane";
+
+  // Back within the budget, the plane path is used again.
+  view->set_layer_count(1);
+  ASSERT_TRUE(PresentPlatformView(25));
+  EXPECT_GT(view->polls(), 0);
+  EXPECT_NE(view->planes().back(), 0U);
+
+  compositor_->UnregisterSurface(25);
+}
+
+// A frame the allocator turns down is not asked about again on every present:
+// the same shape goes straight to composition until the retry interval, so a
+// producer's new frames stop being imported only to be refused.
+TEST_F(DrmBackendVkmsScene, ARejectedFrameShapeIsNotRetriedEveryPresent) {
+  // A buffer a quarter the size of its layer: placing it needs a scaling
+  // plane, and vkms has none.
+  GbmSolidBuffer buffer;
+  ASSERT_TRUE(buffer.Create(backend_->device().fd(), 32, 32, 0xFF1E7A46u));
+  auto view = std::make_shared<FakeDmabufPlatformView>(27, buffer, 0);
+  layer_w_ = 64;
+  layer_h_ = 64;
+  compositor_->RegisterSurface(27, view);
+
+  ASSERT_TRUE(PresentPlatformView(27));
+  const int first = view->polls();
+  ASSERT_GT(first, 0) << "the plane path never looked at the view";
+  ASSERT_EQ(view->planes().back(), 0U)
+      << "vkms placed a scaled layer; this case needs a plane that cannot";
+
+  for (int i = 0; i < 5; ++i) {
+    view->Submit();
+    ASSERT_TRUE(PresentPlatformView(27));
+  }
+  EXPECT_EQ(view->polls(), first)
+      << "a frame shape the allocator just refused was offered to it again";
+
+  // A frame of another shape is tried at once.
+  layer_w_ = 32;
+  layer_h_ = 32;
+  view->Submit();
+  ASSERT_TRUE(PresentPlatformView(27));
+  EXPECT_GT(view->polls(), first);
+  EXPECT_NE(view->planes().back(), 0U) << "an unscaled layer fits a plane";
+
+  compositor_->UnregisterSurface(27);
 }
 
 // #332. GetDmabuf hands a frame over; that is not the same as the frame being

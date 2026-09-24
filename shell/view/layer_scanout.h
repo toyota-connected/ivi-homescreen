@@ -207,3 +207,55 @@ class PvLayerTags {
   };
   std::map<std::pair<const void*, uint32_t>, std::unique_ptr<Tag>> tags_;
 };
+
+// Fold @p v into the running hash @p h, for a frame's shape or plane plan.
+constexpr size_t MixShape(const size_t h, const uint64_t v) {
+  return (h * 1000003U) ^ static_cast<size_t>(v);
+}
+
+// Remembers that the plane path turned down frames of one shape, so presents
+// of the same shape go straight to composition instead of paying again for a
+// TEST_ONLY commit -- and, where the rejected layers are torn down, for fresh
+// imports -- to hear the same answer. Frames of another shape are tried at
+// once; the same shape is retried every @p retry_after presents, since what
+// the allocator can place also turns on things the shape does not capture (a
+// producer's format, another output's claim on a shared plane). Raster
+// thread only.
+class PlanePathBackoff {
+ public:
+  explicit PlanePathBackoff(const uint64_t retry_after)
+      : retry_after_(retry_after) {}
+
+  // Whether a present of shape @p shape should try the plane path. Called
+  // once per present.
+  [[nodiscard]] bool ShouldTry(const size_t shape) {
+    ++presents_;
+    if (!rejected_) {
+      return true;
+    }
+    if (shape != shape_ || presents_ - rejected_at_ >= retry_after_) {
+      rejected_ = false;
+      return true;
+    }
+    return false;
+  }
+
+  // The plane path turned a frame of shape @p shape down.
+  void Rejected(const size_t shape) {
+    rejected_ = true;
+    shape_ = shape;
+    rejected_at_ = presents_;
+  }
+
+  // The plane path took a frame.
+  void Accepted() { rejected_ = false; }
+
+  [[nodiscard]] bool backing_off() const { return rejected_; }
+
+ private:
+  uint64_t retry_after_;
+  uint64_t presents_{0};
+  uint64_t rejected_at_{0};
+  size_t shape_{0};
+  bool rejected_{false};
+};
