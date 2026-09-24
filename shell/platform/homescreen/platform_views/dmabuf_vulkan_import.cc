@@ -197,6 +197,17 @@ std::vector<uint64_t> DmabufVulkanImporter::ImportableModifiers(
   get_format_properties2_(physical_device_, format, &fp);
 
   for (const auto& m : mods) {
+    // Single memory plane only. IhsFrame carries one fd and one plane layout,
+    // and Import() builds the image from exactly that -- so a modifier with a
+    // metadata plane (AMD DCC, for one) cannot be satisfied by any producer on
+    // this ABI. The device will happily report it as importable, because it is
+    // importable with the right plane count; offering it hands the producer a
+    // modifier whose every import then fails with
+    // VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT, once per frame,
+    // with nothing on screen.
+    if (m.drmFormatModifierPlaneCount != 1) {
+      continue;
+    }
     VkPhysicalDeviceImageDrmFormatModifierInfoEXT mod_info{};
     mod_info.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_DRM_FORMAT_MODIFIER_INFO_EXT;
