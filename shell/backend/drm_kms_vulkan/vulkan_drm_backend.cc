@@ -37,6 +37,7 @@
 #include <vector>
 
 #include <xf86drm.h>
+#include <xf86drmMode.h>
 
 #include <ctime>
 
@@ -1043,6 +1044,19 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
           primary_zpos_ = static_cast<int>(p.zpos_min.value_or(0));
           break;
         }
+      }
+      // The registry indexes planes by the CRTC's position in the card's
+      // resource list, not its id.
+      if (drmModeRes* res = drmModeGetResources(state->device.fd());
+          res != nullptr) {
+        for (int i = 0; i < res->count_crtcs; ++i) {
+          if (res->crtcs[i] == target.crtc_id) {
+            plane_formats_ = PlaneFormats(*reg, static_cast<uint32_t>(i),
+                                          state->device.fd());
+            break;
+          }
+        }
+        drmModeFreeResources(res);
       }
     }
     crtc_plane_count_ = target.plane_count;
@@ -2184,6 +2198,14 @@ bool VulkanDrmBackend::ReconcilePlatformViewLayers(
     // keeps.
     ICompositorSurface::Dmabuf& db = ld.dmabuf;
     const bool have_db = state == ICompositorSurface::DmabufState::kFrame;
+    // A new frame no plane scans out in its format goes to the blend; tell
+    // the producer which formats would not (or that its fits).
+    if (have_db) {
+      plane_formats_.Hint(
+          surface->GetPresentationSink().get(), ld.layer_id,
+          ld.geometry.opaque ? OpaqueScanoutFourcc(db.fourcc) : db.fourcc,
+          db.modifier);
+    }
     void* tag = c.pv_layer_tags.Get(surface.get(), ld.layer_id);
     auto* layer = c.scene->find_by_identity_tag(tag);
     auto* pool =

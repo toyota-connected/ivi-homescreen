@@ -64,6 +64,7 @@ extern "C" {
 #include <fcntl.h>
 #include <gbm.h>
 #include <poll.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
@@ -1398,6 +1399,21 @@ struct FakeProducer {
   std::mutex mu;
   std::vector<Presented> presented;
 
+  // IhsPvCallbacks::scanout_hint, also on the display thread.
+  struct ScanoutHint {
+    uint32_t layer_id;
+    uint64_t dev;
+    std::vector<IhsFormatModifier> formats;
+  };
+  std::vector<ScanoutHint> hints;
+
+  std::vector<ScanoutHint> TakeHints() {
+    const std::lock_guard<std::mutex> lock(mu);
+    std::vector<ScanoutHint> out;
+    out.swap(hints);
+    return out;
+  }
+
   std::vector<Presented> TakePresented() {
     const std::lock_guard<std::mutex> lock(mu);
     std::vector<Presented> out;
@@ -1426,6 +1442,15 @@ int fake_factory(const IhsPvCreateInfo* /*info*/,
     }
     const std::lock_guard<std::mutex> lock(producer->mu);
     producer->presented.push_back({seq, ust_ns, refresh_ns, msc, flags});
+  };
+  out_callbacks->scanout_hint = [](void* u, uint32_t layer_id, uint64_t dev,
+                                   const IhsFormatModifier* formats,
+                                   size_t count) {
+    auto* producer = static_cast<FakeProducer*>(u);
+    const std::lock_guard<std::mutex> lock(producer->mu);
+    producer->hints.push_back(
+        {layer_id, dev,
+         std::vector<IhsFormatModifier>(formats, formats + count)});
   };
   *out_user_data = p;
   return IHS_PV_OK;
@@ -2036,6 +2061,63 @@ TEST_F(PvHostVkmsPlanes, NoReportReachesAPluginOnceItsDisposeHasStarted) {
   }
   EXPECT_EQ(producer_.late_reports.load(), 0)
       << "a presented report reached the plugin after its dispose";
+}
+
+// A layer whose buffer no plane scans out -- here, one that claims a tiling
+// the vkms planes do not offer -- is hinted the formats that would reach one;
+// once it switches, the hint is withdrawn, and a steady state says nothing.
+TEST_F(PvHostVkmsPlanes, AnUnscannableFormatIsHintedAndThenWithdrawn) {
+  const int fd = display_->SharedDevice()->fd();
+  GbmSolidBuffer a;
+  GbmSolidBuffer b;
+  ASSERT_TRUE(a.Create(fd, kViewW, kViewH, 0xFF1E7A46u));
+  ASSERT_TRUE(b.Create(fd, kViewW, kViewH, 0xFF7A1E46u));
+  struct stat st{};
+  ASSERT_EQ(fstat(fd, &st), 0);
+
+  // Layer 5 of @p buffer, claiming @p modifier.
+  const auto submit = [this](const GbmSolidBuffer& buffer, uint32_t buffer_id,
+                             uint64_t modifier, uint64_t seq) {
+    IhsFrame f = FrameOf(buffer, buffer_id);
+    f.format.modifier = modifier;
+    IhsLayer layer = LayerOf(&f, 5);
+    int release = -1;
+    const int rc =
+        ihs_pv_submit_layers(producer_.view, &layer, 1, seq, &release);
+    if (release >= 0) {
+      ::close(release);
+    }
+    return rc;
+  };
+
+  // An X-tiled claim: no vkms plane lists it.
+  ASSERT_EQ(submit(a, 0, I915_FORMAT_MOD_X_TILED, 1), IHS_PV_OK);
+  Present();
+  auto hints = producer_.TakeHints();
+  ASSERT_EQ(hints.size(), 1U) << "no hint for a format no plane scans out";
+  EXPECT_EQ(hints[0].layer_id, 5U);
+  EXPECT_EQ(hints[0].dev, static_cast<uint64_t>(st.st_rdev));
+  ASSERT_FALSE(hints[0].formats.empty());
+  const bool offers_linear_xrgb =
+      std::any_of(hints[0].formats.begin(), hints[0].formats.end(),
+                  [](const IhsFormatModifier& fm) {
+                    return fm.fourcc == DRM_FORMAT_XRGB8888 &&
+                           fm.modifier == DRM_FORMAT_MOD_LINEAR;
+                  });
+  EXPECT_TRUE(offers_linear_xrgb) << "the planes' own formats were not offered";
+
+  // Switched to what the planes scan: the hint is withdrawn, once.
+  ASSERT_EQ(submit(b, 1, DRM_FORMAT_MOD_LINEAR, 2), IHS_PV_OK);
+  ASSERT_TRUE(Present());
+  hints = producer_.TakeHints();
+  ASSERT_EQ(hints.size(), 1U) << "the hint was not withdrawn";
+  EXPECT_EQ(hints[0].layer_id, 5U);
+  EXPECT_EQ(hints[0].formats.size(), 0U);
+
+  // Nothing changes from here: nothing more is said.
+  ASSERT_EQ(submit(a, 2, DRM_FORMAT_MOD_LINEAR, 3), IHS_PV_OK);
+  ASSERT_TRUE(Present());
+  EXPECT_TRUE(producer_.TakeHints().empty());
 }
 
 // The same through the GL compositor: the frame is composited, so it is not

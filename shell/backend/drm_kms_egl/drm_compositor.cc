@@ -705,6 +705,8 @@ bool DrmCompositor::InitPlaneAllocator() {
 
   const auto available = plane_registry_->for_crtc(out_.crtc_index());
   crtc_plane_count_ = available.size();
+  plane_formats_ =
+      PlaneFormats(*plane_registry_, out_.crtc_index(), backend_->drm_fd());
   ihs::log::info(
       "[DrmCompositor] {} planes available for CRTC {} (crtc_index={})",
       available.size(), out_.crtc_id(), out_.crtc_index());
@@ -3072,6 +3074,14 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
           return PresentViaGlFallback(layers, layer_count);
         }
         ICompositorSurface::Dmabuf& db = ld.dmabuf;
+        // A new frame no plane scans out in its format goes to composition;
+        // tell the producer which formats would not (or that its fits).
+        if (have_db) {
+          plane_formats_.Hint(
+              surface->GetPresentationSink().get(), ld.layer_id,
+              ld.geometry.opaque ? OpaqueScanoutFourcc(db.fourcc) : db.fourcc,
+              db.modifier);
+        }
         // The buffer's extent: the new frame's, else what the surface reports
         // for the frame on the plane, else the pool's (a surface that does not
         // report it).
