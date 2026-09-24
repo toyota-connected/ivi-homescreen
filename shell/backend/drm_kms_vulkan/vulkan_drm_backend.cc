@@ -220,7 +220,7 @@ PluginInstanceProcAddr(VkInstance instance, const char* procname) {
       std::strcmp(procname, "vkGetInstanceProcAddr") == 0) {
     return reinterpret_cast<PFN_vkVoidFunction>(&PluginInstanceProcAddr);
   }
-  if (auto* interposed = wayland_vulkan::QueueInterposer::Interpose(
+  if (auto* interposed = ihs::vulkan::QueueInterposer::Interpose(
           instance, procname, d().vkGetInstanceProcAddr)) {
     return interposed;
   }
@@ -3598,8 +3598,7 @@ bool VulkanDrmBackend::CreateLogicalDevice(std::string& refusal_reason) {
   d().vkGetDeviceQueue(device_, graphics_queue_family_, 0, &graphics_queue_);
   // Before anything can submit. The trampolines look the mutex up by queue, so
   // an unregistered queue passes through unlocked and serializes nothing.
-  wayland_vulkan::QueueInterposer::RegisterQueue(graphics_queue_,
-                                                 &queue_mutex_);
+  ihs::vulkan::QueueInterposer::RegisterQueue(graphics_queue_, &queue_mutex_);
   return true;
 }
 
@@ -3681,7 +3680,7 @@ void VulkanDrmBackend::PopulateCaps() {
 
 void VulkanDrmBackend::Teardown() {
   if (graphics_queue_ != VK_NULL_HANDLE) {
-    wayland_vulkan::QueueInterposer::UnregisterQueue(graphics_queue_);
+    ihs::vulkan::QueueInterposer::UnregisterQueue(graphics_queue_);
     graphics_queue_ = VK_NULL_HANDLE;
   }
   if (device_ != VK_NULL_HANDLE) {

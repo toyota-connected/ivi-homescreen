@@ -14,13 +14,13 @@
  * limitations under the License.
  */
 
-#include "vulkan_queue_interposer.h"
+#include "backend/vulkan/queue_interposer.h"
 
 #include <atomic>
 #include <cstring>
 #include <unordered_map>
 
-namespace wayland_vulkan {
+namespace ihs::vulkan {
 
 namespace {
 
@@ -296,4 +296,4 @@ PFN_vkVoidFunction QueueInterposer::Interpose(VkInstance instance,
   return nullptr;
 }
 
-}  // namespace wayland_vulkan
+}  // namespace ihs::vulkan

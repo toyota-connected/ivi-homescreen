@@ -38,7 +38,7 @@
 // Pure-Vulkan blend pipeline; despite living beside the Wayland backend it
 // pulls in no Wayland headers, so the DRM backend shares it rather than
 // carrying a second copy of the same render pass.
-#include "backend/wayland_vulkan/vulkan_queue_interposer.h"
+#include "backend/vulkan/queue_interposer.h"
 #include "backend/wayland_vulkan/wl_layer_compositor.h"
 #include "view/compositor_surface_interface.h"
 #include "view/layer_scanout.h"
