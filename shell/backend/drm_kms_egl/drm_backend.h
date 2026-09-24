@@ -217,6 +217,18 @@ class DrmBackend : public Backend, public IFlipSink {
   // Null before Create finishes. Exposed for tests that drive the compositor
   // directly; the shell reaches it through the view_id map instead.
   [[nodiscard]] DrmCompositor* compositor() const { return compositor_.get(); }
+
+  // What the last Present() did with the frame it was given: the serial it
+  // was committed under, which the flip that shows it reports back to the
+  // compositor (DrmCompositor::OnLegacyFlipPresented), or 0 when it never
+  // reached the display. @p immediate is set for a frame that was shown with
+  // no flip event to follow -- the initial modeset. Raster thread.
+  [[nodiscard]] uint64_t last_present_serial(bool* immediate) const {
+    if (immediate != nullptr) {
+      *immediate = last_present_immediate_;
+    }
+    return last_present_serial_;
+  }
 #endif
   ~DrmBackend() override;
 
@@ -389,7 +401,9 @@ class DrmBackend : public Backend, public IFlipSink {
   void OnLegacyFlipComplete();
   // IFlipSink: this backend armed a legacy Present() page flip and registered
   // itself as the flip's user_data. Routes to the legacy completion.
-  void OnFlipEvent(unsigned int tv_sec, unsigned int tv_usec) override;
+  void OnFlipEvent(unsigned int sequence,
+                   unsigned int tv_sec,
+                   unsigned int tv_usec) override;
   // Return the vsync baton stamped with a flip's scanout time. Called by the
   // vsync-driving output (this backend for legacy, or its primary compositor)
   // from a PAGE_FLIP_EVENT. Secondary outputs do not call this — one
@@ -434,6 +448,15 @@ class DrmBackend : public Backend, public IFlipSink {
   uint32_t current_fb_ = 0;
   gbm_bo* pending_bo_ = nullptr;
   uint32_t pending_fb_ = 0;
+  // Which Present() the pending and queued flips came from, so the flip that
+  // completes can be matched to the frame its presentation reports belong to.
+  // Same threading as pending_fb_ / queued_fb_.
+  uint64_t pending_serial_ = 0;
+  uint64_t queued_serial_ = 0;
+  uint64_t present_serial_ = 0;
+  // What the last Present() did with its frame; raster thread.
+  uint64_t last_present_serial_ = 0;
+  bool last_present_immediate_ = false;
   // Atomic so the asio flip monitor (writes false on completion via
   // UnifiedPageFlipHandler → OnLegacyFlipComplete) and the rasterizer
   // thread (reads in WaitForPendingFlip; writes true when queuing the

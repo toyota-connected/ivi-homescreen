@@ -24,6 +24,13 @@ The producer logs the granted kind at startup. If it does not say
 `kind=0x1`, the run is not measuring the import path and the numbers are not
 comparable to one that is.
 
+Once a second it logs its submit rate beside the rate at which the shell
+reported its frames on screen (`IhsPvCallbacks::presented`), and the share of
+those that went from the producer's buffer straight to a plane
+(`IHS_PV_PRESENTED_ZERO_COPY`). Presented below submitted means frames were
+replaced before they were shown; 0 presented means a shell older than ABI
+1.12.
+
 ## Build
 
 The producer is built out of tree, against a configured shell build:

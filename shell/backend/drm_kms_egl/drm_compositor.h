@@ -50,6 +50,7 @@
 #include "backend/wayland_egl/gl_caps.h"
 #include "backend/wayland_egl/gl_compositor.h"
 #include "view/layer_scanout.h"
+#include "view/presentation.h"
 
 class DrmBackend;
 class ICompositorSurface;
@@ -199,7 +200,17 @@ class DrmCompositor : public IFlipSink {
   // IFlipSink: this compositor armed the flip (a scene/atomic commit registered
   // it as user_data). Routes to its own completion so one backend's flip reader
   // can serve several compositors (one per output).
-  void OnFlipEvent(unsigned int tv_sec, unsigned int tv_usec) override;
+  void OnFlipEvent(unsigned int sequence,
+                   unsigned int tv_sec,
+                   unsigned int tv_usec) override;
+
+  // The backend's legacy Present() flip committed under @p serial (see
+  // DrmBackend::last_present_serial) is on screen: report the platform views
+  // it showed. Flip thread.
+  void OnLegacyFlipPresented(uint64_t serial,
+                             unsigned int sequence,
+                             unsigned int tv_sec,
+                             unsigned int tv_usec);
 
   // Queried by DrmBackend::SetVsyncBaton to decide whether a baton
   // arriving from Flutter can wait for the asio flip monitor to
@@ -295,7 +306,7 @@ class DrmCompositor : public IFlipSink {
   void NoteGlComposited(const std::shared_ptr<ICompositorSurface>& surface);
   // The same for one layer of a layered surface, naming its frame directly.
   void NoteGlComposited(const std::shared_ptr<ICompositorSurface>& surface,
-                        uint32_t buffer_id);
+                        const ICompositorSurface::GlLayerTexture& texture);
 
   // GL-composite every layer of a layered platform view into @p target_fbo --
   // any surface GetLayerCount != 1, or whose one layer is cropped, placed,
@@ -628,6 +639,25 @@ class DrmCompositor : public IFlipSink {
   // by the rasterizer thread inside WaitForPendingFlip and on the
   // commit paths. Atomic because the writes and reads cross threads.
   std::atomic<bool> flip_pending_{false};
+
+  // Platform-view frames on their way to the screen, reported through each
+  // view's presentation sink when the flip that shows them completes.
+  PresentationTracker presentation_;
+  // Serial of the latest atomic commit handed to the tracker, which the next
+  // flip event reports. Written on the raster thread before the commit,
+  // read on the flip thread.
+  std::atomic<uint64_t> atomic_serial_{0};
+  // The output's refresh period, for the reports.
+  uint32_t refresh_ns_{0};
+  // The atomic commit that just landed: hand this frame's notes to the tracker
+  // under a new serial, and report them at once when no flip event follows.
+  void CommitPresentation(bool blocking);
+  // A flip's time as a report.
+  [[nodiscard]] PresentationTime FlipTime(unsigned int sequence,
+                                          unsigned int tv_sec,
+                                          unsigned int tv_usec) const;
+  // Now, for a frame shown with no flip event to time it.
+  [[nodiscard]] PresentationTime NowTime() const;
 
   // Backing-store slot release pipeline. PresentLayers pushes the
   // just-committed Pending slots onto in_flight_slots_ on the

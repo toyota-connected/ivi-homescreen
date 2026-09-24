@@ -40,6 +40,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <deque>
 #include <iterator>  // std::size over the advertised format table
 #include <map>
 #include <memory>
@@ -141,6 +142,95 @@ Backend* BackendOf(void* user_data) {
 }
 
 // A registry-owned PlatformView that fronts an ihs_pv plugin: it holds the
+// Where a view's presentation reports land (IhsPvCallbacks::presented). Owned
+// apart from the view: the compositor holds it until the display has shown a
+// frame, which may be after the view was disposed, so the reports stop by
+// Close() rather than by the view going away.
+class PvPresentationSink final : public IPresentationSink {
+ public:
+  // The plugin's callback, once the factory has filled the callback table.
+  // Platform thread.
+  void Open(const IhsPvCallbacks& callbacks, void* user_data) {
+    const std::lock_guard<std::mutex> lock(mu_);
+    // Only a table that reaches the field has it: an older plugin's table
+    // ends before it, and the rest of the shell's copy is zero.
+    constexpr size_t kReach =
+        offsetof(IhsPvCallbacks, presented) + sizeof(callbacks.presented);
+    fn_ = callbacks.struct_size >= kReach ? callbacks.presented : nullptr;
+    user_data_ = user_data;
+  }
+
+  // No more reports, and none still running on return. Called before the
+  // plugin's dispose. Platform thread.
+  void Close() {
+    const std::lock_guard<std::mutex> call(call_mu_);
+    const std::lock_guard<std::mutex> lock(mu_);
+    fn_ = nullptr;
+    seqs_.clear();
+  }
+
+  // @p frame (the view's submit counter) was submitted with the producer's
+  // @p seq. Any thread.
+  void Submitted(const uint64_t frame, const uint64_t seq) {
+    const std::lock_guard<std::mutex> lock(mu_);
+    if (fn_ == nullptr) {
+      return;
+    }
+    seqs_.emplace_back(frame, seq);
+    // Frames the compositor never shows are never reported, so without a
+    // bound this grows for a view that is never on screen.
+    while (seqs_.size() > kMaxPending) {
+      seqs_.pop_front();
+    }
+  }
+
+  // Display thread.
+  void OnPresented(const uint64_t frame,
+                   const PresentationTime& when) override {
+    // Held across the call, so Close() cannot return while a report is still
+    // in the plugin.
+    const std::lock_guard<std::mutex> call(call_mu_);
+    decltype(fn_) fn = nullptr;
+    void* user_data = nullptr;
+    uint64_t seq = 0;
+    {
+      const std::lock_guard<std::mutex> lock(mu_);
+      // Each frame once, and never one older than a frame already reported:
+      // the same frame is noted every present that composites it, and two
+      // outputs may show it.
+      if (fn_ == nullptr || frame <= last_frame_) {
+        return;
+      }
+      bool found = false;
+      while (!seqs_.empty() && seqs_.front().first <= frame) {
+        if (seqs_.front().first == frame) {
+          seq = seqs_.front().second;
+          found = true;
+        }
+        seqs_.pop_front();
+      }
+      // A frame that fell off the bound is not reported under a guessed seq.
+      if (!found) {
+        return;
+      }
+      last_frame_ = frame;
+      fn = fn_;
+      user_data = user_data_;
+    }
+    fn(user_data, seq, when.ust_ns, when.refresh_ns, when.msc, when.flags);
+  }
+
+ private:
+  static constexpr size_t kMaxPending = 64;
+
+  std::mutex call_mu_;  // held while the plugin is being called
+  std::mutex mu_;
+  void (*fn_)(void*, uint64_t, uint64_t, uint32_t, uint64_t, uint32_t){nullptr};
+  void* user_data_{nullptr};
+  uint64_t last_frame_{0};
+  std::deque<std::pair<uint64_t, uint64_t>> seqs_;  // (frame, seq)
+};
+
 // plugin's IhsPvCallbacks table and per-view state, trampolines the registry's
 // platform_view_listener into that table, and is the ICompositorSurface the
 // compositor pulls each frame. Submitted dma-bufs are imported into VkImages
@@ -174,6 +264,9 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
       return;
     }
     disposed_ = true;
+    // Presentation reports come from the display thread; stop them, and wait
+    // out one in progress, before the plugin frees what they would reach.
+    presentation_sink->Close();
     if (callbacks.dispose != nullptr) {
       callbacks.dispose(plugin_user_data);
     }
@@ -182,6 +275,9 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   // Plugin callback table + per-view state, filled by the factory.
   IhsPvCallbacks callbacks{};
   void* plugin_user_data{nullptr};
+  // Where the compositor reports frames reaching the screen.
+  std::shared_ptr<PvPresentationSink> presentation_sink{
+      std::make_shared<PvPresentationSink>()};
 
   // The backend, so dispose can hand imports to it for a safe deferred free
   // (see ~IhsPluginView). Set by the factory; may be null in headless contexts.
@@ -230,6 +326,8 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   // Key of the buffer `current` points at, so its scanout twin can be found.
   uint32_t current_buffer_id{0};
   bool current_buffer_valid{false};
+  // The submit_seq that made `current` current: its presentation token.
+  uint64_t current_frame{0};
 #endif
 
   // Common retire clock for both import paths (incremented on every submit).
@@ -372,6 +470,9 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   // GetGlTextureBufferId. The GL path has no scanout retire to key a release
   // off, so the compositor tells one bound frame from the next by this.
   mutable uint32_t current_egl_buffer_id{0};
+  // The stash_seq of the frame current_egl was imported from: its
+  // presentation token.
+  mutable uint64_t current_egl_frame{0};
   struct RetiredEglImport {
     EglDmabufImporter::ImportedTexture texture;
     uint64_t reap_at{0};
@@ -420,6 +521,7 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
 #if IVI_HAVE_VULKAN
     DmabufVulkanImporter::ImportedImage* current{nullptr};
     uint32_t current_buffer_id{0};
+    uint64_t current_frame{0};
     uint32_t layout{VK_IMAGE_LAYOUT_UNDEFINED};
     int acquire_fd{-1};  // taken by the compositor, like pending_acquire_fd
 #endif
@@ -427,6 +529,7 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     PendingEglFrame pending;
     EglDmabufImporter::ImportedTexture* current_egl{nullptr};
     uint32_t current_egl_buffer_id{0};
+    uint64_t current_egl_frame{0};
 #endif
   };
   mutable std::map<uint32_t, ExtraLayer> extra_layers;
@@ -587,9 +690,11 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
       }
       img = current;
       out.geometry = geom0;
+      out.frame = current_frame;
     } else if (const ExtraLayer* x = ExtraAtLocked(index); x != nullptr) {
       img = x->current;
       out.geometry = x->geom;
+      out.frame = x->current_frame;
     }
     if (img == nullptr || img->image == VK_NULL_HANDLE) {
       return out;
@@ -647,6 +752,7 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     PendingEglFrame* pending{nullptr};
     EglDmabufImporter::ImportedTexture** current{nullptr};
     uint32_t* current_id{nullptr};
+    uint64_t* current_frame{nullptr};
     ICompositorSurface::LayerGeometry* geom{nullptr};
   };
   // Import the frame a layer has waiting, if any, and make it the layer's
@@ -686,6 +792,7 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     ScanoutOffer* offer{nullptr};
     uint32_t layer_id{0};
     uint32_t buffer_id{0};
+    uint64_t frame{0};  // presentation token of the frame on offer
     // A frame submitted and not yet taken by the plane path.
     bool fresh{false};
     ICompositorSurface::LayerGeometry geom;
@@ -725,6 +832,7 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     if (img != nullptr) {
       ref->vulkan = true;
       ref->buffer_id = x == nullptr ? current_buffer_id : x->current_buffer_id;
+      ref->frame = x == nullptr ? current_frame : x->current_frame;
       ref->geom = x == nullptr ? geom0 : x->geom;
       ref->width = img->width;
       ref->height = img->height;
@@ -738,6 +846,7 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     if (pending.valid) {
       ref->pending = &pending;
       ref->buffer_id = pending.frame.buffer_id;
+      ref->frame = pending.stash_seq;
       ref->geom = pending.geom;
       ref->width = pending.frame.width;
       ref->height = pending.frame.height;
@@ -822,6 +931,7 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
       }
       out->buffer_id = ref.buffer_id;
       out->generation = GenerationLocked(ref.buffer_id);
+      out->frame = ref.frame;
       // The acquire fence is the producer's, and the compositor lowers it to
       // the plane's IN_FENCE_FD. dup: the layer's copy stays ours, and the
       // blend path may still want it if this frame ends up composited.
@@ -887,6 +997,7 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     out->plane_count = np;
     out->buffer_id = f.buffer_id;  // the compositor hands it back on release
     out->generation = GenerationLocked(f.buffer_id);
+    out->frame = ref.frame;
     for (uint32_t i = 0; i < np; ++i) {
       out->offset[i] = f.plane_offset[i];
       out->stride[i] = f.plane_stride[i];
@@ -1009,6 +1120,19 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
 #else
     return 0;
 #endif
+  }
+  [[nodiscard]] uint64_t GetGlTextureFrame() const override {
+#if IVI_HAVE_EGL
+    const std::lock_guard<std::mutex> lock(mutex);
+    return current_egl != nullptr ? current_egl_frame : 0;
+#else
+    return 0;
+#endif
+  }
+
+  [[nodiscard]] std::shared_ptr<IPresentationSink> GetPresentationSink()
+      const override {
+    return presentation_sink;
   }
 
   // The DRM scene path retired this frame; wake the producer's release fence
@@ -1574,6 +1698,7 @@ void IhsPluginView::ImportPendingEglLocked(std::unique_lock<std::mutex>& lock,
     CloseFrameFds(&f);  // redundant handle to the cached import
     *slot.current = &it->second;
     *slot.current_id = f.buffer_id;
+    *slot.current_frame = slot.pending->stash_seq;
   } else {
     if (it != buffers_egl.end()) {
       // A resize: the old import goes, and every layer still pointing at it
@@ -1585,6 +1710,7 @@ void IhsPluginView::ImportPendingEglLocked(std::unique_lock<std::mutex>& lock,
       auto [pos, ins] = buffers_egl.emplace(f.buffer_id, imported);
       *slot.current = &pos->second;
       *slot.current_id = f.buffer_id;
+      *slot.current_frame = slot.pending->stash_seq;
       // Synthesised ids never repeat, so every earlier entry is dead. Retire
       // them (the reap margin covers a compositor present still binding one)
       // so the cache holds just the current import rather than growing per
@@ -1625,6 +1751,7 @@ uint32_t IhsPluginView::GetGlTextureName() const {
     s->pending = &pending_egl;
     s->current = &current_egl;
     s->current_id = &current_egl_buffer_id;
+    s->current_frame = &current_egl_frame;
     s->geom = &geom0;
     return true;
   });
@@ -1647,6 +1774,7 @@ ICompositorSurface::GlLayerTexture IhsPluginView::GetLayerGlTexture(
     out.top_first = true;  // imported dma-bufs are top-first
     out.buffer_id = current_egl_buffer_id;
     out.geometry = geom0;
+    out.frame = current_egl_frame;
     return out;
   }
   std::unique_lock<std::mutex> lock(mutex);
@@ -1667,6 +1795,7 @@ ICompositorSurface::GlLayerTexture IhsPluginView::GetLayerGlTexture(
     s->pending = &it->second.pending;
     s->current = &it->second.current_egl;
     s->current_id = &it->second.current_egl_buffer_id;
+    s->current_frame = &it->second.current_egl_frame;
     s->geom = &it->second.geom;
     return true;
   });
@@ -1682,6 +1811,7 @@ ICompositorSurface::GlLayerTexture IhsPluginView::GetLayerGlTexture(
   out.top_first = true;
   out.buffer_id = x.current_egl_buffer_id;
   out.geometry = x.geom;
+  out.frame = x.current_egl_frame;
   return out;
 }
 #endif
@@ -1802,6 +1932,7 @@ int HostRegisterFactory(void* user_data,
                          request.view_type, rc);
           return nullptr;
         }
+        view->presentation_sink->Open(view->callbacks, view->plugin_user_data);
 
         // Drive lifecycle through the registry's listener table, and register
         // the compositor surface so the backend pulls frames. The surface's
@@ -2217,6 +2348,7 @@ void ApplyLayerListLocked(IhsPluginView* v,
       if (auto* img = ImportOrReuseVulkanLocked(v, es.frame); img != nullptr) {
         x.current = img;
         x.current_buffer_id = es.frame.buffer_id;
+        x.current_frame = v->submit_seq;
         x.layout = VK_IMAGE_LAYOUT_GENERAL;
         x.geom = es.geom;
       }
@@ -2296,6 +2428,7 @@ int SubmitFrame0(void* user_data,
                  int acquire_fence_fd,
                  int* out_release_fence_fd,
                  const uint32_t layer_id,
+                 const uint64_t seq,
                  const ICompositorSurface::LayerGeometry& geom,
                  LayerListUpdate* update) {
 #if IVI_HAVE_VULKAN
@@ -2314,6 +2447,7 @@ int SubmitFrame0(void* user_data,
     // the fence with the frame for both.
     std::unique_lock<std::mutex> lock(v->mutex);
     ++v->submit_seq;
+    v->presentation_sink->Submitted(v->submit_seq, seq);
     HandBackReleaseFence(v, acquire_fence_fd, out_release_fence_fd);
     if (v->pending_egl.valid) {
       // A frame the DRM scene path never took (superseded before it was
@@ -2388,6 +2522,7 @@ int SubmitFrame0(void* user_data,
 
   std::unique_lock<std::mutex> lock(v->mutex);
   ++v->submit_seq;
+  v->presentation_sink->Submitted(v->submit_seq, seq);
   HandBackReleaseFence(v, acquire_fence_fd, out_release_fence_fd);
   // Stash this frame's acquire fence (a sync_file) for the compositor to wait
   // on before sampling; it supersedes any previous unconsumed one, since the
@@ -2434,6 +2569,7 @@ int SubmitFrame0(void* user_data,
     CloseFrameFds(frame);
     v->current = &it->second;
     v->current_buffer_id = frame->buffer_id;
+    v->current_frame = v->submit_seq;
     v->current_buffer_valid = true;
   } else {
     // New ring id, or the plugin re-created this slot at a different size (a
@@ -2476,6 +2612,7 @@ int SubmitFrame0(void* user_data,
     auto [pos, inserted] = v->buffers.emplace(frame->buffer_id, imported);
     v->current = &pos->second;
     v->current_buffer_id = frame->buffer_id;
+    v->current_frame = v->submit_seq;
     v->current_buffer_valid = scanout_ok;
     // Synthesised ids never repeat, so every earlier entry is dead. Retire them
     // (the reap margin covers a compositor present still binding one) so the
@@ -2549,7 +2686,7 @@ int HostSubmit(void* user_data,
     return IHS_PV_ERR_INVALID;
   }
   return SubmitFrame0(user_data, v, &normalized, acquire_fence_fd,
-                      out_release_fence_fd, /*layer_id=*/0,
+                      out_release_fence_fd, /*layer_id=*/0, /*seq=*/0,
                       ICompositorSurface::LayerGeometry{}, nullptr);
 }
 
@@ -2577,7 +2714,7 @@ int HostSubmitLayers(void* user_data,
                      IhsPlatformView* view,
                      const IhsLayer* layers,
                      const size_t layer_count,
-                     uint64_t /* seq: reserved for presentation feedback */,
+                     const uint64_t seq,
                      int* out_release_fence_fds) {
   auto* v = reinterpret_cast<IhsPluginView*>(view);
   const auto close_from = [&](size_t first) {
@@ -2633,7 +2770,7 @@ int HostSubmitLayers(void* user_data,
   const int rc = SubmitFrame0(
       user_data, v, &frame0, layers[0].acquire_fence_fd,
       out_release_fence_fds != nullptr ? &out_release_fence_fds[0] : nullptr,
-      layers[0].layer_id, GeometryOf(layers[0]), &update);
+      layers[0].layer_id, seq, GeometryOf(layers[0]), &update);
   if (!update.applied) {
     close_from(1);  // layer 0 failed; the rest were never taken
   }

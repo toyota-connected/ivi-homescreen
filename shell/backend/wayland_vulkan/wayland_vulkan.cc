@@ -91,6 +91,9 @@ WaylandVulkanBackend::WaylandVulkanBackend(Display* shell_display,
     // wp_presentation + vsync feedback machinery live in the Display-owned
     // provider; the backend forwards to it.
     vsync_ = shell_display->GetVsyncProvider();
+    if (vsync_ != nullptr) {
+      vsync_->SetPresentationTracker(presentation_);
+    }
     if (vsync_ != nullptr && !vsync_->Usable()) {
       ihs::log::info(
           "[WaylandVulkanBackend] wp_presentation unusable — vsync_callback "
@@ -194,6 +197,9 @@ FlutterCompositor WaylandVulkanBackend::GetCompositorConfig() {
 }
 
 WaylandVulkanBackend::~WaylandVulkanBackend() {
+  if (vsync_ != nullptr) {
+    vsync_->SetPresentationTracker(nullptr);
+  }
   // Session-aggregate profile summary (IVI_VK_PROFILE=1). Logged from
   // the dtor so it captures the whole run regardless of which present
   // path was active. No-op when the env-var was unset (counters never
@@ -1594,17 +1600,42 @@ void WaylandVulkanBackend::SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine)
   }
 }
 
-void WaylandVulkanBackend::RequestPresentationFeedback() {
+uint64_t WaylandVulkanBackend::RequestPresentationFeedback() {
   // Rasterizer thread, BEFORE the vkQueuePresentKHR that mints the
   // wl_surface.commit the feedback binds to. The provider no-ops when
   // wp_presentation isn't usable or no surface is attached yet.
   if (vsync_ != nullptr) {
-    vsync_->RequestFeedback();
+    return vsync_->RequestFeedback();
   }
+  return 0;
+}
+
+void WaylandVulkanBackend::FinishPresentation(const uint64_t serial,
+                                              const bool committed) {
+  if (!committed) {
+    presentation_->Discard();
+    return;
+  }
+  if (serial != 0) {
+    presentation_->Commit(serial);
+    return;
+  }
+  // No presentation feedback from the host: the commit is the best time there
+  // is, with no claim about vblank or the hardware. Keyed apart from the
+  // feedback serials, which count up from 1.
+  const uint64_t key = (uint64_t{1} << 63U) | ++presentation_fallback_serial_;
+  presentation_->Commit(key);
+  timespec ts{};
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  PresentationTime now;
+  now.ust_ns = static_cast<uint64_t>(ts.tv_sec) * 1'000'000'000ULL +
+               static_cast<uint64_t>(ts.tv_nsec);
+  presentation_->Presented(key, now);
 }
 
 void WaylandVulkanBackend::StopVsyncMonitor() {
   if (vsync_ != nullptr) {
+    vsync_->SetPresentationTracker(nullptr);
     vsync_->Stop();
   }
 }
@@ -2165,6 +2196,9 @@ void WaylandVulkanBackend::BlitStoreToSwapchain(VkCommandBuffer cmd,
 
 bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
                                              size_t count) {
+  // Notes a previous present left without committing were for a frame that
+  // never reached the host.
+  presentation_->Discard();
   if (dmabuf_present_active_) {
     return PresentLayersDmabuf(layers, count);
   }
@@ -2419,12 +2453,15 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
   present_info.pImageIndices = &image_index;
   // Mint wp_presentation_feedback before the commit baked into
   // vkQueuePresentKHR. See PresentCallback for rationale.
-  RequestPresentationFeedback();
+  const uint64_t feedback = RequestPresentationFeedback();
   VkResult result;
   {
     std::lock_guard<std::mutex> queue_lock(queue_mutex_);
     result = d().vkQueuePresentKHR(queue_, &present_info);
   }
+  // SUBOPTIMAL still presented the image.
+  FinishPresentation(feedback,
+                     result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR);
   if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR) {
     resize_pending_ = true;
   }
@@ -2766,6 +2803,8 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
                         static_cast<uint32_t>(img.height), view, &place)) {
           continue;  // entirely outside the view
         }
+        presentation_->Note(surface->GetPresentationSink(), img.frame,
+                            /*zero_copy=*/false);
         auto src = reinterpret_cast<VkImage>(img.image);
         // The image's real format: 0 keeps the historical B8G8R8A8_UNORM
         // contract (RGB producers); a planar YUV producer reports its format
@@ -2891,6 +2930,8 @@ void WaylandVulkanBackend::BlitPlatformViewVulkan(VkCommandBuffer cmd,
                          view.h)) {
       continue;
     }
+    presentation_->Note(surface->GetPresentationSink(), img.frame,
+                        /*zero_copy=*/false);
     const auto sx0 = static_cast<int32_t>(std::lround(crop.x));
     const auto sy0 = static_cast<int32_t>(std::lround(crop.y));
     const auto sx1 = static_cast<int32_t>(std::lround(crop.x + crop.w));
@@ -3257,7 +3298,7 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
   }
   frame_acquire_waits_.clear();
 
-  RequestPresentationFeedback();
+  const uint64_t feedback = RequestPresentationFeedback();
 
   wl_surface* surface = wl_surface_.load(std::memory_order_acquire);
   // Arm the pacing callback for this commit, so the next frame's present waits
@@ -3297,6 +3338,7 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
   }
   wl_surface_commit(surface);
   wl_display_flush(wl_display_);
+  FinishPresentation(feedback, /*committed=*/true);
   slot.buffer->mark_in_use();
 
   ProfilePresent(true);

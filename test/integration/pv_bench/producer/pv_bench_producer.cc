@@ -253,6 +253,14 @@ class BenchView {
     }
   }
 
+  // IhsPvCallbacks::presented, on the shell's display thread.
+  void Presented(const uint32_t flags) {
+    presented_.fetch_add(1, std::memory_order_relaxed);
+    if ((flags & IHS_PV_PRESENTED_ZERO_COPY) != 0U) {
+      zero_copy_.fetch_add(1, std::memory_order_relaxed);
+    }
+  }
+
   void Suspend(bool suspended) {
     suspended_.store(suspended, std::memory_order_release);
     Log("%s", suspended ? "suspended" : "resumed");
@@ -437,7 +445,7 @@ class BenchView {
     }
 
     int release_fence = -1;
-    const int rc = layers_ > 1 ? SubmitLayers(f, &release_fence)
+    const int rc = layers_ > 1 ? SubmitLayers(f, &release_fence, frame + 1ULL)
                                : ihs_pv_submit(view_, &f, -1, &release_fence);
     if (rc != IHS_PV_OK) {
       /*
@@ -469,7 +477,7 @@ class BenchView {
    * fds of every layer). The release that matters is the bottom layer's; the
    * others name the same buffer, so their fences are closed.
    */
-  int SubmitLayers(const IhsFrame& base, int* release_fence) {
+  int SubmitLayers(const IhsFrame& base, int* release_fence, uint64_t seq) {
     IhsFrame frames[3] = {base, base, base};
     IhsLayer layers[3]{};
     const auto fixed = [](uint32_t px) { return px << 16; };  // 16.16
@@ -506,7 +514,7 @@ class BenchView {
       layers[2].transform = IHS_TRANSFORM_90;
     }
     int fences[3] = {-1, -1, -1};
-    const int rc = ihs_pv_submit_layers(view_, layers, n, 0, fences);
+    const int rc = ihs_pv_submit_layers(view_, layers, n, seq, fences);
     *release_fence = fences[0];
     for (uint32_t i = 1; i < n; ++i) {
       if (fences[i] >= 0) {
@@ -558,8 +566,20 @@ class BenchView {
       const auto now = std::chrono::steady_clock::now();
       if (now - window >= std::chrono::seconds(1)) {
         const double secs = std::chrono::duration<double>(now - window).count();
-        Log("%.1f submits/s, release wait %.2f ms/frame, %llu total",
+        // Frames that reached the screen, and how many of them went straight
+        // from this producer's buffer to a plane. 0 presented against a full
+        // submit rate is a shell that predates the presented callback.
+        const uint64_t shown =
+            presented_.exchange(0, std::memory_order_relaxed);
+        const uint64_t direct =
+            zero_copy_.exchange(0, std::memory_order_relaxed);
+        Log("%.1f submits/s, %.1f presented/s (%.0f%% zero-copy), release "
+            "wait %.2f ms/frame, %llu total",
             static_cast<double>(window_frames) / secs,
+            static_cast<double>(shown) / secs,
+            shown ? 100.0 * static_cast<double>(direct) /
+                        static_cast<double>(shown)
+                  : 0.0,
             window_frames
                 ? static_cast<double>(window_wait_ns) / window_frames / 1e6
                 : 0.0,
@@ -593,6 +613,8 @@ class BenchView {
   std::atomic<bool> running_{false};
   std::atomic<bool> suspended_{false};
   std::atomic<uint64_t> submitted_{0};
+  std::atomic<uint64_t> presented_{0};
+  std::atomic<uint64_t> zero_copy_{0};
   uint64_t submit_errors_ = 0;
   // Layers per submit (PV_BENCH_LAYERS, 1..3); 1 is a plain ihs_pv_submit.
   uint32_t layers_ = 1;
@@ -601,6 +623,15 @@ class BenchView {
 void OnResize(void* user_data, double w, double h) {
   static_cast<BenchView*>(user_data)->Resize(static_cast<uint32_t>(w),
                                              static_cast<uint32_t>(h));
+}
+
+void OnPresented(void* user_data,
+                 uint64_t /*seq*/,
+                 uint64_t /*ust_ns*/,
+                 uint32_t /*refresh_ns*/,
+                 uint64_t /*msc*/,
+                 uint32_t flags) {
+  static_cast<BenchView*>(user_data)->Presented(flags);
 }
 
 void OnSuspended(void* user_data, uint8_t suspended) {
@@ -638,6 +669,7 @@ int Factory(const IhsPvCreateInfo* info,
   out_callbacks->set_suspended = OnSuspended;
   out_callbacks->renegotiate = OnRenegotiate;
   out_callbacks->dispose = OnDispose;
+  out_callbacks->presented = OnPresented;
   *out_user_data = bench;
   return IHS_PV_OK;
 }

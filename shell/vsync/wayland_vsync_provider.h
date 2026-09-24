@@ -30,6 +30,7 @@
 #include "presentation_time_client.hpp"  // generated (presentation_time::client)
 
 #include "profiling/frame_profile.h"
+#include "view/presentation.h"
 #include "vsync/ivsync_provider.h"
 
 #include <wl/wl_ptr.hpp>
@@ -75,6 +76,10 @@ class WpFeedbackHandler final
   // present, so no synchronization needed). 0 = unknown → no frame-accurate
   // drain for this frame.
   uint64_t cutoff_ns_{};
+  // The serial RequestFeedback returned for this commit, which the presented
+  // event reports to the presentation tracker. Same happens-before as
+  // cutoff_ns_.
+  uint64_t serial_{};
 
  private:
   WaylandVsyncProvider* owner_;
@@ -135,7 +140,16 @@ class WaylandVsyncProvider : public IVsyncProvider {
 
   /// Mint a wp_presentation_feedback for the current surface — call BEFORE the
   /// wl_surface.commit (eglSwapBuffers). No-op when !Usable() or surface unset.
-  void RequestFeedback();
+  /// Returns the serial the commit's presented event will report to the
+  /// presentation tracker, or 0 when no feedback was requested.
+  uint64_t RequestFeedback();
+
+  /// Where presented events are reported, by the serial RequestFeedback
+  /// returned; null detaches. The owner detaches before it goes away.
+  void SetPresentationTracker(std::shared_ptr<PresentationTracker> tracker) {
+    const std::lock_guard<std::mutex> lock(tracker_mu_);
+    tracker_ = std::move(tracker);
+  }
 
   /// Cancel + drain all in-flight feedback, then the base teardown. Idempotent.
   /// Called from FlutterView::~FlutterView before the engine destructs.
@@ -146,6 +160,8 @@ class WaylandVsyncProvider : public IVsyncProvider {
   /// presented: record refresh period, hand the baton back via PostOnVsync.
   void OnPresented(uint64_t present_ns,
                    uint32_t refresh_ns,
+                   uint64_t msc,
+                   uint32_t flags,
                    WpFeedbackHandler* fb);
   /// discarded: still hand the baton back so Flutter keeps scheduling.
   void OnDiscarded(WpFeedbackHandler* fb);
@@ -198,6 +214,9 @@ class WaylandVsyncProvider : public IVsyncProvider {
 
   std::mutex feedback_mu_;
   std::vector<std::unique_ptr<WpFeedbackHandler>> feedback_in_flight_;
+  std::atomic<uint64_t> feedback_serial_{0};
+  std::mutex tracker_mu_;
+  std::shared_ptr<PresentationTracker> tracker_;
 };
 
 }  // namespace ivi

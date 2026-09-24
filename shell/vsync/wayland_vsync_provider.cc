@@ -70,9 +70,9 @@ void WpFeedbackHandler::OnPresented(const uint32_t tv_sec_hi,
                                     const uint32_t tv_sec_lo,
                                     const uint32_t tv_nsec,
                                     const uint32_t refresh,
-                                    uint32_t /*seq_hi*/,
-                                    uint32_t /*seq_lo*/,
-                                    uint32_t /*flags*/) {
+                                    const uint32_t seq_hi,
+                                    const uint32_t seq_lo,
+                                    const uint32_t flags) {
   // Reject malformed tv_sec_hi: CLOCK_MONOTONIC seconds-since-boot has never
   // reached 2^32 (~136 years); a non-zero high word would overflow the *1e9
   // below. Fall back to the discarded path (still returns the baton).
@@ -82,7 +82,8 @@ void WpFeedbackHandler::OnPresented(const uint32_t tv_sec_hi,
   }
   const uint64_t present_ns =
       static_cast<uint64_t>(tv_sec_lo) * 1'000'000'000ULL + tv_nsec;
-  owner_->OnPresented(present_ns, refresh, this);
+  const uint64_t msc = (static_cast<uint64_t>(seq_hi) << 32U) | seq_lo;
+  owner_->OnPresented(present_ns, refresh, msc, flags, this);
 }
 
 void WpFeedbackHandler::OnDiscarded() {
@@ -133,9 +134,9 @@ bool WaylandVsyncProvider::Usable() const {
 // park/drain/marshal machinery). IsSourcePending()/PeriodNs() supply the
 // Wayland-specific bits.
 
-void WaylandVsyncProvider::RequestFeedback() {
+uint64_t WaylandVsyncProvider::RequestFeedback() {
   if (!Usable() || surface_ == nullptr) {
-    return;
+    return 0;
   }
   {
     std::lock_guard<std::mutex> lock(feedback_mu_);
@@ -144,7 +145,7 @@ void WaylandVsyncProvider::RequestFeedback() {
           "[WaylandVsync] feedback_in_flight_ saturated at {}; compositor "
           "dropping wp_presentation_feedback requests",
           feedback_in_flight_.size());
-      return;
+      return 0;
     }
   }
   // feedback(surface, callback:new_id) — the new_id is the TRAILING arg, so
@@ -155,7 +156,7 @@ void WaylandVsyncProvider::RequestFeedback() {
       *presentation_, reinterpret_cast<wl_proxy*>(surface_));
   if (raw == nullptr) {
     ihs::log::warn("[WaylandVsync] wp_presentation.feedback returned null");
-    return;
+    return 0;
   }
   auto handler = std::make_unique<WpFeedbackHandler>(this);
   // Stamp this frame's input cutoff: the frame being committed now was driven
@@ -163,12 +164,16 @@ void WaylandVsyncProvider::RequestFeedback() {
   // parked), so its frame_start_time is the cutoff of the inputs it consumed.
   // OnPresented reads it back for the motion-to-photon frame-accurate drain.
   handler->cutoff_ns_ = LastDeliveredFrameStartNs();
+  const uint64_t serial =
+      feedback_serial_.fetch_add(1, std::memory_order_relaxed) + 1;
+  handler->serial_ = serial;
   handler->_SetProxy(raw);  // adopts + installs presented/discarded listener
   {
     std::lock_guard<std::mutex> lock(feedback_mu_);
     feedback_in_flight_.push_back(std::move(handler));
   }
   feedback_pending_.store(true, std::memory_order_release);
+  return serial;
 }
 
 void WaylandVsyncProvider::RetireFeedback(WpFeedbackHandler* fb) {
@@ -197,12 +202,16 @@ void WaylandVsyncProvider::RetireFeedback(WpFeedbackHandler* fb) {
 
 void WaylandVsyncProvider::OnPresented(const uint64_t present_ns,
                                        const uint32_t refresh_ns,
+                                       const uint64_t msc,
+                                       const uint32_t flags,
                                        WpFeedbackHandler* fb) {
   if (refresh_ns > 0 && refresh_ns <= kMaxPlausibleRefreshNs) {
     last_refresh_ns_.store(refresh_ns, std::memory_order_release);
   }
-  // Read the frame's input cutoff before RetireFeedback destroys fb.
+  // Read the frame's input cutoff and serial before RetireFeedback destroys
+  // fb.
   const uint64_t cutoff_ns = fb->cutoff_ns_;
+  const uint64_t serial = fb->serial_;
   RetireFeedback(
       fb);  // clears feedback_pending_ once the last feedback retires
   // Motion-to-photon: this scanout timestamp closes out the input events this
@@ -211,6 +220,23 @@ void WaylandVsyncProvider::OnPresented(const uint64_t present_ns,
   // pass.
   if (m2p_ != nullptr) {
     m2p_->RecordPresent(present_ns, cutoff_ns, "wayland");
+  }
+  // The platform views this commit showed. The host's timing and flags are the
+  // shell window's -- except ZERO_COPY, which says the host scanned out the
+  // window's buffer, not that a view's own buffer reached the screen; the
+  // shell composited the views into it.
+  std::shared_ptr<PresentationTracker> tracker;
+  {
+    const std::lock_guard<std::mutex> lock(tracker_mu_);
+    tracker = tracker_;
+  }
+  if (tracker) {
+    PresentationTime when;
+    when.ust_ns = present_ns;
+    when.refresh_ns = refresh_ns;
+    when.msc = msc;
+    when.flags = flags & ~kPresentedZeroCopy;
+    tracker->Presented(serial, when);
   }
   // Base records the present (cadence profile) + hands the parked baton back
   // with the compositor's real presented timestamp.

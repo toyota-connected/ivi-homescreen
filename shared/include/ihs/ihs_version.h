@@ -32,7 +32,7 @@
  * a retired buffer id to be submitted again (see ihs_pv_retire_buffer).
  */
 #define IHS_SHARED_ABI_MAJOR 1u
-#define IHS_SHARED_ABI_MINOR 11u
+#define IHS_SHARED_ABI_MINOR 12u
 #define IHS_SHARED_ABI_VERSION \
   ((IHS_SHARED_ABI_MAJOR << 16) | IHS_SHARED_ABI_MINOR)
 

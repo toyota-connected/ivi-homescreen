@@ -783,5 +783,17 @@ class WaylandVulkanBackend final : public Backend {
   // Per-commit feedback request — called from BOTH present paths BEFORE the
   // vkQueuePresentKHR that mints the wl_surface.commit the feedback binds to.
   // Delegates to the provider.
-  void RequestPresentationFeedback();
+  // Returns the serial the commit's presented event reports, or 0 when no
+  // feedback was requested.
+  uint64_t RequestPresentationFeedback();
+
+  // Platform-view frames on their way to the screen, reported through each
+  // view's presentation sink when the host presents the commit that carries
+  // them (or at the commit, when the host has no wp_presentation).
+  std::shared_ptr<PresentationTracker> presentation_{
+      std::make_shared<PresentationTracker>()};
+  uint64_t presentation_fallback_serial_{0};
+  // The frame was committed (or not, @p committed false) under feedback
+  // @p serial.
+  void FinishPresentation(uint64_t serial, bool committed);
 };

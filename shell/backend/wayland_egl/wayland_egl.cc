@@ -87,6 +87,9 @@ WaylandEglBackend::WaylandEglBackend(Display* shell_display,
     // whether the compositor advertised wp_presentation with a compatible
     // clock.
     vsync_ = shell_display->GetVsyncProvider();
+    if (vsync_ != nullptr) {
+      vsync_->SetPresentationTracker(presentation_);
+    }
     if (vsync_ != nullptr && !vsync_->Usable()) {
       ihs::log::info(
           "[WaylandEglBackend] wp_presentation unusable — vsync_callback "
@@ -96,6 +99,9 @@ WaylandEglBackend::WaylandEglBackend(Display* shell_display,
 }
 
 WaylandEglBackend::~WaylandEglBackend() {
+  if (vsync_ != nullptr) {
+    vsync_->SetPresentationTracker(nullptr);
+  }
 #if BUILD_HUD
   // Tear the HUD down with the GL context current so imgui's glDelete* land on
   // a live context (the Egl base — destroyed after this — still owns it).
@@ -520,13 +526,37 @@ void WaylandEglBackend::SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine,
   }
 }
 
-void WaylandEglBackend::RequestPresentationFeedback() {
+uint64_t WaylandEglBackend::RequestPresentationFeedback() {
   // Rasterizer thread, BEFORE eglSwapBuffers (which mints the wl_surface.commit
   // the feedback binds to). The provider no-ops when wp_presentation isn't
   // usable or no surface is attached yet.
   if (vsync_ != nullptr) {
-    vsync_->RequestFeedback();
+    return vsync_->RequestFeedback();
   }
+  return 0;
+}
+
+void WaylandEglBackend::FinishPresentation(const uint64_t serial,
+                                           const bool swapped) {
+  if (!swapped) {
+    presentation_->Discard();
+    return;
+  }
+  if (serial != 0) {
+    presentation_->Commit(serial);
+    return;
+  }
+  // No presentation feedback from the host: the swap is the best time there
+  // is, with no claim about vblank or the hardware. Keyed apart from the
+  // feedback serials, which count up from 1.
+  const uint64_t key = (uint64_t{1} << 63U) | ++presentation_fallback_serial_;
+  presentation_->Commit(key);
+  timespec ts{};
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  PresentationTime now;
+  now.ust_ns = static_cast<uint64_t>(ts.tv_sec) * 1'000'000'000ULL +
+               static_cast<uint64_t>(ts.tv_nsec);
+  presentation_->Presented(key, now);
 }
 
 void WaylandEglBackend::StopVsyncMonitor() {
@@ -535,6 +565,7 @@ void WaylandEglBackend::StopVsyncMonitor() {
   // parked baton (an unresponded baton is a documented leak, not a crash —
   // Flutter has already begun shutdown).
   if (vsync_ != nullptr) {
+    vsync_->SetPresentationTracker(nullptr);
     vsync_->Stop();
   }
 
@@ -971,7 +1002,8 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
   // path below end in eglSwapBuffers, and both want feedback — do it once
   // here at the entry so the request and the commit are not interleaved
   // with anything else on the wl_display proxy queue.
-  RequestPresentationFeedback();
+  presentation_->Discard();
+  const uint64_t feedback = RequestPresentationFeedback();
 
   // Fast path: a single Flutter-rendered layer, no platform views.
   if (count == 1 && layers[0]->type == kFlutterLayerContentTypeBackingStore &&
@@ -1104,6 +1136,8 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
                                          : ICompositorSurface::GlLayerTexture{};
         if (first.name != 0 && first.geometry.IsWhole() &&
             !first.geometry.opaque) {
+          presentation_->Note(surface.GetPresentationSink(), first.frame,
+                              /*zero_copy=*/false);
           EnsureGlCapsProbed();
           const auto tex = first.name;
           const auto sw = first.width;
@@ -1145,9 +1179,13 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
                            static_cast<int32_t>(layer->offset.y),
                            static_cast<int32_t>(layer->size.width),
                            static_cast<int32_t>(layer->size.height)};
+          const auto sink = surface.GetPresentationSink();
           if (m_gl_compositor->CompositeSurfaceLayers(
                   0, surface, view, static_cast<GLint>(m_initial_height),
-                  /*target_top_first=*/false, blend) > 0) {
+                  /*target_top_first=*/false, blend,
+                  [this, &sink](const ICompositorSurface::GlLayerTexture& t) {
+                    presentation_->Note(sink, t.frame, /*zero_copy=*/false);
+                  }) > 0) {
             composited_any = true;
           }
         }
@@ -1160,7 +1198,9 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
 #if BUILD_HUD
   MaybeRenderHud(layers, count);
 #endif
-  return SwapBuffers() && ok;
+  const bool swapped = SwapBuffers();
+  FinishPresentation(feedback, swapped);
+  return swapped && ok;
 }
 
 void WaylandEglBackend::RegisterCompositorSurface(
