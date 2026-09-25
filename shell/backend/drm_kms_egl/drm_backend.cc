@@ -1836,7 +1836,10 @@ bool DrmBackend::Present() {
     return false;
   }
 
-  if (!mode_set_) {
+  // A GL frame taking the CRTC over from the plane compositor finds it already
+  // lit by the scene's modeset, and a drmModeSetCrtc would keep the scene's
+  // REFLECT_Y on the primary: the reset flip below is the modeset it needs.
+  if (!mode_set_ && reset_primary_ == 0) {
     // A resume re-modesets from this fresh buffer (mode_set_ was cleared in
     // OnSessionResumed). Release the pre-pause scanout buffer first, or it
     // leaks when overwritten below — another per-cycle starvation source.
@@ -1968,6 +1971,7 @@ int DrmBackend::FlipResettingPlanes(const uint32_t fb) {
   if (!r) {
     return r.error().value() != 0 ? r.error().value() : EIO;
   }
+  mode_set_ = true;
   ihs::log::debug(
       "[DrmBackend] GL frame took the CRTC back from the plane compositor "
       "(primary {} at ROTATE_0, {} overlay(s) off)",
