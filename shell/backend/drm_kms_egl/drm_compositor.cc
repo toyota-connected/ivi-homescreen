@@ -28,6 +28,7 @@
 #include <cstdlib>
 #include <mutex>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <system_error>
 #include <thread>
@@ -1465,8 +1466,34 @@ void DrmCompositor::CompositeLayerIntoFbo(GLuint target_fbo,
 
 // ─── GL fallback (no plane allocator) ────────────────────────────────────
 
+void DrmCompositor::NoteGlFallbackSite(const int from_line) {
+  static const bool enabled =
+      profiling::FrameProfile::Enabled("IVI_DRM_FALLBACK_TRACE");
+  if (!enabled) {
+    return;
+  }
+  ++fallback_sites_[from_line];
+  if (++fallback_entries_ % kFallbackTraceWindow != 0) {
+    return;
+  }
+  // One line per window, sites in file order with their share. Which site
+  // dominates is the whole question: narrowing one bail-out buys nothing if
+  // another takes the frame off the scene just as often.
+  std::string sites;
+  for (const auto& [line, hits] : fallback_sites_) {
+    if (!sites.empty()) {
+      sites += ' ';
+    }
+    sites += std::to_string(line) + ':' + std::to_string(hits);
+  }
+  ihs::log::info("[DrmCompositor] gl fallback {} entries by call site: {}",
+                 fallback_entries_, sites);
+}
+
 bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
-                                         const size_t count) {
+                                         const size_t count,
+                                         const int from_line) {
+  NoteGlFallbackSite(from_line);
   // The GL fallback composites into, and page-flips, the backend's own
   // (primary) gbm_surface/CRTC via DrmBackend::Present(). A secondary output
   // must not touch that -- doing so would render its frame onto the
