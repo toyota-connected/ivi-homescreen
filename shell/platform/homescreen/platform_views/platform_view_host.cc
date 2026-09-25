@@ -2321,13 +2321,32 @@ int HostEglContext(void* user_data, IhsEglContext* out) {
   return IHS_PV_OK;
 }
 
-int HostGrant(void* /*user_data*/,
+int HostGrant(void* user_data,
               IhsPlatformView* view,
               uint32_t kind,
-              const IhsFormatModifier* /*format*/,
+              IhsFormatModifier* format,
               uint32_t* /*out_drm_plane_id*/,
               int* /*out_shm_fd*/,
               size_t* /*out_shm_stride*/) {
+  // A DRM_PLANE buffer is read by the display controller, but the modifier was
+  // chosen against what this shell can import -- on a tiler a disjoint set, so
+  // a producer can be handed one it cannot even allocate, and then it never
+  // starts (#642). The backend owns the plane table, so ask it to reconcile.
+  // negotiate reports back whatever is left here. The other kinds are sampled
+  // rather than scanned out and keep the import-side answer.
+  if (kind == IHS_PV_KIND_DRM_PLANE && format != nullptr) {
+    const Backend* backend = BackendOf(user_data);
+    if (backend != nullptr) {
+      const uint64_t asked = format->modifier;
+      if (backend->ReconcileScanoutModifier(format->fourcc,
+                                            &format->modifier)) {
+        ihs::log::info(
+            "[ihs_pv] grant: no plane scans out fourcc {:#x} with modifier "
+            "{:#x}; granting {:#x} instead",
+            format->fourcc, asked, format->modifier);
+      }
+    }
+  }
   // Record the granted kind on the view. Reserving a DRM plane / shm buffer for
   // the non-Vulkan kinds is wired with the submit path; the Vulkan
   // texture-import kind needs no pull-side reservation.

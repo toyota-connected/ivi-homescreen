@@ -316,6 +316,19 @@ std::unique_ptr<DrmBackend> DrmBackend::Create(const DrmConfig& cfg,
   return backend;
 }
 
+bool DrmBackend::ReconcileScanoutModifier(
+    [[maybe_unused]] const uint32_t fourcc,
+    [[maybe_unused]] uint64_t* const modifier) const {
+#if BUILD_COMPOSITOR
+  // Before Create finishes there is no plane table to consult, and a grant
+  // that early has nothing to reconcile against.
+  if (compositor_ != nullptr) {
+    return compositor_->ReconcileScanoutModifier(fourcc, modifier);
+  }
+#endif
+  return false;
+}
+
 void DrmBackend::MaybeCaptureSnapshot() {
 #if HAVE_DRM_CAPTURE
   if (capture_ != nullptr && drm_dev_) {

@@ -51,6 +51,11 @@ struct MockHost {
   int grant_calls = 0;
   int submit_calls = 0;
   uint32_t last_grant_kind = IHS_PV_KIND_NONE;
+  // Stands in for a host whose planes cannot scan out what was negotiated:
+  // when set, grant rewrites the modifier and negotiate must report it back.
+  bool substitute_modifier = false;
+  uint64_t substitute_with = 0;
+  uint64_t last_grant_modifier_in = 0;
   IhsPvFactory last_factory = nullptr;
   IhsPlatformView* last_submit_view = nullptr;
 };
@@ -86,13 +91,19 @@ int mock_vulkan(void* /*u*/, IhsVulkanContext* out) {
 int mock_grant(void* u,
                IhsPlatformView* /*view*/,
                uint32_t kind,
-               const IhsFormatModifier* /*fmt*/,
+               IhsFormatModifier* fmt,
                uint32_t* out_plane,
                int* out_shm_fd,
                size_t* out_shm_stride) {
   auto* m = static_cast<MockHost*>(u);
   ++m->grant_calls;
   m->last_grant_kind = kind;
+  if (fmt != nullptr) {
+    m->last_grant_modifier_in = fmt->modifier;
+    if (m->substitute_modifier) {
+      fmt->modifier = m->substitute_with;
+    }
+  }
   if (kind == IHS_PV_KIND_DRM_PLANE) {
     *out_plane = 42;
   } else if (kind == IHS_PV_KIND_SOFTWARE_SHM) {
@@ -368,6 +379,61 @@ TEST(IhsPvSurface, NegotiatePicksBestKind) {
   EXPECT_EQ(grant.granted_kind, IHS_PV_KIND_TEXTURE_DMABUF_IMPORT);
   EXPECT_EQ(host_state.last_grant_kind, IHS_PV_KIND_TEXTURE_DMABUF_IMPORT);
   EXPECT_EQ(host_state.grant_calls, 1);
+
+  detach_host();
+}
+
+// grant may replace the modifier (1.15) and negotiate reports what came back,
+// so the grant describes the buffer the producer will actually allocate. The
+// case this exists for: a DRM_PLANE grant whose negotiated modifier no plane
+// scans out (ivi-homescreen#642).
+TEST(IhsPvSurface, GrantMaySubstituteTheModifier) {
+  MockHost host_state;
+  host_state.caps_kinds = IHS_PV_KIND_DRM_PLANE;
+  host_state.substitute_modifier = true;
+  host_state.substitute_with = 0;  // DRM_FORMAT_MOD_LINEAR
+  const IhsPvHost host = make_host(&host_state);
+  ihs_pv_set_host(&host);
+
+  constexpr uint64_t kTiled = 0x0700000000000006ULL;  // BROADCOM_UIF
+  IhsFormatModifier want{};
+  want.fourcc = 0x34325241;  // AR24
+  want.modifier = kTiled;
+  IhsPvRequirements req = make_req(IHS_PV_KIND_DRM_PLANE);
+  req.formats = &want;
+  req.format_count = 1;
+
+  IhsPvGrant grant{};
+  grant.struct_size = sizeof(grant);
+  ASSERT_EQ(ihs_pv_negotiate(fake_view(), &req, &grant), IHS_PV_OK);
+
+  // The host saw what was negotiated, and the caller is told what it granted.
+  EXPECT_EQ(host_state.last_grant_modifier_in, kTiled);
+  EXPECT_EQ(grant.format.modifier, 0ULL);
+  EXPECT_EQ(grant.format.fourcc, want.fourcc);
+
+  detach_host();
+}
+
+// A host with no opinion leaves the negotiated modifier alone.
+TEST(IhsPvSurface, GrantLeavesTheModifierAloneByDefault) {
+  MockHost host_state;
+  host_state.caps_kinds = IHS_PV_KIND_DRM_PLANE;
+  const IhsPvHost host = make_host(&host_state);
+  ihs_pv_set_host(&host);
+
+  constexpr uint64_t kTiled = 0x0700000000000006ULL;
+  IhsFormatModifier want{};
+  want.fourcc = 0x34325241;
+  want.modifier = kTiled;
+  IhsPvRequirements req = make_req(IHS_PV_KIND_DRM_PLANE);
+  req.formats = &want;
+  req.format_count = 1;
+
+  IhsPvGrant grant{};
+  grant.struct_size = sizeof(grant);
+  ASSERT_EQ(ihs_pv_negotiate(fake_view(), &req, &grant), IHS_PV_OK);
+  EXPECT_EQ(grant.format.modifier, kTiled);
 
   detach_host();
 }

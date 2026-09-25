@@ -218,6 +218,12 @@ class DrmBackend : public Backend, public IFlipSink {
   // directly; the shell reaches it through the view_id map instead.
   [[nodiscard]] DrmCompositor* compositor() const { return compositor_.get(); }
 
+  // This backend has planes, so it has an opinion: delegate to the compositor
+  // that owns the plane table. See Backend::ReconcileScanoutModifier.
+  [[nodiscard]] bool ReconcileScanoutModifier(
+      uint32_t fourcc,
+      uint64_t* modifier) const override;
+
   // What the last Present() did with the frame it was given: the serial it
   // was committed under, which the flip that shows it reports back to the
   // compositor (DrmCompositor::OnLegacyFlipPresented), or 0 when it never

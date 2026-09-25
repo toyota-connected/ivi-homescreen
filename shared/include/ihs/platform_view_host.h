@@ -66,7 +66,18 @@ extern "C" {
  *                 fill the out struct from the active Backend.
  *   grant         reserve the negotiated surface path for @view and write the
  *                 kind-specific payload back through the out-params (which the
- *                 shell caches on the view for the accessors below):
+ *                 shell caches on the view for the accessors below).
+ *
+ *                 @format is in/out as of 1.15: a host may replace the
+ *                 modifier with one it can actually honor for @kind, and
+ *                 ihs_pv_negotiate reports back what it returns, so the grant
+ *                 describes the buffer the producer will really allocate.
+ *                 DRM_PLANE is the case that needs it -- the modifier is
+ *                 negotiated against what the shell can import, which on a
+ *                 tiler is disjoint from what a plane scans out (#642). A host
+ *                 with no opinion leaves it untouched.
+ *
+ *                 Payloads:
  *                   DRM_PLANE     -> *out_drm_plane_id
  *                   SOFTWARE_SHM  -> *out_shm_fd, *out_shm_stride
  *                   TEXTURE_*     -> no pull-side payload (the plugin submits)
@@ -100,7 +111,7 @@ typedef struct IhsPvHost {
   int (*grant)(void* user_data,
                IhsPlatformView* view,
                uint32_t kind,
-               const IhsFormatModifier* format,
+               IhsFormatModifier* format,
                uint32_t* out_drm_plane_id,
                int* out_shm_fd,
                size_t* out_shm_stride);

@@ -4467,6 +4467,26 @@ bool DrmCompositor::CollectBackingStore(const FlutterBackingStore* store) {
   return true;
 }
 
+bool DrmCompositor::ReconcileScanoutModifier(const uint32_t fourcc,
+                                             uint64_t* const modifier) const {
+  if (modifier == nullptr || plane_formats_.Scans(fourcc, *modifier)) {
+    return false;
+  }
+  // First entry for this fourcc: formats() is sorted and deduplicated, and any
+  // modifier in it is one a plane on this output takes. Leaving the modifier
+  // alone when the fourcc is absent entirely is deliberate -- the caller is
+  // better placed to fail than we are to invent a format.
+  const auto& formats = plane_formats_.formats();
+  const auto it = std::find_if(
+      formats.begin(), formats.end(),
+      [fourcc](const FormatModifierPair& p) { return p.first == fourcc; });
+  if (it == formats.end()) {
+    return false;
+  }
+  *modifier = it->second;
+  return true;
+}
+
 // ─── Session pause / resume ──────────────────────────────────────────────
 
 void DrmCompositor::ReserveCursorPlane(const uint32_t plane_id) {
