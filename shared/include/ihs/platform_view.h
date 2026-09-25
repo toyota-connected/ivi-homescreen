@@ -242,7 +242,11 @@ typedef enum IhsPvResult {
  * revocation — the same event that revokes a grant. @explicit_sync is 1 when
  * explicit fences are available. @formats/@format_count is the fourcc+modifier
  * set the dma-buf/shm kinds can offer, pointing into registry-owned storage
- * valid until the next query on the calling thread.
+ * valid until the next query on the calling thread. @render_device is the
+ * dev_t of the DRM render node the shell imports platform-view dma-bufs on --
+ * the GPU a producer should allocate on (a Wayland server hands it to its
+ * clients as linux-dmabuf feedback's main_device) -- or 0 when the backend
+ * cannot tell. Added in 1.14; written only when @struct_size covers it.
  */
 typedef struct IhsPvCapabilities {
   size_t struct_size;
@@ -252,6 +256,7 @@ typedef struct IhsPvCapabilities {
   uint8_t reserved[3];   /* pad; must be 0 */
   const IhsFormatModifier* formats;
   size_t format_count;
+  uint64_t render_device; /* dev_t; 0 when unknown (1.14) */
 } IhsPvCapabilities;
 
 /*

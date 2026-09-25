@@ -32,6 +32,8 @@
 #include <poll.h>
 #include <pthread.h>
 #include <sys/eventfd.h>
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -60,6 +62,9 @@
 #include "dmabuf_vulkan_import.h"
 #endif
 #if IVI_HAVE_EGL
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+
 #include "egl_dmabuf_import.h"
 #endif
 #include "flutter_desktop_view_controller_state.h"
@@ -2082,15 +2087,103 @@ std::vector<IhsFormatModifier> ProbedOffer(const char* importer,
   return offered;
 }
 
+// The dev_t of the render node at @p path, or 0.
+uint64_t RenderNodeDev(const char* path) {
+  struct stat st{};
+  if (path == nullptr || ::stat(path, &st) != 0 || !S_ISCHR(st.st_mode)) {
+    return 0;
+  }
+  return static_cast<uint64_t>(st.st_rdev);
+}
+
+#if IVI_HAVE_EGL
+// The render node of the GPU behind @p display: its EGL device's, which Mesa
+// reports for the rendering GPU even when the display came from a KMS-only
+// device (kmsro -- vc4 display, v3d rendering on a Raspberry Pi).
+uint64_t EglRenderDevice(void* display) {
+#ifndef EGL_DRM_RENDER_NODE_FILE_EXT
+#define EGL_DRM_RENDER_NODE_FILE_EXT 0x3377
+#endif
+  const auto query_display = reinterpret_cast<PFNEGLQUERYDISPLAYATTRIBEXTPROC>(
+      eglGetProcAddress("eglQueryDisplayAttribEXT"));
+  const auto query_device = reinterpret_cast<PFNEGLQUERYDEVICESTRINGEXTPROC>(
+      eglGetProcAddress("eglQueryDeviceStringEXT"));
+  EGLAttrib device = 0;
+  if (query_display == nullptr || query_device == nullptr ||
+      query_display(display, EGL_DEVICE_EXT, &device) != EGL_TRUE ||
+      device == 0) {
+    return 0;
+  }
+  const auto dev = reinterpret_cast<EGLDeviceEXT>(device);
+  const char* exts = query_device(dev, EGL_EXTENSIONS);
+  if (exts == nullptr ||
+      std::strstr(exts, "EGL_EXT_device_drm_render_node") == nullptr) {
+    return 0;
+  }
+  return RenderNodeDev(query_device(dev, EGL_DRM_RENDER_NODE_FILE_EXT));
+}
+#endif
+
+#if IVI_HAVE_VULKAN
+// The render node of @p vk's physical device, from VK_EXT_physical_device_drm.
+uint64_t VulkanRenderDevice(const BackendVulkanContext& vk) {
+  const auto gipa =
+      reinterpret_cast<PFN_vkGetInstanceProcAddr>(vk.get_instance_proc_addr);
+  if (gipa == nullptr || vk.physical_device == nullptr) {
+    return 0;
+  }
+  const auto instance = static_cast<VkInstance>(vk.instance);
+  const auto physical = static_cast<VkPhysicalDevice>(vk.physical_device);
+  const auto enumerate =
+      reinterpret_cast<PFN_vkEnumerateDeviceExtensionProperties>(
+          gipa(instance, "vkEnumerateDeviceExtensionProperties"));
+  const auto properties2 = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2>(
+      gipa(instance, "vkGetPhysicalDeviceProperties2"));
+  if (enumerate == nullptr || properties2 == nullptr) {
+    return 0;
+  }
+  uint32_t count = 0;
+  if (enumerate(physical, nullptr, &count, nullptr) != VK_SUCCESS) {
+    return 0;
+  }
+  std::vector<VkExtensionProperties> exts(count);
+  if (enumerate(physical, nullptr, &count, exts.data()) != VK_SUCCESS) {
+    return 0;
+  }
+  const bool has_drm =
+      std::any_of(exts.begin(), exts.end(), [](const VkExtensionProperties& e) {
+        return std::strcmp(e.extensionName, "VK_EXT_physical_device_drm") == 0;
+      });
+  if (!has_drm) {
+    return 0;
+  }
+  VkPhysicalDeviceDrmPropertiesEXT drm{};
+  drm.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRM_PROPERTIES_EXT;
+  VkPhysicalDeviceProperties2 props{};
+  props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+  props.pNext = &drm;
+  properties2(physical, &props);
+  if (drm.hasRender == VK_FALSE) {
+    return 0;
+  }
+  return static_cast<uint64_t>(makedev(static_cast<unsigned>(drm.renderMajor),
+                                       static_cast<unsigned>(drm.renderMinor)));
+}
+#endif
+
 int HostQueryCapabilities(void* user_data, IhsPvCapabilities* out) {
   out->backend_key = "";
   out->kinds =
       IHS_PV_KIND_SOFTWARE_SHM;  // the universal floor is always offered
   Backend* backend = BackendOf(user_data);
+  uint64_t render_device = 0;
   if (backend != nullptr) {
     BackendVulkanContext vk{};
     if (backend->GetVulkanContext(&vk)) {
       out->kinds |= IHS_PV_KIND_TEXTURE_DMABUF_IMPORT;
+#if IVI_HAVE_VULKAN
+      render_device = VulkanRenderDevice(vk);
+#endif
       // Explicit-sync acquire is available when the shared device can import a
       // producer's sync_file as a semaphore — the compositor's platform-view
       // wait path (TakeAcquireFenceFd -> vkImportSemaphoreFdKHR) needs
@@ -2112,6 +2205,9 @@ int HostQueryCapabilities(void* user_data, IhsPvCapabilities* out) {
     BackendEglContext egl{};
     if (backend->GetEglContext(&egl)) {
       out->kinds |= IHS_PV_KIND_TEXTURE_DMABUF_IMPORT;
+      if (render_device == 0 && egl.display != nullptr) {
+        render_device = EglRenderDevice(egl.display);
+      }
       // Explicit-sync acquire on EGL: the GL-composite path waits on the
       // producer's sync_file with eglWaitSyncKHR before sampling the import
       // (GetGlTextureName), which needs EGL_ANDROID_native_fence_sync on the
@@ -2133,6 +2229,11 @@ int HostQueryCapabilities(void* user_data, IhsPvCapabilities* out) {
       }
     }
 #endif
+  }
+  // Added in 1.14: a caller built against an older header has no room for it.
+  if (out->struct_size >=
+      offsetof(IhsPvCapabilities, render_device) + sizeof(out->render_device)) {
+    out->render_device = render_device;
   }
   // Name the formats behind the dma-buf kinds. Only when one was actually
   // offered: advertising formats for a capability the backend does not have
