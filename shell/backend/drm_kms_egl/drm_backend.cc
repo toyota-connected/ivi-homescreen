@@ -43,8 +43,10 @@
 #include <vector>
 
 #include <drm-cxx/core/format.hpp>
+#include <drm-cxx/core/property_store.hpp>
 #include <drm-cxx/log.hpp>
 #include "backend/drm_kms_egl/driver_probe.h"
+#include "drm-cxx/src/modeset/atomic.hpp"
 
 #include "backend/drm_kms_egl/drm_capture.h"
 #include "backend/drm_kms_egl/drm_compositor.h"
@@ -1870,8 +1872,10 @@ bool DrmBackend::Present() {
     bool queued = false;
     {
       std::lock_guard<std::mutex> lk(queued_flip_mutex_);
+      // A frame that hands the CRTC back flips here, not from the flip
+      // handler, which only does legacy flips.
       if (flip_pending_.load(std::memory_order_acquire) &&
-          queued_bo_ == nullptr) {
+          queued_bo_ == nullptr && reset_primary_ == 0) {
         queued_bo_ = next_bo;
         queued_fb_ = next_fb;
         queued_serial_ = ++present_serial_;
@@ -1892,10 +1896,15 @@ bool DrmBackend::Present() {
   if (cfg_.debug_backend) {
     flip_submit_ns_ = LibFlutterEngine->GetCurrentTime();
   }
-  if (drmModePageFlip(drm_dev_->fd(), crtc_id_, next_fb,
-                      DRM_MODE_PAGE_FLIP_EVENT,
-                      static_cast<IFlipSink*>(this)) != 0) {
-    ihs::log::warn("[DrmBackend] drmModePageFlip: {}", std::strerror(errno));
+  const int flip_rc = reset_primary_ != 0
+                          ? FlipResettingPlanes(next_fb)
+                          : (drmModePageFlip(drm_dev_->fd(), crtc_id_, next_fb,
+                                             DRM_MODE_PAGE_FLIP_EVENT,
+                                             static_cast<IFlipSink*>(this)) == 0
+                                 ? 0
+                                 : errno);
+  if (flip_rc != 0) {
+    ihs::log::warn("[DrmBackend] page flip: {}", std::strerror(flip_rc));
     drmModeRmFB(drm_dev_->fd(), next_fb);
     gbm_surface_release_buffer(gbm_surface_, next_bo);
     return false;
@@ -1910,6 +1919,60 @@ bool DrmBackend::Present() {
   flip_pending_.store(true, std::memory_order_release);
   trace_present("flipped");
   return true;
+}
+
+void DrmBackend::ResetPlanesOnNextFlip(const uint32_t primary,
+                                       std::vector<uint32_t> overlays) {
+  reset_primary_ = primary;
+  reset_overlays_ = std::move(overlays);
+}
+
+int DrmBackend::FlipResettingPlanes(const uint32_t fb) {
+  const uint32_t primary = std::exchange(reset_primary_, 0);
+  const std::vector<uint32_t> overlays = std::move(reset_overlays_);
+  reset_overlays_.clear();
+
+  const int fd = drm_dev_->fd();
+  drm::PropertyStore props;
+  if (auto r = props.cache_properties(fd, primary, DRM_MODE_OBJECT_PLANE); !r) {
+    return EINVAL;
+  }
+  for (const uint32_t id : overlays) {
+    (void)props.cache_properties(fd, id, DRM_MODE_OBJECT_PLANE);
+  }
+  drm::AtomicRequest req(*drm_dev_);
+  if (!req.valid()) {
+    return ENOMEM;
+  }
+  auto set = [&](const uint32_t obj, const char* name, const uint64_t value) {
+    auto pid = props.property_id(obj, name);
+    return pid && req.add_property(obj, *pid, value).has_value();
+  };
+  // The frame fills the fb, as drmModeSetCrtc and drmModePageFlip scan it.
+  if (!set(primary, "FB_ID", fb) || !set(primary, "CRTC_ID", crtc_id_) ||
+      !set(primary, "SRC_X", 0) || !set(primary, "SRC_Y", 0) ||
+      !set(primary, "SRC_W", static_cast<uint64_t>(fb_w_) << 16) ||
+      !set(primary, "SRC_H", static_cast<uint64_t>(fb_h_) << 16) ||
+      !set(primary, "CRTC_X", 0) || !set(primary, "CRTC_Y", 0) ||
+      !set(primary, "CRTC_W", fb_w_) || !set(primary, "CRTC_H", fb_h_)) {
+    return EINVAL;
+  }
+  // Optional: a primary without the property was never rotated.
+  (void)set(primary, "rotation", DRM_MODE_ROTATE_0);
+  for (const uint32_t id : overlays) {
+    (void)set(id, "FB_ID", 0);
+    (void)set(id, "CRTC_ID", 0);
+  }
+  auto r = req.commit(DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK,
+                      static_cast<IFlipSink*>(this));
+  if (!r) {
+    return r.error().value() != 0 ? r.error().value() : EIO;
+  }
+  ihs::log::debug(
+      "[DrmBackend] GL frame took the CRTC back from the plane compositor "
+      "(primary {} at ROTATE_0, {} overlay(s) off)",
+      primary, overlays.size());
+  return 0;
 }
 
 void DrmBackend::Resize(size_t /*index*/,

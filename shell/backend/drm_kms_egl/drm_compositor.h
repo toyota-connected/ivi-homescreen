@@ -685,6 +685,12 @@ class DrmCompositor : public IFlipSink {
   // Set once we hit an unrecoverable atomic-commit failure. All future
   // frames route through PresentViaGlFallback until restart.
   bool fallback_latched_{false};
+  // The last present was a scene commit, so the CRTC's planes are as the scene
+  // left them; the GL fallback hands them back before its flip. Raster thread.
+  bool scene_owns_crtc_{false};
+  // The planes were changed behind the scene's back: its next commit writes
+  // every property rather than its diff. Raster thread.
+  bool scene_stale_{false};
 
   // Consecutive scene-commit EBUSY count. EBUSY is transient -- a new plane
   // (e.g. a platform view appearing) committed NONBLOCK against a still-pending
