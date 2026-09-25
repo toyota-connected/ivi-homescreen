@@ -1888,10 +1888,11 @@ bool DrmBackend::Present() {
     bool queued = false;
     {
       std::lock_guard<std::mutex> lk(queued_flip_mutex_);
-      // A frame that hands the CRTC back flips here, not from the flip
-      // handler, which only does legacy flips.
+      // A frame that hands the CRTC back, or any once flips are atomic,
+      // flips here, not from the flip handler, which only does legacy flips.
       if (flip_pending_.load(std::memory_order_acquire) &&
-          queued_bo_ == nullptr && reset_primary_ == 0) {
+          queued_bo_ == nullptr && reset_primary_ == 0 &&
+          atomic_primary_ == 0) {
         queued_bo_ = next_bo;
         queued_fb_ = next_fb;
         queued_serial_ = ++present_serial_;
@@ -1912,13 +1913,18 @@ bool DrmBackend::Present() {
   if (cfg_.debug_backend) {
     flip_submit_ns_ = LibFlutterEngine->GetCurrentTime();
   }
-  const int flip_rc = reset_primary_ != 0
-                          ? FlipResettingPlanes(next_fb)
-                          : (drmModePageFlip(drm_dev_->fd(), crtc_id_, next_fb,
-                                             DRM_MODE_PAGE_FLIP_EVENT,
-                                             static_cast<IFlipSink*>(this)) == 0
-                                 ? 0
-                                 : errno);
+  int flip_rc = 0;
+  if (reset_primary_ != 0) {
+    flip_rc = FlipResettingPlanes(next_fb);
+  } else if (atomic_primary_ != 0) {
+    flip_rc = FlipAtomically(next_fb, atomic_primary_, {});
+  } else {
+    flip_rc = drmModePageFlip(drm_dev_->fd(), crtc_id_, next_fb,
+                              DRM_MODE_PAGE_FLIP_EVENT,
+                              static_cast<IFlipSink*>(this)) == 0
+                  ? 0
+                  : errno;
+  }
   if (flip_rc != 0) {
     ihs::log::warn("[DrmBackend] page flip: {}", std::strerror(flip_rc));
     drmModeRmFB(drm_dev_->fd(), next_fb);
@@ -1947,7 +1953,20 @@ int DrmBackend::FlipResettingPlanes(const uint32_t fb) {
   const uint32_t primary = std::exchange(reset_primary_, 0);
   const std::vector<uint32_t> overlays = std::move(reset_overlays_);
   reset_overlays_.clear();
+  const int rc = FlipAtomically(fb, primary, overlays);
+  if (rc == 0) {
+    atomic_primary_ = primary;
+    ihs::log::debug(
+        "[DrmBackend] GL frame took the CRTC back from the plane compositor "
+        "(primary {} at ROTATE_0, {} overlay(s) off)",
+        primary, overlays.size());
+  }
+  return rc;
+}
 
+int DrmBackend::FlipAtomically(const uint32_t fb,
+                               const uint32_t primary,
+                               const std::vector<uint32_t>& overlays) {
   const int fd = drm_dev_->fd();
   drm::PropertyStore props;
   if (auto r = props.cache_properties(fd, primary, DRM_MODE_OBJECT_PLANE); !r) {
@@ -1985,10 +2004,6 @@ int DrmBackend::FlipResettingPlanes(const uint32_t fb) {
     return r.error().value() != 0 ? r.error().value() : EIO;
   }
   mode_set_ = true;
-  ihs::log::debug(
-      "[DrmBackend] GL frame took the CRTC back from the plane compositor "
-      "(primary {} at ROTATE_0, {} overlay(s) off)",
-      primary, overlays.size());
   return 0;
 }
 
