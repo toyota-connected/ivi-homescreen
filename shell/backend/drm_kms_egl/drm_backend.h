@@ -469,6 +469,21 @@ class DrmBackend : public Backend, public IFlipSink {
   // What the last Present() did with its frame; raster thread.
   uint64_t last_present_serial_ = 0;
   bool last_present_immediate_ = false;
+
+  /// Counts commits that carried new content, which `flip #N handled` does not:
+  /// that one is the vblank event and fires whether or not a buffer reached the
+  /// kernel, so it reads the mode rate on a stalled producer. Called from every
+  /// commit point on both present paths -- Present() here, and the compositor's
+  /// atomic paths via CommitPresentation -- so a frame is counted once
+  /// whichever path took it.
+  ///
+  /// The EGL counterpart to `[VulkanDrmBackend] presented frame N`, on the same
+  /// terms: the first frames at info, a heartbeat at debug that release builds
+  /// drop. IVI_DRM_PRESENT_COUNT=1 asks for the heartbeat in any build, which
+  /// is what makes a board-class rate measurable on a release build -- the
+  /// Vulkan side has no such request and cannot be measured on one.
+  void LogPresentedFrame();
+  uint64_t presented_frame_ = 0;
   // Atomic so the asio flip monitor (writes false on completion via
   // UnifiedPageFlipHandler → OnLegacyFlipComplete) and the rasterizer
   // thread (reads in WaitForPendingFlip; writes true when queuing the

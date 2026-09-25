@@ -1711,6 +1711,39 @@ unsigned int DrmBackend::RenderHudTexture(uint32_t width, uint32_t height) {
 }
 #endif  // BUILD_HUD
 
+void DrmBackend::LogPresentedFrame() {
+  // IVI_DRM_PRESENT_COUNT=1 asks for the heartbeat in any build, which is what
+  // taking a throughput figure on a target board needs -- release builds drop
+  // the unprompted one.
+  //
+  // It enables the heartbeat rather than logging every frame, which is where
+  // this departs from IVI_DRM_FLIP_TRACE beside it: a line per frame at 60 Hz
+  // on the boards this is measured on costs enough to move the number being
+  // measured, and every 120th answers the same question without perturbing it.
+  static const bool count_trace = []() {
+    const char* env = std::getenv("IVI_DRM_PRESENT_COUNT");
+    return env != nullptr && std::string_view(env) == "1";
+  }();
+  // The unprompted heartbeat is a development aid, on the flip heartbeat's
+  // terms: debug records are emitted by default, so leaving it on in a release
+  // build costs a line every two seconds for the life of the process.
+#ifdef NDEBUG
+  constexpr bool kHeartbeat = false;
+#else
+  constexpr bool kHeartbeat = true;
+#endif
+  const uint64_t n = presented_frame_++;
+  // The first frames at info confirm content reached the display; everything
+  // after is a heartbeat, and a heartbeat at info never stops.
+  if (n < 3) {
+    ihs::log::info("[DrmBackend] presented frame {} ({}x{})", n, mode_width(),
+                   mode_height());
+  } else if ((count_trace || kHeartbeat) && n % 120 == 0) {
+    ihs::log::debug("[DrmBackend] presented frame {} ({}x{})", n, mode_width(),
+                    mode_height());
+  }
+}
+
 bool DrmBackend::Present() {
   last_present_serial_ = 0;
   last_present_immediate_ = false;
@@ -1871,6 +1904,7 @@ bool DrmBackend::Present() {
     last_present_serial_ = ++present_serial_;
     last_present_immediate_ = true;
     RecordFlipComplete();
+    LogPresentedFrame();
     // Mirror the compositor's first-commit drain: drmModeSetCrtc produces no
     // PAGE_FLIP_EVENT, so the next baton (Flutter requested it after the first
     // OnVsync) would sit parked unfired. Drain it now via the provider;
@@ -1902,6 +1936,10 @@ bool DrmBackend::Present() {
     }
     if (queued) {
       trace_present("queued");
+      // Counted here rather than when the flip handler dequeues it: this is the
+      // frame the engine produced, and the handler flips it on the next vblank
+      // without a Present of its own.
+      LogPresentedFrame();
       return true;
     }
     if (flip_pending_.load(std::memory_order_acquire) &&
@@ -1940,6 +1978,7 @@ bool DrmBackend::Present() {
   last_present_serial_ = pending_serial_;
   flip_pending_.store(true, std::memory_order_release);
   trace_present("flipped");
+  LogPresentedFrame();
   return true;
 }
 
