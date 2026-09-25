@@ -360,7 +360,10 @@ extern "C" int ihs_pv_negotiate(IhsPlatformView* view,
     return IHS_PV_ERR_UNSUPPORTED;
   }
 
-  const IhsFormatModifier fmt = choose_format(requirements, &caps);
+  // Mutable: as of 1.15 grant() may replace the modifier with one it can
+  // actually honor for this kind, and out->format below reports what came
+  // back rather than what was asked for.
+  IhsFormatModifier fmt = choose_format(requirements, &caps);
   uint32_t plane_id = 0;
   int shm_fd = -1;
   size_t shm_stride = 0;

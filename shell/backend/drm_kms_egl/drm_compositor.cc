@@ -704,18 +704,33 @@ bool DrmCompositor::InitEglExtensions() {
          glEGLImageTargetTexture2DOES_;
 }
 
-bool DrmCompositor::InitPlaneAllocator() {
+bool DrmCompositor::EnsurePlaneFormats() {
+  if (plane_registry_.has_value()) {
+    return true;
+  }
+  // Enumerating planes needs the DRM device and nothing else -- no GL context,
+  // no EGL. InitPlaneAllocator runs from EnsureGlCapsProbed, which is lazy and
+  // waits for a current context, so it lands on the first present. A platform
+  // view negotiates before that, and a grant has to know what the planes take
+  // (#642), so this half is split out and called from both.
   auto reg = drm::planes::PlaneRegistry::enumerate(backend_->device());
   if (!reg) {
     ihs::log::warn("[DrmCompositor] PlaneRegistry: {}", reg.error().message());
     return false;
   }
   plane_registry_.emplace(std::move(*reg));
+  plane_formats_ =
+      PlaneFormats(*plane_registry_, out_.crtc_index(), backend_->drm_fd());
+  return true;
+}
+
+bool DrmCompositor::InitPlaneAllocator() {
+  if (!EnsurePlaneFormats()) {
+    return false;
+  }
 
   const auto available = plane_registry_->for_crtc(out_.crtc_index());
   crtc_plane_count_ = available.size();
-  plane_formats_ =
-      PlaneFormats(*plane_registry_, out_.crtc_index(), backend_->drm_fd());
   ihs::log::info(
       "[DrmCompositor] {} planes available for CRTC {} (crtc_index={})",
       available.size(), out_.crtc_id(), out_.crtc_index());
@@ -4464,6 +4479,33 @@ bool DrmCompositor::CollectBackingStore(const FlutterBackingStore* store) {
     ihs::log::debug("[DrmCompositor] CollectBackingStore #{} live={} idle={}",
                     store_collect_total_, stores_.size(), store_pool_.size());
   }
+  return true;
+}
+
+bool DrmCompositor::ReconcileScanoutModifier(const uint32_t fourcc,
+                                             uint64_t* const modifier) {
+  if (modifier == nullptr) {
+    return false;
+  }
+  // A grant is served before the first present, so the table may not exist
+  // yet; build it now rather than answer from an empty one. Scans() reports
+  // true when there are no planes to ask, which would silently decline every
+  // substitution -- the exact way this change first measured as a no-op.
+  if (!EnsurePlaneFormats() || plane_formats_.Scans(fourcc, *modifier)) {
+    return false;
+  }
+  // First entry for this fourcc: formats() is sorted and deduplicated, and any
+  // modifier in it is one a plane on this output takes. Leaving the modifier
+  // alone when the fourcc is absent entirely is deliberate -- the caller is
+  // better placed to fail than we are to invent a format.
+  const auto& formats = plane_formats_.formats();
+  const auto it = std::find_if(
+      formats.begin(), formats.end(),
+      [fourcc](const FormatModifierPair& p) { return p.first == fourcc; });
+  if (it == formats.end()) {
+    return false;
+  }
+  *modifier = it->second;
   return true;
 }
 

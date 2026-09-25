@@ -176,6 +176,27 @@ class Backend {
     return false;
   }
 
+  /**
+   * @brief Replace |*modifier| with one a plane can actually scan out for
+   *        |fourcc|, when the negotiated one cannot be.
+   *
+   * A DRM_PLANE grant is read by the display controller, but the modifier is
+   * negotiated against what the shell can *import*, and on a tiler those are
+   * different sets: V3D samples BROADCOM_UIF and not LINEAR, vc4 scans out
+   * LINEAR and not UIF. A producer handed the import-side answer for a scanout
+   * grant cannot allocate the buffer at all, so it never starts and the view
+   * stays dark (#642; fluorite#576 backstops it producer-side).
+   *
+   * Only the backend knows what its planes take, so the grant asks here rather
+   * than have the plugin re-derive it across the ABI. Returns true when
+   * |*modifier| was changed. The default has no planes and no opinion.
+   */
+  [[nodiscard]] virtual bool ReconcileScanoutModifier(
+      uint32_t /* fourcc */,
+      uint64_t* /* modifier */) const {
+    return false;
+  }
+
   // Run @fn at a point where no compositor frame is recording or in flight —
   // the top of a later present, after prior frame fences. A platform-view host
   // uses this to free an imported image on dispose without racing the raster

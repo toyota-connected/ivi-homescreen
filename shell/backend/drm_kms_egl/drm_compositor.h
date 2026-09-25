@@ -185,6 +185,16 @@ class DrmCompositor : public IFlipSink {
   // plane_id == 0 (legacy cursor path / no cursor) is a no-op.
   void ReserveCursorPlane(uint32_t plane_id);
 
+  // When no plane on this output scans out @fourcc with *@modifier, replace it
+  // with one that does and return true. False when it already scans out, when
+  // nothing else in the plane's table carries that fourcc, or when there are
+  // no planes to ask. Backs Backend::ReconcileScanoutModifier -- see there for
+  // why a scanout grant cannot take the import side's answer.
+  // Not const: the plane table is built on demand, because a grant is served
+  // before the first present builds it the usual way.
+  [[nodiscard]] bool ReconcileScanoutModifier(uint32_t fourcc,
+                                              uint64_t* modifier);
+
   // Give the compositor the HW cursor so it can stage the cursor plane
   // into its own atomic commit (DrmCursor::Stage) instead of letting the
   // cursor self-commit. Used on drivers (nvidia-drm) where a separate
@@ -237,6 +247,9 @@ class DrmCompositor : public IFlipSink {
   };
 
   bool InitEglExtensions();
+  // Enumerate planes and build the format table. DRM only -- no GL context
+  // needed, unlike InitPlaneAllocator which wraps it. Idempotent.
+  bool EnsurePlaneFormats();
   bool InitPlaneAllocator();
   bool InitCompositionBuffers();
   // Framed-mode setup: pick an overlay plane for the letterboxed
