@@ -369,6 +369,14 @@ DrmCompositor::DrmCompositor(DrmBackend* backend, DrmOutputContext out)
 }
 
 DrmCompositor::~DrmCompositor() {
+  // Before anything else, and unconditionally when the trace is on: the
+  // running tally only prints every kFallbackTraceWindow entries, so a session
+  // below the window printed nothing at all and zero was indistinguishable
+  // from "one short of a window". A final line makes a low count -- which is
+  // the interesting answer -- legible without rebuilding for a smaller window.
+  if (FallbackTraceEnabled()) {
+    LogGlFallbackSites("final");
+  }
   (void)WaitForPendingFlip();
   // The final flip is done, so anything held for its post-flip release is now
   // off the plane -- return it so producers aren't left blocked on a ring slot.
@@ -1466,19 +1474,16 @@ void DrmCompositor::CompositeLayerIntoFbo(GLuint target_fbo,
 
 // ─── GL fallback (no plane allocator) ────────────────────────────────────
 
-void DrmCompositor::NoteGlFallbackSite(const int from_line) {
+bool DrmCompositor::FallbackTraceEnabled() {
   static const bool enabled =
       profiling::FrameProfile::Enabled("IVI_DRM_FALLBACK_TRACE");
-  if (!enabled) {
-    return;
-  }
-  ++fallback_sites_[from_line];
-  if (++fallback_entries_ % kFallbackTraceWindow != 0) {
-    return;
-  }
-  // One line per window, sites in file order with their share. Which site
-  // dominates is the whole question: narrowing one bail-out buys nothing if
-  // another takes the frame off the scene just as often.
+  return enabled;
+}
+
+void DrmCompositor::LogGlFallbackSites(const char* const when) const {
+  // Sites in file order with their share. Which site dominates is the whole
+  // question: narrowing one bail-out buys nothing if another takes the frame
+  // off the scene just as often.
   std::string sites;
   for (const auto& [line, hits] : fallback_sites_) {
     if (!sites.empty()) {
@@ -1486,8 +1491,22 @@ void DrmCompositor::NoteGlFallbackSite(const int from_line) {
     }
     sites += std::to_string(line) + ':' + std::to_string(hits);
   }
-  ihs::log::info("[DrmCompositor] gl fallback {} entries by call site: {}",
-                 fallback_entries_, sites);
+  if (sites.empty()) {
+    sites = "none";
+  }
+  ihs::log::info("[DrmCompositor] gl fallback {} entries by call site ({}): {}",
+                 fallback_entries_, when, sites);
+}
+
+void DrmCompositor::NoteGlFallbackSite(const int from_line) {
+  if (!FallbackTraceEnabled()) {
+    return;
+  }
+  ++fallback_sites_[from_line];
+  if (++fallback_entries_ % kFallbackTraceWindow != 0) {
+    return;
+  }
+  LogGlFallbackSites("running");
 }
 
 bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
