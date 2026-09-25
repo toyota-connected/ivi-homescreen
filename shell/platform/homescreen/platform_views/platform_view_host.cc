@@ -522,6 +522,10 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     // Where the frame lands (ihs_pv_submit_layers); applied at import, so the
     // geometry and the pixels it describes switch together.
     ICompositorSurface::LayerGeometry geom;
+    // An image layer (IhsImage): the producer's EGLImage, bound as it is
+    // rather than imported from @frame, which then has no planes.
+    void* image{nullptr};
+    bool image_external{false};
     // Owned copy of the frame's HDR metadata: frame.hdr points at plugin memory
     // we must not retain, so its contents are copied here at submit and
     // frame.hdr nulled. has_hdr is false for SDR frames.
@@ -1532,6 +1536,9 @@ IhsPluginView::~IhsPluginView() {
 
 // Close every plane fd a frame still owns (its import did not consume them).
 void CloseFrameFds(const IhsFrame* frame) {
+  if (frame == nullptr) {
+    return;  // an image layer: no fds
+  }
   // One fd may back several planes (IhsFrame contract), so a plane_fd can
   // repeat across entries. Close each distinct numeric fd once -- closing a
   // duplicate a second time could close an unrelated fd that reused the number.
@@ -1771,7 +1778,12 @@ void IhsPluginView::ImportPendingEglLocked(std::unique_lock<std::mutex>& lock,
       DropEglImportLocked(f.buffer_id);
     }
     EglDmabufImporter::ImportedTexture imported;
-    if (g_egl_importer.Import(f, &imported)) {
+    const bool ok =
+        slot.pending->image != nullptr
+            ? g_egl_importer.Adopt(slot.pending->image, f.width, f.height,
+                                   slot.pending->image_external, &imported)
+            : g_egl_importer.Import(f, &imported);
+    if (ok) {
       auto [pos, ins] = buffers_egl.emplace(f.buffer_id, imported);
       *slot.current = &pos->second;
       *slot.current_id = f.buffer_id;
@@ -2171,6 +2183,8 @@ uint64_t VulkanRenderDevice(const BackendVulkanContext& vk) {
 }
 #endif
 
+bool SamplesImageLayers();
+
 int HostQueryCapabilities(void* user_data, IhsPvCapabilities* out) {
   out->backend_key = "";
   out->kinds =
@@ -2218,6 +2232,11 @@ int HostQueryCapabilities(void* user_data, IhsPvCapabilities* out) {
       // producer a fence nothing waits on (#513).
       if (g_egl_importer.has_native_fence_sync()) {
         out->explicit_sync = 1;
+      }
+      // Image layers (1.16): the producer's EGLImage bound as it is, for
+      // buffers a dma-buf cannot fully describe.
+      if (SamplesImageLayers()) {
+        out->kinds |= IHS_PV_KIND_TEXTURE_EGL_IMAGE;
       }
       // The DRM-KMS-EGL backend (gbm_device set; wayland-egl leaves it null)
       // runs the plane compositor, which can scan out a submitted dma-buf
@@ -2419,6 +2438,9 @@ struct ExtraSubmit {
   int acquire_fd{-1};
   int* out_release_fd{nullptr};
   ICompositorSurface::LayerGeometry geom;
+  // An image layer's EGLImage (frame then has no planes); EGL only.
+  void* image{nullptr};
+  bool image_external{false};
 };
 struct LayerListUpdate {
   std::vector<ExtraSubmit> extras;
@@ -2554,6 +2576,8 @@ void ApplyLayerListLocked(IhsPluginView* v,
     x.pending.stash_seq = v->submit_seq;
     x.pending.reimport = v->deferred_retire.Resubmitted(es.frame.buffer_id);
     x.pending.geom = es.geom;
+    x.pending.image = es.image;
+    x.pending.image_external = es.image_external;
     x.pending.valid = true;
     const uint32_t bid = es.frame.buffer_id;
     if (std::find(released_here.begin(), released_here.end(), bid) ==
@@ -2610,7 +2634,9 @@ int SubmitFrame0(void* user_data,
                  const uint32_t layer_id,
                  const uint64_t seq,
                  const ICompositorSurface::LayerGeometry& geom,
-                 LayerListUpdate* update) {
+                 LayerListUpdate* update,
+                 void* image0 = nullptr,
+                 bool image0_external = false) {
 #if IVI_HAVE_VULKAN
   const bool vulkan_ready = g_importer.ready();
 #else
@@ -2655,6 +2681,8 @@ int SubmitFrame0(void* user_data,
     v->pending_egl.stash_seq = v->submit_seq;
     v->pending_egl.reimport = v->deferred_retire.Resubmitted(frame->buffer_id);
     v->pending_egl.geom = geom;
+    v->pending_egl.image = image0;
+    v->pending_egl.image_external = image0_external;
     v->pending_egl.valid = true;
     v->layer0_id = layer_id;
     // Release retired frames this one pushed off screen. Checked here as well
@@ -2888,6 +2916,29 @@ ICompositorSurface::LayerGeometry GeometryOf(const IhsLayer& l) {
   return g;
 }
 
+// The layer's image (1.16), or null for a frame layer or one built without
+// the field.
+const IhsImage* LayerImage(const IhsLayer& layer) {
+  return layer.struct_size >=
+                 offsetof(IhsLayer, image) + sizeof(const IhsImage*)
+             ? layer.image
+             : nullptr;
+}
+
+// Whether the active backend binds image layers: an EGL one.
+bool SamplesImageLayers() {
+#if IVI_HAVE_EGL
+#if IVI_HAVE_VULKAN
+  if (g_importer.ready()) {
+    return false;
+  }
+#endif
+  return g_egl_importer.ready();
+#else
+  return false;
+#endif
+}
+
 // ihs_pv_submit_layers. libihs_shared has validated the list's shape; this
 // owns every fd in it from here, on every path.
 int HostSubmitLayers(void* user_data,
@@ -2925,6 +2976,17 @@ int HostSubmitLayers(void* user_data,
       }
     }
   }
+  // Image layers (1.16) are only sampled on an EGL backend.
+  bool any_image = false;
+  for (size_t i = 0; i < layer_count; ++i) {
+    any_image = any_image || LayerImage(layers[i]) != nullptr;
+  }
+  if (any_image && !SamplesImageLayers()) {
+    ihs::log::warn(
+        "[ihs_pv] submit_layers rejected: image layers need an EGL backend");
+    close_from(0);
+    return IHS_PV_ERR_UNSUPPORTED;
+  }
   // Every frame here carries a buffer_id (libihs_shared checked), so none is
   // synthesised, and the synthesised-id pruning -- which would retire other
   // layers' imports -- stops applying to this view.
@@ -2934,6 +2996,19 @@ int HostSubmitLayers(void* user_data,
   IhsFrame frame0{};
   for (size_t i = 0; i < layer_count; ++i) {
     IhsFrame* dst = i == 0 ? &frame0 : &update.extras[i - 1].frame;
+    if (const IhsImage* image = LayerImage(layers[i]); image != nullptr) {
+      // No planes: the frame names the buffer and its size, and the image is
+      // what gets bound.
+      *dst = IhsFrame{};
+      dst->struct_size = sizeof(IhsFrame);
+      dst->width = image->width;
+      dst->height = image->height;
+      dst->buffer_id = image->buffer_id;
+      for (int& fd : dst->plane_fd) {
+        fd = -1;
+      }
+      continue;
+    }
     if (!NormalizeFrame(v, layers[i].frame, dst)) {
       close_from(0);  // cannot happen past libihs_shared's check; be safe
       return IHS_PV_ERR_INVALID;
@@ -2946,11 +3021,18 @@ int HostSubmitLayers(void* user_data,
     es.out_release_fd =
         out_release_fence_fds != nullptr ? &out_release_fence_fds[i] : nullptr;
     es.geom = GeometryOf(layers[i]);
+    if (const IhsImage* image = LayerImage(layers[i]); image != nullptr) {
+      es.image = image->egl_image;
+      es.image_external = image->external_oes != 0;
+    }
   }
+  const IhsImage* image0 = LayerImage(layers[0]);
   const int rc = SubmitFrame0(
       user_data, v, &frame0, layers[0].acquire_fence_fd,
       out_release_fence_fds != nullptr ? &out_release_fence_fds[0] : nullptr,
-      layers[0].layer_id, seq, GeometryOf(layers[0]), &update);
+      layers[0].layer_id, seq, GeometryOf(layers[0]), &update,
+      image0 != nullptr ? image0->egl_image : nullptr,
+      image0 != nullptr && image0->external_oes != 0);
   if (!update.applied) {
     close_from(1);  // layer 0 failed; the rest were never taken
   }
