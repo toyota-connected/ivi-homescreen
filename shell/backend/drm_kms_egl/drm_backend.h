@@ -287,6 +287,12 @@ class DrmBackend : public Backend, public IFlipSink {
   bool MakeResourceCurrent() const;
   bool Present();
 
+  // Make the next Present() flip also hand the CRTC back from the plane
+  // compositor: @p primary at ROTATE_0 showing the new frame, @p overlays off.
+  // A legacy page flip touches neither, so a GL frame after scene commits would
+  // scan out through the scene's REFLECT_Y and under its overlays. One shot.
+  void ResetPlanesOnNextFlip(uint32_t primary, std::vector<uint32_t> overlays);
+
   // Park the engine's vsync baton (from VsyncTrampoline) into the shared
   // provider, which returns it when the next page flip completes or — for an
   // idle pipeline — drains it inline. Also caches the engine handle for the
@@ -463,6 +469,13 @@ class DrmBackend : public Backend, public IFlipSink {
   // next flip in Present) don't race. Same justification on the
   // compositor's mirror.
   std::atomic<bool> flip_pending_{false};
+
+  // ResetPlanesOnNextFlip's request; raster thread.
+  uint32_t reset_primary_ = 0;
+  std::vector<uint32_t> reset_overlays_;
+  // The flip that carries it: an atomic commit in place of drmModePageFlip,
+  // with the same flip event. 0 or an errno, like drmModePageFlip.
+  int FlipResettingPlanes(uint32_t fb);
 
   // Set by OnSessionPaused / cleared by OnSessionResumed (libseat VT switch).
   // While paused, scanout is revoked and page flips never complete, so GBM

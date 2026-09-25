@@ -1494,6 +1494,27 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
   // defect as #530, one path over.
   std::vector<DeferredScanoutRelease> previous = TakeDeferredScanoutReleases();
 
+  // Take the CRTC back from the scene: its last commit left the primary at
+  // REFLECT_Y (for GL's bottom-up backing stores) and may have lit overlays,
+  // and the legacy flip below changes neither.
+  if (scene_owns_crtc_ && plane_registry_) {
+    (void)WaitForPendingFlip();
+    uint32_t primary = 0;
+    std::vector<uint32_t> overlays;
+    for (const auto* p : plane_registry_->for_crtc(out_.crtc_index())) {
+      if (p->type == drm::planes::DRMPlaneType::PRIMARY) {
+        primary = p->id;
+      } else if (p->type != drm::planes::DRMPlaneType::CURSOR) {
+        overlays.push_back(p->id);
+      }
+    }
+    if (primary != 0) {
+      backend_->ResetPlanesOnNextFlip(primary, std::move(overlays));
+    }
+    scene_owns_crtc_ = false;
+    scene_stale_ = true;
+  }
+
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   glDisable(GL_SCISSOR_TEST);
   glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -3076,11 +3097,20 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
         ICompositorSurface::Dmabuf& db = ld.dmabuf;
         // A new frame no plane scans out in its format goes to composition;
         // tell the producer which formats would not (or that its fits).
+        const uint32_t scan_fourcc =
+            ld.geometry.opaque ? OpaqueScanoutFourcc(db.fourcc) : db.fourcc;
         if (have_db) {
-          plane_formats_.Hint(
-              surface->GetPresentationSink().get(), ld.layer_id,
-              ld.geometry.opaque ? OpaqueScanoutFourcc(db.fourcc) : db.fourcc,
-              db.modifier);
+          plane_formats_.Hint(surface->GetPresentationSink().get(), ld.layer_id,
+                              scan_fourcc, db.modifier);
+        }
+        // No plane scans this buffer out, so a KMS pool gains nothing -- and
+        // its import may be refused outright (vc4 takes no Broadcom UIF FB),
+        // which leaves the layer with no frame at all: neither on a plane nor
+        // composited. Hand it back and composite.
+        if (have_db && !plane_formats_.Scans(scan_fourcc, db.modifier)) {
+          surface->OnScanoutRelease(db.buffer_id);
+          CloseDmabufFds(&db);
+          return PresentViaGlFallback(layers, layer_count);
         }
         // The buffer's extent: the new frame's, else what the surface reports
         // for the frame on the plane, else the pool's (a surface that does not
@@ -3191,9 +3221,10 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   //
   // The pool key is the buffer's ScanoutKey, not its bare id: a producer may
   // retire an id and submit it again for new memory, which must be imported
-  // afresh rather than scanned out through the old framebuffer.
+  // afresh rather than scanned out through the old framebuffer. Returns false
+  // when KMS will not take the buffer.
   const auto submit_pv_pool = [](drm::scene::ExternalDmaBufPool* pool,
-                                 const ICompositorSurface::Dmabuf& db) {
+                                 const ICompositorSurface::Dmabuf& db) -> bool {
     const uint32_t np = db.plane_count < 4 ? db.plane_count : 4;
     std::array<drm::scene::ExternalPlaneInfo, 4> planes{};
     for (uint32_t p = 0; p < np; ++p) {
@@ -3211,10 +3242,20 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
             f.error().message());
       }
     }
-    pool->submit(
+    auto taken = pool->submit(
         ICompositorSurface::ScanoutKey(db.buffer_id, db.generation),
         drm::span<const drm::scene::ExternalPlaneInfo>(planes.data(), np),
         std::move(acquire));
+    // A retired key only holds the last frame this present; anything else is a
+    // buffer KMS will not take.
+    if (!taken &&
+        taken.error() !=
+            std::make_error_code(std::errc::resource_unavailable_try_again)) {
+      ihs::log::debug("[DrmCompositor] pv buffer {} not imported: {}",
+                      db.buffer_id, taken.error().message());
+      return false;
+    }
+    return true;
   };
   // Stand up a fresh ExternalDmaBufPool for a PV layer's decoder ring at the
   // frame's geometry, scanning it out as @p fourcc. Used both on first sight
@@ -3328,7 +3369,12 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
               pool->format().height == db.height &&
               pool->format().drm_fourcc == fl.pv_fourcc &&
               pool->format().modifier == db.modifier) {
-            submit_pv_pool(pool, db);
+            if (!submit_pv_pool(pool, db)) {
+              if (fl.pv_surface) {
+                fl.pv_surface->OnScanoutRelease(db.buffer_id);
+              }
+              return PresentViaGlFallback(layers, layer_count);
+            }
             if (fl.pv_surface) {
               fl.pv_surface->AckDmabufScanout(db.buffer_id);
             }
@@ -3348,7 +3394,12 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
               auto* np_raw = new_pool.value().get();
               if (scene_->replace_source(layer->handle(),
                                          std::move(new_pool.value()))) {
-                submit_pv_pool(np_raw, db);
+                if (!submit_pv_pool(np_raw, db)) {
+                  if (fl.pv_surface) {
+                    fl.pv_surface->OnScanoutRelease(db.buffer_id);
+                  }
+                  return PresentViaGlFallback(layers, layer_count);
+                }
                 if (fl.pv_surface) {
                   fl.pv_surface->AckDmabufScanout(db.buffer_id);
                 }
@@ -3420,6 +3471,14 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
         return PresentViaGlFallback(layers, layer_count);
       }
       auto* pool_raw = pool.value().get();
+      // Import the first frame before the layer joins the scene: a refused
+      // import would otherwise leave a layer with nothing to acquire.
+      if (!submit_pv_pool(pool_raw, db)) {
+        if (fl.pv_surface) {
+          fl.pv_surface->OnScanoutRelease(db.buffer_id);
+        }
+        return PresentViaGlFallback(layers, layer_count);
+      }
       drm::scene::LayerDesc desc{};
       desc.source = std::move(pool.value());
       desc.display.src_rect_fixed = pv_src;
@@ -3468,8 +3527,6 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       if (pv_is_hdr) {
         output_hdr = ToHdrSourceMetadata(hmeta);
       }
-      // Submit the first frame: imports this slot and caches its fb_id.
-      submit_pv_pool(pool_raw, db);
       if (fl.pv_surface) {
         fl.pv_surface->AckDmabufScanout(db.buffer_id);
       }
@@ -3600,6 +3657,9 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   // cheap on repeat.
   scene_->set_output_metadata(output_hdr);
 
+  if (scene_stale_) {
+    scene_->set_force_full_property_writes(true);
+  }
   auto report = [this, commit_flags] {
     const EglCurrentGuard keep_context;
     return scene_->commit(commit_flags, static_cast<IFlipSink*>(this));
@@ -3639,6 +3699,11 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   }
   scene_ebusy_streak_ = 0;  // a clean commit clears the transient-EBUSY streak
   scene_backoff_.Accepted();
+  scene_owns_crtc_ = true;
+  if (scene_stale_) {
+    scene_->set_force_full_property_writes(false);
+    scene_stale_ = false;
+  }
   CommitPresentation(blocking_modeset);
 
   // Report each platform view's scanout plane back through its surface (feeds
