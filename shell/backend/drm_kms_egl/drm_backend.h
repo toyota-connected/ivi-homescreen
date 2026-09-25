@@ -482,6 +482,17 @@ class DrmBackend : public Backend, public IFlipSink {
   // The flip that carries it: an atomic commit in place of drmModePageFlip,
   // with the same flip event. 0 or an errno, like drmModePageFlip.
   int FlipResettingPlanes(uint32_t fb);
+  // Flip @p fb onto @p primary with an atomic commit, turning @p overlays_off
+  // off in the same commit. Returns 0 or an errno.
+  int FlipAtomically(uint32_t fb,
+                     uint32_t primary,
+                     const std::vector<uint32_t>& overlays_off);
+  // The primary plane once a GL frame has flipped atomically, else 0. From
+  // then on every GL frame flips atomically: some drivers refuse a legacy page
+  // flip on a CRTC that atomic commits have driven (EBUSY with nothing
+  // pending), which loses the frame and stalls the platform views waiting on
+  // it.
+  uint32_t atomic_primary_ = 0;
 
   // Set by OnSessionPaused / cleared by OnSessionResumed (libseat VT switch).
   // While paused, scanout is revoked and page flips never complete, so GBM
