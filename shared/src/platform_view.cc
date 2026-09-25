@@ -252,6 +252,14 @@ extern "C" int ihs_pv_retire_buffer(IhsPlatformView* view, uint32_t buffer_id) {
 constexpr size_t kIhsLayerMinSize =
     offsetof(IhsLayer, reserved) + sizeof(IhsLayer::reserved);
 
+// The layer's image (1.16), or null for one built without the field.
+static const IhsImage* layer_image(const IhsLayer& layer) {
+  return layer.struct_size >=
+                 offsetof(IhsLayer, image) + sizeof(const IhsImage*)
+             ? layer.image
+             : nullptr;
+}
+
 extern "C" int ihs_pv_submit_layers(IhsPlatformView* view,
                                     const IhsLayer* layers,
                                     size_t layer_count,
@@ -265,12 +273,25 @@ extern "C" int ihs_pv_submit_layers(IhsPlatformView* view,
     return IHS_PV_ERR_INVALID;
   }
   for (size_t i = 0; i < layer_count; ++i) {
+    if (layers[i].struct_size < kIhsLayerMinSize) {
+      return IHS_PV_ERR_INVALID;
+    }
+    // A layer shows a frame or, from 1.16, an image: exactly one.
+    const IhsImage* image = layer_image(layers[i]);
+    if ((layers[i].frame == nullptr) == (image == nullptr)) {
+      return IHS_PV_ERR_INVALID;
+    }
+    if (image != nullptr) {
+      if (image->struct_size < sizeof(IhsImage) ||
+          image->egl_image == nullptr) {
+        return IHS_PV_ERR_INVALID;
+      }
+      continue;
+    }
     // Every frame of a list carries its buffer_id: the shell keys each layer's
     // import on it, and never synthesises one here.
-    if (layers[i].struct_size < kIhsLayerMinSize ||
-        layers[i].frame == nullptr ||
-        layers[i].frame->struct_size <
-            offsetof(IhsFrame, buffer_id) + sizeof(IhsFrame::buffer_id)) {
+    if (layers[i].frame->struct_size <
+        offsetof(IhsFrame, buffer_id) + sizeof(IhsFrame::buffer_id)) {
       return IHS_PV_ERR_INVALID;
     }
   }

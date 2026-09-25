@@ -49,6 +49,9 @@ class EglDmabufImporter {
     // data. Packed RGB stays on GL_TEXTURE_2D, which every GLES context
     // supports.
     bool external{false};
+    // False for an image the producer made and keeps (Adopt): Destroy then
+    // deletes the texture alone.
+    bool owns_image{true};
   };
 
   EglDmabufImporter() = default;
@@ -102,6 +105,16 @@ class EglDmabufImporter {
   // RGB stays GL_TEXTURE_2D. ImportedTexture::external says which, and the
   // caller must sample with a matching sampler. GL context must be current.
   bool Import(const IhsFrame& frame, ImportedTexture* out) const;
+
+  // Bind the producer's @p egl_image, created on this importer's display, to a
+  // texture in @out: GL_TEXTURE_EXTERNAL_OES when @p external, else
+  // GL_TEXTURE_2D. The image stays the producer's: Destroy leaves it. GL
+  // context must be current.
+  bool Adopt(void* egl_image,
+             uint32_t width,
+             uint32_t height,
+             bool external,
+             ImportedTexture* out) const;
 
   void Destroy(ImportedTexture* out) const;
 

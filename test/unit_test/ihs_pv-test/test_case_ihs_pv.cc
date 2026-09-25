@@ -816,6 +816,96 @@ TEST(IhsPvSurface, SubmitLayersRejectsMalformedListsAndClosesNothing) {
   detach_host();
 }
 
+// An image layer (1.16) shows an EGLImage instead of a frame; a list may mix
+// the two.
+TEST(IhsPvSurface, SubmitLayersForwardsImageLayers) {
+  LayersRecorder rec;
+  IhsPvHost host{};
+  host.struct_size = sizeof(host);
+  host.user_data = &rec;
+  host.submit_layers = mock_submit_layers;
+  ihs_pv_set_host(&host);
+
+  int token = 0;  // stands in for an EGLImage: the registry never touches it
+  IhsImage image{};
+  image.struct_size = sizeof(image);
+  image.egl_image = &token;
+  image.width = 16;
+  image.height = 16;
+  image.buffer_id = 3;
+  IhsLayer image_layer = MakeLayer(nullptr, 4);
+  image_layer.image = &image;
+  const IhsFrame f = LayerFrame(-1);
+  const IhsLayer layers[2] = {image_layer, MakeLayer(&f, 5)};
+  EXPECT_EQ(ihs_pv_submit_layers(fake_view(), layers, 2, 1, nullptr),
+            IHS_PV_OK);
+  EXPECT_EQ(rec.calls, 1);
+  EXPECT_EQ(rec.count, 2u);
+  EXPECT_EQ(rec.first_layer_id, 4u);
+  detach_host();
+}
+
+// A layer carries a frame or an image, never both, and an image must be one.
+TEST(IhsPvSurface, SubmitLayersRejectsMalformedImageLayersAndClosesNothing) {
+  LayersRecorder rec;
+  IhsPvHost host{};
+  host.struct_size = sizeof(host);
+  host.user_data = &rec;
+  host.submit_layers = mock_submit_layers;
+  ihs_pv_set_host(&host);
+
+  const int fd = OpenFd();
+  const IhsFrame f = LayerFrame(fd);
+  int token = 0;
+  IhsImage image{};
+  image.struct_size = sizeof(image);
+  image.egl_image = &token;
+
+  IhsLayer both = MakeLayer(&f, 1);
+  both.image = &image;
+  EXPECT_EQ(ihs_pv_submit_layers(fake_view(), &both, 1, 0, nullptr),
+            IHS_PV_ERR_INVALID);
+  IhsImage short_image = image;
+  short_image.struct_size = 8;
+  IhsLayer bad = MakeLayer(nullptr, 1);
+  bad.image = &short_image;
+  EXPECT_EQ(ihs_pv_submit_layers(fake_view(), &bad, 1, 0, nullptr),
+            IHS_PV_ERR_INVALID);
+  IhsImage no_image = image;
+  no_image.egl_image = nullptr;
+  bad.image = &no_image;
+  EXPECT_EQ(ihs_pv_submit_layers(fake_view(), &bad, 1, 0, nullptr),
+            IHS_PV_ERR_INVALID);
+
+  EXPECT_EQ(rec.calls, 0);
+  EXPECT_TRUE(IsOpen(fd));
+  close(fd);
+  detach_host();
+}
+
+// A layer from a header before 1.16 ends before @image: whatever follows it in
+// memory is not read as one.
+TEST(IhsPvSurface, SubmitLayersIgnoresImageBeyondAnOlderLayer) {
+  LayersRecorder rec;
+  IhsPvHost host{};
+  host.struct_size = sizeof(host);
+  host.user_data = &rec;
+  host.submit_layers = mock_submit_layers;
+  ihs_pv_set_host(&host);
+
+  const IhsFrame f = LayerFrame(-1);
+  IhsLayer old = MakeLayer(&f, 1);
+  old.struct_size = offsetof(IhsLayer, image);
+  int token = 0;
+  IhsImage image{};
+  image.struct_size = sizeof(image);
+  image.egl_image = &token;
+  old.image = &image;  // past its struct_size: must be ignored
+  EXPECT_EQ(ihs_pv_submit_layers(fake_view(), &old, 1, 0, nullptr), IHS_PV_OK);
+  EXPECT_EQ(rec.calls, 1);
+  detach_host();
+}
+
 // With nowhere to send the list, its fds are still consumed.
 TEST(IhsPvSurface, SubmitLayersConsumesFdsWithNoHost) {
   detach_host();

@@ -184,13 +184,25 @@ typedef struct IhsHdrMetadata {
  *   DRM_PLANE              bypass: the frame is scanned out directly on a KMS
  *                          overlay plane (zero GPU) — direct-scanout HDR video.
  *   SOFTWARE_SHM           universal floor: a CPU-filled shared-memory buffer.
+ *   TEXTURE_EGL_IMAGE      an EGLImage on the backend's own EGLDisplay (see
+ *                          ihs_pv_egl_context), sampled as it is: carried by
+ *                          an IhsLayer's @image. Not negotiated: a backend
+ *                          that samples image layers reports this kind in
+ *                          IhsPvCapabilities::kinds, and a view granted
+ *                          TEXTURE_DMABUF_IMPORT may then submit them. For
+ *                          buffers a dma-buf cannot fully describe, such as
+ *                          ones a Wayland EGL implementation shares through
+ *                          EGL_WL_bind_wayland_display with compression
+ *                          metadata kept outside the dma-buf. EGL backends
+ *                          only. Added in 1.16.
  * A well-formed requirement that includes SOFTWARE_SHM never hard-fails.
  */
 typedef enum IhsPvKind {
   IHS_PV_KIND_NONE = 0,
   IHS_PV_KIND_TEXTURE_DMABUF_IMPORT = 1u << 0,
   IHS_PV_KIND_DRM_PLANE = 1u << 1,
-  IHS_PV_KIND_SOFTWARE_SHM = 1u << 2
+  IHS_PV_KIND_SOFTWARE_SHM = 1u << 2,
+  IHS_PV_KIND_TEXTURE_EGL_IMAGE = 1u << 3
 } IhsPvKind;
 
 /* Synchronization the plugin needs / the grant honors. Explicit sync uses an
@@ -811,6 +823,39 @@ typedef enum IhsContentType {
 #define IHS_PV_MAX_LAYERS 8
 
 /*
+ * An EGLImage a layer shows instead of a dma-buf
+ * (IHS_PV_KIND_TEXTURE_EGL_IMAGE). struct_size-first; fields are only ever
+ * appended.
+ *
+ * @egl_image is an EGLImageKHR created on the EGLDisplay ihs_pv_egl_context
+ * reports. The producer keeps it: the shell binds it to a texture and never
+ * destroys it. Destroying it once the shell has released the frame (the
+ * layer's release fence) or retired @buffer_id is safe; GL keeps a texture's
+ * storage for as long as the texture lives.
+ *
+ * @buffer_id names the underlying buffer, as IhsFrame::buffer_id does: stable
+ * per buffer, reused across frames, shared with the frames of the view's other
+ * layers, and given to ihs_pv_retire_buffer when the buffer goes. An EGLImage
+ * handle is not a safe id: drivers reuse handles once one is destroyed.
+ *
+ * @width/@height are the image's size in pixels.
+ *
+ * @external_oes: 1 when the image must be sampled as GL_TEXTURE_EXTERNAL_OES
+ * (YUV, or whatever the implementation says needs it), 0 for GL_TEXTURE_2D.
+ * Sampling an external image as 2D reads the wrong data without an error, so
+ * it is answered from the image, never assumed.
+ */
+typedef struct IhsImage {
+  size_t struct_size;
+  void* egl_image; /* EGLImageKHR */
+  uint32_t width;
+  uint32_t height;
+  uint32_t buffer_id;
+  uint8_t external_oes; /* 0 or 1 */
+  uint8_t reserved[3];  /* must be 0 */
+} IhsImage;
+
+/*
  * One layer of a view: a buffer, the part of it shown, where in the view it
  * lands, and how it is oriented. struct_size-first; fields are only ever
  * appended.
@@ -836,6 +881,12 @@ typedef enum IhsContentType {
  * @transform is an IhsTransform. @opaque says every pixel of @dst is covered
  * and the buffer's alpha channel is to be ignored (it is undefined in an XRGB
  * buffer). @content_type is an IhsContentType.
+ *
+ * @image, when not NULL, is what the layer shows instead of @frame, which must
+ * then be NULL: an EGLImage (IhsImage), for a backend reporting
+ * IHS_PV_KIND_TEXTURE_EGL_IMAGE. Its src is in the image's pixels, as a frame's
+ * is in the buffer's. An image layer is composited, never put on a plane.
+ * Added in 1.16.
  */
 typedef struct IhsLayer {
   size_t struct_size;
@@ -850,10 +901,11 @@ typedef struct IhsLayer {
   int32_t dst_y;
   uint32_t dst_w;
   uint32_t dst_h;
-  uint32_t transform;   /* IhsTransform */
-  uint8_t opaque;       /* 0 or 1 */
-  uint8_t content_type; /* IhsContentType */
-  uint8_t reserved[2];  /* must be 0 */
+  uint32_t transform;    /* IhsTransform */
+  uint8_t opaque;        /* 0 or 1 */
+  uint8_t content_type;  /* IhsContentType */
+  uint8_t reserved[2];   /* must be 0 */
+  const IhsImage* image; /* instead of @frame; see above. 1.16 */
 } IhsLayer;
 
 /*
@@ -880,12 +932,18 @@ typedef struct IhsLayer {
  * FD OWNERSHIP is ihs_pv_submit's, per layer: every plane fd and acquire fence
  * is consumed whatever this returns, except when the list is rejected as
  * malformed (NULL @view, NULL @layers with a non-zero count, a count above
- * IHS_PV_MAX_LAYERS, a layer with a bad struct_size or no frame, or a frame
- * whose struct_size does not reach buffer_id), which closes nothing.
+ * IHS_PV_MAX_LAYERS, a layer with a bad struct_size, with neither or both of a
+ * frame and an image, a frame whose struct_size does not reach buffer_id, or
+ * an image with a bad struct_size or no egl_image), which closes nothing.
+ *
+ * A list with an image layer on a backend that does not report
+ * IHS_PV_KIND_TEXTURE_EGL_IMAGE is refused with IHS_PV_ERR_UNSUPPORTED, its
+ * fds consumed.
  *
  * Callable from any thread, under the same dispose rule as ihs_pv_submit.
- * Returns IHS_PV_OK, IHS_PV_ERR_INVALID, IHS_PV_ERR_NO_REGISTRY with no host,
- * or IHS_PV_ERR_NO_BACKEND when the host predates this call.
+ * Returns IHS_PV_OK, IHS_PV_ERR_INVALID, IHS_PV_ERR_UNSUPPORTED for an image
+ * layer the backend cannot sample, IHS_PV_ERR_NO_REGISTRY with no host, or
+ * IHS_PV_ERR_NO_BACKEND when the host predates this call.
  *
  * Added after 1.0; IHS_WEAK_IMPORT, so test the symbol before calling it.
  */

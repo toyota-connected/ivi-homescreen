@@ -264,6 +264,48 @@ bool EglDmabufImporter::Import(const IhsFrame& frame,
   return true;
 }
 
+bool EglDmabufImporter::Adopt(void* egl_image,
+                              uint32_t width,
+                              uint32_t height,
+                              bool external,
+                              ImportedTexture* out) const {
+  if (!ready() || out == nullptr || egl_image == nullptr ||
+      image_target_texture_ == nullptr) {
+    return false;
+  }
+  if (external && !HasExternalImage()) {
+    ihs::log::error(
+        "[EglDmabufImporter] an external image needs "
+        "GL_OES_EGL_image_external, which this context lacks");
+    return false;
+  }
+  const GLenum target = external ? GL_TEXTURE_EXTERNAL_OES : GL_TEXTURE_2D;
+  GLuint tex = 0;
+  glGenTextures(1, &tex);
+  glBindTexture(target, tex);
+  auto image_target = reinterpret_cast<PFNGLEGLIMAGETARGETTEXTURE2DOESPROC>(
+      image_target_texture_);
+  image_target(target, static_cast<GLeglImageOES>(egl_image));
+  glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glBindTexture(target, 0);
+  if (const GLenum err = glGetError(); err != GL_NO_ERROR) {
+    ihs::log::error("[EglDmabufImporter] binding a producer image: GL 0x{:x}",
+                    err);
+    glDeleteTextures(1, &tex);
+    return false;
+  }
+  out->texture = tex;
+  out->egl_image = egl_image;
+  out->width = width;
+  out->height = height;
+  out->external = external;
+  out->owns_image = false;
+  return true;
+}
+
 void EglDmabufImporter::Destroy(ImportedTexture* out) const {
   if (out == nullptr) {
     return;
@@ -273,13 +315,15 @@ void EglDmabufImporter::Destroy(ImportedTexture* out) const {
     glDeleteTextures(1, &tex);
     out->texture = 0;
   }
-  if (out->egl_image != nullptr && destroy_image_ != nullptr) {
+  if (out->egl_image != nullptr && out->owns_image &&
+      destroy_image_ != nullptr) {
     auto destroy_image =
         reinterpret_cast<PFNEGLDESTROYIMAGEKHRPROC>(destroy_image_);
     destroy_image(static_cast<EGLDisplay>(egl_display_),
                   static_cast<EGLImageKHR>(out->egl_image));
-    out->egl_image = nullptr;
   }
+  // An adopted image is the producer's to destroy.
+  out->egl_image = nullptr;
 }
 
 bool EglDmabufImporter::WaitAcquireFence(int fence_fd) const {
