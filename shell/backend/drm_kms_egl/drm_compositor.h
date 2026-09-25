@@ -20,6 +20,7 @@
 #include <atomic>
 #include <cstddef>
 #include <deque>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -353,7 +354,20 @@ class DrmCompositor : public IFlipSink {
   // GL fallback: composites all layers into FBO 0 and calls
   // DrmBackend::Present(). Used when the plane allocator isn't
   // available or when all layers need composition anyway.
-  bool PresentViaGlFallback(const FlutterLayer** layers, size_t count);
+  //
+  // @p from_line defaults to the caller's line, so a tally can say which of
+  // the many bail-outs actually takes frames off the scene path -- which the
+  // call count alone does not tell you, and which decides whether narrowing
+  // any single one of them is worth doing. Costs an immediate per call site
+  // and nothing at runtime unless the trace is on.
+  bool PresentViaGlFallback(const FlutterLayer** layers,
+                            size_t count,
+                            int from_line = __builtin_LINE());
+
+  // Tally one GL-fallback entry against its call site, and every
+  // kFallbackTraceWindow entries log the running distribution. No-op unless
+  // IVI_DRM_FALLBACK_TRACE (or the IVI_PROFILE umbrella) is set.
+  void NoteGlFallbackSite(int from_line);
 
   // Framed-mode present path. Composites every Flutter layer into the
   // mode-independent composition buffer (same pixel work as the GL
@@ -685,6 +699,13 @@ class DrmCompositor : public IFlipSink {
   // Set once we hit an unrecoverable atomic-commit failure. All future
   // frames route through PresentViaGlFallback until restart.
   bool fallback_latched_{false};
+
+  // GL-fallback call-site tally (IVI_DRM_FALLBACK_TRACE). Raster thread only,
+  // like the rest of the present path, so it needs no lock. Keyed by the line
+  // the fallback was taken from; ordered so the log reads in file order.
+  static constexpr uint64_t kFallbackTraceWindow = 120;
+  std::map<int, uint64_t> fallback_sites_;
+  uint64_t fallback_entries_{0};
   // The last present was a scene commit, so the CRTC's planes are as the scene
   // left them; the GL fallback hands them back before its flip. Raster thread.
   bool scene_owns_crtc_{false};
