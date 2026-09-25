@@ -369,6 +369,14 @@ class DrmCompositor : public IFlipSink {
   // IVI_DRM_FALLBACK_TRACE (or the IVI_PROFILE umbrella) is set.
   void NoteGlFallbackSite(int from_line);
 
+  // Whether the call-site tally is on. Resolved once per process.
+  static bool FallbackTraceEnabled();
+
+  // Log the tally, tagged @p when ("running" per window, "final" at teardown).
+  // "none" when nothing was tallied -- a run below the window would otherwise
+  // print nothing, leaving zero indistinguishable from a near-miss.
+  void LogGlFallbackSites(const char* when) const;
+
   // Framed-mode present path. Composites every Flutter layer into the
   // mode-independent composition buffer (same pixel work as the GL
   // fallback) and atomic-commits a two-plane layout: primary plane
