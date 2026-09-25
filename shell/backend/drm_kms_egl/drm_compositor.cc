@@ -1397,6 +1397,11 @@ PresentationTime DrmCompositor::NowTime() const {
 }
 
 void DrmCompositor::CommitPresentation(const bool blocking) {
+  // Every atomic path reaches here once its commit succeeded; the GL fallback
+  // counts inside DrmBackend::Present. One counter across both, so a session
+  // that latches the fallback mid-way still reads as one series.
+  backend_->LogPresentedFrame();
+
   const uint64_t serial = atomic_serial_.load(std::memory_order_relaxed) + 1;
   presentation_.Commit(serial);
   // Published before any flip event for this commit can arrive: the commit
