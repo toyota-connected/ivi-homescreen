@@ -42,6 +42,7 @@
 #include <ctime>
 
 #include <poll.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <asio/executor_work_guard.hpp>
@@ -3789,6 +3790,14 @@ bool VulkanDrmBackend::TextureMakeCurrent() {
 
 bool VulkanDrmBackend::TextureClearCurrent() {
   return false;
+}
+
+uint64_t VulkanDrmBackend::GetKmsDevice() const {
+  // The leased fd when there is one; drm_device_ names the same node.
+  struct stat st{};
+  const bool ok = injected_fd_ >= 0 ? ::fstat(injected_fd_, &st) == 0
+                                    : ::stat(drm_device_.c_str(), &st) == 0;
+  return ok && S_ISCHR(st.st_mode) ? static_cast<uint64_t>(st.st_rdev) : 0;
 }
 
 bool VulkanDrmBackend::GetVulkanContext(BackendVulkanContext* out) const {

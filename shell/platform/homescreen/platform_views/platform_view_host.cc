@@ -57,6 +57,7 @@
 #include "asio/post.hpp"
 
 #include "backend/backend.h"
+#include "backend/drm_render_node.h"
 #include "deferred_retire_set.h"
 #if IVI_HAVE_VULKAN
 #include "dmabuf_vulkan_import.h"
@@ -2248,6 +2249,13 @@ int HostQueryCapabilities(void* user_data, IhsPvCapabilities* out) {
       }
     }
 #endif
+    // Neither context names its GPU's render node (a Vulkan driver without
+    // VK_EXT_physical_device_drm, an EGL without the device query): name the
+    // render node of the KMS device the shell displays on, if it has one.
+    if (render_device == 0 &&
+        (out->kinds & IHS_PV_KIND_TEXTURE_DMABUF_IMPORT) != 0U) {
+      render_device = drm_render_node::Of(backend->GetKmsDevice());
+    }
   }
   // Added in 1.14: a caller built against an older header has no room for it.
   if (out->struct_size >=
