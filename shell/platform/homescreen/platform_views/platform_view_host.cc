@@ -78,6 +78,41 @@
 
 namespace {
 
+// Whether a frame of @p modifier on the @p count plane @p fds is Broadcom SAND
+// with its planes in separate dma-bufs, which a KMS plane cannot show
+// correctly. The SAND modifier carries one column height for every plane, and
+// the DRM core takes one modifier per framebuffer. A decoder that writes chroma
+// as a tiled image of its own (rpi-hevc-dec) gives it half the luma's column
+// height, so the HVS strides the chroma columns wrongly and the picture goes
+// green. drm_fourcc.h says as much: UV in a separate tiled image is not
+// supported under this modifier. Composited, the frame is sampled correctly.
+bool SeparateSandPlanes(const uint64_t modifier,
+                        const int* const fds,
+                        const uint32_t count) {
+  // fourcc_mod_broadcom_mod: the vendor code without the column-height
+  // parameter in bits 8..55.
+  constexpr uint64_t kParamBits = 0xffffffffffffULL << 8;
+  constexpr uint64_t kSand32 = 0x0700000000000002ULL;
+  constexpr uint64_t kSand256 = 0x0700000000000005ULL;
+  const uint64_t base = modifier & ~kParamBits;
+  if (base < kSand32 || base > kSand256 || count < 2) {
+    return false;
+  }
+  // Two fds of one dma-buf share its inode.
+  struct stat first{};
+  if (::fstat(fds[0], &first) != 0) {
+    return true;  // cannot tell: composite, which is always correct
+  }
+  for (uint32_t i = 1; i < count; ++i) {
+    struct stat st{};
+    if (::fstat(fds[i], &st) != 0 || st.st_dev != first.st_dev ||
+        st.st_ino != first.st_ino) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Ask the engine for a frame after a producer submits.
 //
 // A producer renders and submits on its own thread, out of band with Flutter's
@@ -978,6 +1013,9 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
         return DmabufState::kNotScanoutCapable;
       }
       const ScanoutBuffer& sb = sit->second;
+      if (SeparateSandPlanes(sb.modifier, sb.fd, sb.plane_count)) {
+        return DmabufState::kNotScanoutCapable;
+      }
       int duped[4] = {-1, -1, -1, -1};
       for (uint32_t i = 0; i < sb.plane_count; ++i) {
         duped[i] = sb.fd[i] >= 0 ? ::dup(sb.fd[i]) : -1;
@@ -1027,14 +1065,19 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     // one fd across planes with distinct offsets; a multi-handle frame (e.g.
     // rpi-hevc-dec, which exports the Y and C planes as separate dma-bufs)
     // carries a distinct fd per plane. Dup each so the caller owns its copies;
-    // AddFB2 resolves each to a GEM handle, so both layouts scan out. Clamp to
-    // the 4 planes the descriptor holds (a DRM fourcc has at most 4).
+    // AddFB2 resolves each to a GEM handle, so both layouts scan out -- but for
+    // Broadcom SAND on separate buffers, which scans out green
+    // (SeparateSandPlanes). Clamp to the 4 planes the descriptor holds (a DRM
+    // fourcc has at most 4).
     const uint32_t np = f.plane_count < 4 ? f.plane_count : 4;
     for (uint32_t i = 0; i < np; ++i) {
       if (f.plane_fd[i] < 0) {
         // A plane without a handle can't be scanned out.
         return DmabufState::kNotScanoutCapable;
       }
+    }
+    if (SeparateSandPlanes(f.format.modifier, f.plane_fd, np)) {
+      return DmabufState::kNotScanoutCapable;
     }
     int duped[4] = {-1, -1, -1, -1};
     for (uint32_t i = 0; i < np; ++i) {
