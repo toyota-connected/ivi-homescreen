@@ -2066,9 +2066,30 @@ constexpr IhsFormatModifier kDmabufImportFormats[] = {
     {HostFourcc('A', 'B', '2', '4'), 0, 0},  // DRM_FORMAT_ABGR8888, LINEAR
 };
 
+// YUV, offered only with the modifiers the importer confirms, never assumed:
+// no importer is known to take all of these, and a hardware decoder's output
+// is rarely LINEAR (SAND128 on a Raspberry Pi). A plugin names its YUV format
+// explicitly, but a producer that picks from the offer -- a Wayland server
+// passing it on to its clients as linux-dmabuf formats -- can only use what
+// is listed here. The EGL importer binds all of them as external textures;
+// the Vulkan one, NV12.
+constexpr uint32_t kDmabufProbedYuvFourccs[] = {
+    HostFourcc('N', 'V', '1', '2'),  // DRM_FORMAT_NV12
+    HostFourcc('N', 'V', '2', '1'),  // DRM_FORMAT_NV21
+    HostFourcc('N', 'V', '1', '6'),  // DRM_FORMAT_NV16
+    HostFourcc('N', 'V', '6', '1'),  // DRM_FORMAT_NV61
+    HostFourcc('Y', 'U', '1', '2'),  // DRM_FORMAT_YUV420
+    HostFourcc('Y', 'V', '1', '2'),  // DRM_FORMAT_YVU420
+    HostFourcc('Y', 'U', '1', '6'),  // DRM_FORMAT_YUV422
+    HostFourcc('Y', 'U', '2', '4'),  // DRM_FORMAT_YUV444
+    HostFourcc('P', '0', '1', '0'),  // DRM_FORMAT_P010
+    HostFourcc('Y', 'U', 'Y', 'V'),  // DRM_FORMAT_YUYV
+    HostFourcc('U', 'Y', 'V', 'Y'),  // DRM_FORMAT_UYVY
+};
+
 // The formats the dma-buf kinds offer when the active importer can say which
-// modifiers it will take: those first, best first, then the assumed list
-// behind them.
+// modifiers it will take: those first, best first, then the YUV ones it
+// confirms, then the assumed list behind them.
 //
 // Preference, not a filter. A producer that can honor the order lands on a
 // modifier the driver admits; one that can only make LINEAR -- anything
@@ -2088,15 +2109,23 @@ std::vector<IhsFormatModifier> ProbedOffer(const char* importer,
       offered.push_back({f.fourcc, 0, m});
     }
   }
+  const size_t rgb = offered.size();
+  for (const uint32_t fourcc : kDmabufProbedYuvFourccs) {
+    for (const uint64_t m : probe(fourcc)) {
+      offered.push_back({fourcc, 0, m});
+    }
+  }
   if (offered.empty()) {
     return offered;
   }
+  const size_t yuv = offered.size() - rgb;
   for (const IhsFormatModifier& f : kDmabufImportFormats) {
     offered.push_back(f);
   }
-  ihs::log::debug("[ihs_pv] dma-buf formats ({}): {} device-probed, {} assumed",
-                  importer, offered.size() - std::size(kDmabufImportFormats),
-                  std::size(kDmabufImportFormats));
+  ihs::log::debug(
+      "[ihs_pv] dma-buf formats ({}): {} device-probed, {} of them YUV, {} "
+      "assumed",
+      importer, rgb + yuv, yuv, std::size(kDmabufImportFormats));
   return offered;
 }
 
