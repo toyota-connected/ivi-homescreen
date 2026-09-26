@@ -78,6 +78,41 @@
 
 namespace {
 
+// Whether a frame of @p modifier on the @p count plane @p fds is Broadcom SAND
+// with its planes in separate dma-bufs, which a KMS plane cannot show
+// correctly. The SAND modifier carries one column height for every plane, and
+// the DRM core takes one modifier per framebuffer. A decoder that writes chroma
+// as a tiled image of its own (rpi-hevc-dec) gives it half the luma's column
+// height, so the HVS strides the chroma columns wrongly and the picture goes
+// green. drm_fourcc.h says as much: UV in a separate tiled image is not
+// supported under this modifier. Composited, the frame is sampled correctly.
+bool SeparateSandPlanes(const uint64_t modifier,
+                        const int* const fds,
+                        const uint32_t count) {
+  // fourcc_mod_broadcom_mod: the vendor code without the column-height
+  // parameter in bits 8..55.
+  constexpr uint64_t kParamBits = 0xffffffffffffULL << 8;
+  constexpr uint64_t kSand32 = 0x0700000000000002ULL;
+  constexpr uint64_t kSand256 = 0x0700000000000005ULL;
+  const uint64_t base = modifier & ~kParamBits;
+  if (base < kSand32 || base > kSand256 || count < 2) {
+    return false;
+  }
+  // Two fds of one dma-buf share its inode.
+  struct stat first{};
+  if (::fstat(fds[0], &first) != 0) {
+    return true;  // cannot tell: composite, which is always correct
+  }
+  for (uint32_t i = 1; i < count; ++i) {
+    struct stat st{};
+    if (::fstat(fds[i], &st) != 0 || st.st_dev != first.st_dev ||
+        st.st_ino != first.st_ino) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Ask the engine for a frame after a producer submits.
 //
 // A producer renders and submits on its own thread, out of band with Flutter's
@@ -978,6 +1013,9 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
         return DmabufState::kNotScanoutCapable;
       }
       const ScanoutBuffer& sb = sit->second;
+      if (SeparateSandPlanes(sb.modifier, sb.fd, sb.plane_count)) {
+        return DmabufState::kNotScanoutCapable;
+      }
       int duped[4] = {-1, -1, -1, -1};
       for (uint32_t i = 0; i < sb.plane_count; ++i) {
         duped[i] = sb.fd[i] >= 0 ? ::dup(sb.fd[i]) : -1;
@@ -1027,14 +1065,19 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     // one fd across planes with distinct offsets; a multi-handle frame (e.g.
     // rpi-hevc-dec, which exports the Y and C planes as separate dma-bufs)
     // carries a distinct fd per plane. Dup each so the caller owns its copies;
-    // AddFB2 resolves each to a GEM handle, so both layouts scan out. Clamp to
-    // the 4 planes the descriptor holds (a DRM fourcc has at most 4).
+    // AddFB2 resolves each to a GEM handle, so both layouts scan out -- but for
+    // Broadcom SAND on separate buffers, which scans out green
+    // (SeparateSandPlanes). Clamp to the 4 planes the descriptor holds (a DRM
+    // fourcc has at most 4).
     const uint32_t np = f.plane_count < 4 ? f.plane_count : 4;
     for (uint32_t i = 0; i < np; ++i) {
       if (f.plane_fd[i] < 0) {
         // A plane without a handle can't be scanned out.
         return DmabufState::kNotScanoutCapable;
       }
+    }
+    if (SeparateSandPlanes(f.format.modifier, f.plane_fd, np)) {
+      return DmabufState::kNotScanoutCapable;
     }
     int duped[4] = {-1, -1, -1, -1};
     for (uint32_t i = 0; i < np; ++i) {
@@ -2066,9 +2109,30 @@ constexpr IhsFormatModifier kDmabufImportFormats[] = {
     {HostFourcc('A', 'B', '2', '4'), 0, 0},  // DRM_FORMAT_ABGR8888, LINEAR
 };
 
+// YUV, offered only with the modifiers the importer confirms, never assumed:
+// no importer is known to take all of these, and a hardware decoder's output
+// is rarely LINEAR (SAND128 on a Raspberry Pi). A plugin names its YUV format
+// explicitly, but a producer that picks from the offer -- a Wayland server
+// passing it on to its clients as linux-dmabuf formats -- can only use what
+// is listed here. The EGL importer binds all of them as external textures;
+// the Vulkan one, NV12.
+constexpr uint32_t kDmabufProbedYuvFourccs[] = {
+    HostFourcc('N', 'V', '1', '2'),  // DRM_FORMAT_NV12
+    HostFourcc('N', 'V', '2', '1'),  // DRM_FORMAT_NV21
+    HostFourcc('N', 'V', '1', '6'),  // DRM_FORMAT_NV16
+    HostFourcc('N', 'V', '6', '1'),  // DRM_FORMAT_NV61
+    HostFourcc('Y', 'U', '1', '2'),  // DRM_FORMAT_YUV420
+    HostFourcc('Y', 'V', '1', '2'),  // DRM_FORMAT_YVU420
+    HostFourcc('Y', 'U', '1', '6'),  // DRM_FORMAT_YUV422
+    HostFourcc('Y', 'U', '2', '4'),  // DRM_FORMAT_YUV444
+    HostFourcc('P', '0', '1', '0'),  // DRM_FORMAT_P010
+    HostFourcc('Y', 'U', 'Y', 'V'),  // DRM_FORMAT_YUYV
+    HostFourcc('U', 'Y', 'V', 'Y'),  // DRM_FORMAT_UYVY
+};
+
 // The formats the dma-buf kinds offer when the active importer can say which
-// modifiers it will take: those first, best first, then the assumed list
-// behind them.
+// modifiers it will take: those first, best first, then the YUV ones it
+// confirms, then the assumed list behind them.
 //
 // Preference, not a filter. A producer that can honor the order lands on a
 // modifier the driver admits; one that can only make LINEAR -- anything
@@ -2088,15 +2152,23 @@ std::vector<IhsFormatModifier> ProbedOffer(const char* importer,
       offered.push_back({f.fourcc, 0, m});
     }
   }
+  const size_t rgb = offered.size();
+  for (const uint32_t fourcc : kDmabufProbedYuvFourccs) {
+    for (const uint64_t m : probe(fourcc)) {
+      offered.push_back({fourcc, 0, m});
+    }
+  }
   if (offered.empty()) {
     return offered;
   }
+  const size_t yuv = offered.size() - rgb;
   for (const IhsFormatModifier& f : kDmabufImportFormats) {
     offered.push_back(f);
   }
-  ihs::log::debug("[ihs_pv] dma-buf formats ({}): {} device-probed, {} assumed",
-                  importer, offered.size() - std::size(kDmabufImportFormats),
-                  std::size(kDmabufImportFormats));
+  ihs::log::debug(
+      "[ihs_pv] dma-buf formats ({}): {} device-probed, {} of them YUV, {} "
+      "assumed",
+      importer, rgb + yuv, yuv, std::size(kDmabufImportFormats));
   return offered;
 }
 
