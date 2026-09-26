@@ -177,6 +177,16 @@ class Backend {
   }
 
   /**
+   * @brief The dev_t of the KMS device this backend scans out on, or 0 when it
+   *        drives none (Wayland, headless).
+   *
+   * The platform-view host falls back to this device's render node when
+   * neither the Vulkan nor the EGL context can name the GPU's: a producer
+   * then allocates on the device the shell displays on, as weston does.
+   */
+  [[nodiscard]] virtual uint64_t GetKmsDevice() const { return 0; }
+
+  /**
    * @brief Replace |*modifier| with one a plane can actually scan out for
    *        |fourcc|, when the negotiated one cannot be.
    *

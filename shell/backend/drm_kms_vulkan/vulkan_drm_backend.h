@@ -157,6 +157,7 @@ class VulkanDrmBackend final : public Backend {
   // an exported dma-buf, and submit it for zero-copy import — the same seam
   // WaylandVulkanBackend provides.
   bool GetVulkanContext(BackendVulkanContext* out) const override;
+  [[nodiscard]] uint64_t GetKmsDevice() const override;
 
 #if BUILD_COMPOSITOR
   // Platform-view surfaces. Backend's default implementations are no-ops, so

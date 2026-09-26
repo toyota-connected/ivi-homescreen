@@ -258,7 +258,9 @@ typedef enum IhsPvResult {
  * dev_t of the DRM render node the shell imports platform-view dma-bufs on --
  * the GPU a producer should allocate on (a Wayland server hands it to its
  * clients as linux-dmabuf feedback's main_device) -- or 0 when the backend
- * cannot tell. Added in 1.14; written only when @struct_size covers it.
+ * cannot tell. When its Vulkan or EGL context cannot name the GPU's node, a
+ * DRM backend reports the render node of the KMS device it displays on, if
+ * that has one. Added in 1.14; written only when @struct_size covers it.
  */
 typedef struct IhsPvCapabilities {
   size_t struct_size;

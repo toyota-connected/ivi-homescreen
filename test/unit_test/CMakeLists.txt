@@ -196,6 +196,11 @@ endif ()
 if (TARGET PkgConfig::DRM)
     add_subdirectory(drm_flip_wake-test)
 endif ()
+# drm_render_node::Of, the platform-view host's render_device fallback,
+# against libdrm on the machine's own cards. Header-only; skips without a card.
+if (TARGET PkgConfig::DRM)
+    add_subdirectory(drm_render_node-test)
+endif ()
 # The same race through the real DrmDisplay: DrainReadyFlips and WakeFlipDrain
 # with the card's reader thread running. Needs the display sources and drm-cxx,
 # which exist once a DRM-KMS backend is configured; the mechanism test above

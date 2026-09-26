@@ -24,6 +24,7 @@
 #include <linux/vt.h>
 #include <poll.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <sys/sysmacros.h>
 #include <unistd.h>
 
@@ -2303,6 +2304,15 @@ void DrmBackend::ResizeCompositorSurface(FlutterPlatformViewIdentifier id,
   }
 }
 #endif
+
+uint64_t DrmBackend::GetKmsDevice() const {
+  struct stat st{};
+  if (drm_dev_ == nullptr || ::fstat(drm_dev_->fd(), &st) != 0 ||
+      !S_ISCHR(st.st_mode)) {
+    return 0;
+  }
+  return static_cast<uint64_t>(st.st_rdev);
+}
 
 bool DrmBackend::GetEglContext(BackendEglContext* out) const {
   if (!out) {

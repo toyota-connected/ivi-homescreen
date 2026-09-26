@@ -248,6 +248,7 @@ class DrmBackend : public Backend, public IFlipSink {
   FlutterRendererConfig GetRenderConfig() override;
   FlutterCompositor GetCompositorConfig() override;
   bool GetEglContext(BackendEglContext* out) const override;
+  [[nodiscard]] uint64_t GetKmsDevice() const override;
 
   // bind a view id to the compositor that scans it out to its output
   // (a sibling backend's CRTC on the same card). Called by App when it attaches
