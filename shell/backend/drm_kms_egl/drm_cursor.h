@@ -72,6 +72,12 @@ class DrmCursor final : public ICursorShapeSink {
   // suitable plane, drm-cxx built without DRM_CXX_CURSOR, etc.) or
   // when disabled via IVI_DRM_CURSOR=0 — non-fatal: the shell continues
   // without an on-screen cursor.
+  // self_committing: the cursor commits its own moves (SetPosition), rather
+  // than being staged into the compositor's commit. It then drives the CRTC's
+  // cursor plane through the legacy cursor ioctls, which the kernel runs as
+  // async plane updates: a blocking atomic commit per move contends with the
+  // scanout's flips (on vc4 the display dropped to a third of its rate while
+  // the pointer moved). IVI_DRM_CURSOR=atomic keeps atomic commits.
   // rotation_degrees (0|90|180|270) rotates the sprite to match a rotated
   // scanout. The drm-cxx cursor Renderer drives the plane's rotation property
   // when present, else pre-rotates the pixels + hotspot in software (amdgpu's
@@ -83,7 +89,8 @@ class DrmCursor final : public ICursorShapeSink {
                                            uint32_t fb_w,
                                            uint32_t fb_h,
                                            int rotation_degrees = 0,
-                                           std::string_view theme_name = {});
+                                           std::string_view theme_name = {},
+                                           bool self_committing = true);
 
   DrmCursor(const DrmCursor&) = delete;
   DrmCursor& operator=(const DrmCursor&) = delete;
@@ -148,11 +155,11 @@ class DrmCursor final : public ICursorShapeSink {
   void Hide();
   void Show();
 
-  // The DRM plane id the cursor is scanned out on (0 on the legacy
-  // drmModeSetCursor path, which has no addressable plane). On a CRTC
-  // with no dedicated cursor plane the renderer takes an overlay; the
-  // compositor must reserve that plane so its scene allocator doesn't
-  // disable it every commit. Fixed for the cursor's lifetime.
+  // The DRM plane the cursor occupies, for the compositor to reserve so its
+  // scene allocator doesn't disable it every commit: the cursor plane, the
+  // overlay taken on a CRTC without one, or the cursor plane the legacy
+  // ioctls drive. 0 when there is none to name (legacy on a driver without a
+  // cursor plane). Fixed for the cursor's lifetime.
   [[nodiscard]] uint32_t plane_id() const;
 
  private:

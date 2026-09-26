@@ -222,20 +222,12 @@ std::unique_ptr<DrmBackend> DrmBackend::Create(const DrmConfig& cfg,
   backend->used_crtcs_.push_back(backend->crtc_id_);
 #endif
 
-  // HW cursor on the CRTC's cursor plane (or legacy drmModeSetCursor
-  // when the driver doesn't expose one). Failure is non-fatal —
+  // HW cursor on the CRTC's cursor plane. Failure is non-fatal —
   // pointer events still flow to Flutter, just without a visible
-  // sprite. Independent of the compositor: cursor commits run on
-  // their own AtomicRequests on the seat dispatch thread.
+  // sprite. Unless staged, it moves on its own from the seat dispatch
+  // thread, through the legacy cursor ioctls the kernel runs as async
+  // plane updates, so pointer motion never waits on or delays a flip.
 #if HAVE_DRM_CURSOR
-  if (backend->cfg_.disable_cursor) {
-    ihs::log::info("[DrmBackend] HW cursor disabled (--disable-cursor)");
-  } else {
-    backend->cursor_ = homescreen::DrmCursor::Create(
-        *backend->drm_dev_, backend->crtc_id_, backend->connector_id_,
-        backend->mode_, backend->fb_w_, backend->fb_h_,
-        /*rotation_degrees=*/0, backend->cfg_.cursor_theme);
-  }
 #if BUILD_COMPOSITOR
   // Decide whether to stage the cursor into the compositor's own atomic commit
   // or let it self-commit. Staging is only a win on nvidia-drm, where a
@@ -257,10 +249,23 @@ std::unique_ptr<DrmBackend> DrmBackend::Create(const DrmConfig& cfg,
       (backend->cfg_.stage_cursor == drm_config::TriState::kAuto &&
        backend->resolved_->driver_name == "nvidia-drm" &&
        !RasterDrainEnabled());
+#else
+  const bool stage_cursor = false;
+#endif
+  if (backend->cfg_.disable_cursor) {
+    ihs::log::info("[DrmBackend] HW cursor disabled (--disable-cursor)");
+  } else {
+    backend->cursor_ = homescreen::DrmCursor::Create(
+        *backend->drm_dev_, backend->crtc_id_, backend->connector_id_,
+        backend->mode_, backend->fb_w_, backend->fb_h_,
+        /*rotation_degrees=*/0, backend->cfg_.cursor_theme,
+        /*self_committing=*/!stage_cursor);
+  }
+#if BUILD_COMPOSITOR
   // Either way, reserve the cursor's plane so the scene allocator's
   // disable-unused pass doesn't toggle it off every commit (flicker on
-  // motion). plane_id()==0 (legacy cursor path) is a no-op in the
-  // compositor.
+  // motion) -- the legacy ioctls drive that plane too. plane_id()==0 (no
+  // plane to name) is a no-op in the compositor.
   if (backend->cursor_ && backend->compositor_) {
     if (stage_cursor) {
       backend->cursor_->SetStagedMode(true);
