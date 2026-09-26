@@ -57,6 +57,7 @@
 #include <drm-cxx/scene/layer_scene.hpp>
 #include <drm-cxx/sync/fence.hpp>
 
+#include "backend/common/flip_arm.h"
 #include "backend/drm_kms_egl/drm_cursor.h"
 #include "backend/drm_kms_egl/scene_layer_source_vk.h"
 #if BUILD_HUD
@@ -3112,6 +3113,11 @@ bool VulkanDrmBackend::CommitPlaneFrame(CompositorState& c,
   const bool modeset = c.first_commit || c.plane_topology_changed;
   const uint32_t flags =
       modeset ? 0U : (DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK);
+  // Arm before the ioctl: the flip reader can dispatch this commit's event
+  // before we return, and a latch raised afterwards parks the next baton for
+  // good (#649). Mirrors into SetSourcePending, which is this backend's gate.
+  ScopedFlipArm arm(c.flip_pending, vsync_, !modeset, /*drives_vsync=*/true,
+                    /*mirror_source_pending=*/true);
   if (auto report = c.scene->commit(flags, this); !report) {
     ihs::log::error("[VulkanDrmBackend] plane commit: {}",
                     report.error().message());
@@ -3139,8 +3145,7 @@ bool VulkanDrmBackend::CommitPlaneFrame(CompositorState& c,
     c.plane_scanning_slots = slots;
   } else {
     c.plane_pending_slots = slots;
-    c.flip_pending.store(true, std::memory_order_release);
-    vsync_.SetSourcePending(true);
+    arm.Commit();
   }
 
   // Report each view's plane back, for ihs_pv_grant_drm_plane_id.
@@ -3242,9 +3247,13 @@ bool VulkanDrmBackend::PresentSlot(const size_t slot,
   // First commit is a blocking modeset (the scene adds ALLOW_MODESET, which
   // cannot be non-blocking); subsequent frames are non-blocking page flips we
   // pace against.
+  const bool ring_modeset = c.first_commit;
   const uint32_t flags =
-      c.first_commit ? 0U
-                     : (DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK);
+      ring_modeset ? 0U : (DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK);
+  // Captured above because the branch below clears first_commit: the arm has
+  // to know what this commit was, not what the next one will be.
+  ScopedFlipArm arm(c.flip_pending, vsync_, !ring_modeset,
+                    /*drives_vsync=*/true, /*mirror_source_pending=*/true);
   // Pass `this` as the flip user_data so the event routes to OnFlipEvent.
   if (auto report = c.scene->commit(flags, this); !report) {
     ihs::log::error("[VulkanDrmBackend] commit: {}", report.error().message());
@@ -3260,8 +3269,7 @@ bool VulkanDrmBackend::PresentSlot(const size_t slot,
     // Non-blocking flip: mark the source pending so the provider holds the next
     // baton until OnFlipEvent returns it on vblank.
     c.pending_slot = static_cast<int>(slot);
-    c.flip_pending.store(true, std::memory_order_release);
-    vsync_.SetSourcePending(true);
+    arm.Commit();
   }
 
   const uint64_t n = c.frame++;
