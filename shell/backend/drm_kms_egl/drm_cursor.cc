@@ -152,15 +152,15 @@ constexpr uint64_t PackPos(const int fb_x, const int fb_y) {
 }
 }  // namespace
 
-std::unique_ptr<DrmCursor> DrmCursor::Create(
-    drm::Device& dev,
-    const uint32_t crtc_id,
-    const uint32_t connector_id,
-    const drmModeModeInfo& mode,
-    const uint32_t fb_w,
-    const uint32_t fb_h,
-    const int rotation_degrees,
-    const std::string_view theme_name) {
+std::unique_ptr<DrmCursor> DrmCursor::Create(drm::Device& dev,
+                                             const uint32_t crtc_id,
+                                             const uint32_t connector_id,
+                                             const drmModeModeInfo& mode,
+                                             const uint32_t fb_w,
+                                             const uint32_t fb_h,
+                                             const int rotation_degrees,
+                                             const std::string_view theme_name,
+                                             const bool self_committing) {
   if (const char* gate = std::getenv("IVI_DRM_CURSOR");
       gate != nullptr && std::string_view(gate) == "0") {
     ihs::log::info("[DrmCursor] disabled via IVI_DRM_CURSOR=0");
@@ -198,6 +198,10 @@ std::unique_ptr<DrmCursor> DrmCursor::Create(
   drm::cursor::RendererConfig rcfg;
   rcfg.crtc_id = crtc_id;
   rcfg.preferred_size = sizing.buffer;
+  const char* const path_env = std::getenv("IVI_DRM_CURSOR");
+  rcfg.prefer_legacy =
+      self_committing &&
+      !(path_env != nullptr && std::string_view(path_env) == "atomic");
   // drm-cxx's cursor Rotation runs opposite to the primary plane's
   // DRM_MODE_ROTATE_* (k270 on a 270 raster points the sprite "down"), so apply
   // the inverse here to keep the sprite visually aligned with the content.
@@ -257,7 +261,7 @@ DrmCursor::DrmCursor(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
 DrmCursor::~DrmCursor() = default;
 
 uint32_t DrmCursor::plane_id() const {
-  return impl_->renderer.plane_id();
+  return impl_->renderer.reserved_plane_id();
 }
 
 void DrmCursor::Move(const int fb_x, const int fb_y) {
