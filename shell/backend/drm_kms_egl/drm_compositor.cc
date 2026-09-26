@@ -1690,7 +1690,8 @@ bool DrmCompositor::StageCursorInto(drm::AtomicRequest& req) {
 #endif
 }
 
-void DrmCompositor::SettleAtomicCommit(const bool blocking) {
+void DrmCompositor::SettleAtomicCommit(ScopedFlipArm& arm,
+                                       const bool blocking) {
   CommitPresentation(blocking);
   if (blocking) {
     // A blocking commit (initial modeset or a cursor first-enable) lands
@@ -1706,7 +1707,10 @@ void DrmCompositor::SettleAtomicCommit(const bool blocking) {
     flip_pending_.store(false, std::memory_order_release);
     (void)backend_->vsync_.DeliverParkedBaton();
   } else {
-    flip_pending_.store(true, std::memory_order_release);
+    // The latch went up before the ioctl (ScopedFlipArm); all that is left is
+    // to stop the arm disarming it at scope exit. Raising it here instead is
+    // the race: the flip reader may already have cleared it (#649).
+    arm.Commit();
   }
 }
 
@@ -1937,7 +1941,6 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
   drm::AtomicRequest req(backend_->device());
   if (!req.valid()) {
     ihs::log::warn("[DrmCompositor] framed: AtomicRequest alloc failed");
-    fallback_latched_ = true;
     return PresentViaGlFallback(layers, count);
   }
 
@@ -2130,6 +2133,12 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
                     commit_flags);
   }
 
+  // Arm before the ioctl: a NONBLOCK commit's event can be dispatched before
+  // we get back here, and a latch raised afterwards is a latch for a flip
+  // that already retired (#649). The arm disarms itself on every exit below
+  // that does not reach SettleAtomicCommit.
+  ScopedFlipArm arm(flip_pending_, backend_->vsync_, !blocking, drives_vsync_,
+                    /*mirror_source_pending=*/false);
   if (auto r = req.commit(commit_flags, static_cast<IFlipSink*>(this)); !r) {
     if (r.error() == std::errc::permission_denied) {
       // EACCES races: paused_ might be set already (steady-state pause)
@@ -2152,10 +2161,13 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
         "plane support; GL fallback cannot letterbox. Next Present will fail.",
         fb_w, fb_h, mode_w, mode_h);
     fallback_latched_ = true;
+    // Before the fallback, not at scope exit: PresentViaGlFallback waits out
+    // the latch, so leaving it armed would burn the full timeout.
+    arm.Abort();
     return PresentViaGlFallback(layers, count);
   }
 
-  SettleAtomicCommit(blocking);
+  SettleAtomicCommit(arm, blocking);
   comp_idx_ ^= 1;
 
   if (profile && profile_) {
@@ -2778,6 +2790,12 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
   // before the kernel-side commit.
   const uint64_t t2 = profile ? NsNow() : 0;
 
+  // Arm before the ioctl: a NONBLOCK commit's event can be dispatched before
+  // we get back here, and a latch raised afterwards is a latch for a flip
+  // that already retired (#649). The arm disarms itself on every exit below
+  // that does not reach SettleAtomicCommit.
+  ScopedFlipArm arm(flip_pending_, backend_->vsync_, !blocking, drives_vsync_,
+                    /*mirror_source_pending=*/false);
   if (auto commit_ok = req.commit(commit_flags, static_cast<IFlipSink*>(this));
       !commit_ok) {
     if (commit_ok.error() == std::errc::permission_denied) {
@@ -2805,10 +2823,11 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
           out_.width(), out_.height(), out_.mode_width(), out_.mode_height());
     }
     fallback_latched_ = true;
+    arm.Abort();
     return PresentViaGlFallback(layers, layer_count);
   }
 
-  SettleAtomicCommit(blocking);
+  SettleAtomicCommit(arm, blocking);
   // Only advance the comp-buffer double-buffer index if we actually
   // wrote to it this frame. Direct-scanout frames don't touch comp,
   // so the next frame can keep using the same comp_idx_ if it needs
@@ -3726,6 +3745,11 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   if (scene_stale_) {
     scene_->set_force_full_property_writes(true);
   }
+  // Arm before the ioctl. This is the path #649 was reported on: the scene's
+  // NONBLOCK commit can complete on the flip reader before this thread gets
+  // back, and a latch raised afterwards parks the next baton forever.
+  ScopedFlipArm arm(flip_pending_, backend_->vsync_, !blocking_modeset,
+                    drives_vsync_, /*mirror_source_pending=*/false);
   auto report = [this, commit_flags] {
     const EglCurrentGuard keep_context;
     return scene_->commit(commit_flags, static_cast<IFlipSink*>(this));
@@ -3749,8 +3773,8 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
     // Latch if it persists.
     if (report.error() == std::errc::device_or_resource_busy) {
       if (++scene_ebusy_streak_ <= kSceneEbusyRetryLimit) {
-        (void)backend_->vsync_.DeliverParkedBaton();  // keep the loop alive
-        return false;                                 // retry next present
+        arm.Abort();   // clears the latch, then hands the baton back
+        return false;  // retry next present
       }
       ihs::log::warn(
           "[DrmCompositor] LayerScene::commit EBUSY x{}; latching GL fallback",
@@ -3761,6 +3785,7 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
         "fallback for remaining session",
         report.error().message());
     fallback_latched_ = true;
+    arm.Abort();
     return PresentViaGlFallback(layers, layer_count);
   }
   scene_ebusy_streak_ = 0;  // a clean commit clears the transient-EBUSY streak
@@ -3809,7 +3834,7 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
     flip_pending_.store(false, std::memory_order_release);
     (void)backend_->vsync_.DeliverParkedBaton();
   } else {
-    flip_pending_.store(true, std::memory_order_release);
+    arm.Commit();
   }
 
   // LayerScene owns its commit and can't accept a staged cursor plane, so
@@ -4173,7 +4198,6 @@ bool DrmCompositor::PresentDirectOverlay(const FlutterLayer** layers,
   if (!req.valid()) {
     ihs::log::warn(
         "[DrmCompositor] direct-overlay: AtomicRequest alloc failed");
-    fallback_latched_ = true;
     return PresentViaGlFallback(layers, count);
   }
 
@@ -4293,6 +4317,12 @@ bool DrmCompositor::PresentDirectOverlay(const FlutterLayer** layers,
                : (DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK);
   const uint64_t t2 = profile ? NsNow() : 0;
 
+  // Arm before the ioctl: a NONBLOCK commit's event can be dispatched before
+  // we get back here, and a latch raised afterwards is a latch for a flip
+  // that already retired (#649). The arm disarms itself on every exit below
+  // that does not reach SettleAtomicCommit.
+  ScopedFlipArm arm(flip_pending_, backend_->vsync_, !blocking, drives_vsync_,
+                    /*mirror_source_pending=*/false);
   if (auto r = req.commit(commit_flags, static_cast<IFlipSink*>(this)); !r) {
     if (r.error() == std::errc::permission_denied) {
       if (!paused_.load(std::memory_order_acquire)) {
@@ -4307,10 +4337,13 @@ bool DrmCompositor::PresentDirectOverlay(const FlutterLayer** layers,
         "fallback for remaining session",
         r.error().message());
     fallback_latched_ = true;
+    // Before the fallback, not at scope exit: PresentViaGlFallback waits out
+    // the latch, so leaving it armed would burn the full timeout.
+    arm.Abort();
     return PresentViaGlFallback(layers, count);
   }
 
-  SettleAtomicCommit(blocking);
+  SettleAtomicCommit(arm, blocking);
 
   // Rotate the BS pool slot so Flutter's next render targets a different
   // BO than the one the kernel is scanning out. Same slot-release

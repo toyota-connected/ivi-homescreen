@@ -46,6 +46,7 @@
 
 #include <drm-cxx/scene/layer_scene.hpp>
 
+#include "backend/common/flip_arm.h"
 #include "backend/drm_kms_egl/drm_output_context.h"
 #include "backend/drm_kms_egl/flip_sink.h"
 #include "backend/drm_plane_formats.h"
@@ -362,7 +363,7 @@ class DrmCompositor : public IFlipSink {
   // PAGE_FLIP_EVENT: clear flip_pending_ and return the vsync baton
   // inline; the genuine first modeset also latches plane_mode_set_ and
   // verifies the pipe. A steady-state nonblock flip arms flip_pending_.
-  void SettleAtomicCommit(bool blocking);
+  void SettleAtomicCommit(ScopedFlipArm& arm, bool blocking);
 
   // GL fallback: composites all layers into FBO 0 and calls
   // DrmBackend::Present(). Used when the plane allocator isn't
