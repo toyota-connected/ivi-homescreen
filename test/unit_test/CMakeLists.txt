@@ -255,6 +255,7 @@ endif ()
 add_subdirectory(compositor_registry-test)
 add_subdirectory(platform_view_registry-test)
 add_subdirectory(backend_output_binding-test)
+add_subdirectory(flip_arm-test)
 add_subdirectory(vsync_park-test)
 add_subdirectory(mutation_stack-test)
 # The MCP registry is only compiled into ihs_shared when BUILD_MCP is on, so
