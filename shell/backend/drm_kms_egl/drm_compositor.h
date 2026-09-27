@@ -235,6 +235,14 @@ class DrmCompositor : public IFlipSink {
     return flip_pending_.load(std::memory_order_acquire);
   }
 
+  // Stall recovery only: clear the commit latch because the flip it describes
+  // is never going to complete. Returns true iff it was set, so the caller can
+  // report that it actually recovered something. Anything else clearing this
+  // latch is the #649 bug -- only the flip event may, or this.
+  bool ClearStalledFlip() {
+    return flip_pending_.exchange(false, std::memory_order_acq_rel);
+  }
+
  private:
   struct StoreBaton {
     DrmCompositor* owner;
