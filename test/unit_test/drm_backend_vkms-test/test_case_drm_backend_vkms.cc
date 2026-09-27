@@ -79,6 +79,8 @@ extern "C" {
 
 #include <gtest/gtest.h>
 
+#include "task_runner.h"
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -2322,6 +2324,111 @@ TEST_F(PvHostVkmsPlanes, AnEarlyFlipCompletionReportsTheFrameItShowed) {
          "previous serial, which was already finished";
   EXPECT_EQ(got[0].seq, 12U)
       << "reported a frame other than the one this flip showed";
+}
+
+// A flip event that never arrives must not leave Flutter waiting forever.
+//
+// The baton comes back on the flip event for the commit in flight. If that
+// event is lost the baton is never returned, no frame is built, and because no
+// frame is built Present never runs -- so its own WaitForPendingFlip guard
+// never fires either. The display stops until a VT switch (#649). The detector
+// watches from the task runner's io_context, which is alive exactly then.
+//
+// Two ticks with no progress is the signal, so one tick must not fire: a baton
+// parked for less than the threshold is just a frame in flight.
+TEST_F(DrmBackendVkms, AStalledFlipIsRecoveredNotWaitedOnForever) {
+  auto view = std::make_shared<FakePlatformView>(31);
+  view->set_texture(tex_);
+  compositor_->RegisterSurface(31, view);
+  ASSERT_TRUE(PresentPlatformView(31));
+
+  // Delivery needs a runner: PostOnVsync marshals onto it, and without one the
+  // provider leaves the baton parked whatever the detector decides. Wire it on
+  // the provider directly rather than through SetPlatformTaskRunner, which
+  // would also start the real timer on an io_context nothing here runs.
+  FLUTTER_API_SYMBOL(FlutterEngine) no_engine{nullptr};
+  TaskRunner runner("stall-test", no_engine);
+  backend_->VsyncForTest().SetEngine(nullptr, &runner);
+
+  // The state the detector exists for: a commit in flight whose event will
+  // never arrive, and Flutter waiting on it.
+  backend_->SetFlipPendingForTest(true);
+  backend_->VsyncForTest().SubmitBaton(nullptr, 0x5151);
+  ASSERT_TRUE(backend_->VsyncForTest().HasParkedBaton())
+      << "the latch is up, so the baton must park -- otherwise there is no "
+         "stall to detect and this case proves nothing";
+
+  const uint64_t before = backend_->StallRecoveriesForTest();
+  backend_->CheckForStallForTest();
+  EXPECT_TRUE(backend_->VsyncForTest().HasParkedBaton())
+      << "one tick is not evidence of a stall; a frame may simply be in flight";
+  EXPECT_EQ(backend_->StallRecoveriesForTest(), before);
+
+  // Second tick, nothing moved in between.
+  backend_->CheckForStallForTest();
+  EXPECT_FALSE(backend_->FlipPendingForTest())
+      << "the latch has to go, or the baton parks again immediately";
+  EXPECT_FALSE(backend_->VsyncForTest().HasParkedBaton())
+      << "the baton must be handed back; nothing else is going to";
+  EXPECT_EQ(backend_->StallRecoveriesForTest(), before + 1);
+
+  compositor_->UnregisterSurface(31);
+}
+
+// The other half: a display that is merely busy must never be recovered. Flips
+// advancing between ticks is progress, however long a baton has been parked.
+TEST_F(DrmBackendVkms, AFlipInFlightIsNotMistakenForAStall) {
+  auto view = std::make_shared<FakePlatformView>(32);
+  view->set_texture(tex_);
+  compositor_->RegisterSurface(32, view);
+  ASSERT_TRUE(PresentPlatformView(32));
+
+  const uint64_t before = backend_->StallRecoveriesForTest();
+  for (int i = 0; i < 4; ++i) {
+    // A tick between real frames. Presenting advances flips_handled_, which is
+    // the progress the detector looks for -- so however a baton happens to be
+    // parked at the moment of the tick, nothing here is stalled.
+    backend_->CheckForStallForTest();
+    ASSERT_TRUE(PresentPlatformView(32)) << "frame " << i;
+  }
+  EXPECT_EQ(backend_->StallRecoveriesForTest(), before)
+      << "flips were advancing the whole time; nothing was stalled";
+
+  compositor_->UnregisterSurface(32);
+}
+
+// A revoked session looks exactly like a lost flip event -- a baton parked, the
+// latch up, no events coming -- and must not be reported as one. The latch
+// stays up across a VT switch-out by design; OnResume is what clears it.
+TEST_F(DrmBackendVkms, APausedSessionIsNotReportedAsAStall) {
+  auto view = std::make_shared<FakePlatformView>(33);
+  view->set_texture(tex_);
+  compositor_->RegisterSurface(33, view);
+  ASSERT_TRUE(PresentPlatformView(33));
+
+  FLUTTER_API_SYMBOL(FlutterEngine) no_engine{nullptr};
+  TaskRunner runner("stall-pause-test", no_engine);
+  backend_->VsyncForTest().SetEngine(nullptr, &runner);
+
+  const uint64_t before = backend_->StallRecoveriesForTest();
+  backend_->OnSessionPaused();
+  // Put the latch back: OnSessionPaused drops the legacy one, but the scene
+  // path's stays up until OnResume -- which is the case this guards.
+  backend_->SetFlipPendingForTest(true);
+  backend_->VsyncForTest().SubmitBaton(nullptr, 0x5353);
+  ASSERT_TRUE(backend_->VsyncForTest().HasParkedBaton())
+      << "no baton parked, so there is no stall to mistake this for";
+
+  for (int i = 0; i < 4; ++i) {
+    backend_->CheckForStallForTest();
+  }
+  EXPECT_EQ(backend_->StallRecoveriesForTest(), before)
+      << "a VT switch-out was reported as a lost flip event";
+  EXPECT_TRUE(backend_->FlipPendingForTest())
+      << "the latch is OnResume's to clear while the session is revoked";
+
+  backend_->OnSessionResumed(display_->SharedDevice()->fd());
+  compositor_->UnregisterSurface(33);
 }
 
 }  // namespace

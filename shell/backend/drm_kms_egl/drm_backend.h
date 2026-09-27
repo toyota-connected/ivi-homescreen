@@ -34,6 +34,7 @@
 #include <xf86drmMode.h>
 
 #include "asio/posix/stream_descriptor.hpp"
+#include "asio/steady_timer.hpp"
 
 #include <drm-cxx/core/device.hpp>
 
@@ -339,6 +340,28 @@ class DrmBackend : public Backend, public IFlipSink {
 
   void StopVsyncMonitor() override;
 
+  // ─── Stall detector ──────────────────────────────────────────────────────
+  //
+  // A parked vsync baton means Flutter asked for a frame; the baton comes back
+  // on the flip event for the commit in flight. If that event never arrives the
+  // baton is never returned, no frame is produced, and because no frame is
+  // produced Present never runs -- so WaitForPendingFlip's own 100 ms guard
+  // never gets a chance to fire either. The display stops until a VT switch.
+  // That was #649; its causes are fixed, and this is the net for whatever else
+  // loses an event (a driver dropping one, a session paused mid-flip).
+  //
+  // Runs on the task runner's io_context, which is alive precisely when the
+  // present path is not. Detection needs no timestamp: a tick that sees a baton
+  // parked, the latch up, and flips_handled_ unmoved since the previous tick --
+  // which also saw it parked -- has watched a full tick pass with no progress.
+  void ArmStallTimer();
+  void CheckForStall();
+  std::unique_ptr<asio::steady_timer> stall_timer_;
+  uint64_t stall_last_flips_{0};
+  bool stall_last_parked_{false};
+  uint64_t stall_recoveries_{0};
+  bool warned_stall_{false};
+
   // Unified PAGE_FLIP_EVENT dispatcher (drmModeEventContext.page_flip_handler
   // signature). The card's flip-reader thread (owned by DrmDisplay) registers
   // this as the handler; user_data is always a DrmBackend*, so a single reader
@@ -608,6 +631,18 @@ class DrmBackend : public Backend, public IFlipSink {
 
   /// True while a legacy flip is in flight, i.e. the latch this series is
   /// about.
+  /// Put the latch up without a commit, so a test can build the state the
+  /// stall detector exists for: a flip that will never complete.
+  void SetFlipPendingForTest(const bool pending) {
+    flip_pending_.store(pending, std::memory_order_release);
+  }
+  /// One detector tick, without waiting out the real threshold.
+  void CheckForStallForTest() { CheckForStall(); }
+  /// Stalls this backend recovered from.
+  [[nodiscard]] uint64_t StallRecoveriesForTest() const {
+    return stall_recoveries_;
+  }
+
   [[nodiscard]] bool FlipPendingForTest() const {
     return flip_pending_.load(std::memory_order_acquire);
   }
