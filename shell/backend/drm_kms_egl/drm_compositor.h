@@ -689,9 +689,63 @@ class DrmCompositor : public IFlipSink {
   std::atomic<uint64_t> atomic_serial_{0};
   // The output's refresh period, for the reports.
   uint32_t refresh_ns_{0};
-  // The atomic commit that just landed: hand this frame's notes to the tracker
-  // under a new serial, and report them at once when no flip event follows.
-  void CommitPresentation(bool blocking);
+  // Hand this frame's notes to the tracker under a new serial and publish that
+  // serial, both *before* the commit. OnFlipEvent reads atomic_serial_ to
+  // decide which serial a flip showed, so a serial published after the ioctl
+  // means an early event attributes the flip to the previous frame -- and then
+  // every later flip reports one frame behind, for good. Returns the serial.
+  [[nodiscard]] uint64_t StagePresentation();
+  // The commit was accepted. Counts the frame, and reports it at once when the
+  // commit was blocking and no flip event will follow.
+  void SettlePresentation(uint64_t serial, bool blocking);
+  // The commit never happened: roll the serial back and return the notes to the
+  // frame being built. Safe because every present path waits out the previous
+  // flip before committing, so no event is outstanding when this runs -- the
+  // only event this serial could name is the one that will never arrive.
+  void WithdrawPresentation(uint64_t serial);
+
+  // Stages the presentation notes before a commit and withdraws them unless the
+  // commit was accepted. Same shape as ScopedFlipArm and ScopedSlotPublish, for
+  // the same reason: several failure exits per path, each of which used to have
+  // nothing to undo because the staging happened afterwards.
+  class ScopedPresentation {
+   public:
+    ScopedPresentation(DrmCompositor& owner, bool blocking)
+        : owner_(owner),
+          serial_(owner.StagePresentation()),
+          blocking_(blocking) {}
+    ~ScopedPresentation() { Abort(); }
+
+    ScopedPresentation(const ScopedPresentation&) = delete;
+    ScopedPresentation& operator=(const ScopedPresentation&) = delete;
+    ScopedPresentation(ScopedPresentation&&) = delete;
+    ScopedPresentation& operator=(ScopedPresentation&&) = delete;
+
+    /// The commit was accepted: count the frame and, for a blocking commit,
+    /// report it now.
+    void Commit() noexcept {
+      if (!live_) {
+        return;
+      }
+      live_ = false;
+      owner_.SettlePresentation(serial_, blocking_);
+    }
+    /// The commit never happened.
+    void Abort() noexcept {
+      if (!live_) {
+        return;
+      }
+      live_ = false;
+      owner_.WithdrawPresentation(serial_);
+    }
+    [[nodiscard]] uint64_t serial() const noexcept { return serial_; }
+
+   private:
+    DrmCompositor& owner_;
+    uint64_t serial_;
+    bool blocking_;
+    bool live_{true};
+  };
   // A flip's time as a report.
   [[nodiscard]] PresentationTime FlipTime(unsigned int sequence,
                                           unsigned int tv_sec,

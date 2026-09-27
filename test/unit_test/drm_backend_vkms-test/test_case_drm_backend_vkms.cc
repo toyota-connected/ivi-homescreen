@@ -2267,6 +2267,63 @@ TEST_F(DrmBackendVkmsScene, AnEarlyFlipCompletionDoesNotStrandASlotGeneration) {
          "still scanning out -- the generation reached the pipeline late";
 }
 
+// An early flip completion must report the frame it showed, not the one before.
+//
+// OnFlipEvent reads atomic_serial_ to name the serial a flip carried. That
+// serial used to be published *after* the commit, so when the card's reader
+// dispatched the flip before the raster thread returned from the ioctl, the
+// event named serial-1 -- a frame already reported -- and the frame actually on
+// screen went unreported. The skew is permanent: each commit adds one serial
+// and each event consumes one, so the offset never closes and every later frame
+// is reported one flip late.
+//
+// on_commit_returned_ forces that order once. What is asserted is the
+// producer's own feedback, which is the thing a late report actually breaks.
+TEST_F(PvHostVkmsPlanes, AnEarlyFlipCompletionReportsTheFrameItShowed) {
+  const int fd = display_->SharedDevice()->fd();
+  GbmSolidBuffer a;
+  GbmSolidBuffer b;
+  ASSERT_TRUE(a.Create(fd, kViewW, kViewH, 0xFF1E7A46u));
+  ASSERT_TRUE(b.Create(fd, kViewW, kViewH, 0xFF7A1E46u));
+
+  // Bring the pipeline up. The first present is the blocking modeset, reported
+  // inline, so the commit that matters is the next one.
+  ASSERT_EQ(SubmitSeq(a, 0, 11), IHS_PV_OK);
+  ASSERT_EQ(PresentUntilReported(1).size(), 1U)
+      << "the first frame was never reported, so the case cannot run";
+
+  // Block on the raster thread with the flip in flight, until the reader has
+  // dispatched its completion.
+  auto* drm = dynamic_cast<DrmBackend*>(view_->GetBackend());
+  ASSERT_NE(drm, nullptr);
+  bool forced = false;
+  comp_->on_commit_returned_ = [drm, &forced] {
+    if (forced) {
+      return;
+    }
+    forced = true;
+    const uint64_t before = drm->FlipsHandledForTest();
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (drm->FlipsHandledForTest() == before &&
+           std::chrono::steady_clock::now() < deadline) {
+      std::this_thread::sleep_for(std::chrono::microseconds(200));
+    }
+  };
+  ASSERT_EQ(SubmitSeq(b, 1, 12), IHS_PV_OK);
+  // Exactly one present: a second would report this frame off the *next* flip
+  // and hide the defect.
+  const auto got = PresentUntilReported(1, 1);
+  comp_->on_commit_returned_ = nullptr;
+  ASSERT_TRUE(forced) << "the hook never ran, so the order was never forced";
+
+  ASSERT_EQ(got.size(), 1U)
+      << "the flip that showed this frame reported nothing -- it named the "
+         "previous serial, which was already finished";
+  EXPECT_EQ(got[0].seq, 12U)
+      << "reported a frame other than the one this flip showed";
+}
+
 }  // namespace
 
 // Own main rather than gtest_main: the shell's logging has to be started

@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <utility>
@@ -148,6 +149,36 @@ class PresentationTracker {
       }
     }
     RunRetires(dropped);
+  }
+
+  // The commit that would have carried @p key never reached the display: take
+  // its notes back out of the queue and return them to the frame being built,
+  // so the next commit carries them.
+  //
+  // Distinct from Discarded(), which is the display's word that a frame it had
+  // was dropped: that reports nothing but does run the retires, because what
+  // the frame used is finished with. Here the frame was never handed over at
+  // all, so its retires must not run -- the buffers it names are still the ones
+  // the next commit will use.
+  //
+  // Only the key most recently committed can be withdrawn, which is the only
+  // case that exists: the caller withdraws when its own commit fails, and it
+  // holds the raster thread until then. An unknown key changes nothing.
+  void Withdraw(const uint64_t key) {
+    const std::lock_guard<std::mutex> lock(mu_);
+    if (in_flight_.empty() || in_flight_.back().key != key) {
+      return;
+    }
+    Committed& c = in_flight_.back();
+    // Prepend: these were taken from building_ and anything added since was
+    // noted after them, so this restores the original order.
+    building_.insert(building_.begin(),
+                     std::make_move_iterator(c.entries.begin()),
+                     std::make_move_iterator(c.entries.end()));
+    retires_.insert(retires_.begin(),
+                    std::make_move_iterator(c.retires.begin()),
+                    std::make_move_iterator(c.retires.end()));
+    in_flight_.pop_back();
   }
 
   // The frame committed under @p key is on screen. Frames committed before it
