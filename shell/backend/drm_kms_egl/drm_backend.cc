@@ -1518,9 +1518,13 @@ void DrmBackend::OnFlipEvent(const unsigned int sequence,
   OnLegacyFlipComplete();
   // A legacy Present() is the primary compositor's GL fallback; tell it which
   // of its frames is on screen.
+#if BUILD_COMPOSITOR
   if (compositor_ != nullptr) {
     compositor_->OnLegacyFlipPresented(shown, sequence, tv_sec, tv_usec);
   }
+#else
+  (void)shown;
+#endif
   // A legacy Present() flip belongs to this backend's own (primary) output, so
   // it always drives vsync.
   DeliverVsyncFromFlip(tv_sec, tv_usec);
