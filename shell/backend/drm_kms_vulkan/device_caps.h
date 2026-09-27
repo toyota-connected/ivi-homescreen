@@ -65,6 +65,21 @@ struct DeviceCaps {
 DeviceCaps ProbeDeviceCaps(const std::string& display_device,
                            std::string& refusal_reason);
 
+// Whether a CPU / software-rasterizer Vulkan device may be used for scanout.
+//
+// False by default, and the refusal is deliberate: it drives
+// VulkanDrmBackend::Create() -> nullptr -> FlutterView exit(EXIT_FAILURE), so a
+// device whose GPU driver is missing or broken fails loudly at start instead of
+// coming up on llvmpipe and rendering at software speed, which is far harder to
+// diagnose from a bug report.
+//
+// IVI_DRMVK_ALLOW_SOFTWARE=1 lifts it, for the cases that genuinely want a
+// software device: the vkms test harness (which has no GPU on a CI runner), the
+// drm_kms_vulkan_probe tool, and answering "is my GPU driver the problem?" on a
+// board. Accepting one is logged at warn, every time -- this is never a state
+// to be in by accident.
+[[nodiscard]] bool AllowSoftwareRenderer();
+
 // Resolve the (major, minor) device numbers of a DRM node path so the backend
 // can match a Vulkan physical device's DRM node against the scanout device.
 // Returns false (leaving the outputs untouched) when the path cannot be

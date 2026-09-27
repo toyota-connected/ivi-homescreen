@@ -231,6 +231,11 @@ endif ()
 if (BUILD_BACKEND_DRM_KMS_EGL AND BUILD_COMPOSITOR)
     add_subdirectory(drm_backend_vkms-test)
 endif ()
+# The software-renderer opt-in lives in the Vulkan backend's device_caps, so the
+# test has nothing to link against without it.
+if (BUILD_BACKEND_DRM_KMS_VULKAN)
+    add_subdirectory(vk_software_gate-test)
+endif ()
 add_subdirectory(timer-test)
 add_subdirectory(watchdog-test)
 add_subdirectory(wake_event_fd-test)
