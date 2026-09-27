@@ -20,10 +20,20 @@ jobs:
             cc: gcc-14
             cxx: g++-14
             extra_pkgs: g++-14
+            compositor: 'ON'
           - compiler: clang
             cc: clang-19
             cxx: clang++-19
             extra_pkgs: clang-19 llvm-19 lld-19 libc++-19-dev libc++abi-19-dev
+            compositor: 'ON'
+          # The legacy DrmBackend::Present path is only reachable with the
+          # compositor off, so nothing else here compiles it. Two separate
+          # commits broke this configuration before the job existed.
+          - compiler: gcc-nocompositor
+            cc: gcc-14
+            cxx: g++-14
+            extra_pkgs: g++-14
+            compositor: 'OFF'
 
     name: drm-${{ matrix.compiler }}
     permissions:
@@ -50,7 +60,7 @@ jobs:
       - name: Setup libdisplay-info (system or from-source)
         uses: ./.github/actions/setup-libdisplay-info
 
-      - name: Configure (DRM/KMS EGL + compositor)
+      - name: Configure (DRM/KMS EGL, compositor ${{ matrix.compositor }})
         env:
           CC: ${{ matrix.cc }}
           CXX: ${{ matrix.cxx }}
@@ -62,7 +72,7 @@ jobs:
             -D BUILD_BACKEND_DRM_KMS_EGL=ON \
             -D BUILD_BACKEND_WAYLAND_EGL=OFF \
             -D BUILD_BACKEND_WAYLAND_VULKAN=OFF \
-            -D BUILD_COMPOSITOR=ON \
+            -D BUILD_COMPOSITOR=${{ matrix.compositor }} \
             -D BUILD_NUMBER=${GITHUB_RUN_ID}
 
       - name: Build

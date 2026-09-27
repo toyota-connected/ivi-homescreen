@@ -81,11 +81,13 @@ extern "C" {
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <iostream>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -2147,6 +2149,52 @@ TEST_F(PvHostVkmsGl, ACompositedFrameIsReportedPresented) {
                               IHS_PV_PRESENTED_HW_COMPLETION)
       << "composited, so not zero-copy";
   EXPECT_NE(got[0].msc, 0U);
+}
+
+// An early flip completion must not leave the latch armed.
+//
+// The legacy present path publishes its flip state and raises flip_pending_
+// around a NONBLOCK ioctl. If the card's reader dispatches that flip's
+// completion before the raster thread gets back, a latch raised afterwards
+// describes a flip that has already retired -- and the next vsync baton parks
+// against it with no event coming to return it. The display stops (#649).
+//
+// on_commit_returned_ forces exactly that order: it runs on the raster thread
+// with the flip in flight, and blocks until the reader has handled it. What is
+// asserted afterwards is the latch, because that is the thing that goes stale.
+// On a build that raises the latch after the ioctl this fails.
+TEST_F(DrmBackendVkms, AnEarlyFlipCompletionLeavesNoStaleLatch) {
+  auto view = std::make_shared<FakePlatformView>(11);
+  view->set_texture(tex_);
+  compositor_->RegisterSurface(11, view);
+
+  // First present brings the pipeline up; the flip that matters is the next.
+  ASSERT_TRUE(PresentPlatformView(11));
+
+  const uint64_t before = backend_->FlipsHandledForTest();
+  backend_->on_commit_returned_ = [this, before] {
+    // Bounded: if the reader never dispatches, say so rather than hang the
+    // suite. Two seconds is ~120 vblanks at 60Hz.
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (backend_->FlipsHandledForTest() == before &&
+           std::chrono::steady_clock::now() < deadline) {
+      std::this_thread::sleep_for(std::chrono::microseconds(200));
+    }
+  };
+  const bool presented = PresentPlatformView(11);
+  backend_->on_commit_returned_ = nullptr;
+  ASSERT_TRUE(presented);
+
+  ASSERT_GT(backend_->FlipsHandledForTest(), before)
+      << "the completion never landed inside the commit window, so this case "
+         "did not reproduce the order it exists to test";
+
+  EXPECT_FALSE(backend_->FlipPendingForTest())
+      << "the flip retired while we were still in Present, so nothing is in "
+         "flight -- a latch left up here parks the next baton forever (#649)";
+
+  compositor_->UnregisterSurface(11);
 }
 
 }  // namespace

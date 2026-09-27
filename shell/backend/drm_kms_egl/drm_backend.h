@@ -218,12 +218,6 @@ class DrmBackend : public Backend, public IFlipSink {
   // directly; the shell reaches it through the view_id map instead.
   [[nodiscard]] DrmCompositor* compositor() const { return compositor_.get(); }
 
-  // This backend has planes, so it has an opinion: delegate to the compositor
-  // that owns the plane table. See Backend::ReconcileScanoutModifier.
-  [[nodiscard]] bool ReconcileScanoutModifier(
-      uint32_t fourcc,
-      uint64_t* modifier) const override;
-
   // What the last Present() did with the frame it was given: the serial it
   // was committed under, which the flip that shows it reports back to the
   // compositor (DrmCompositor::OnLegacyFlipPresented), or 0 when it never
@@ -236,6 +230,13 @@ class DrmBackend : public Backend, public IFlipSink {
     return last_present_serial_;
   }
 #endif
+
+  // This backend has planes, so it has an opinion: delegate to the compositor
+  // that owns the plane table. See Backend::ReconcileScanoutModifier.
+  [[nodiscard]] bool ReconcileScanoutModifier(
+      uint32_t fourcc,
+      uint64_t* modifier) const override;
+
   ~DrmBackend() override;
 
   DrmBackend(const DrmBackend&) = delete;
@@ -585,6 +586,35 @@ class DrmBackend : public Backend, public IFlipSink {
   // cadence profile (IVI_VSYNC_PROFILE, "[DrmVsync]") now lives in vsync_,
   // recorded on every page flip via DeliverVsync.
   void RecordFlipComplete();
+
+#if defined(UNIT_TEST)
+ public:
+  /// Count of legacy flip completions handled, so a test can tell when the
+  /// reader thread has dispatched a specific flip. Written by the reader,
+  /// read by the test.
+  [[nodiscard]] uint64_t FlipsHandledForTest() const {
+    return flips_handled_.load(std::memory_order_acquire);
+  }
+
+  /// Runs on the raster thread immediately after a legacy flip ioctl returns
+  /// successfully, while the flip is in flight -- the window in which the
+  /// completion may be dispatched. A test blocks here to force that order and
+  /// prove the latch survives it. Never set outside tests.
+  std::function<void()> on_commit_returned_;
+
+  /// The provider whose baton the latch gates, so a test can submit one and
+  /// see whether it came back.
+  [[nodiscard]] ivi::IVsyncProvider& VsyncForTest() { return vsync_; }
+
+  /// True while a legacy flip is in flight, i.e. the latch this series is
+  /// about.
+  [[nodiscard]] bool FlipPendingForTest() const {
+    return flip_pending_.load(std::memory_order_acquire);
+  }
+
+ private:
+#endif
+  std::atomic<uint64_t> flips_handled_{0};
 
 #if BUILD_COMPOSITOR
   std::unique_ptr<DrmCompositor> compositor_{};

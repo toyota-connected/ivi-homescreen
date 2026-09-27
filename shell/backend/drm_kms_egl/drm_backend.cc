@@ -15,6 +15,7 @@
  */
 
 #include "backend/drm_kms_egl/drm_backend.h"
+#include "backend/common/flip_arm.h"
 #include "display/drm_display.h"    // DrainReadyFlips from WaitForPendingFlip
 #include "display/drm_mode_list.h"  // ConnectorTypeName, PrintDrmModes (shared)
 #include "logging/logging.h"
@@ -36,6 +37,7 @@
 #include <cstdlib>
 #include <limits>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -1197,6 +1199,7 @@ bool DrmBackend::TextureClearCurrent() {
 }
 
 void DrmBackend::RecordFlipComplete() {
+  flips_handled_.fetch_add(1, std::memory_order_release);
   // Scanout-cadence profiling now lives in vsync_ (recorded per page flip via
   // DeliverVsync under IVI_VSYNC_PROFILE). This is just the debug_backend
   // per-second FPS line.
@@ -1403,12 +1406,23 @@ void DrmBackend::OnLegacyFlipComplete() {
   // queued at depth 1, so this costs one uncontended lock.
   gbm_bo* queued_bo = nullptr;
   uint32_t queued_fb = 0;
+  // Armed inside the lock below, before the ioctl. This flip cannot race its
+  // own event -- we are on the reader thread -- but it does race the
+  // rasterizer's queue check, which reads this latch to decide between
+  // queueing and flipping directly. Arm after the unlock and Present can still
+  // slip through in the gap, costing an EBUSY and an unsynchronised write to
+  // pending_bo_; arm under the lock and it cannot. Non-movable, hence optional.
+  std::optional<ScopedFlipArm> arm;
   {
     std::lock_guard<std::mutex> lk(queued_flip_mutex_);
     queued_bo = queued_bo_;
     queued_fb = queued_fb_;
     queued_bo_ = nullptr;
     queued_fb_ = 0;
+    if (queued_bo != nullptr) {
+      arm.emplace(flip_pending_, vsync_, /*nonblocking=*/true,
+                  /*drives_vsync=*/true, /*mirror_source_pending=*/false);
+    }
   }
   if (queued_bo != nullptr) {
     if (drmModePageFlip(drm_dev_->fd(), crtc_id_, queued_fb,
@@ -1417,7 +1431,7 @@ void DrmBackend::OnLegacyFlipComplete() {
       pending_bo_ = queued_bo;
       pending_fb_ = queued_fb;
       pending_serial_ = queued_serial_;
-      flip_pending_.store(true, std::memory_order_release);
+      arm->Commit();
     } else {
       // The frame is unpresentable; drop it rather than leak the buffer, and
       // leave flip_pending_ clear so the next Present commits directly.
@@ -1504,9 +1518,13 @@ void DrmBackend::OnFlipEvent(const unsigned int sequence,
   OnLegacyFlipComplete();
   // A legacy Present() is the primary compositor's GL fallback; tell it which
   // of its frames is on screen.
+#if BUILD_COMPOSITOR
   if (compositor_ != nullptr) {
     compositor_->OnLegacyFlipPresented(shown, sequence, tv_sec, tv_usec);
   }
+#else
+  (void)shown;
+#endif
   // A legacy Present() flip belongs to this backend's own (primary) output, so
   // it always drives vsync.
   DeliverVsyncFromFlip(tv_sec, tv_usec);
@@ -1957,6 +1975,24 @@ bool DrmBackend::Present() {
   if (cfg_.debug_backend) {
     flip_submit_ns_ = LibFlutterEngine->GetCurrentTime();
   }
+  // Publish everything the flip reader reads BEFORE the ioctl, not after. All
+  // three of these flips are NONBLOCK, so OnLegacyFlipComplete can run before
+  // this thread gets back: it would otherwise promote a stale pending_bo_
+  // (nullptr on the first frame) into current_bo_, leaving the real scanout BO
+  // parked and holding a gbm buffer for an extra flip, and OnFlipEvent would
+  // report the previous pending_serial_. Saved so a failed flip can put the
+  // previous values back (#649).
+  gbm_bo* const prev_bo = pending_bo_;
+  const uint32_t prev_fb = pending_fb_;
+  const uint64_t prev_pending_serial = pending_serial_;
+  const uint64_t prev_last_serial = last_present_serial_;
+  pending_bo_ = next_bo;
+  pending_fb_ = next_fb;
+  pending_serial_ = ++present_serial_;
+  last_present_serial_ = pending_serial_;
+  ScopedFlipArm arm(flip_pending_, vsync_, /*nonblocking=*/true,
+                    /*drives_vsync=*/true, /*mirror_source_pending=*/false);
+
   int flip_rc = 0;
   if (reset_primary_ != 0) {
     flip_rc = FlipResettingPlanes(next_fb);
@@ -1971,18 +2007,31 @@ bool DrmBackend::Present() {
   }
   if (flip_rc != 0) {
     ihs::log::warn("[DrmBackend] page flip: {}", std::strerror(flip_rc));
+    // Put back what the kernel did not take, before freeing the buffer those
+    // fields would otherwise still name. present_serial_ keeps its bump: it is
+    // monotonic and a gap in it costs nothing.
+    pending_bo_ = prev_bo;
+    pending_fb_ = prev_fb;
+    pending_serial_ = prev_pending_serial;
+    last_present_serial_ = prev_last_serial;
+    arm.Abort();  // disarm and hand the baton back before the frees
     drmModeRmFB(drm_dev_->fd(), next_fb);
     gbm_surface_release_buffer(gbm_surface_, next_bo);
     return false;
   }
 
+#if defined(UNIT_TEST)
+  // The flip is in flight and nothing has been published after the ioctl. A
+  // test blocks here until the completion has been dispatched, which is the
+  // order that used to leave a stale latch behind.
+  if (on_commit_returned_) {
+    on_commit_returned_();
+  }
+#endif
+
   // The kernel now owns next_bo/next_fb until the page-flip-complete event
   // fires. current_bo_/current_fb_ remain the live scanout until then.
-  pending_bo_ = next_bo;
-  pending_fb_ = next_fb;
-  pending_serial_ = ++present_serial_;
-  last_present_serial_ = pending_serial_;
-  flip_pending_.store(true, std::memory_order_release);
+  arm.Commit();
   trace_present("flipped");
   LogPresentedFrame();
   return true;
