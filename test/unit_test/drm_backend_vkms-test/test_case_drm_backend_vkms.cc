@@ -2197,6 +2197,76 @@ TEST_F(DrmBackendVkms, AnEarlyFlipCompletionLeavesNoStaleLatch) {
   compositor_->UnregisterSurface(11);
 }
 
+// An early flip completion must not strand a slot generation.
+//
+// The backing-store slot pipeline is what decides when Flutter may render into
+// a pool slot again. PresentLayers used to push the generation it had just
+// committed onto in_flight_slots_ *after* the commit; if the card's reader
+// dispatched that flip first, the handler popped nothing and the generation
+// arrived a beat late. Every later event then freed one generation too old, so
+// at pool_size 3 no slot was ever Free when the next frame needed one and the
+// rotate fell back to reusing the buffer being scanned out.
+//
+// on_commit_returned_ forces that order: it runs on the raster thread with the
+// commit in flight and blocks until the reader has handled it. The assertion is
+// the gate-miss counter, which is exactly "the rotate found no free slot".
+TEST_F(DrmBackendVkmsScene, AnEarlyFlipCompletionDoesNotStrandASlotGeneration) {
+  // A Flutter backing-store layer, not a platform view: only a backing store
+  // owns a rotating slot pool, so a platform-view-only frame never reaches the
+  // code under test.
+  FlutterBackingStoreConfig cfg{};
+  cfg.struct_size = sizeof(FlutterBackingStoreConfig);
+  cfg.size = FlutterSize{1024.0, 768.0};
+  FlutterBackingStore bs{};
+  ASSERT_TRUE(compositor_->CreateBackingStore(&cfg, &bs));
+
+  FlutterLayer layer{};
+  layer.struct_size = sizeof(FlutterLayer);
+  layer.type = kFlutterLayerContentTypeBackingStore;
+  layer.backing_store = &bs;
+  layer.offset = FlutterPoint{0.0, 0.0};
+  layer.size = cfg.size;
+  const FlutterLayer* layers[] = {&layer};
+
+  // Bring the pipeline up: the first commit is a blocking modeset and gets no
+  // event, so the generation that matters is a later one.
+  ASSERT_TRUE(compositor_->PresentLayers(layers, 1));
+  ASSERT_TRUE(compositor_->PresentLayers(layers, 1));
+  ASSERT_GT(compositor_->SlotRotationsForTest(), 0U)
+      << "no slot was rotated, so this case never reached the pipeline it "
+         "exists to test -- a backing store with pool_size > 1 is required";
+
+  // Force the completion to land inside the commit window, once.
+  bool forced = false;
+  compositor_->on_commit_returned_ = [this, &forced] {
+    if (forced) {
+      return;
+    }
+    forced = true;
+    const uint64_t before = backend_->FlipsHandledForTest();
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (backend_->FlipsHandledForTest() == before &&
+           std::chrono::steady_clock::now() < deadline) {
+      std::this_thread::sleep_for(std::chrono::microseconds(200));
+    }
+  };
+  ASSERT_TRUE(compositor_->PresentLayers(layers, 1));
+  compositor_->on_commit_returned_ = nullptr;
+  ASSERT_TRUE(forced) << "the hook never ran, so the order was never forced";
+
+  // Now run the pool round. With the generation published before the commit
+  // the pipeline stays in step and a slot is always free; published after, it
+  // is one generation behind from here on and the gate starves.
+  for (int i = 0; i < 6; ++i) {
+    ASSERT_TRUE(compositor_->PresentLayers(layers, 1)) << "frame " << i;
+  }
+
+  EXPECT_EQ(compositor_->SlotGateMissesForTest(), 0U)
+      << "the rotate found no free slot, so it reused a buffer the kernel is "
+         "still scanning out -- the generation reached the pipeline late";
+}
+
 }  // namespace
 
 // Own main rather than gtest_main: the shell's logging has to be started

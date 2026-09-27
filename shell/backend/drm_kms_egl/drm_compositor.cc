@@ -1440,6 +1440,142 @@ void DrmCompositor::OnFlipComplete() {
   backend_->RecordFlipComplete();
 }
 
+size_t DrmCompositor::ChooseRenderSlotLocked(GbmBackingStore& store) {
+  // Start at the next index so a healthy pool still cycles round-robin; the
+  // gate only changes which slot is picked when the obvious one is not free.
+  const size_t next = (store.active_idx + 1) % store.pool_size;
+  for (size_t i = 0; i < store.pool_size; ++i) {
+    const size_t idx = (next + i) % store.pool_size;
+    if (store.pool[idx].state == GbmBackingStore::Slot::State::Free) {
+      return idx;
+    }
+  }
+  // Nothing free: the frame outran its own flip event, so no slot has been
+  // released yet. Fall back to plain round-robin, which is what this did
+  // before the gate existed -- at pool_size 3 a slot is ~2 vblanks old by the
+  // time the cycle returns to it. Warn once; a steady stream of these means
+  // the pool is too small for the cadence, not that a frame was lost.
+  ++slot_gate_misses_;
+  if (!warned_slot_gate_) {
+    warned_slot_gate_ = true;
+    ihs::log::warn(
+        "[DrmCompositor] no free backing-store slot (pool_size={}); reusing "
+        "slot {} round-robin. Further occurrences counted, not logged.",
+        store.pool_size, next);
+  }
+  return next;
+}
+
+std::vector<DrmCompositor::SlotRef> DrmCompositor::ActiveSlotsOf(
+    const std::vector<GbmBackingStore*>& stores) {
+  std::vector<SlotRef> slots;
+  slots.reserve(stores.size());
+  for (GbmBackingStore* store : stores) {
+    if (store == nullptr || store->pool_size <= 1) {
+      continue;
+    }
+    slots.push_back({store, store->active_idx});
+  }
+  return slots;
+}
+
+DrmCompositor::ScopedSlotPublish::ScopedSlotPublish(DrmCompositor& owner,
+                                                    std::vector<SlotRef> slots,
+                                                    const bool nonblocking)
+    : owner_(owner),
+      slots_(std::move(slots)),
+      live_(nonblocking && !slots_.empty()) {
+  if (!live_) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(owner_.slot_pipeline_mu_);
+  for (const auto& ref : slots_) {
+    ref.store->pool[ref.slot_idx].state = GbmBackingStore::Slot::State::Pending;
+  }
+  owner_.in_flight_slots_.push_back(slots_);
+}
+
+DrmCompositor::ScopedSlotPublish::~ScopedSlotPublish() {
+  Abort();
+}
+
+void DrmCompositor::ScopedSlotPublish::Abort() noexcept {
+  if (!live_) {
+    return;
+  }
+  live_ = false;
+  std::lock_guard<std::mutex> lock(owner_.slot_pipeline_mu_);
+  // The generation is normally still queued, but an event for an *earlier*
+  // commit can have promoted it to scanning in the meantime. Nothing will ever
+  // scan these out, so clear it from wherever it landed rather than assuming
+  // the back of the deque.
+  const auto same = [this](const std::vector<SlotRef>& gen) {
+    return gen.size() == slots_.size() &&
+           std::equal(gen.begin(), gen.end(), slots_.begin(),
+                      [](const SlotRef& a, const SlotRef& b) {
+                        return a.store == b.store && a.slot_idx == b.slot_idx;
+                      });
+  };
+  for (auto it = owner_.in_flight_slots_.begin();
+       it != owner_.in_flight_slots_.end(); ++it) {
+    if (same(*it)) {
+      owner_.in_flight_slots_.erase(it);
+      break;
+    }
+  }
+  if (same(owner_.scanning_slots_)) {
+    owner_.scanning_slots_.clear();
+  }
+  // Back to Active: the FBO still points here and Flutter may render into it
+  // again, because no rotation followed a commit that did not happen.
+  for (const auto& ref : slots_) {
+    ref.store->pool[ref.slot_idx].state = GbmBackingStore::Slot::State::Active;
+  }
+}
+
+void DrmCompositor::ChooseNextSlots(const std::vector<GbmBackingStore*>& stores,
+                                    std::vector<PendingRotation>& rotations) {
+  // One critical section for the whole frame: Slot::state is written here and
+  // by OnFlipComplete, so the choice has to be atomic with respect to it. The
+  // GL rebinds it implies are done by ApplyRotations once the lock is dropped.
+  std::lock_guard<std::mutex> lock(slot_pipeline_mu_);
+  for (GbmBackingStore* store : stores) {
+    if (store == nullptr || store->pool_size <= 1) {
+      continue;
+    }
+    const size_t next_idx = ChooseRenderSlotLocked(*store);
+    store->active_idx = next_idx;
+    store->pool[next_idx].state = GbmBackingStore::Slot::State::Active;
+    ++slot_rotations_;
+    rotations.push_back({store, next_idx});
+  }
+}
+bool DrmCompositor::ApplyRotations(
+    const std::vector<PendingRotation>& rotations) {
+  for (const auto& r : rotations) {
+    // Rebind the FBO's color attachment to the new slot's texture. The FBO ID
+    // handed to Flutter is unchanged; only the attachment moves, so Flutter's
+    // cached FBO state stays valid.
+    glBindFramebuffer(GL_FRAMEBUFFER, r.store->fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                           r.store->pool[r.next_idx].color_tex, 0);
+    if (backend_->cfg_.debug_backend) {
+      GLint attached_tex = 0;
+      glGetFramebufferAttachmentParameteriv(
+          GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+          GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &attached_tex);
+      if (static_cast<GLuint>(attached_tex) !=
+          r.store->pool[r.next_idx].color_tex) {
+        ihs::log::warn(
+            "[DrmCompositor] FBO rebind verify failed: expected "
+            "color_tex={} got={}",
+            r.store->pool[r.next_idx].color_tex, attached_tex);
+      }
+    }
+  }
+  return !rotations.empty();
+}
+
 bool DrmCompositor::WaitForPendingFlip() const {
   // The card's flip reader (owned by DrmDisplay, on its own thread) is the
   // single reader of the shared fd: it drains PAGE_FLIP_EVENTs and clears
@@ -2794,6 +2930,18 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
   // we get back here, and a latch raised afterwards is a latch for a flip
   // that already retired (#649). The arm disarms itself on every exit below
   // that does not reach SettleAtomicCommit.
+  // Take this frame's slots into the release pipeline before the ioctl too,
+  // for the same reason: a generation pushed after the event has already been
+  // dispatched is popped one event late for the rest of the session, so every
+  // slot frees a vblank late from then on. A blocking commit gets no event and
+  // is settled after the fact below instead.
+  std::vector<GbmBackingStore*> slot_stores;
+  slot_stores.reserve(frame_layers.size());
+  for (const auto& fl : frame_layers) {
+    slot_stores.push_back(fl.store);
+  }
+  ScopedSlotPublish slots(*this, ActiveSlotsOf(slot_stores), !blocking);
+
   ScopedFlipArm arm(flip_pending_, backend_->vsync_, !blocking, drives_vsync_,
                     /*mirror_source_pending=*/false);
   if (auto commit_ok = req.commit(commit_flags, static_cast<IFlipSink*>(this));
@@ -2824,10 +2972,21 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
     }
     fallback_latched_ = true;
     arm.Abort();
+    slots.Abort();
     return PresentViaGlFallback(layers, layer_count);
   }
 
   SettleAtomicCommit(arm, blocking);
+  slots.Commit();
+#if defined(UNIT_TEST)
+  // The commit is in flight and the slot generation has (or has not, on the
+  // pre-fix ordering) been published. A test blocks here until the completion
+  // has been dispatched, to force the order that leaves the pipeline a
+  // generation behind.
+  if (on_commit_returned_) {
+    on_commit_returned_();
+  }
+#endif
   // Only advance the comp-buffer double-buffer index if we actually
   // wrote to it this frame. Direct-scanout frames don't touch comp,
   // so the next frame can keep using the same comp_idx_ if it needs
@@ -2844,55 +3003,34 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
   // on drivers that don't kernel-side hold the BO during scanout
   // (notably nvidia-drm).
   //
-  // Round-robin with pool_size >= 3 is empirically safe: by the time
-  // we cycle back to a slot it's been ~2 vblanks since the kernel last
-  // referenced it. The slot-release pipeline (in_flight_slots_ +
-  // scanning_slots_) tracks the actual state so a later size of 2
-  // would also be correct.
+  // The choice is gated on Slot::State::Free, which the release pipeline
+  // (in_flight_slots_ + scanning_slots_) maintains, so a slot is only reused
+  // once the flip that displaced it has been handled. Round-robin order is
+  // kept as the starting point and as the fallback when nothing is free --
+  // at pool_size >= 3 that is safe on its own, because a slot is ~2 vblanks
+  // old by the time the cycle returns to it.
+  //
+  // 3 is the minimum this rotate can serve, which is worth knowing before
+  // anyone shrinks it for the GBM footprint. Measured, not reasoned: with a
+  // pool of 2 the gate finds nothing free in the steady state, because the
+  // rotate runs here -- right after the commit -- when one slot is scanning
+  // out and the other is the one just committed, whose event has not arrived.
+  // A pool of 2 needs the slot chosen lazily at the next render instead, once
+  // that event has freed the other. That is a different change; this comment
+  // is here so the next person does not read the gate as making 2 safe.
   //
   // Stores with pool_size == 1 (comp_bufs_, bg_store_) skip the rotate;
   // they're already multi-buffered at a higher level (comp_idx_) or
   // single-shot (bg_store_).
-  bool any_rotated = false;
-  std::vector<SlotRef> committed_this_frame;
-  for (const auto& fl : frame_layers) {
-    if (!fl.store || fl.store->pool_size <= 1) {
-      continue;
-    }
-    auto& store = *fl.store;
-    const size_t committed_idx = store.active_idx;
-    store.pool[committed_idx].state = GbmBackingStore::Slot::State::Pending;
-    committed_this_frame.push_back({&store, committed_idx});
-    store.active_idx = (store.active_idx + 1) % store.pool_size;
-    store.pool[store.active_idx].state = GbmBackingStore::Slot::State::Active;
-    // Rebind the FBO's color attachment to the new active slot's
-    // texture. The FBO ID we returned to Flutter via
-    // FlutterBackingStore::open_gl.framebuffer.name is unchanged; only
-    // the attachment is swapped, so Flutter's cached FBO state stays
-    // valid.
-    glBindFramebuffer(GL_FRAMEBUFFER, store.fbo);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-                           store.active().color_tex, 0);
-    any_rotated = true;
-    if (backend_->cfg_.debug_backend) {
-      GLint attached_tex = 0;
-      glGetFramebufferAttachmentParameteriv(
-          GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-          GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &attached_tex);
-      if (static_cast<GLuint>(attached_tex) != store.active().color_tex) {
-        ihs::log::warn(
-            "[DrmCompositor] FBO rebind verify failed: expected "
-            "color_tex={} got={}",
-            store.active().color_tex, attached_tex);
-      }
-    }
-  }
+  std::vector<PendingRotation> rotations;
+  ChooseNextSlots(slot_stores, rotations);
   // Only restore the default FBO when we actually rebound. Calling
   // glBindFramebuffer(0) unconditionally per frame triggered GL-driver
   // state-flush jitter under image-decode-heavy workloads on Tegra
   // (sustained 60 Hz lock degraded to 25 fps after ~9 s); gating on
   // any_rotated keeps the call out of the hot path when no Flutter BS
   // participated in this frame.
+  const bool any_rotated = ApplyRotations(rotations);
   if (any_rotated) {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
   }
@@ -2901,16 +3039,22 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
   // was blocking + ALLOW_MODESET, so no PAGE_FLIP_EVENT will fire —
   // promote the slots straight to "scanning" so the next event frees
   // them. Subsequent commits queue and the flip handler drains.
-  if (!committed_this_frame.empty()) {
+  // A blocking commit gets no PAGE_FLIP_EVENT, so nothing will ever pop its
+  // generation off the deque: promote it straight to scanning and free
+  // whatever it displaced. The nonblocking case was published before the
+  // ioctl, so there is nothing to do for it here. Keyed on the commit being
+  // blocking rather than on it being the first: a blocking cursor enable gets
+  // no event either, and pushing its generation onto the deque left it there
+  // for good.
+  if (blocking && !slots.slots().empty()) {
     std::lock_guard<std::mutex> lock(slot_pipeline_mu_);
-    if (was_first_commit_pre) {
-      for (auto& ref : scanning_slots_) {
-        ref.store->pool[ref.slot_idx].state =
-            GbmBackingStore::Slot::State::Free;
-      }
-      scanning_slots_ = std::move(committed_this_frame);
-    } else {
-      in_flight_slots_.push_back(std::move(committed_this_frame));
+    for (auto& ref : scanning_slots_) {
+      ref.store->pool[ref.slot_idx].state = GbmBackingStore::Slot::State::Free;
+    }
+    scanning_slots_ = slots.slots();
+    for (auto& ref : scanning_slots_) {
+      ref.store->pool[ref.slot_idx].state =
+          GbmBackingStore::Slot::State::Pending;
     }
   }
 
@@ -3748,6 +3892,16 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   // Arm before the ioctl. This is the path #649 was reported on: the scene's
   // NONBLOCK commit can complete on the flip reader before this thread gets
   // back, and a latch raised afterwards parks the next baton forever.
+  // Same for the slot generation: published before the ioctl, because an event
+  // dispatched before this thread returns would otherwise pop a generation that
+  // is not in the deque yet, leaving every later slot freed a vblank late.
+  std::vector<GbmBackingStore*> slot_stores;
+  slot_stores.reserve(frame_layers.size());
+  for (const auto& fl : frame_layers) {
+    slot_stores.push_back(fl.store);
+  }
+  ScopedSlotPublish slots(*this, ActiveSlotsOf(slot_stores), !blocking_modeset);
+
   ScopedFlipArm arm(flip_pending_, backend_->vsync_, !blocking_modeset,
                     drives_vsync_, /*mirror_source_pending=*/false);
   auto report = [this, commit_flags] {
@@ -3786,8 +3940,17 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
         report.error().message());
     fallback_latched_ = true;
     arm.Abort();
+    slots.Abort();
     return PresentViaGlFallback(layers, layer_count);
   }
+  slots.Commit();
+#if defined(UNIT_TEST)
+  // See the note on the other path: a test blocks here, with the commit in
+  // flight, to force the completion ahead of the publish.
+  if (on_commit_returned_) {
+    on_commit_returned_();
+  }
+#endif
   scene_ebusy_streak_ = 0;  // a clean commit clears the transient-EBUSY streak
   scene_backoff_.Accepted();
   scene_owns_crtc_ = true;
@@ -3854,36 +4017,28 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   // bookkeeping as the legacy path — the scene path does not touch
   // these data structures, so the existing in_flight_slots_ /
   // scanning_slots_ release semantics still apply.
-  bool any_rotated = false;
-  std::vector<SlotRef> committed_this_frame;
-  for (const auto& fl : frame_layers) {
-    if (!fl.store || fl.store->pool_size <= 1) {
-      continue;
-    }
-    auto& store = *fl.store;
-    const size_t committed_idx = store.active_idx;
-    store.pool[committed_idx].state = GbmBackingStore::Slot::State::Pending;
-    committed_this_frame.push_back({&store, committed_idx});
-    store.active_idx = (store.active_idx + 1) % store.pool_size;
-    store.pool[store.active_idx].state = GbmBackingStore::Slot::State::Active;
-    glBindFramebuffer(GL_FRAMEBUFFER, store.fbo);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-                           store.active().color_tex, 0);
-    any_rotated = true;
-  }
+  std::vector<PendingRotation> rotations;
+  ChooseNextSlots(slot_stores, rotations);
+  const bool any_rotated = ApplyRotations(rotations);
   if (any_rotated) {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
   }
-  if (!committed_this_frame.empty()) {
+  // A blocking commit gets no PAGE_FLIP_EVENT, so nothing will ever pop its
+  // generation off the deque: promote it straight to scanning and free
+  // whatever it displaced. The nonblocking case was published before the
+  // ioctl, so there is nothing to do for it here. Keyed on the commit being
+  // blocking rather than on it being the first: a blocking cursor enable gets
+  // no event either, and pushing its generation onto the deque left it there
+  // for good.
+  if (blocking_modeset && !slots.slots().empty()) {
     std::lock_guard<std::mutex> lock(slot_pipeline_mu_);
-    if (was_first_commit_pre) {
-      for (auto& ref : scanning_slots_) {
-        ref.store->pool[ref.slot_idx].state =
-            GbmBackingStore::Slot::State::Free;
-      }
-      scanning_slots_ = std::move(committed_this_frame);
-    } else {
-      in_flight_slots_.push_back(std::move(committed_this_frame));
+    for (auto& ref : scanning_slots_) {
+      ref.store->pool[ref.slot_idx].state = GbmBackingStore::Slot::State::Free;
+    }
+    scanning_slots_ = slots.slots();
+    for (auto& ref : scanning_slots_) {
+      ref.store->pool[ref.slot_idx].state =
+          GbmBackingStore::Slot::State::Pending;
     }
   }
 
@@ -4321,6 +4476,9 @@ bool DrmCompositor::PresentDirectOverlay(const FlutterLayer** layers,
   // we get back here, and a latch raised afterwards is a latch for a flip
   // that already retired (#649). The arm disarms itself on every exit below
   // that does not reach SettleAtomicCommit.
+  // Published before the ioctl, like the latch and for the same reason.
+  ScopedSlotPublish slots(*this, ActiveSlotsOf({store}), !blocking);
+
   ScopedFlipArm arm(flip_pending_, backend_->vsync_, !blocking, drives_vsync_,
                     /*mirror_source_pending=*/false);
   if (auto r = req.commit(commit_flags, static_cast<IFlipSink*>(this)); !r) {
@@ -4340,34 +4498,35 @@ bool DrmCompositor::PresentDirectOverlay(const FlutterLayer** layers,
     // Before the fallback, not at scope exit: PresentViaGlFallback waits out
     // the latch, so leaving it armed would burn the full timeout.
     arm.Abort();
+    slots.Abort();
     return PresentViaGlFallback(layers, count);
   }
 
   SettleAtomicCommit(arm, blocking);
+  slots.Commit();
 
   // Rotate the BS pool slot so Flutter's next render targets a different
   // BO than the one the kernel is scanning out. Same slot-release
   // pipeline bookkeeping as the scene path.
   if (store->pool_size > 1) {
-    const size_t committed_idx = store->active_idx;
-    store->pool[committed_idx].state = GbmBackingStore::Slot::State::Pending;
-    SlotRef committed{store, committed_idx};
-    store->active_idx = (store->active_idx + 1) % store->pool_size;
-    store->pool[store->active_idx].state = GbmBackingStore::Slot::State::Active;
-    glBindFramebuffer(GL_FRAMEBUFFER, store->fbo);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-                           store->active().color_tex, 0);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-    std::lock_guard<std::mutex> lock(slot_pipeline_mu_);
-    if (was_first_commit_pre) {
+    std::vector<PendingRotation> rotations;
+    ChooseNextSlots({store}, rotations);
+    if (ApplyRotations(rotations)) {
+      glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    }
+    // See the other paths: a blocking commit gets no event, so its generation
+    // has to be promoted here rather than left on the deque for good.
+    if (blocking && !slots.slots().empty()) {
+      std::lock_guard<std::mutex> lock(slot_pipeline_mu_);
       for (auto& ref : scanning_slots_) {
         ref.store->pool[ref.slot_idx].state =
             GbmBackingStore::Slot::State::Free;
       }
-      scanning_slots_.assign(1, committed);
-    } else {
-      in_flight_slots_.push_back({committed});
+      scanning_slots_ = slots.slots();
+      for (auto& ref : scanning_slots_) {
+        ref.store->pool[ref.slot_idx].state =
+            GbmBackingStore::Slot::State::Pending;
+      }
     }
   }
 
