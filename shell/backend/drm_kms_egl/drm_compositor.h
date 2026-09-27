@@ -20,6 +20,7 @@
 #include <atomic>
 #include <cstddef>
 #include <deque>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -712,6 +713,90 @@ class DrmCompositor : public IFlipSink {
   std::mutex slot_pipeline_mu_;
   std::deque<std::vector<SlotRef>> in_flight_slots_;
   std::vector<SlotRef> scanning_slots_;
+
+  // Which slot Flutter renders into next. Prefers one the release pipeline
+  // has marked Free, which is what keeps Flutter off a buffer the kernel is
+  // still scanning out; falls back to the next index when nothing is Free.
+  // Caller holds slot_pipeline_mu_, because Slot::state is also written by
+  // the flip handler.
+  [[nodiscard]] size_t ChooseRenderSlotLocked(GbmBackingStore& store);
+  // One store's pending FBO rebind, decided under the lock and performed
+  // outside it -- GL calls must not hold up the flip handler.
+  struct PendingRotation {
+    GbmBackingStore* store;
+    size_t next_idx;
+  };
+  // The slots this frame's commit scans out, before any rotation. Raster
+  // thread only: reads active_idx, which no other thread touches.
+  [[nodiscard]] static std::vector<SlotRef> ActiveSlotsOf(
+      const std::vector<GbmBackingStore*>& stores);
+
+  // Takes this frame's committed slots into the release pipeline *before* the
+  // commit. A NONBLOCK commit's PAGE_FLIP_EVENT can be dispatched before the
+  // ioctl returns; a generation pushed afterwards is popped one event late for
+  // the rest of the session, so every slot is then freed a vblank late. That
+  // lag is what makes a pool of 2 unsafe. Inert for a blocking commit, which
+  // gets no event and is settled by the caller after the fact.
+  class ScopedSlotPublish {
+   public:
+    ScopedSlotPublish(DrmCompositor& owner,
+                      std::vector<SlotRef> slots,
+                      bool nonblocking);
+    ~ScopedSlotPublish();
+
+    ScopedSlotPublish(const ScopedSlotPublish&) = delete;
+    ScopedSlotPublish& operator=(const ScopedSlotPublish&) = delete;
+    ScopedSlotPublish(ScopedSlotPublish&&) = delete;
+    ScopedSlotPublish& operator=(ScopedSlotPublish&&) = delete;
+
+    /// The commit was accepted: the pipeline owns these slots now.
+    void Commit() noexcept { live_ = false; }
+    /// The commit never happened: take them back out and mark them Active
+    /// again, so the next rotation may reuse them.
+    void Abort() noexcept;
+    /// What was published, for the caller's own bookkeeping.
+    [[nodiscard]] const std::vector<SlotRef>& slots() const { return slots_; }
+
+   private:
+    DrmCompositor& owner_;
+    std::vector<SlotRef> slots_;
+    bool live_;
+  };
+
+  // Choose each store's next render slot and mark it Active, after the commit.
+  // Fills @p rotations; takes the lock itself.
+  void ChooseNextSlots(const std::vector<GbmBackingStore*>& stores,
+                       std::vector<PendingRotation>& rotations);
+  // Perform the rebinds RotateCommittedSlots chose. Returns true if any ran,
+  // so the caller knows whether to restore the default FBO.
+  bool ApplyRotations(const std::vector<PendingRotation>& rotations);
+  // How often the Free gate found nothing and fell back to round-robin, and
+  // how many slots it rotated in total. The second exists so a test can prove
+  // it exercised this path rather than passing because nothing ran.
+  uint64_t slot_gate_misses_{0};
+  uint64_t slot_rotations_{0};
+  bool warned_slot_gate_{false};
+
+#if defined(UNIT_TEST)
+ public:
+  /// Times the Free gate found no free slot. Zero is the healthy value: a
+  /// non-zero count means a generation reached the pipeline late and every
+  /// slot is now accounted for, so the next render reuses a live buffer.
+  [[nodiscard]] uint64_t SlotGateMissesForTest() const {
+    return slot_gate_misses_;
+  }
+  /// Slots rotated, so a test can assert it reached the rotate at all.
+  [[nodiscard]] uint64_t SlotRotationsForTest() const {
+    return slot_rotations_;
+  }
+  /// Runs on the raster thread immediately after a commit ioctl returns, with
+  /// the flip in flight -- the window in which its completion may be
+  /// dispatched. A test blocks here to force that order. Never set outside
+  /// tests.
+  std::function<void()> on_commit_returned_;
+
+ private:
+#endif
 
   // First atomic commit after Create(). The kernel needs the modeset
   // flag + a blocking commit; subsequent commits use NONBLOCK +
