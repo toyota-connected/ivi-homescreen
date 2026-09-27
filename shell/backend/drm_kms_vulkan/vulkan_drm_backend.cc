@@ -3429,8 +3429,18 @@ bool VulkanDrmBackend::SelectPhysicalDevice(std::string& refusal_reason) {
 
     if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU ||
         LooksLikeSoftware(props.deviceName)) {
-      last_miss = std::string(props.deviceName) + " is a CPU/software renderer";
-      continue;
+      if (!drm_kms_vulkan::AllowSoftwareRenderer()) {
+        last_miss =
+            std::string(props.deviceName) + " is a CPU/software renderer";
+        continue;
+      }
+      // Every time, not once: a board running the UI on llvmpipe is a state
+      // worth seeing in the log for as long as it lasts.
+      ihs::log::warn(
+          "[VulkanDrmBackend] accepting software renderer {} because "
+          "IVI_DRMVK_ALLOW_SOFTWARE=1. Scanout works; rendering is software "
+          "speed. A test and diagnosis setting, not a shipping one.",
+          props.deviceName);
     }
 
     // The Flutter engine's Skia backend requires a Vulkan 1.1 device. Reject a

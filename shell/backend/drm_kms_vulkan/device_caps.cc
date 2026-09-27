@@ -25,6 +25,9 @@
 //
 // System headers are included before vulkan.hpp so the stat()/sysmacros use in
 // DrmNodeNumber resolves cleanly.
+#include <cstdlib>
+#include <string_view>
+
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
 
@@ -73,6 +76,14 @@ bool NameLooksLikeSoftware(const char* name) {
 }
 
 }  // namespace
+
+bool AllowSoftwareRenderer() {
+  // Read every call rather than caching in a static: device selection runs once
+  // at bring-up over a handful of devices, so the getenv costs nothing, and a
+  // cached value cannot be tested in both directions from one process.
+  const char* env = std::getenv("IVI_DRMVK_ALLOW_SOFTWARE");
+  return env != nullptr && std::string_view(env) == "1";
+}
 
 DeviceCaps ProbeDeviceCaps(const std::string& display_device,
                            std::string& refusal_reason) {
@@ -135,8 +146,11 @@ DeviceCaps ProbeDeviceCaps(const std::string& display_device,
 
     if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU ||
         NameLooksLikeSoftware(props.deviceName)) {
-      last_miss = std::string(props.deviceName) + " is a CPU/software renderer";
-      continue;
+      if (!AllowSoftwareRenderer()) {
+        last_miss =
+            std::string(props.deviceName) + " is a CPU/software renderer";
+        continue;
+      }
     }
 
     uint32_t ext_count = 0;
