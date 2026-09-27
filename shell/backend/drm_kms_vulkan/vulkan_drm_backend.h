@@ -274,6 +274,29 @@ class VulkanDrmBackend final : public Backend {
   bool CollectBackingStoreImpl(const FlutterBackingStore* store);
   bool PresentLayersImpl(const FlutterLayer** layers, size_t count);
 
+#if defined(UNIT_TEST)
+ public:
+  /// The engine's compositor entry points, reachable from a test. A fixture
+  /// stands in for the engine: it takes a backing store, draws nothing into it,
+  /// and presents it, which is enough to drive a real commit and a real flip.
+  bool CreateBackingStoreForTest(const FlutterBackingStoreConfig* config,
+                                 FlutterBackingStore* out) {
+    return CreateBackingStoreImpl(config, out);
+  }
+  bool CollectBackingStoreForTest(const FlutterBackingStore* store) {
+    return CollectBackingStoreImpl(store);
+  }
+  bool PresentLayersForTest(const FlutterLayer** layers, const size_t count) {
+    return PresentLayersImpl(layers, count);
+  }
+  /// Frames this backend has committed, so a test can prove it presented
+  /// rather than passing on a return value alone. Defined out of line:
+  /// CompositorState is only complete inside the implementation.
+  [[nodiscard]] uint64_t PresentedFramesForTest() const;
+
+ private:
+#endif
+
   std::string drm_device_;
 
   // wayland-leased-drm: a borrowed DRM fd to use instead of opening
