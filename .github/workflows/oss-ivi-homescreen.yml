@@ -79,6 +79,20 @@ jobs:
           ninja -C . package
           ls -la _packages
 
+      # The C++ dependencies are submodules and carry no package metadata, so a
+      # scanner walking the tree reports nothing. Generated here rather than
+      # committed, so it cannot drift from .gitmodules.
+      - name: Generate SBOM
+        run: |
+          python3 scripts/gen_sbom.py --output homescreen.cdx.json
+          python3 -c "import json;d=json.load(open('homescreen.cdx.json'));print(len(d['components']),'components')"
+
+      - name: Publish SBOM
+        uses: actions/upload-artifact@v7
+        with:
+          name: homescreen.cdx.json
+          path: homescreen.cdx.json
+
       - name: Publish Debug Artifact TGZ
         uses: actions/upload-artifact@v7
         with:
