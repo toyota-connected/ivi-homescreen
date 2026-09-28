@@ -293,6 +293,14 @@ class VulkanDrmBackend final : public Backend {
   /// rather than passing on a return value alone. Defined out of line:
   /// CompositorState is only complete inside the implementation.
   [[nodiscard]] uint64_t PresentedFramesForTest() const;
+  /// The presentation serial the next flip event will report. Defined out of
+  /// line for the same reason.
+  [[nodiscard]] uint64_t PresentationSerialForTest() const;
+  /// Runs on the raster thread right after a commit ioctl returns, with the
+  /// flip in flight -- the window in which its event may be dispatched. A test
+  /// reads the serial here: that is the value OnFlipEvent would use, so this is
+  /// where a serial published too late is visible. Never set outside tests.
+  std::function<void()> on_commit_returned_;
 
  private:
 #endif
@@ -545,7 +553,62 @@ class VulkanDrmBackend final : public Backend {
 
   // A commit just landed: hand the frame's presentation notes to the tracker
   // under a new serial, and report them at once when no flip event follows.
-  static void CommitPresentation(CompositorState& c, bool blocking);
+  // Presentation notes and their serial, staged *before* the commit.
+  //
+  // OnFlipEvent names the serial a flip carried by reading
+  // c.presentation_serial, and every commit here is NONBLOCK -- so a serial
+  // published after the ioctl means an event dispatched before we return names
+  // serial-1, a frame already reported, while the frame on screen goes
+  // unreported. The skew is permanent: each commit adds one serial and each
+  // event consumes one, so the offset never closes and every later flip reports
+  // the frame before the one it showed. Same defect and same fix as the EGL
+  // backend's.
+  static uint64_t StagePresentation(CompositorState& c);
+  // The commit was accepted. Reports inline when it was blocking, because no
+  // flip event will follow one.
+  static void SettlePresentation(CompositorState& c,
+                                 uint64_t serial,
+                                 bool blocking);
+  // The commit never happened: roll the serial back and return the notes to the
+  // frame being built. Safe because a present waits out the previous flip
+  // before committing, so no event is outstanding -- the only event this serial
+  // could name is the one that will never arrive.
+  static void WithdrawPresentation(CompositorState& c, uint64_t serial);
+
+  // Stages the notes before a commit and withdraws them unless it was accepted.
+  class ScopedPresentation {
+   public:
+    ScopedPresentation(CompositorState& c, const bool blocking)
+        : c_(c), serial_(StagePresentation(c)), blocking_(blocking) {}
+    ~ScopedPresentation() { Abort(); }
+
+    ScopedPresentation(const ScopedPresentation&) = delete;
+    ScopedPresentation& operator=(const ScopedPresentation&) = delete;
+    ScopedPresentation(ScopedPresentation&&) = delete;
+    ScopedPresentation& operator=(ScopedPresentation&&) = delete;
+
+    void Commit() noexcept {
+      if (!live_) {
+        return;
+      }
+      live_ = false;
+      SettlePresentation(c_, serial_, blocking_);
+    }
+    void Abort() noexcept {
+      if (!live_) {
+        return;
+      }
+      live_ = false;
+      WithdrawPresentation(c_, serial_);
+    }
+    [[nodiscard]] uint64_t serial() const noexcept { return serial_; }
+
+   private:
+    CompositorState& c_;
+    uint64_t serial_;
+    bool blocking_;
+    bool live_{true};
+  };
 
   // Remove every scene layer ReconcilePlaneLayers added and forget them.
   static void DropPlaneLayers(CompositorState& c);

@@ -209,6 +209,43 @@ TEST_F(VulkanDrmVkms, APresentedFrameReachesTheDisplay) {
       << "five presents returned true but the backend committed fewer frames";
 }
 
+// The serial a flip event will report must already name this frame by the time
+// the commit is in flight.
+//
+// OnFlipEvent reads c.presentation_serial to say which frame a flip showed.
+// That serial used to be published after the commit returned, and every commit
+// here is NONBLOCK -- so an event dispatched before the raster thread got back
+// named serial-1, a frame already reported, while the frame on screen went
+// unreported. The skew is permanent: each commit adds one serial and each event
+// consumes one.
+//
+// on_commit_returned_ runs on the raster thread with the flip in flight, which
+// is precisely where the event would read it. Asserting there needs no producer
+// and no real flip -- the value at that instant is the whole question.
+TEST_F(VulkanDrmVkms, TheSerialNamesThisFrameWhileItsCommitIsInFlight) {
+  ASSERT_TRUE(PresentOneFrame()) << "the first present is the blocking modeset";
+
+  const uint64_t before = backend_->PresentationSerialForTest();
+  ASSERT_GT(before, 0u) << "no serial was ever staged, so this case cannot run";
+
+  uint64_t seen_in_flight = 0;
+  int hook_runs = 0;
+  backend_->on_commit_returned_ = [this, &seen_in_flight, &hook_runs] {
+    ++hook_runs;
+    seen_in_flight = backend_->PresentationSerialForTest();
+  };
+  const bool presented = PresentOneFrame();
+  backend_->on_commit_returned_ = nullptr;
+  ASSERT_TRUE(presented);
+  ASSERT_EQ(hook_runs, 1) << "the hook never ran, so nothing was observed";
+
+  EXPECT_EQ(seen_in_flight, before + 1)
+      << "while this frame's commit was in flight the serial still named the "
+         "previous frame, so a flip event dispatched then would report the "
+         "wrong "
+         "one -- and every later flip would too";
+}
+
 int main(int argc, char** argv) {
   IHS_LOGGING_START("TEST", "drm_kms_vulkan vkms test");
   ::testing::InitGoogleTest(&argc, argv);
