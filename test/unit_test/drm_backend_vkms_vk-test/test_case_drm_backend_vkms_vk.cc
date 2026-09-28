@@ -246,6 +246,46 @@ TEST_F(VulkanDrmVkms, TheSerialNamesThisFrameWhileItsCommitIsInFlight) {
          "one -- and every later flip would too";
 }
 
+// A VT switch must be survivable: master goes away, comes back, and the display
+// has to return.
+//
+// This backend registered no libseat pause/resume handlers at all -- it stored
+// the session and never used it -- so it kept committing into a revoked fd, its
+// layer sources kept fd-bound state a resume invalidates, and nothing
+// re-established the mode on the way back. The EGL backend has had this since
+// drm_backend.cc:319; this is the Vulkan half.
+//
+// Driven directly rather than through libseat: the fixture has no seat (the
+// backend self-acquires master), and what matters is the state either side of
+// the callbacks, not who invoked them.
+TEST_F(VulkanDrmVkms, AVtSwitchLeavesTheBackendAbleToPresent) {
+  ASSERT_TRUE(PresentOneFrame()) << "the first present is the blocking modeset";
+  ASSERT_TRUE(PresentOneFrame()) << "and a steady-state flip after it";
+  const uint64_t before = backend_->PresentedFramesForTest();
+
+  // Force it up rather than hoping the last flip's event has not landed yet:
+  // otherwise the assertion below passes whether pause clears the latch or not.
+  backend_->SetFlipPendingForTest(true);
+  ASSERT_TRUE(backend_->FlipPendingForTest());
+
+  backend_->OnSessionPaused();
+  EXPECT_TRUE(backend_->SessionPaused());
+  EXPECT_FALSE(backend_->FlipPendingForTest())
+      << "no flip event is coming for a commit made before the revoke, so the "
+         "latch it raised must not stand";
+
+  backend_->OnSessionResumed(backend_->DrmFdForTest());
+  EXPECT_FALSE(backend_->SessionPaused());
+  EXPECT_FALSE(backend_->FlipPendingForTest());
+
+  // The real assertion: frames again. Without a resume that puts first_commit
+  // back, the next commit is a plain non-blocking flip against a CRTC whose
+  // mode went away with master.
+  EXPECT_TRUE(PresentOneFrame()) << "nothing presented after the switch back";
+  EXPECT_GT(backend_->PresentedFramesForTest(), before)
+      << "the backend returned true but committed nothing after resume";
+}
+
 int main(int argc, char** argv) {
   IHS_LOGGING_START("TEST", "drm_kms_vulkan vkms test");
   ::testing::InitGoogleTest(&argc, argv);

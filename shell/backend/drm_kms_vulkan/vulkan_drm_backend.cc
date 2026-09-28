@@ -63,6 +63,7 @@
 #if BUILD_HUD
 #include "backend/hud/vulkan_hud.h"
 #endif
+#include "backend/drm_kms_egl/drm_session.h"
 #include "backend/drm_kms_vulkan/device_caps.h"
 #include "backend/drm_kms_vulkan/drm_scanout_target.h"
 #include "backend/drm_kms_vulkan/modifier_format.h"
@@ -553,6 +554,14 @@ std::shared_ptr<VulkanDrmBackend> VulkanDrmBackend::FinishCreate(
         "[VulkanDrmBackend] compositor setup failed; refusing to start: {}",
         err);
     return nullptr;
+  }
+  // Wire the session lifecycle now that the compositor exists, the way the EGL
+  // backend does. DrmSeat installs its own pair for libinput separately.
+  if (backend->session_ != nullptr) {
+    VulkanDrmBackend* raw = backend.get();
+    backend->session_->AddPauseHandler([raw]() { raw->OnSessionPaused(); });
+    backend->session_->AddResumeHandler(
+        [raw](int new_fd) { raw->OnSessionResumed(new_fd); });
   }
   return backend;
 }
@@ -1583,12 +1592,87 @@ uint64_t VulkanDrmBackend::PresentedFramesForTest() const {
   return compositor_ ? compositor_->frame : 0;
 }
 
+bool VulkanDrmBackend::FlipPendingForTest() const {
+  return compositor_ &&
+         compositor_->flip_pending.load(std::memory_order_acquire);
+}
+
+void VulkanDrmBackend::SetFlipPendingForTest(const bool pending) {
+  if (compositor_) {
+    compositor_->flip_pending.store(pending, std::memory_order_release);
+    vsync_.SetSourcePending(pending);
+  }
+}
+
+int VulkanDrmBackend::DrmFdForTest() const {
+  return compositor_ ? compositor_->device.fd() : -1;
+}
+
 uint64_t VulkanDrmBackend::PresentationSerialForTest() const {
   return compositor_
              ? compositor_->presentation_serial.load(std::memory_order_acquire)
              : 0;
 }
 #endif
+
+void VulkanDrmBackend::OnSessionPaused() {
+  ihs::log::info("[VulkanDrmBackend] session paused (VT switch-out)");
+  session_paused_.store(true, std::memory_order_release);
+  CompositorState* c = compositor_.get();
+  if (c == nullptr) {
+    return;
+  }
+  // No PAGE_FLIP_EVENT will arrive for a commit made before the revoke, so the
+  // latch it raised would otherwise stand until something else cleared it.
+  // Both halves: this backend mirrors the latch into the provider, and leaving
+  // either set keeps the next baton parked.
+  c->flip_pending.store(false, std::memory_order_release);
+  vsync_.SetSourcePending(false);
+  // Let the layer sources drop fd-bound state before the kernel takes the fd
+  // out from under them. Infallible per the LayerBufferSource contract.
+  if (c->scene) {
+    c->scene->on_session_paused();
+  }
+}
+
+void VulkanDrmBackend::OnSessionResumed(const int new_fd) {
+  ihs::log::info("[VulkanDrmBackend] session resumed (VT switch-in, fd={})",
+                 new_fd);
+  session_paused_.store(false, std::memory_order_release);
+  CompositorState* c = compositor_.get();
+  if (c == nullptr) {
+    return;
+  }
+  // preserve-fd contract, as on the EGL side: per-fd state (FB ids, the
+  // property cache, the scene's plane bindings) only survives if the fd did.
+  if (c->device.fd() != new_fd) {
+    ihs::log::error(
+        "[VulkanDrmBackend] resume: fd changed ({} -> {}) — preserve-fd "
+        "contract violated; per-fd state is stale and the next commit will "
+        "likely fail",
+        c->device.fd(), new_fd);
+  }
+  if (c->scene) {
+    if (auto r = c->scene->on_session_resumed(c->device); !r) {
+      ihs::log::error("[VulkanDrmBackend] resume: scene rebind failed ({})",
+                      r.error().message());
+    }
+  }
+  // The CRTC state went away with master. Make the next commit the same kind
+  // the first one was -- blocking, ALLOW_MODESET, no flip event -- by putting
+  // first_commit back, which is what re-establishes the mode. The slot
+  // bookkeeping goes with it: nothing is scanning out any more.
+  c->first_commit = true;
+  c->plane_topology_changed = true;
+  c->scanning_slot = -1;
+  c->pending_slot = -1;
+  c->flip_pending.store(false, std::memory_order_release);
+  vsync_.SetSourcePending(false);
+  // A baton parked before the revoke has nothing coming to return it: that
+  // blocking re-modeset sends no event either, so hand it back here or the
+  // display stays dark after the switch back.
+  (void)vsync_.DeliverParkedBaton();
+}
 
 void VulkanDrmBackend::OnFlipEvent(const unsigned int sequence,
                                    const unsigned int tv_sec,
