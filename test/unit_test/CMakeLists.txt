@@ -235,6 +235,9 @@ endif ()
 # test has nothing to link against without it.
 if (BUILD_BACKEND_DRM_KMS_VULKAN)
     add_subdirectory(vk_software_gate-test)
+    # A real VulkanDrmBackend on a vkms card. Skips itself when no vkms card is
+    # loaded or no Vulkan device can import dma-buf, so it is safe in CI.
+    add_subdirectory(drm_backend_vkms_vk-test)
 endif ()
 add_subdirectory(timer-test)
 add_subdirectory(watchdog-test)

@@ -1578,6 +1578,12 @@ void VulkanDrmBackend::ArmFlipRead() {
                          });
 }
 
+#if defined(UNIT_TEST)
+uint64_t VulkanDrmBackend::PresentedFramesForTest() const {
+  return compositor_ ? compositor_->frame : 0;
+}
+#endif
+
 void VulkanDrmBackend::OnFlipEvent(const unsigned int sequence,
                                    const unsigned int tv_sec,
                                    const unsigned int tv_usec) {
