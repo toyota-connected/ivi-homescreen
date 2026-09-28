@@ -1582,6 +1582,12 @@ void VulkanDrmBackend::ArmFlipRead() {
 uint64_t VulkanDrmBackend::PresentedFramesForTest() const {
   return compositor_ ? compositor_->frame : 0;
 }
+
+uint64_t VulkanDrmBackend::PresentationSerialForTest() const {
+  return compositor_
+             ? compositor_->presentation_serial.load(std::memory_order_acquire)
+             : 0;
+}
 #endif
 
 void VulkanDrmBackend::OnFlipEvent(const unsigned int sequence,
@@ -2071,12 +2077,27 @@ std::pair<size_t, size_t> VulkanDrmBackend::FramePlaneDemand(
   return {needed, shape};
 }
 
-void VulkanDrmBackend::CommitPresentation(CompositorState& c,
-                                          const bool blocking) {
+uint64_t VulkanDrmBackend::StagePresentation(CompositorState& c) {
   const uint64_t serial =
       c.presentation_serial.load(std::memory_order_relaxed) + 1;
   c.presentation.Commit(serial);
+  // Both before the ioctl. See the header: published afterwards, an early event
+  // names serial-1 and the offset never closes.
   c.presentation_serial.store(serial, std::memory_order_release);
+  return serial;
+}
+
+void VulkanDrmBackend::WithdrawPresentation(CompositorState& c,
+                                            const uint64_t serial) {
+  // Unpublish first, then give the notes back: a flip racing this reads
+  // serial-1, which is the frame on screen.
+  c.presentation_serial.store(serial - 1, std::memory_order_release);
+  c.presentation.Withdraw(serial);
+}
+
+void VulkanDrmBackend::SettlePresentation(CompositorState& c,
+                                          const uint64_t serial,
+                                          const bool blocking) {
   if (blocking) {
     // A blocking commit has taken effect when it returns and sends no event.
     timespec ts{};
@@ -3124,6 +3145,9 @@ bool VulkanDrmBackend::CommitPlaneFrame(CompositorState& c,
   // good (#649). Mirrors into SetSourcePending, which is this backend's gate.
   ScopedFlipArm arm(c.flip_pending, vsync_, !modeset, /*drives_vsync=*/true,
                     /*mirror_source_pending=*/true);
+  // Staged before the ioctl for the same reason as the latch: the flip event
+  // reads c.presentation_serial to name what it showed.
+  ScopedPresentation pres(c, modeset);
   if (auto report = c.scene->commit(flags, this); !report) {
     ihs::log::error("[VulkanDrmBackend] plane commit: {}",
                     report.error().message());
@@ -3132,6 +3156,7 @@ bool VulkanDrmBackend::CommitPlaneFrame(CompositorState& c,
     ihs::log::warn(
         "[VulkanDrmBackend] plane layers off for this session after a commit "
         "failure; blending from here");
+    pres.Abort();
     return false;
   }
   // Say so once, positively. Everything else about this path is visible only
@@ -3144,7 +3169,15 @@ bool VulkanDrmBackend::CommitPlaneFrame(CompositorState& c,
         assigned);
   }
   c.plane_topology_changed = false;
-  CommitPresentation(c, modeset);
+#if defined(UNIT_TEST)
+  // The commit is in flight; on the pre-fix ordering the serial still names the
+  // previous frame at this point, which is exactly what the flip event would
+  // read. A test observes it here.
+  if (on_commit_returned_) {
+    on_commit_returned_();
+  }
+#endif
+  pres.Commit();
   if (modeset) {
     // Blocking modeset: no flip event, so these slots are already scanning.
     c.first_commit = false;
@@ -3260,12 +3293,25 @@ bool VulkanDrmBackend::PresentSlot(const size_t slot,
   // to know what this commit was, not what the next one will be.
   ScopedFlipArm arm(c.flip_pending, vsync_, !ring_modeset,
                     /*drives_vsync=*/true, /*mirror_source_pending=*/true);
+  // Staged before the ioctl, and keyed on ring_modeset for the same reason the
+  // arm is: the branch below clears first_commit, so reading it after the
+  // commit describes the next frame rather than this one.
+  ScopedPresentation pres(c, ring_modeset);
   // Pass `this` as the flip user_data so the event routes to OnFlipEvent.
   if (auto report = c.scene->commit(flags, this); !report) {
     ihs::log::error("[VulkanDrmBackend] commit: {}", report.error().message());
+    pres.Abort();
     return false;
   }
-  CommitPresentation(c, c.first_commit);
+#if defined(UNIT_TEST)
+  // The commit is in flight; on the pre-fix ordering the serial still names the
+  // previous frame at this point, which is exactly what the flip event would
+  // read. A test observes it here.
+  if (on_commit_returned_) {
+    on_commit_returned_();
+  }
+#endif
+  pres.Commit();
   if (c.first_commit) {
     // Blocking modeset: no flip event. Leave the source not-pending so the
     // provider drains the next baton inline and the async loop starts.
