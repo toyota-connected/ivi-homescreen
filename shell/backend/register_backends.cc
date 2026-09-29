@@ -602,7 +602,8 @@ std::shared_ptr<Backend> MakeDrmVulkanBackend(
           : VulkanDrmBackend::Create(
                 drm_display->device_path(),
                 config.debug_backend.value_or(false), drm_display->session(),
-                drm_mode, drm_connector, config.view.drm_rotation.value_or(0),
+                drm_display->SharedDevice(), drm_mode, drm_connector,
+                config.view.drm_rotation.value_or(0),
                 ParseTriState(config.view.drm_explicit_sync));
 
   // Create returns nullptr on any init failure (unsupported device, no

@@ -132,9 +132,14 @@ class VulkanDrmVkms : public ::testing::Test {
     // acquires DRM master itself; a DrmDisplay would take master first and
     // Create would then refuse with EACCES against our own handle -- which
     // reads exactly like "another display server holds this card".
+    // No session and no shared device: the backend opens the card and takes
+    // master itself, which is the --drm-no-seat arrangement. Handing it a
+    // DrmDisplay's device instead would mean master was already held, and
+    // Create would refuse against our own handle.
     backend_ = VulkanDrmBackend::Create(
         card_.path, /*enable_validation=*/false, /*session=*/nullptr,
-        /*mode_spec=*/"", /*connector_name=*/"", /*rotation=*/0);
+        /*shared_device=*/nullptr, /*mode_spec=*/"", /*connector_name=*/"",
+        /*rotation=*/0);
     if (backend_ == nullptr) {
       // No Vulkan loader, or no device that can import dma-buf at all. A skip,
       // not a failure: the host simply cannot run this backend.
