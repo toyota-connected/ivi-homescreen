@@ -693,6 +693,36 @@ jobs:
         working-directory: ${{github.workspace}}/build/unit-tests-release
         run: ctest --output-on-failure --test-dir .
 
+      # Every other unit-test leg here builds with GCC, where the `toolchain`
+      # target selects no C++ standard library and googletest and its consumers
+      # cannot disagree about one. Under clang it selects libc++, and a driver
+      # that links gtest without also picking up the toolchain compiled against
+      # the default libstdc++ and failed to resolve gtest's std::__1:: symbols.
+      # Nine drivers did exactly that and no CI leg ever built them.
+      #
+      # layer_geometry-test is the minimal case and is configured
+      # unconditionally: one translation unit, gtest_main, no shell sources and
+      # no backend. Building and running it under clang costs seconds and is
+      # enough to catch a googletest ABI that consumers are not told about.
+      - name: Configure (clang, googletest ABI)
+        env:
+          CC: clang-19
+          CXX: clang++-19
+        run: |
+          cmake -GNinja \
+            -B ${{github.workspace}}/build/unit-tests-clang \
+            -D CMAKE_BUILD_TYPE=Debug \
+            -D BUILD_UNIT_TESTS=ON \
+            -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging-clang/usr/local \
+            -D BUILD_NUMBER=${GITHUB_RUN_ID}
+
+      - name: Build and run one driver (clang)
+        working-directory: ${{github.workspace}}/build/unit-tests-clang
+        run: |
+          ninja -C . homescreen_layer_geometry_ut_test_driver
+          ctest --output-on-failure --test-dir . \
+            -R homescreen_layer_geometry_ut_test_driver
+
       - name: Capture coverage data
         working-directory: ${{github.workspace}}/build/unit-tests
         run: |
