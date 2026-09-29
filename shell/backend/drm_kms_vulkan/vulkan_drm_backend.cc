@@ -578,6 +578,10 @@ std::shared_ptr<VulkanDrmBackend> VulkanDrmBackend::FinishCreate(
     backend->session_->AddResumeHandler(
         [raw](int new_fd) { raw->OnSessionResumed(new_fd); });
   }
+  // Built here rather than when the task runner arrives, so it is never null on
+  // a live backend -- a null one would make every tick a silent no-op, which a
+  // test would read as "no stall detected".
+  backend->BuildStallDetector();
   return backend;
 }
 
@@ -1744,6 +1748,7 @@ void VulkanDrmBackend::OnFlipEvent(const unsigned int sequence,
   }
   c->flip_pending.store(false, std::memory_order_release);
   vsync_.SetSourcePending(false);
+  stall_->NoteFlip();  // progress, for the stall detector
   const uint64_t tv_ns = static_cast<uint64_t>(tv_sec) * 1'000'000'000ULL +
                          static_cast<uint64_t>(tv_usec) * 1000ULL;
   // The kernel's vblank timestamp for a flip the display completed.
@@ -1763,8 +1768,45 @@ void VulkanDrmBackend::OnFlipEvent(const unsigned int sequence,
   vsync_.DeliverVsync(tv_ns);  // returns the baton, marshaled onto the runner
 }
 
+void VulkanDrmBackend::SetPlatformTaskRunner(TaskRunner* runner) {
+  platform_task_runner_.store(runner, std::memory_order_release);
+  vsync_.SetEngine(engine_handle_.load(std::memory_order_acquire), runner);
+
+  // The detector lives on the same io_context as the flip reader, which is
+  // running exactly when the present path has stopped.
+  if (runner != nullptr && runner->GetIoContext() != nullptr) {
+    stall_->Start(*runner->GetIoContext());
+  }
+}
+
+void VulkanDrmBackend::BuildStallDetector() {
+  // Both latches, not either. This backend mirrors flip_pending into the
+  // provider's source_pending_, and SubmitBaton gates on the provider's copy:
+  // clearing only flip_pending hands the waiting baton back and parks the next
+  // one forever, which reads as a recovery in the log and leaves the display
+  // just as stuck.
+  stall_ = std::make_unique<StallDetector>(
+      vsync_, session_paused_,
+      [this]() {
+        CompositorState* c = compositor_.get();
+        if (c == nullptr) {
+          return false;
+        }
+        const bool was_up =
+            c->flip_pending.exchange(false, std::memory_order_acq_rel);
+        vsync_.SetSourcePending(false);
+        return was_up;
+      },
+      "VulkanDrmBackend");
+}
+
 void VulkanDrmBackend::StopVsyncMonitor() {
   platform_task_runner_.store(nullptr, std::memory_order_release);
+
+  // Before vsync_.Stop(): an async_wait left outstanding keeps the
+  // io_context's worker thread from finishing.
+  stall_->Stop();
+
   if (compositor_) {
     compositor_->StopFlipReader();
   }

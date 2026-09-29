@@ -21,11 +21,13 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+
 #include <mutex>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include "asio/steady_timer.hpp"
 
 #include <vulkan/vulkan.h>
 
@@ -202,10 +204,9 @@ class VulkanDrmBackend final : public Backend {
     vsync_.SetEngine(engine,
                      platform_task_runner_.load(std::memory_order_acquire));
   }
-  void SetPlatformTaskRunner(TaskRunner* runner) override {
-    platform_task_runner_.store(runner, std::memory_order_release);
-    vsync_.SetEngine(engine_handle_.load(std::memory_order_acquire), runner);
-  }
+  // Out of line: it arms the stall detector, whose timer needs the runner's
+  // io_context.
+  void SetPlatformTaskRunner(TaskRunner* runner) override;
   void SetVsyncParked(const bool parked) override { vsync_.SetParked(parked); }
 
   // ─── libseat session lifecycle (VT switch) ───────────────────────────────
@@ -230,6 +231,15 @@ class VulkanDrmBackend final : public Backend {
 
   void StopVsyncMonitor() override;
 
+ private:
+  // Lost-flip-event recovery, shared with the EGL backend (#660). Built out of
+  // line in FinishCreate: its ClearLatch hook clears both this backend's latch
+  // and the provider copy it mirrors into, and CompositorState is only complete
+  // in the implementation. Never null on a backend Create returned.
+  void BuildStallDetector();
+  std::unique_ptr<StallDetector> stall_;
+
+ public:
   [[nodiscard]] uint32_t width() const { return width_; }
   [[nodiscard]] uint32_t height() const { return height_; }
   // Scanout rotation in degrees (0|90|180|270). FlutterView forwards it to the
@@ -348,6 +358,18 @@ class VulkanDrmBackend final : public Backend {
   /// reads the serial here: that is the value OnFlipEvent would use, so this is
   /// where a serial published too late is visible. Never set outside tests.
   std::function<void()> on_commit_returned_;
+
+  /// One detector tick, without waiting out the real threshold.
+  void CheckForStallForTest() { stall_->Tick(); }
+  /// Stalls this backend recovered from.
+  [[nodiscard]] uint64_t StallRecoveriesForTest() const {
+    return stall_->recoveries();
+  }
+  /// Flip events handled -- the progress signal the detector keys on.
+  [[nodiscard]] uint64_t FlipsHandledForTest() const { return stall_->flips(); }
+  /// The provider whose baton both latches gate, so a case can submit one and
+  /// see whether it comes back.
+  [[nodiscard]] ivi::IVsyncProvider& VsyncForTest() { return vsync_; }
 
  private:
 #endif
