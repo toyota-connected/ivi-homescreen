@@ -18,6 +18,7 @@
 
 #include <cstdlib>
 #include <ctime>
+#include <string_view>
 
 #include "logging/logging.h"
 
@@ -79,10 +80,19 @@ void FrameProfile::Stats::Merge(const Stats& other) {
 }
 
 bool FrameProfile::Enabled(const char* legacy_env) {
-  if (std::getenv("IVI_PROFILE") != nullptr) {
+  // `== "1"`, on DrmBackend::LogPresentedFrame's terms rather than a looser
+  // reading of its own: presence used to be enough here, so IVI_PROFILE=0
+  // switched profiling *on*, and the obvious way to disable it was the one
+  // way that did not. One spelling across the shell means a reader who knows
+  // what IVI_DRM_PRESENT_COUNT=1 does knows what this does.
+  const auto asked_for = [](const char* name) {
+    const char* value = std::getenv(name);
+    return value != nullptr && std::string_view(value) == "1";
+  };
+  if (asked_for("IVI_PROFILE")) {
     return true;
   }
-  return legacy_env != nullptr && std::getenv(legacy_env) != nullptr;
+  return legacy_env != nullptr && asked_for(legacy_env);
 }
 
 void FrameProfile::Record(const std::string_view label,
@@ -110,7 +120,8 @@ void FrameProfile::Record(const std::string_view label,
   }
   const uint64_t mean_ns =
       MeanIntervalNs(window_.interval_sum_ns, window_.frames);
-  ihs::log::info(
+  // Debug, not info: repeats every window for the life of the process.
+  ihs::log::debug(
       "[{}] profile (n={}): fps={:.2f} mean_interval={}us max_interval={}us "
       "discarded={} stalls={} buckets[60Hz/30Hz/20Hz/slow/idle]={}/{}/{}/{}/{}",
       label, window_.frames, FpsFromMean(mean_ns), mean_ns / 1000,

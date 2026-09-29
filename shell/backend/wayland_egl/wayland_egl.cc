@@ -658,7 +658,8 @@ void WaylandEglBackend::RecordSwapDuration(const uint64_t swap_ns) {
 
   // Flush a window every 60 swaps, mirroring the frame-interval profiler.
   if (auto& w = swap_profile_; w.samples >= 60) {
-    ihs::log::info(
+    // Debug, not info: repeats every window for the life of the process.
+    ihs::log::debug(
         "[WaylandEglBackend] swap profile (n={}): mean={}us max={}us "
         "blocked(>2ms)={} ({:.1f}%)",
         w.samples, (w.sum_ns / w.samples) / 1000, w.max_ns / 1000, w.blocked,

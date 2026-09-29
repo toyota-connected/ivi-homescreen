@@ -3537,7 +3537,8 @@ bool VulkanDrmBackend::PresentSlot(const size_t slot,
       const auto max_ms = [](const uint64_t v) {
         return static_cast<double>(v) / 1e6;
       };
-      ihs::log::info(
+      // Debug, not info: repeats every window for the life of the process.
+      ihs::log::debug(
           "[VulkanDrmBackend] stage profile (n={}): barrier={:.2f}ms (max "
           "{:.2f})  wait={:.2f}ms (max {:.2f})  commit={:.2f}ms (max {:.2f})  "
           "total={:.2f}ms (max {:.2f})",

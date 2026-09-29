@@ -2338,7 +2338,8 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
       const auto ms_max = [](uint64_t ns) {
         return static_cast<double>(ns) / 1e6;
       };
-      ihs::log::info(
+      // Debug, not info: repeats every window for the life of the process.
+      ihs::log::debug(
           "[DrmCompositor] framed profile (n={}): "
           "wait={:.2f}ms (max {:.2f})  compose={:.2f}ms (max {:.2f})  "
           "test={:.2f}ms (max {:.2f})  commit={:.2f}ms (max {:.2f})  "
@@ -3119,7 +3120,8 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
       const auto ms_max = [](uint64_t ns) {
         return static_cast<double>(ns) / 1e6;
       };
-      ihs::log::info(
+      // Debug, not info: repeats every window for the life of the process.
+      ihs::log::debug(
           "[DrmCompositor] planes profile (n={}): "
           "wait={:.2f}ms (max {:.2f})  compose={:.2f}ms (max {:.2f})  "
           "commit={:.2f}ms (max {:.2f})  total={:.2f}ms (max {:.2f})",
@@ -4099,7 +4101,8 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       const auto ms_max = [](uint64_t ns) {
         return static_cast<double>(ns) / 1e6;
       };
-      ihs::log::info(
+      // Debug, not info: repeats every window for the life of the process.
+      ihs::log::debug(
           "[DrmCompositor] scene profile (n={}): wait={:.2f}ms (max {:.2f})  "
           "compose={:.2f}ms (max {:.2f})  commit={:.2f}ms (max {:.2f})  "
           "total={:.2f}ms (max {:.2f})",
@@ -4577,7 +4580,8 @@ bool DrmCompositor::PresentDirectOverlay(const FlutterLayer** layers,
       const auto ms_max = [](uint64_t ns) {
         return static_cast<double>(ns) / 1e6;
       };
-      ihs::log::info(
+      // Debug, not info: repeats every window for the life of the process.
+      ihs::log::debug(
           "[DrmCompositor] direct-overlay profile (n={}): wait={:.2f}ms (max "
           "{:.2f})  sync={:.2f}ms (max {:.2f})  commit={:.2f}ms (max {:.2f})  "
           "total={:.2f}ms (max {:.2f})",
