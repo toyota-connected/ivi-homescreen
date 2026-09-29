@@ -30,17 +30,57 @@ namespace ihs::dlt {
 
 namespace {
 
+// Whether a `..` component appears anywhere in the path.
+//
+// IHS_LOG_FILE names a file this process will append to, rename and delete --
+// see RotatingFileSink::rotate, which moves the live path aside and removes
+// the oldest kept file. A traversal component turns "the log directory a
+// deployment picked" into any path reachable from it, so a path carrying one
+// is refused outright rather than normalized: there is no legitimate reason
+// for a configured log destination to climb out of its own directory, and
+// refusing is the answer that cannot be wrong.
+bool has_dotdot(const std::string& path) noexcept {
+  std::size_t at = 0;
+  while (at < path.size()) {
+    std::size_t end = path.find('/', at);
+    if (end == std::string::npos) {
+      end = path.size();
+    }
+    if (end - at == 2 && path[at] == '.' && path[at + 1] == '.') {
+      return true;
+    }
+    at = end + 1;
+  }
+  return false;
+}
+
 // Open the log file for appending with defensive flags: O_NOFOLLOW refuses a
 // symlink at the final path component (an attacker cannot redirect our append
 // to an arbitrary file), O_CLOEXEC keeps the fd from leaking across exec, and
 // mode 0600 keeps a freshly created log from being world-readable (logs may
 // carry sensitive data). Returns nullptr on any failure; the caller then falls
 // back to the console sink.
+//
+// The fstat afterwards is the half O_NOFOLLOW does not cover. That flag
+// refuses a *symlink* at the final component and says nothing about what the
+// component otherwise is, so `IHS_LOG_FILE=/dev/sda` opens the block device
+// and appends to it, and a FIFO blocks the writer on a reader that may never
+// come. Requiring a regular file costs one syscall at open and removes both:
+// every path this sink is meant to take is a regular file, and the fd is
+// already open, so the check cannot be raced by a swap after the fact.
 std::FILE* open_append(const std::string& path) noexcept {
+  if (path.empty() || has_dotdot(path)) {
+    return nullptr;
+  }
   const int fd =
       ::open(path.c_str(),
              O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
   if (fd < 0) {
+    return nullptr;
+  }
+  struct stat st{};
+  if (::fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+    ::close(fd);
     return nullptr;
   }
   std::FILE* fp = ::fdopen(fd, "a");

@@ -289,8 +289,16 @@ void Display::HandleGlobal(wl::CRegistry& reg,
     // be compat with v2 as well
 #if defined(WL_OUTPUT_NAME_SINCE_VERSION) && \
     defined(WL_OUTPUT_DESCRIPTION_SINCE_VERSION)
-    if (version >= WL_OUTPUT_NAME_SINCE_VERSION &&
-        version >= WL_OUTPUT_DESCRIPTION_SINCE_VERSION)
+    // Both events arrived in wl_output v4, so the two SINCE_VERSIONs are the
+    // same number and testing them separately made the second comparison
+    // unreachable -- always true wherever the first held. The max keeps the
+    // requirement stated as "whichever of the two landed later" without
+    // asserting they are equal, which is the part a future protocol bump
+    // could change.
+    constexpr auto kOutputNamedSince =
+        std::max(static_cast<uint32_t>(WL_OUTPUT_NAME_SINCE_VERSION),
+                 static_cast<uint32_t>(WL_OUTPUT_DESCRIPTION_SINCE_VERSION));
+    if (version >= kOutputNamedSince)
       oi->output = static_cast<wl_output*>(
           wl_registry_bind(registry, name, &wl_output_interface,
                            std::min(static_cast<uint32_t>(4), version)));
