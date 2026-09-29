@@ -35,6 +35,7 @@
 
 #include "asio/posix/stream_descriptor.hpp"
 #include "asio/steady_timer.hpp"
+#include "backend/common/stall_detector.h"
 
 #include <drm-cxx/core/device.hpp>
 
@@ -351,16 +352,12 @@ class DrmBackend : public Backend, public IFlipSink {
   // loses an event (a driver dropping one, a session paused mid-flip).
   //
   // Runs on the task runner's io_context, which is alive precisely when the
-  // present path is not. Detection needs no timestamp: a tick that sees a baton
-  // parked, the latch up, and flips_handled_ unmoved since the previous tick --
-  // which also saw it parked -- has watched a full tick pass with no progress.
-  void ArmStallTimer();
-  void CheckForStall();
-  std::unique_ptr<asio::steady_timer> stall_timer_;
-  uint64_t stall_last_flips_{0};
-  bool stall_last_parked_{false};
-  uint64_t stall_recoveries_{0};
-  bool warned_stall_{false};
+  // present path is not. The policy lives in StallDetector, shared with the
+  // DRM-KMS-Vulkan backend; what is ours is the ClearLatch hook, which has to
+  // pick between the plane compositor's latch and this one. Built in the
+  // constructor, so it is never null and a tick is never a silent no-op.
+  void BuildStallDetector();
+  std::unique_ptr<StallDetector> stall_;
 
   // Unified PAGE_FLIP_EVENT dispatcher (drmModeEventContext.page_flip_handler
   // signature). The card's flip-reader thread (owned by DrmDisplay) registers
@@ -615,9 +612,7 @@ class DrmBackend : public Backend, public IFlipSink {
   /// Count of legacy flip completions handled, so a test can tell when the
   /// reader thread has dispatched a specific flip. Written by the reader,
   /// read by the test.
-  [[nodiscard]] uint64_t FlipsHandledForTest() const {
-    return flips_handled_.load(std::memory_order_acquire);
-  }
+  [[nodiscard]] uint64_t FlipsHandledForTest() const { return stall_->flips(); }
 
   /// Runs on the raster thread immediately after a legacy flip ioctl returns
   /// successfully, while the flip is in flight -- the window in which the
@@ -637,10 +632,10 @@ class DrmBackend : public Backend, public IFlipSink {
     flip_pending_.store(pending, std::memory_order_release);
   }
   /// One detector tick, without waiting out the real threshold.
-  void CheckForStallForTest() { CheckForStall(); }
+  void CheckForStallForTest() { stall_->Tick(); }
   /// Stalls this backend recovered from.
   [[nodiscard]] uint64_t StallRecoveriesForTest() const {
-    return stall_recoveries_;
+    return stall_->recoveries();
   }
 
   [[nodiscard]] bool FlipPendingForTest() const {
@@ -649,7 +644,6 @@ class DrmBackend : public Backend, public IFlipSink {
 
  private:
 #endif
-  std::atomic<uint64_t> flips_handled_{0};
 
 #if BUILD_COMPOSITOR
   std::unique_ptr<DrmCompositor> compositor_{};

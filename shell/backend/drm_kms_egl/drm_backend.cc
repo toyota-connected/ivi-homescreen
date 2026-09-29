@@ -390,6 +390,7 @@ DrmBackend::DrmBackend(DrmConfig cfg, homescreen::DrmSession* session)
   // Motion-to-photon (IVI_M2P_PROFILE): the flip path feeds RecordPresent and
   // DrmSeat feeds RecordInput, both marshaled onto the platform task runner.
   InitMotionToPhoton();
+  BuildStallDetector();
 }
 
 homescreen::ICursorPositionSink* DrmBackend::gl_cursor() const {
@@ -1199,7 +1200,7 @@ bool DrmBackend::TextureClearCurrent() {
 }
 
 void DrmBackend::RecordFlipComplete() {
-  flips_handled_.fetch_add(1, std::memory_order_release);
+  stall_->NoteFlip();
   // Scanout-cadence profiling now lives in vsync_ (recorded per page flip via
   // DeliverVsync under IVI_VSYNC_PROFILE). This is just the debug_backend
   // per-second FPS line.
@@ -1530,96 +1531,21 @@ void DrmBackend::OnFlipEvent(const unsigned int sequence,
   DeliverVsyncFromFlip(tv_sec, tv_usec);
 }
 
-void DrmBackend::ArmStallTimer() {
-  if (!stall_timer_) {
-    return;
-  }
-  // IVI_VSYNC_STALL_MS overrides the threshold; 0 disables the detector. The
-  // default is well clear of any legitimate park: a baton waits one refresh
-  // period in steady state, and the longest legitimate wait measured on a
-  // loaded board was 127 ms, against WaitForPendingFlip's own 100 ms guard.
-  static const int kThresholdMs = []() {
-    const char* env = std::getenv("IVI_VSYNC_STALL_MS");
-    if (env == nullptr) {
-      return 1000;
-    }
-    char* end = nullptr;
-    const long v = std::strtol(env, &end, 10);
-    if (end == env || *end != '\0' || v < 0 || v > 60000) {
-      ihs::log::warn(
-          "[DrmBackend] IVI_VSYNC_STALL_MS={} is not a value in [0, 60000]; "
-          "using the 1000 ms default",
-          env);
-      return 1000;
-    }
-    return static_cast<int>(v);
-  }();
-  if (kThresholdMs == 0) {
-    return;
-  }
-  stall_timer_->expires_after(std::chrono::milliseconds(kThresholdMs));
-  stall_timer_->async_wait([this](const std::error_code& ec) {
-    if (ec) {
-      return;  // cancelled: teardown
-    }
-    CheckForStall();
-    ArmStallTimer();
-  });
-}
-
-void DrmBackend::CheckForStall() {
-  // A revoked session is not a stall. The kernel will not send a flip event
-  // for a commit made before the revoke, and the compositor's latch stays up
-  // until OnResume clears it -- so every VT switch-out longer than the
-  // threshold would read exactly like a lost event. Forget what the last tick
-  // saw as well, or the first tick after resume pairs with a pre-pause one.
-  if (session_paused_.load(std::memory_order_acquire)) {
-    stall_last_parked_ = false;
-    return;
-  }
-
-  // A baton parked by SetParked is a deliberate stop (a view whose output went
-  // away), not a stall -- it has no flip to wait for and unparking delivers it.
-  const bool parked = vsync_.HasParkedBaton() && !vsync_.IsParked();
-  const uint64_t flips = flips_handled_.load(std::memory_order_acquire);
-  const bool no_progress =
-      parked && stall_last_parked_ && flips == stall_last_flips_;
-  stall_last_parked_ = parked;
-  stall_last_flips_ = flips;
-  if (!no_progress) {
-    return;
-  }
-
-  // Clear whichever latch the provider is gating on, or the baton we hand back
-  // parks again on the next request. Mirrors DrmVsyncProvider::IsSourcePending.
-  bool cleared = false;
+void DrmBackend::BuildStallDetector() {
+  stall_ = std::make_unique<StallDetector>(
+      vsync_, session_paused_,
+      [this]() {
+  // Whichever latch the provider is gating on. Mirrors
+  // DrmVsyncProvider::IsSourcePending: with the plane compositor active
+  // that is the compositor's, otherwise this backend's own.
 #if BUILD_COMPOSITOR
-  if (compositor_ && compositor_->planes_active()) {
-    cleared = compositor_->ClearStalledFlip();
-  } else {
-    cleared = flip_pending_.exchange(false, std::memory_order_acq_rel);
-  }
-#else
-  cleared = flip_pending_.exchange(false, std::memory_order_acq_rel);
+        if (compositor_ && compositor_->planes_active()) {
+          return compositor_->ClearStalledFlip();
+        }
 #endif
-  if (!cleared) {
-    // The latch is already clear, so nothing is gating the baton and something
-    // else is holding it. Hand it back anyway -- that is the whole point -- but
-    // do not claim a flip was lost.
-    (void)vsync_.DeliverParkedBaton();
-    return;
-  }
-
-  ++stall_recoveries_;
-  if (!warned_stall_) {
-    warned_stall_ = true;
-    ihs::log::warn(
-        "[DrmBackend] no page-flip event for a commit in flight and a baton "
-        "waiting: cleared the latch and returned the baton so frames resume. A "
-        "lost flip event, not a slow one. Further recoveries counted, not "
-        "logged.");
-  }
-  (void)vsync_.DeliverParkedBaton();
+        return flip_pending_.exchange(false, std::memory_order_acq_rel);
+      },
+      "DrmBackend");
 }
 
 void DrmBackend::SetPlatformTaskRunner(TaskRunner* runner) {
@@ -1635,9 +1561,7 @@ void DrmBackend::SetPlatformTaskRunner(TaskRunner* runner) {
   // The detector lives on the same io_context as the flip monitor, which is
   // running exactly when the present path has stopped.
   if (runner != nullptr && runner->GetIoContext() != nullptr) {
-    stall_timer_ =
-        std::make_unique<asio::steady_timer>(*runner->GetIoContext());
-    ArmStallTimer();
+    stall_->Start(*runner->GetIoContext());
   }
 }
 
@@ -1647,9 +1571,7 @@ void DrmBackend::StopVsyncMonitor() {
   // Cancel before vsync_.Stop(): an async_wait left outstanding keeps the
   // io_context's worker thread from finishing, which is the deadlock the
   // flip-monitor teardown comment below describes.
-  if (stall_timer_) {
-    stall_timer_->cancel();
-  }
+  stall_->Stop();
 
   // Drop any parked baton, clear engine/runner, and log the IVI_VSYNC_PROFILE
   // session summary. Any page-flip event the reader drains after this finds the
