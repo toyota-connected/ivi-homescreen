@@ -38,6 +38,7 @@
 
 #include "backend/drm_kms_vulkan/vulkan_drm_backend.h"
 #include "logging/logger.hpp"
+#include "task_runner.h"
 
 extern "C" {
 #include <fcntl.h>
@@ -289,6 +290,135 @@ TEST_F(VulkanDrmVkms, AVtSwitchLeavesTheBackendAbleToPresent) {
   EXPECT_TRUE(PresentOneFrame()) << "nothing presented after the switch back";
   EXPECT_GT(backend_->PresentedFramesForTest(), before)
       << "the backend returned true but committed nothing after resume";
+}
+
+// ─── Stall detector (#660) ─────────────────────────────────────────────────
+//
+// The EGL backend got this in #659; this one can stall the same way and was
+// not covered. A parked baton means Flutter is waiting for the flip event of
+// the commit in flight. If that event is lost the baton never comes back, no
+// frame is built, and because no frame is built the present path -- and so its
+// own 100 ms spin guard -- never runs again. The display stops until a VT
+// switch. The detector watches from the task runner's io_context, which is
+// alive exactly then.
+//
+// Two ticks with no progress is the signal, so one tick must not fire: a baton
+// parked for less than the threshold is just a frame in flight.
+TEST_F(VulkanDrmVkms, AStalledFlipIsRecoveredNotWaitedOnForever) {
+  ASSERT_TRUE(PresentOneFrame()) << "the first present is the blocking modeset";
+
+  // Delivery needs a runner: PostOnVsync marshals onto it, and without one the
+  // provider leaves the baton parked whatever the detector decides. Wired on
+  // the provider directly rather than through SetPlatformTaskRunner, which
+  // would also start the real timer on an io_context nothing here runs.
+  FLUTTER_API_SYMBOL(FlutterEngine) no_engine{nullptr};
+  TaskRunner runner("vk-stall-test", no_engine);
+  backend_->VsyncForTest().SetEngine(nullptr, &runner);
+
+  // The state the detector exists for: a commit in flight whose event will
+  // never arrive, and Flutter waiting on it. Both latches, because that is
+  // what a real commit raises.
+  backend_->SetFlipPendingForTest(true);
+  backend_->VsyncForTest().SetSourcePending(true);
+  backend_->VsyncForTest().SubmitBaton(nullptr, 0x6060);
+  ASSERT_TRUE(backend_->VsyncForTest().HasParkedBaton())
+      << "the latch is up, so the baton must park -- otherwise there is no "
+         "stall to detect and this case proves nothing";
+
+  const uint64_t before = backend_->StallRecoveriesForTest();
+  backend_->CheckForStallForTest();
+  EXPECT_TRUE(backend_->VsyncForTest().HasParkedBaton())
+      << "one tick is not evidence of a stall; a frame may simply be in flight";
+  EXPECT_EQ(backend_->StallRecoveriesForTest(), before);
+
+  // Second tick, nothing moved in between.
+  backend_->CheckForStallForTest();
+  EXPECT_FALSE(backend_->FlipPendingForTest())
+      << "the latch has to go, or the baton parks again immediately";
+  EXPECT_FALSE(backend_->VsyncForTest().HasParkedBaton())
+      << "the baton must be handed back; nothing else is going to";
+  EXPECT_EQ(backend_->StallRecoveriesForTest(), before + 1);
+}
+
+// The trap this backend adds over the EGL one: it mirrors its latch into the
+// provider, and SubmitBaton gates on the provider's copy. Clearing only
+// flip_pending hands *this* baton back and parks the next one forever -- a
+// recovery that looks right in the log and leaves the display just as stuck.
+// So the assertion is about the frame after the recovery, not the recovery.
+TEST_F(VulkanDrmVkms, RecoveryClearsTheProviderLatchNotJustTheBackendOne) {
+  ASSERT_TRUE(PresentOneFrame());
+
+  FLUTTER_API_SYMBOL(FlutterEngine) no_engine{nullptr};
+  TaskRunner runner("vk-stall-mirror-test", no_engine);
+  backend_->VsyncForTest().SetEngine(nullptr, &runner);
+
+  backend_->SetFlipPendingForTest(true);
+  backend_->VsyncForTest().SetSourcePending(true);
+  backend_->VsyncForTest().SubmitBaton(nullptr, 0x6161);
+  ASSERT_TRUE(backend_->VsyncForTest().HasParkedBaton());
+
+  backend_->CheckForStallForTest();
+  backend_->CheckForStallForTest();
+  ASSERT_EQ(backend_->StallRecoveriesForTest(), 1u)
+      << "no recovery happened, so there is nothing to check here";
+
+  // Flutter asks for the next frame. If the provider latch survived the
+  // recovery this parks and the display is stalled again, one baton later.
+  backend_->VsyncForTest().SubmitBaton(nullptr, 0x6262);
+  EXPECT_FALSE(backend_->VsyncForTest().HasParkedBaton())
+      << "the next baton parked, so the recovery cleared the backend latch and "
+         "left the provider one up -- the display is still stalled";
+}
+
+// The other half: a display that is merely busy must never be recovered. Flip
+// events advancing between ticks is progress, however long a baton has been
+// parked. This is also what rules out keying on the commit counter, which
+// advances during the stall itself.
+TEST_F(VulkanDrmVkms, AFlipInFlightIsNotMistakenForAStall) {
+  ASSERT_TRUE(PresentOneFrame()) << "the first present is the blocking modeset";
+
+  const uint64_t before = backend_->StallRecoveriesForTest();
+  const uint64_t flips_before = backend_->FlipsHandledForTest();
+  for (int i = 0; i < 4; ++i) {
+    backend_->CheckForStallForTest();
+    ASSERT_TRUE(PresentOneFrame()) << "frame " << i;
+  }
+  EXPECT_EQ(backend_->StallRecoveriesForTest(), before)
+      << "flips were advancing the whole time; nothing was stalled";
+  EXPECT_GT(backend_->FlipsHandledForTest(), flips_before)
+      << "no flip event was counted, so the progress signal the detector reads "
+         "is dead and the case above passed for the wrong reason";
+}
+
+// A revoked session looks exactly like a lost flip event -- a baton parked, the
+// latch up, no events coming -- and must not be reported as one.
+TEST_F(VulkanDrmVkms, APausedSessionIsNotReportedAsAStall) {
+  ASSERT_TRUE(PresentOneFrame());
+
+  FLUTTER_API_SYMBOL(FlutterEngine) no_engine{nullptr};
+  TaskRunner runner("vk-stall-pause-test", no_engine);
+  backend_->VsyncForTest().SetEngine(nullptr, &runner);
+
+  const uint64_t before = backend_->StallRecoveriesForTest();
+  backend_->OnSessionPaused();
+  // Put the latch back: OnSessionPaused drops it, and the case being guarded
+  // is a commit whose event the revoke ate.
+  backend_->SetFlipPendingForTest(true);
+  backend_->VsyncForTest().SetSourcePending(true);
+  backend_->VsyncForTest().SubmitBaton(nullptr, 0x6363);
+  ASSERT_TRUE(backend_->VsyncForTest().HasParkedBaton())
+      << "no baton parked, so there is no stall to mistake this for";
+
+  for (int i = 0; i < 4; ++i) {
+    backend_->CheckForStallForTest();
+  }
+  EXPECT_EQ(backend_->StallRecoveriesForTest(), before)
+      << "a VT switch-out was reported as a lost flip event";
+  EXPECT_TRUE(backend_->FlipPendingForTest())
+      << "the latch is the resume's to clear while the session is revoked";
+
+  backend_->OnSessionResumed(backend_->DrmFdForTest());
+  EXPECT_FALSE(backend_->SessionPaused());
 }
 
 int main(int argc, char** argv) {

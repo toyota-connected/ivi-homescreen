@@ -1744,6 +1744,9 @@ void VulkanDrmBackend::OnFlipEvent(const unsigned int sequence,
   }
   c->flip_pending.store(false, std::memory_order_release);
   vsync_.SetSourcePending(false);
+  // Progress, for the stall detector. Flip events, not commits: c->frame
+  // advances during the very stall being detected.
+  flips_handled_.fetch_add(1, std::memory_order_release);
   const uint64_t tv_ns = static_cast<uint64_t>(tv_sec) * 1'000'000'000ULL +
                          static_cast<uint64_t>(tv_usec) * 1000ULL;
   // The kernel's vblank timestamp for a flip the display completed.
@@ -1763,8 +1766,119 @@ void VulkanDrmBackend::OnFlipEvent(const unsigned int sequence,
   vsync_.DeliverVsync(tv_ns);  // returns the baton, marshaled onto the runner
 }
 
+void VulkanDrmBackend::SetPlatformTaskRunner(TaskRunner* runner) {
+  platform_task_runner_.store(runner, std::memory_order_release);
+  vsync_.SetEngine(engine_handle_.load(std::memory_order_acquire), runner);
+
+  // The detector lives on the same io_context as the flip reader, which is
+  // running exactly when the present path has stopped.
+  if (runner != nullptr && runner->GetIoContext() != nullptr) {
+    stall_timer_ =
+        std::make_unique<asio::steady_timer>(*runner->GetIoContext());
+    ArmStallTimer();
+  }
+}
+
+void VulkanDrmBackend::ArmStallTimer() {
+  if (!stall_timer_) {
+    return;
+  }
+  // IVI_VSYNC_STALL_MS overrides the threshold and 0 disables it -- the same
+  // knob the EGL backend reads, since only one of the two drives a display.
+  // The default is well clear of any legitimate park: a baton waits one refresh
+  // period in steady state, against the present path's own 100 ms spin guard.
+  static const int kThresholdMs = []() {
+    const char* env = std::getenv("IVI_VSYNC_STALL_MS");
+    if (env == nullptr) {
+      return 1000;
+    }
+    char* end = nullptr;
+    const long v = std::strtol(env, &end, 10);
+    if (end == env || *end != '\0' || v < 0 || v > 60000) {
+      ihs::log::warn(
+          "[VulkanDrmBackend] IVI_VSYNC_STALL_MS={} is not a value in "
+          "[0, 60000]; using the 1000 ms default",
+          env);
+      return 1000;
+    }
+    return static_cast<int>(v);
+  }();
+  if (kThresholdMs == 0) {
+    return;
+  }
+  stall_timer_->expires_after(std::chrono::milliseconds(kThresholdMs));
+  stall_timer_->async_wait([this](const std::error_code& ec) {
+    if (ec) {
+      return;  // canceled: teardown
+    }
+    CheckForStall();
+    ArmStallTimer();
+  });
+}
+
+void VulkanDrmBackend::CheckForStall() {
+  CompositorState* c = compositor_.get();
+  if (c == nullptr) {
+    return;
+  }
+
+  // A revoked session is not a stall. The kernel sends no flip event for a
+  // commit made before the revoke, so every VT switch-out longer than the
+  // threshold would read exactly like a lost event. Forget what the last tick
+  // saw as well, or the first tick after resume pairs with a pre-pause one.
+  if (session_paused_.load(std::memory_order_acquire)) {
+    stall_last_parked_ = false;
+    return;
+  }
+
+  // A baton parked by SetParked is a deliberate stop (a view whose output went
+  // away), not a stall -- it has no flip to wait for and unparking delivers it.
+  const bool parked = vsync_.HasParkedBaton() && !vsync_.IsParked();
+  const uint64_t flips = flips_handled_.load(std::memory_order_acquire);
+  const bool no_progress =
+      parked && stall_last_parked_ && flips == stall_last_flips_;
+  stall_last_parked_ = parked;
+  stall_last_flips_ = flips;
+  if (!no_progress) {
+    return;
+  }
+
+  // Both, not either. This backend mirrors its latch into the provider -- the
+  // two are set together when a commit goes in flight and cleared together on
+  // the flip event -- and SubmitBaton gates on the provider's copy. Clearing
+  // only flip_pending hands this baton back and parks the next one forever,
+  // which looks like a recovery and is not one.
+  const bool cleared =
+      c->flip_pending.exchange(false, std::memory_order_acq_rel);
+  vsync_.SetSourcePending(false);
+  if (!cleared) {
+    // Nothing was gating on our latch, so something else is holding the baton.
+    // Hand it back anyway -- that is the point -- but do not claim a lost flip.
+    (void)vsync_.DeliverParkedBaton();
+    return;
+  }
+
+  ++stall_recoveries_;
+  if (!warned_stall_) {
+    warned_stall_ = true;
+    ihs::log::warn(
+        "[VulkanDrmBackend] no page-flip event for a commit in flight and a "
+        "baton waiting: cleared the latch and returned the baton so frames "
+        "resume. A lost flip event, not a slow one. Further recoveries "
+        "counted, not logged.");
+  }
+  (void)vsync_.DeliverParkedBaton();
+}
+
 void VulkanDrmBackend::StopVsyncMonitor() {
   platform_task_runner_.store(nullptr, std::memory_order_release);
+
+  // Cancel before vsync_.Stop(): an async_wait left outstanding keeps the
+  // io_context's worker thread from finishing.
+  if (stall_timer_) {
+    stall_timer_->cancel();
+  }
+
   if (compositor_) {
     compositor_->StopFlipReader();
   }

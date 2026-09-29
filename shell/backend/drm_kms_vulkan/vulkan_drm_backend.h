@@ -21,11 +21,13 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+
 #include <mutex>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include "asio/steady_timer.hpp"
 
 #include <vulkan/vulkan.h>
 
@@ -202,10 +204,9 @@ class VulkanDrmBackend final : public Backend {
     vsync_.SetEngine(engine,
                      platform_task_runner_.load(std::memory_order_acquire));
   }
-  void SetPlatformTaskRunner(TaskRunner* runner) override {
-    platform_task_runner_.store(runner, std::memory_order_release);
-    vsync_.SetEngine(engine_handle_.load(std::memory_order_acquire), runner);
-  }
+  // Out of line: it arms the stall detector, whose timer needs the runner's
+  // io_context.
+  void SetPlatformTaskRunner(TaskRunner* runner) override;
   void SetVsyncParked(const bool parked) override { vsync_.SetParked(parked); }
 
   // ─── libseat session lifecycle (VT switch) ───────────────────────────────
@@ -230,6 +231,34 @@ class VulkanDrmBackend final : public Backend {
 
   void StopVsyncMonitor() override;
 
+ private:
+  // ─── Stall detector ──────────────────────────────────────────────────────
+  //
+  // The EGL backend's #659 detector, which this backend was not covered by.
+  // A parked baton means Flutter asked for a frame and is waiting for the flip
+  // event of the commit in flight. If that event never arrives the baton is
+  // never returned, no frame is produced, and because no frame is produced the
+  // present path -- and so its own 100 ms spin guard -- never runs again. The
+  // display stops until a VT switch.
+  //
+  // Runs on the task runner's io_context, which is alive precisely when the
+  // present path is not. No timestamp needed: a tick that sees a baton parked,
+  // the latch up, and flips_handled_ unmoved since the previous tick -- which
+  // also saw it parked -- has watched a full tick pass with no progress.
+  //
+  // The counter has to be flip events, not commits. CompositorState::frame
+  // counts commits and therefore advances during exactly the stall being
+  // detected, which would read as progress.
+  void ArmStallTimer();
+  void CheckForStall();
+  std::unique_ptr<asio::steady_timer> stall_timer_;
+  std::atomic<uint64_t> flips_handled_{0};
+  uint64_t stall_last_flips_{0};
+  bool stall_last_parked_{false};
+  uint64_t stall_recoveries_{0};
+  bool warned_stall_{false};
+
+ public:
   [[nodiscard]] uint32_t width() const { return width_; }
   [[nodiscard]] uint32_t height() const { return height_; }
   // Scanout rotation in degrees (0|90|180|270). FlutterView forwards it to the
@@ -348,6 +377,20 @@ class VulkanDrmBackend final : public Backend {
   /// reads the serial here: that is the value OnFlipEvent would use, so this is
   /// where a serial published too late is visible. Never set outside tests.
   std::function<void()> on_commit_returned_;
+
+  /// One detector tick, without waiting out the real threshold.
+  void CheckForStallForTest() { CheckForStall(); }
+  /// Stalls this backend recovered from.
+  [[nodiscard]] uint64_t StallRecoveriesForTest() const {
+    return stall_recoveries_;
+  }
+  /// Flip events handled -- the progress signal the detector keys on.
+  [[nodiscard]] uint64_t FlipsHandledForTest() const {
+    return flips_handled_.load(std::memory_order_acquire);
+  }
+  /// The provider whose baton both latches gate, so a case can submit one and
+  /// see whether it comes back.
+  [[nodiscard]] ivi::IVsyncProvider& VsyncForTest() { return vsync_; }
 
  private:
 #endif
