@@ -824,6 +824,9 @@ struct VulkanDrmBackend::CompositorState {
   // completes. drm-cxx fires on_release at displacement, not at flip, so
   // returning one straight away hands the producer a slot KMS is still
   // scanning out.
+#if BUILD_COMPOSITOR
+  // Platform-view surfaces only, and every consumer of these is already behind
+  // the same guard -- this was the one declaration that was not.
   struct DeferredRelease {
     std::shared_ptr<ICompositorSurface> surface;
     std::uintptr_t key = 0;  // the ScanoutKey the pool cached the buffer under
@@ -831,6 +834,7 @@ struct VulkanDrmBackend::CompositorState {
   };
   std::mutex deferred_releases_mu;
   std::vector<DeferredRelease> deferred_releases;
+#endif  // BUILD_COMPOSITOR
   // Platform-view frames on their way to the screen, reported through each
   // view's presentation sink when the flip that shows them completes.
   PresentationTracker presentation;
@@ -2218,6 +2222,10 @@ std::pair<size_t, size_t> VulkanDrmBackend::FramePlaneDemand(
   return {needed, shape};
 }
 
+#endif  // BUILD_COMPOSITOR
+
+// Both present paths stage a serial -- the plane path and the root-surface ring
+// -- so these sit outside the compositor guard, with their declarations.
 uint64_t VulkanDrmBackend::StagePresentation(CompositorState& c) {
   const uint64_t serial =
       c.presentation_serial.load(std::memory_order_relaxed) + 1;
@@ -2250,6 +2258,8 @@ void VulkanDrmBackend::SettlePresentation(CompositorState& c,
     c.presentation.Presented(serial, now);
   }
 }
+
+#if BUILD_COMPOSITOR
 
 void VulkanDrmBackend::DropPlaneLayers(CompositorState& c) {
   c.plane_plan_sig_valid = false;
@@ -3083,10 +3093,12 @@ bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
   // reconcile and a TEST_ONLY commit, which is why the rejection latches a log
   // line rather than being silent -- a frame shape that never places is worth
   // knowing about.
+#if BUILD_COMPOSITOR
   if (plane_layers_ && !plane_layers_latched_off_ &&
       PresentLayersViaPlanes(layers, count)) {
     return true;
   }
+#endif
   // The plane attempt, if any, did not commit: what it noted is not going to
   // be shown that way.
   c.presentation.Discard();
@@ -3101,6 +3113,9 @@ bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
 // path (present_layers, with a layer stack to composite) and the root-surface
 // path (present_image, one image and no layers). Everything from the scanout
 // barrier onward is identical; only how the slot was chosen differs.
+#if BUILD_COMPOSITOR
+// The plane path consumes the engine's layer list, which only exists on the
+// compositor callbacks; its declarations are guarded, so these are too.
 void VulkanDrmBackend::DrainDeferredScanoutReleases(CompositorState& c) {
   // Take the batch under the lock and fire the callbacks without it: they run
   // producer code (an eventfd signal) and must not re-enter under our mutex.
@@ -3353,6 +3368,8 @@ bool VulkanDrmBackend::CommitPlaneFrame(CompositorState& c,
   ++c.frame;
   return true;
 }
+
+#endif  // BUILD_COMPOSITOR
 
 bool VulkanDrmBackend::PresentSlot(const size_t slot,
                                    const FlutterLayer** layers,
