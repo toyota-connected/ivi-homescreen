@@ -170,7 +170,7 @@ The shell logging surface honors them transparently.
 |------|---------|--------|
 | `IHS_LOG_SINK` | `console` | Active sink: `dlt`, `console`, or `file`. `dlt` with no `libdlt` warns and falls back to console. |
 | `IHS_LOG_LEVEL` | verbose | Level floor (name, case-insensitive, or `0`–`6`); more-verbose records are dropped before formatting. `off` disables all records. |
-| `IHS_LOG_FILE` | — | Output path when `IHS_LOG_SINK=file`. Unset with `file` warns and uses console. |
+| `IHS_LOG_FILE` | — | Output path when `IHS_LOG_SINK=file`. Must name a regular file and carry no `..` component; anything else warns and uses console, as does leaving it unset. The sink appends to this path, renames it and deletes rotated copies, so a device, FIFO or traversal is refused rather than written to. |
 | `IHS_LOG_FILE_MAX_BYTES` | — | Rotation size threshold for the file sink. |
 | `IHS_LOG_FILE_MAX_FILES` | — | Number of rotated files to keep. |
 | `IHS_LOG_RING_CAPACITY` | `256` | Per-thread SPSC ring depth, in slots. Rounded up to a power of two and clamped to `[16, 65536]`; anything adjusted or unparseable is reported on stderr. Each slot is a cache-line padded 240-byte record, so the default is ~80 KiB per logging thread and the ceiling ~20 MiB. Resolved once, at first use. Raise it when a burst is dropping records. |

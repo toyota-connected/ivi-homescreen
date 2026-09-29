@@ -16,6 +16,9 @@ plugins/
 ivi-homescreen-plugins/
 build-systemd-watchdog-test/
 build-ut/
+# Any build-<name>/ tree: out-of-source CMake dirs named for what they build
+# (build-pv, build-vk, ...). `build/` above only catches the unsuffixed one.
+build-*/
 
 lcovHtml/
 
