@@ -34,6 +34,7 @@ add_executable(${PROJECT_NAME}
         # Binds each view to an output by name across backends (resolver +
         # provider); feeds the resolved connector / wl_output to the backend.
         display/output_manager.cc
+        cache_dir.cc
         engine.cc
         libflutter_engine.cc
         main.cc

@@ -1,5 +1,6 @@
 
 #include "compositor_surface.h"
+#include "cache_dir.h"
 #include "logging/logging.h"
 
 #include <filesystem>
@@ -163,18 +164,14 @@ invalid:
 }
 
 std::string CompositorSurface::GetFilePath(const char* folder) {
-  std::filesystem::path path(Utils::GetConfigHomePath());
-  path /= folder;
-
-  if (!std::filesystem::is_directory(path) || !std::filesystem::exists(path)) {
-    if (!std::filesystem::create_directories(path)) {
-      ihs::log::critical("GetCachePath create_directories failed: {}",
-                         path.c_str());
-      exit(EXIT_FAILURE);
-    }
-  }
-
-  return path;
+  // Not fatal, and no longer throwing: this used to call the throwing overload
+  // of create_directories from a constructor initializer list, so a read-only
+  // rootfs ended the process in std::terminate (#650). A plugin that cannot
+  // cache still runs; it is handed the path it would have used, and finds out
+  // it cannot write there the same way anything else would.
+  const auto dir = ihs::ResolveCacheDir(Utils::GetConfigHomePath(), folder,
+                                        "CompositorSurface");
+  return dir.path.string();
 }
 
 void CompositorSurface::InitializePlugin() {

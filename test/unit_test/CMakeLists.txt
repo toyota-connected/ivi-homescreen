@@ -161,6 +161,7 @@ endif ()
 
 #add_subdirectory(template-test-case)
 add_subdirectory(utils-test)
+add_subdirectory(cache_dir-test)
 # flutter_view-test and app-test require a live Wayland compositor connection
 # (Display::Display calls wl_display_connect / App::BuildDisplays).  They have
 # been moved to test/integration/ and are not run by the unit-test-coverage job.
