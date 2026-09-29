@@ -65,6 +65,47 @@ cmake_policy(SET CMP0079 NEW)
 
 add_subdirectory(${_drm_cxx_src} ${CMAKE_BINARY_DIR}/third_party/drm-cxx EXCLUDE_FROM_ALL)
 
+# drm-cxx's Blend2D verdict, hoisted out of its directory scope.
+#
+# drm::capture (capture/snapshot.cpp, capture/png.cpp) is compiled only when
+# DRM_CXX_HAS_BLEND2D, so that variable -- not a second probe -- is what decides
+# whether drm::capture::snapshot and write_png exist to link against.
+#
+# The shell and the vkms test used to run their own find_package(blend2d), and
+# the two sides can disagree. find_package in package mode is not constrained by
+# the toolchain's CMAKE_FIND_ROOT_PATH_MODE_LIBRARY / _INCLUDE, so a cross
+# configure resolves the *host* package and reports found, while drm-cxx --
+# which also requires <blend2d/blend2d.h> to be reachable -- correctly decides
+# not to build the module. The build then compiles drm_capture.cc and fails at
+# link on both symbols. Reading the verdict makes disagreement impossible.
+get_directory_property(IVI_DRM_HAVE_CAPTURE
+        DIRECTORY "${_drm_cxx_src}" DEFINITION DRM_CXX_HAS_BLEND2D)
+if (NOT IVI_DRM_HAVE_CAPTURE)
+    set(IVI_DRM_HAVE_CAPTURE 0)
+endif ()
+
+# Cross-check the verdict against what drm-cxx actually compiled.
+# DRM_CXX_HAS_BLEND2D is drm-cxx's own internal variable, so a submodule bump
+# could rename it and get_directory_property would quietly return empty --
+# disabling capture on a tree that has it, and taking two pixel tests with it.
+# Fail the configure instead.
+get_target_property(_drmcxx_srcs drm-cxx SOURCES)
+set(_drmcxx_capture 0)
+if (_drmcxx_srcs MATCHES "capture/snapshot\\.cpp")
+    set(_drmcxx_capture 1)
+endif ()
+if (NOT _drmcxx_capture EQUAL IVI_DRM_HAVE_CAPTURE)
+    message(FATAL_ERROR
+        "drm-cxx capture gate mismatch: DRM_CXX_HAS_BLEND2D reads "
+        "'${IVI_DRM_HAVE_CAPTURE}' but capture/snapshot.cpp is "
+        "${_drmcxx_capture} in drm-cxx's sources. That variable belongs to "
+        "drm-cxx; check whether a submodule bump renamed it.")
+endif ()
+unset(_drmcxx_srcs)
+unset(_drmcxx_capture)
+
+message(STATUS "drm::capture available .. ${IVI_DRM_HAVE_CAPTURE}")
+
 # Treat drm-cxx as a system library (vendored submodule we keep pristine):
 # mark its interface headers SYSTEM so they're -isystem for consumers, and
 # silence its own-source warnings (-Wsign-conversion, -Wc++20-extensions, …).
