@@ -111,10 +111,6 @@ if (BUILD_UNIT_TESTS)
     add_subdirectory(googletest)
 
     target_compile_options(gtest PRIVATE -include cstdint)
-    get_target_property(TOOLCHAIN_COMPILE_OPTIONS toolchain INTERFACE_COMPILE_OPTIONS)
-    if (TOOLCHAIN_COMPILE_OPTIONS)
-        target_compile_options(gtest PRIVATE ${TOOLCHAIN_COMPILE_OPTIONS})
-    endif ()
     # Suppress warnings inside googletest/googlemock that are promoted to errors
     # by our toolchain flags. Keep these in sync with the vendored version:
     #   v1.17.0 (C++17 required) — added -Wno-error=maybe-uninitialized for
@@ -130,13 +126,41 @@ if (BUILD_UNIT_TESTS)
             -Wno-error=maybe-uninitialized)
 
     target_compile_options(gtest_main PRIVATE -include cstdint)
-    get_target_property(TOOLCHAIN_COMPILE_OPTIONS toolchain INTERFACE_COMPILE_OPTIONS)
-    if (TOOLCHAIN_COMPILE_OPTIONS)
-        target_compile_options(gtest_main PRIVATE ${TOOLCHAIN_COMPILE_OPTIONS})
-    endif ()
     target_compile_options(gtest_main PRIVATE
             -Wno-error=sign-conversion
             -Wno-error=conversion
             -Wno-error=maybe-uninitialized)
 
+    # Carry the toolchain as a usage requirement rather than copying its compile
+    # options in privately, which is what this did before. The copy built
+    # googletest against the project's C++ standard library (-stdlib=libc++ on
+    # clang) but told consumers nothing, so a driver that links gtest without
+    # also linking toolchain::toolchain compiled against the default libstdc++
+    # and could not resolve gtest's std::__1:: symbols. Most drivers get the
+    # toolchain transitively through homescreen_ut_shell and so happened to
+    # agree; the ones that link neither did not. Making it googletest's own
+    # requirement means every consumer agrees by construction.
+    #
+    # Invisible until now because CI builds the unit tests with GCC, where the
+    # toolchain target carries no -stdlib at all.
+    #
+    # Set both properties rather than calling target_link_libraries(... PUBLIC):
+    # these targets are built in googletest's own directory, which that command
+    # only allows under CMP0079 NEW, and the project floor is below the 3.13
+    # that introduced it. LINK_LIBRARIES gives googletest the toolchain's
+    # compile options; INTERFACE_LINK_LIBRARIES passes them and the link options
+    # to consumers.
+    #
+    # BUILD_INTERFACE on the interface side: googletest installs a GTestTargets
+    # export set, and an exported target may not name one that is not itself
+    # exported. The toolchain is an in-tree ABI choice and has no meaning to an
+    # installed googletest, so keep it out of the export.
+    foreach (_gt gtest gtest_main gmock gmock_main)
+        if (TARGET ${_gt})
+            set_property(TARGET ${_gt} APPEND PROPERTY
+                    LINK_LIBRARIES toolchain::toolchain)
+            set_property(TARGET ${_gt} APPEND PROPERTY
+                    INTERFACE_LINK_LIBRARIES $<BUILD_INTERFACE:toolchain::toolchain>)
+        endif ()
+    endforeach ()
 endif ()
