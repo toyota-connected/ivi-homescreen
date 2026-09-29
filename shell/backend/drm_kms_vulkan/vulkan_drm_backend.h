@@ -81,10 +81,21 @@ class VulkanDrmBackend final : public Backend {
   // @p connector_name pins the panel (--drm-connector); empty picks the first
   // connected connector, which is a coin flip on a card that also exposes a
   // virtual connector.
+  // @p shared_device is the card the DrmDisplay already opened -- through
+  // libseat when there is a seat, directly when there is not. Adopt it rather
+  // than opening the node again, exactly as the EGL backend does: a device
+  // taken through the seat is one the seat *tracks*, and only tracked devices
+  // get a resume callback on VT switch-in. Opening our own fd left this backend
+  // with a pause it could see and a resume that could never arrive, so the
+  // display went away on Ctrl+Alt+Fn and never came back.
+  //
+  // Null is the no-display caller (a unit fixture): then this backend opens the
+  // node and takes master itself, which is the --drm-no-seat arrangement.
   static std::shared_ptr<VulkanDrmBackend> Create(
       const std::string& drm_device,
       bool enable_validation,
       homescreen::DrmSession* session,
+      drm::Device* shared_device,
       const std::string& mode_spec,
       const std::string& connector_name,
       int rotation,
@@ -334,6 +345,9 @@ class VulkanDrmBackend final : public Backend {
 #endif
 
   std::atomic<bool> session_paused_{false};
+  // Borrowed: owned by the DrmDisplay that opened it. Null when this backend
+  // opens the card itself.
+  drm::Device* shared_device_ = nullptr;
 
   std::string drm_device_;
 

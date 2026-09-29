@@ -162,6 +162,19 @@ bool RotationCompatible(const uint64_t mod) {
 // required by the device extension VK_EXT_image_drm_format_modifier" -- the
 // device is created anyway and the modifier path appears to work, so nothing
 // short of a validation run says otherwise.
+// A commit that failed because master is gone, however the error was built.
+//
+// Deliberately not `ec == std::errc::permission_denied` alone: that relies on
+// the error_code carrying a category the standard knows how to compare, and a
+// commit failure here has come back as a plain EACCES value that the
+// equivalence test did not match. Test the value as well -- EACCES is the
+// revoke, EPERM is the same thing from a driver that reports it differently.
+[[nodiscard]] bool IsMasterRevoked(const std::error_code& ec) {
+  return ec == std::errc::permission_denied ||
+         ec == std::errc::operation_not_permitted || ec.value() == EACCES ||
+         ec.value() == EPERM;
+}
+
 constexpr std::array<const char*, 7> kRequiredDeviceExtensions = {
     VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
     VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME,
@@ -497,6 +510,7 @@ std::shared_ptr<VulkanDrmBackend> VulkanDrmBackend::Create(
     const std::string& drm_device,
     const bool enable_validation,
     homescreen::DrmSession* session,
+    drm::Device* shared_device,
     const std::string& mode_spec,
     const std::string& connector_name,
     const int rotation,
@@ -504,6 +518,7 @@ std::shared_ptr<VulkanDrmBackend> VulkanDrmBackend::Create(
   auto backend = std::shared_ptr<VulkanDrmBackend>(
       new VulkanDrmBackend(drm_device, enable_validation, session, mode_spec,
                            connector_name, rotation));
+  backend->shared_device_ = shared_device;
   backend->explicit_sync_pref_ = explicit_sync;
   return FinishCreate(std::move(backend));
 }
@@ -980,7 +995,15 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   std::optional<drm::Device> dev;
   if (injected_fd_ >= 0) {
     dev.emplace(drm::Device::from_fd(injected_fd_));
+  } else if (shared_device_ != nullptr) {
+    // The DrmDisplay already opened this card -- through libseat when there is
+    // a seat. Adopt that fd rather than opening the node again: only a device
+    // the seat tracks gets a resume callback on VT switch-in, and a second fd
+    // of our own is not one. from_fd borrows; the DrmDisplay owns it.
+    dev.emplace(drm::Device::from_fd(shared_device_->fd()));
   } else {
+    // No display to take one from (a unit fixture): open the node ourselves,
+    // which is the --drm-no-seat arrangement and takes master below.
     auto dev_exp = drm::Device::open(drm_device_);
     if (!dev_exp) {
       err = "drm::Device::open: " + dev_exp.error().message();
@@ -1241,7 +1264,11 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
                                                            tv_usec);
   };
 
-  if (drmSetMaster(state->device.fd()) != 0) {
+  // Master is libseat's to hand over for a device taken through the seat, and
+  // the lessor's on a lease. Taking it ourselves there is both unnecessary and
+  // the thing that made VK_KHR_display's loader grab fail with EPERM.
+  const bool own_master = injected_fd_ < 0 && shared_device_ == nullptr;
+  if (own_master && drmSetMaster(state->device.fd()) != 0) {
     if (const int set_err = errno;
         set_err == EBUSY || set_err == EACCES || set_err == EPERM) {
       // Read-only enumeration (DrmOutputProvider / ResolveDrmDevice) succeeds
@@ -1257,14 +1284,21 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
     }
     return false;
   }
-  state->have_master = true;
+  state->have_master = own_master;
 
   width_ = state->width;
   height_ = state->height;
   compositor_ = std::move(state);
+  // Say which arrangement this is, not just that it worked: "master acquired"
+  // on a device we adopted would be a lie, and the difference decides whether a
+  // VT switch can ever resume this backend. "the display" rather than "the
+  // seat": DrmDisplay owns the fd either way, and it takes master itself under
+  // --drm-no-seat, where naming a seat would be wrong twice over.
   ihs::log::info(
-      "[VulkanDrmBackend] compositor ready: {}x{}, DRM master acquired", width_,
-      height_);
+      "[VulkanDrmBackend] compositor ready: {}x{}, master {}", width_, height_,
+      own_master
+          ? "acquired (own fd)"
+          : (injected_fd_ >= 0 ? "held by the lease" : "held by the display"));
 
   // Refresh-adaptive pacing: tell the vsync provider the connector's period so
   // Flutter targets the real refresh, and start the async page-flip reader that
@@ -1668,10 +1702,33 @@ void VulkanDrmBackend::OnSessionResumed(const int new_fd) {
   c->pending_slot = -1;
   c->flip_pending.store(false, std::memory_order_release);
   vsync_.SetSourcePending(false);
-  // A baton parked before the revoke has nothing coming to return it: that
-  // blocking re-modeset sends no event either, so hand it back here or the
-  // display stays dark after the switch back.
-  (void)vsync_.DeliverParkedBaton();
+  // Getting a frame out of Flutter again is the whole point of resuming, and
+  // there are two cases. A baton parked before the revoke has nothing coming to
+  // return it -- the blocking re-modeset sends no event either -- so hand it
+  // back. But if nothing was parked (an idle UI, or no vsync request in
+  // flight), delivering nothing asks Flutter for nothing and the display just
+  // stays dark: ScheduleFrame is what prompts a fresh request. The EGL backend
+  // has had both halves since its own resume path was written; only having the
+  // first is what left the screen black after a VT switch here.
+  // Every branch says which it took: a resume that silently does neither leaves
+  // the display dark with nothing in the log to say why, which is how this went
+  // unexplained for three test cycles.
+  if (vsync_.DeliverParkedBaton()) {
+    ihs::log::info("[VulkanDrmBackend] resume: drained pending baton");
+  } else if (auto engine = engine_handle_.load(std::memory_order_acquire);
+             engine == nullptr) {
+    ihs::log::warn(
+        "[VulkanDrmBackend] resume: no baton parked and no engine handle, so "
+        "nothing will ask for a frame and the display stays dark");
+  } else if (const FlutterEngineResult r =
+                 LibFlutterEngine->ScheduleFrame(engine);
+             r != kSuccess) {
+    ihs::log::warn("[VulkanDrmBackend] resume: ScheduleFrame failed (rc={})",
+                   static_cast<int>(r));
+  } else {
+    ihs::log::info(
+        "[VulkanDrmBackend] resume: ScheduleFrame requested (idle UI)");
+  }
 }
 
 void VulkanDrmBackend::OnFlipEvent(const unsigned int sequence,
@@ -3233,8 +3290,17 @@ bool VulkanDrmBackend::CommitPlaneFrame(CompositorState& c,
   // reads c.presentation_serial to name what it showed.
   ScopedPresentation pres(c, modeset);
   if (auto report = c.scene->commit(flags, this); !report) {
-    ihs::log::error("[VulkanDrmBackend] plane commit: {}",
-                    report.error().message());
+    // Same EACCES reasoning as the ring path below.
+    if (IsMasterRevoked(report.error())) {
+      if (!session_paused_.load(std::memory_order_acquire)) {
+        ihs::log::warn(
+            "[VulkanDrmBackend] plane commit: master revoked ({}); skip frame",
+            report.error().message());
+      }
+    } else {
+      ihs::log::error("[VulkanDrmBackend] plane commit: {} (errno {})",
+                      report.error().message(), report.error().value());
+    }
     DropPlaneLayers(c);
     plane_layers_latched_off_ = true;
     ihs::log::warn(
@@ -3383,7 +3449,22 @@ bool VulkanDrmBackend::PresentSlot(const size_t slot,
   ScopedPresentation pres(c, ring_modeset);
   // Pass `this` as the flip user_data so the event routes to OnFlipEvent.
   if (auto report = c.scene->commit(flags, this); !report) {
-    ihs::log::error("[VulkanDrmBackend] commit: {}", report.error().message());
+    // EACCES is how a VT switch-out actually reaches us: master is revoked and
+    // the commit already in flight fails before libseat's pause callback
+    // arrives (drmIsMaster lags it). Expected, so not an error -- but warn
+    // while we do not yet know we are paused, or a genuine unexpected revoke
+    // would be silent. Eight of these at error level made a normal VT switch
+    // read as eight failures.
+    if (IsMasterRevoked(report.error())) {
+      if (!session_paused_.load(std::memory_order_acquire)) {
+        ihs::log::warn(
+            "[VulkanDrmBackend] commit: master revoked ({}); skip frame",
+            report.error().message());
+      }
+    } else {
+      ihs::log::error("[VulkanDrmBackend] commit: {} (errno {})",
+                      report.error().message(), report.error().value());
+    }
     pres.Abort();
     return false;
   }
