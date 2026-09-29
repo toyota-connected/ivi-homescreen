@@ -21,19 +21,29 @@ jobs:
             cxx: g++-14
             extra_pkgs: g++-14
             compositor: 'ON'
+            vulkan: 'OFF'
           - compiler: clang
             cc: clang-19
             cxx: clang++-19
             extra_pkgs: clang-19 llvm-19 lld-19 libc++-19-dev libc++abi-19-dev
             compositor: 'ON'
+            vulkan: 'OFF'
           # The legacy DrmBackend::Present path is only reachable with the
           # compositor off, so nothing else here compiles it. Two separate
           # commits broke this configuration before the job existed.
+          #
+          # It builds the Vulkan backend too, which has its own no-compositor
+          # mode: the engine presents through the root surface rather than the
+          # compositor callbacks. That mode did not compile for as long as it
+          # existed, because nothing built it. No Vulkan dev package is needed --
+          # the backend resolves the loader at runtime, which is why the
+          # coverage job builds it without one either.
           - compiler: gcc-nocompositor
             cc: gcc-14
             cxx: g++-14
             extra_pkgs: g++-14
             compositor: 'OFF'
+            vulkan: 'ON'
 
     name: drm-${{ matrix.compiler }}
     permissions:
@@ -73,6 +83,7 @@ jobs:
             -D BUILD_BACKEND_WAYLAND_EGL=OFF \
             -D BUILD_BACKEND_WAYLAND_VULKAN=OFF \
             -D BUILD_COMPOSITOR=${{ matrix.compositor }} \
+            -D BUILD_BACKEND_DRM_KMS_VULKAN=${{ matrix.vulkan }} \
             -D BUILD_NUMBER=${GITHUB_RUN_ID}
 
       - name: Build

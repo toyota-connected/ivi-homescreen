@@ -34,15 +34,23 @@
 // EGL backend's header is where they are declared; only the enum is used here.
 #include "backend/drm_kms_egl/drm_backend.h"
 #include "backend/drm_kms_vulkan/device_caps.h"
+// Scanout, not composition: what the CRTC's planes can display and when to
+// retry the plane path. The root-surface present needs both, so neither belongs
+// behind BUILD_COMPOSITOR. Both are self-contained -- standard headers, drm-cxx
+// and view/ -- and pull in nothing from the compositor.
+#include "backend/drm_plane_formats.h"
+#include "view/layer_scanout.h"
+// Queue sharing with plugins, nothing to do with composition -- and
+// queue_interposer.cc is in the source list unconditionally, so guarding only
+// its header left the declaration missing from a build that still compiled the
+// definition.
+#include "backend/vulkan/queue_interposer.h"
 #if BUILD_COMPOSITOR
 // Pure-Vulkan blend pipeline; despite living beside the Wayland backend it
 // pulls in no Wayland headers, so the DRM backend shares it rather than
 // carrying a second copy of the same render pass.
-#include "backend/drm_plane_formats.h"
-#include "backend/vulkan/queue_interposer.h"
 #include "backend/wayland_vulkan/wl_layer_compositor.h"
 #include "view/compositor_surface_interface.h"
-#include "view/layer_scanout.h"
 #endif
 #include "profiling/frame_profile.h"
 #include "vsync/ivsync_provider.h"
@@ -500,6 +508,68 @@ class VulkanDrmBackend final : public Backend {
                  size_t count);
 #endif
 
+  // Both present paths stage a presentation serial: the plane path and the
+  // root-surface ring. Keeping this behind BUILD_COMPOSITOR left PresentSlot
+  // calling a ScopedPresentation that had not been declared.
+  // A commit just landed: hand the frame's presentation notes to the tracker
+  // under a new serial, and report them at once when no flip event follows.
+  // Presentation notes and their serial, staged *before* the commit.
+  //
+  // OnFlipEvent names the serial a flip carried by reading
+  // c.presentation_serial, and every commit here is NONBLOCK -- so a serial
+  // published after the ioctl means an event dispatched before we return names
+  // serial-1, a frame already reported, while the frame on screen goes
+  // unreported. The skew is permanent: each commit adds one serial and each
+  // event consumes one, so the offset never closes and every later flip reports
+  // the frame before the one it showed. Same defect and same fix as the EGL
+  // backend's.
+  static uint64_t StagePresentation(CompositorState& c);
+  // The commit was accepted. Reports inline when it was blocking, because no
+  // flip event will follow one.
+  static void SettlePresentation(CompositorState& c,
+                                 uint64_t serial,
+                                 bool blocking);
+  // The commit never happened: roll the serial back and return the notes to the
+  // frame being built. Safe because a present waits out the previous flip
+  // before committing, so no event is outstanding -- the only event this serial
+  // could name is the one that will never arrive.
+  static void WithdrawPresentation(CompositorState& c, uint64_t serial);
+
+  // Stages the notes before a commit and withdraws them unless it was accepted.
+  class ScopedPresentation {
+   public:
+    ScopedPresentation(CompositorState& c, const bool blocking)
+        : c_(c), serial_(StagePresentation(c)), blocking_(blocking) {}
+    ~ScopedPresentation() { Abort(); }
+
+    ScopedPresentation(const ScopedPresentation&) = delete;
+    ScopedPresentation& operator=(const ScopedPresentation&) = delete;
+    ScopedPresentation(ScopedPresentation&&) = delete;
+    ScopedPresentation& operator=(ScopedPresentation&&) = delete;
+
+    void Commit() noexcept {
+      if (!live_) {
+        return;
+      }
+      live_ = false;
+      SettlePresentation(c_, serial_, blocking_);
+    }
+    void Abort() noexcept {
+      if (!live_) {
+        return;
+      }
+      live_ = false;
+      WithdrawPresentation(c_, serial_);
+    }
+    [[nodiscard]] uint64_t serial() const noexcept { return serial_; }
+
+   private:
+    CompositorState& c_;
+    uint64_t serial_;
+    bool blocking_;
+    bool live_{true};
+  };
+
 #if BUILD_COMPOSITOR
   // Platform-view surfaces, keyed by the engine's view identifier. Registered
   // from the platform thread and read on the raster thread during compositing,
@@ -594,65 +664,6 @@ class VulkanDrmBackend final : public Backend {
   // the producers.
   std::pair<size_t, size_t> FramePlaneDemand(const FlutterLayer** layers,
                                              size_t count);
-
-  // A commit just landed: hand the frame's presentation notes to the tracker
-  // under a new serial, and report them at once when no flip event follows.
-  // Presentation notes and their serial, staged *before* the commit.
-  //
-  // OnFlipEvent names the serial a flip carried by reading
-  // c.presentation_serial, and every commit here is NONBLOCK -- so a serial
-  // published after the ioctl means an event dispatched before we return names
-  // serial-1, a frame already reported, while the frame on screen goes
-  // unreported. The skew is permanent: each commit adds one serial and each
-  // event consumes one, so the offset never closes and every later flip reports
-  // the frame before the one it showed. Same defect and same fix as the EGL
-  // backend's.
-  static uint64_t StagePresentation(CompositorState& c);
-  // The commit was accepted. Reports inline when it was blocking, because no
-  // flip event will follow one.
-  static void SettlePresentation(CompositorState& c,
-                                 uint64_t serial,
-                                 bool blocking);
-  // The commit never happened: roll the serial back and return the notes to the
-  // frame being built. Safe because a present waits out the previous flip
-  // before committing, so no event is outstanding -- the only event this serial
-  // could name is the one that will never arrive.
-  static void WithdrawPresentation(CompositorState& c, uint64_t serial);
-
-  // Stages the notes before a commit and withdraws them unless it was accepted.
-  class ScopedPresentation {
-   public:
-    ScopedPresentation(CompositorState& c, const bool blocking)
-        : c_(c), serial_(StagePresentation(c)), blocking_(blocking) {}
-    ~ScopedPresentation() { Abort(); }
-
-    ScopedPresentation(const ScopedPresentation&) = delete;
-    ScopedPresentation& operator=(const ScopedPresentation&) = delete;
-    ScopedPresentation(ScopedPresentation&&) = delete;
-    ScopedPresentation& operator=(ScopedPresentation&&) = delete;
-
-    void Commit() noexcept {
-      if (!live_) {
-        return;
-      }
-      live_ = false;
-      SettlePresentation(c_, serial_, blocking_);
-    }
-    void Abort() noexcept {
-      if (!live_) {
-        return;
-      }
-      live_ = false;
-      WithdrawPresentation(c_, serial_);
-    }
-    [[nodiscard]] uint64_t serial() const noexcept { return serial_; }
-
-   private:
-    CompositorState& c_;
-    uint64_t serial_;
-    bool blocking_;
-    bool live_{true};
-  };
 
   // Remove every scene layer ReconcilePlaneLayers added and forget them.
   static void DropPlaneLayers(CompositorState& c);
