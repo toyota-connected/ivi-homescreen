@@ -182,6 +182,24 @@ class BenchView {
      * different path on the EGL backend than on the Vulkan one.
      */
     req.kinds = IHS_PV_KIND_TEXTURE_DMABUF_IMPORT | IHS_PV_KIND_SOFTWARE_SHM;
+    /*
+     * PV_BENCH_DRM_PLANE=1 adds DRM_PLANE to the mask, for measuring the
+     * direct-scanout path instead of the composited one. Off by default so the
+     * numbers above stay comparable across backends; the granted-kind log says
+     * which path a run actually took, and asking is not getting.
+     */
+    const bool want_plane = [] {
+      const char* env = ::getenv("PV_BENCH_DRM_PLANE");
+      return env != nullptr && env[0] == '1' && env[1] == '\0';
+    }();
+    if (want_plane) {
+      // DRM_PLANE *only*, not added to the mask: kKindPriority ranks
+      // TEXTURE_DMABUF_IMPORT above DRM_PLANE, and choose_kind takes the first
+      // match, so a producer that also accepts import can never be granted a
+      // plane. Asking for the plane alone is the only way to exercise direct
+      // scanout -- and it fails loudly rather than quietly composing instead.
+      req.kinds = IHS_PV_KIND_DRM_PLANE;
+    }
     req.formats = wanted.data();
     req.format_count = wanted.size();
     req.needs_alpha = 0;
@@ -200,7 +218,14 @@ class BenchView {
         static_cast<unsigned long long>(grant.format.modifier), width_,
         height_);
     format_ = grant.format;
-    if (grant.granted_kind != IHS_PV_KIND_TEXTURE_DMABUF_IMPORT) {
+    if (want_plane) {
+      // Say plainly which one arrived: a plane run that silently fell back to
+      // import measures the composited path under the plane run's name.
+      Log(grant.granted_kind == IHS_PV_KIND_DRM_PLANE
+              ? "PV_BENCH_DRM_PLANE=1: granted a DRM plane (direct scanout)"
+              : "PV_BENCH_DRM_PLANE=1 but the grant is NOT a plane: this run "
+                "measures the composited path");
+    } else if (grant.granted_kind != IHS_PV_KIND_TEXTURE_DMABUF_IMPORT) {
       Log("not a dma-buf import grant: the plane path is NOT being measured");
     }
 
