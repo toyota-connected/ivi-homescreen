@@ -1404,7 +1404,8 @@ void WaylandVulkanBackend::ProfilePresent(const bool ok) {
       p.pipeline_latency_samples > 0
           ? (p.pipeline_latency_sum_ns / p.pipeline_latency_samples) / 1000
           : 0;
-  ihs::log::info(
+  // Debug, not info: repeats every window for the life of the process.
+  ihs::log::debug(
       "[WaylandVulkanBackend] profile (n={}): fps={:.2f} mean_interval={}us "
       "max_interval={}us present_failures={} discarded={} "
       "refresh={}us flags=0x{:x} pipeline_mean={}us pipeline_max={}us "
