@@ -189,6 +189,26 @@ class VulkanDrmBackend final : public Backend {
   }
   void SetVsyncParked(const bool parked) override { vsync_.SetParked(parked); }
 
+  // ─── libseat session lifecycle (VT switch) ───────────────────────────────
+  //
+  // Registered on the session in FinishCreate, the way the EGL backend does it.
+  // Without them this backend never learned that master had been revoked: it
+  // kept committing into a dead fd, its layer sources kept fd-bound state a
+  // resume invalidates, and nothing re-established the mode on the way back.
+  //
+  // Both run on DrmSession's dispatch thread, so they do atomic-flag work and
+  // hand the scene its own pause/resume -- no ioctls -- to keep that loop
+  // responsive.
+  void OnSessionPaused();
+  void OnSessionResumed(int new_fd);
+
+  /// True while master is revoked. A commit attempted then fails EACCES, which
+  /// is the timely signal (drmIsMaster lags libseat's pause callback), but the
+  /// flag is what lets callers tell an expected failure from a real one.
+  [[nodiscard]] bool SessionPaused() const {
+    return session_paused_.load(std::memory_order_acquire);
+  }
+
   void StopVsyncMonitor() override;
 
   [[nodiscard]] uint32_t width() const { return width_; }
@@ -296,6 +316,14 @@ class VulkanDrmBackend final : public Backend {
   /// The presentation serial the next flip event will report. Defined out of
   /// line for the same reason.
   [[nodiscard]] uint64_t PresentationSerialForTest() const;
+  /// The flip-in-flight latch, and the DRM fd, so a lifecycle case can drive
+  /// pause/resume and assert what they left behind. Out of line:
+  /// CompositorState is only complete in the implementation.
+  [[nodiscard]] bool FlipPendingForTest() const;
+  [[nodiscard]] int DrmFdForTest() const;
+  /// Put the latch up without a commit, so a case can be sure it is testing the
+  /// clearing rather than racing a flip event that cleared it first.
+  void SetFlipPendingForTest(bool pending);
   /// Runs on the raster thread right after a commit ioctl returns, with the
   /// flip in flight -- the window in which its event may be dispatched. A test
   /// reads the serial here: that is the value OnFlipEvent would use, so this is
@@ -304,6 +332,8 @@ class VulkanDrmBackend final : public Backend {
 
  private:
 #endif
+
+  std::atomic<bool> session_paused_{false};
 
   std::string drm_device_;
 
