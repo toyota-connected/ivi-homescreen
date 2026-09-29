@@ -277,16 +277,6 @@ jobs:
             -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging/usr/local \
             -D BUILD_NUMBER=${GITHUB_RUN_ID}
 
-      - name: Generate Wayland protocol headers
-        # The unit-test targets compile the Wayland sources without depending
-        # on the scanner targets, so ninja will otherwise compile them before
-        # the headers exist.
-        working-directory: ${{github.workspace}}/build/accesskit
-        run: |
-          ninja $(ninja -t targets all \
-            | grep -oE "^shell/wayland-protocols/[a-z0-9_]+\.hpp" \
-            | sort -u | tr '\n' ' ')
-
       - name: Build
         working-directory: ${{github.workspace}}/build/accesskit
         run: ninja
@@ -564,6 +554,19 @@ jobs:
             -D BUILD_SYSTEMD_WATCHDOG=ON \
             -D ENABLE_OSGI=ON
 
+      # Build the shared shell object library on its own, before anything has
+      # populated the build tree. It compiles the shell sources with the shell
+      # target's include directories, which cover the generated Wayland
+      # protocol headers -- but an include directory is not a build-order
+      # dependency, so without an explicit one it only compiles when the shell
+      # happened to be built first. A full `ninja` schedules the codegen early
+      # enough to hide that, which is why it took a single-target build in a
+      # fresh tree to find (#656). The objects feed the full build below, so
+      # this costs no extra compilation.
+      - name: Build homescreen_ut_shell first (generated-header ordering)
+        working-directory: ${{github.workspace}}/build/unit-tests
+        run: ninja -C . homescreen_ut_shell
+
       - name: Build
         working-directory: ${{github.workspace}}/build/unit-tests
         run: ninja -C .
@@ -681,18 +684,6 @@ jobs:
             -D BUILD_UNIT_TESTS=ON \
             -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging-release/usr/local \
             -D BUILD_NUMBER=${GITHUB_RUN_ID}
-
-      # Same ordering hazard the accesskit job documents: the unit-test targets
-      # compile the Wayland sources without depending on the scanner targets,
-      # so a fresh build directory races and ninja can reach them first. It
-      # surfaces as a couple of dozen compile errors that vanish on a second
-      # run, which is a confusing way to learn about a missing edge.
-      - name: Generate Wayland protocol headers (Release)
-        working-directory: ${{github.workspace}}/build/unit-tests-release
-        run: |
-          ninja $(ninja -t targets all \
-            | grep -oE "^shell/wayland-protocols/[a-z0-9_]+\.hpp" \
-            | sort -u | tr '\n' ' ')
 
       - name: Build (Release)
         working-directory: ${{github.workspace}}/build/unit-tests-release
