@@ -148,6 +148,16 @@ target_link_libraries(homescreen_ut_shell
     platform_homescreen
 )
 
+# TYPICAL_TEST_INC_DIRS carries the shell target's include directories, which
+# cover the generated protocol headers' output dir -- but an include directory
+# is not a build-order dependency, so nothing here makes the codegen run first.
+# In a fresh build directory the headers do not exist yet and every driver that
+# links this object library fails on wayland_client.hpp. Depend on the codegen
+# directly.
+if (COMMAND ivi_wayland_protocol_deps)
+    ivi_wayland_protocol_deps(homescreen_ut_shell)
+endif ()
+
 
 #add_subdirectory(template-test-case)
 add_subdirectory(utils-test)

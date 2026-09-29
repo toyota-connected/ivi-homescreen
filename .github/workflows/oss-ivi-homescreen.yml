@@ -564,6 +564,19 @@ jobs:
             -D BUILD_SYSTEMD_WATCHDOG=ON \
             -D ENABLE_OSGI=ON
 
+      # Build the shared shell object library on its own, before anything has
+      # populated the build tree. It compiles the shell sources with the shell
+      # target's include directories, which cover the generated Wayland
+      # protocol headers -- but an include directory is not a build-order
+      # dependency, so without an explicit one it only compiles when the shell
+      # happened to be built first. A full `ninja` schedules the codegen early
+      # enough to hide that, which is why it took a single-target build in a
+      # fresh tree to find (#656). The objects feed the full build below, so
+      # this costs no extra compilation.
+      - name: Build homescreen_ut_shell first (generated-header ordering)
+        working-directory: ${{github.workspace}}/build/unit-tests
+        run: ninja -C . homescreen_ut_shell
+
       - name: Build
         working-directory: ${{github.workspace}}/build/unit-tests
         run: ninja -C .

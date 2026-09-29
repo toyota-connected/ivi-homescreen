@@ -10,7 +10,8 @@
 # This module is included from the top-level CMakeLists.txt (after compiler.cmake
 # so the `toolchain` INTERFACE library exists). It sets up the scanner subproject
 # and defines ivi_wayland_protocols()/ivi_wayland_link() for the shell target to
-# call once it exists. Mirrors cmake/drm_kms.cmake.
+# call once it exists, plus ivi_wayland_protocol_deps() for targets that reuse
+# the shell's sources and include dirs. Mirrors cmake/drm_kms.cmake.
 #
 
 # Gate on IVI_WAYLAND_ANY, not on the surface backends: wayland-leased-drm
@@ -187,6 +188,46 @@ foreach (_tgt wayland-cxx-scanner wayland-cxx-scanner-lib)
 endforeach ()
 
 #
+# _ivi_wl_generate(<wayland_cxx_generate args>)
+#
+# wayland_cxx_generate() plus a record of the target it created. The scanner
+# names that target after the OUTPUT path, so derive it the same way rather
+# than parsing the build system back out.
+#
+function(_ivi_wl_generate)
+    wayland_cxx_generate(${ARGN})
+    cmake_parse_arguments(PARSE_ARGV 0 _r "" "OUTPUT" "")
+    string(MAKE_C_IDENTIFIER "wlcxxgen_${_r_OUTPUT}" _r_tgt)
+    set_property(GLOBAL APPEND PROPERTY IVI_WAYLAND_PROTOCOL_TARGETS ${_r_tgt})
+endfunction()
+
+#
+# ivi_wayland_protocol_deps(<target>)
+#
+# Attach a build-order dependency on every protocol header
+# ivi_wayland_protocols() generated -- nothing else: no include dirs, no
+# compile definitions.
+#
+# For a target that compiles shell sources with the shell target's include
+# directories copied across (test/unit_test's TYPICAL_TEST_INC_DIRS): the
+# generated headers are on its include path, but nothing orders the codegen
+# ahead of it, so it only builds when the shell happened to be built first.
+# A fresh build directory that builds one such target directly fails on
+# wayland_client.hpp and friends.
+#
+# Depend on the list rather than a hand-written set of names, so a protocol
+# added to ivi_wayland_protocols() later cannot go missing here.
+#
+function(ivi_wayland_protocol_deps target)
+    get_property(_gen GLOBAL PROPERTY IVI_WAYLAND_PROTOCOL_TARGETS)
+    foreach (_t IN LISTS _gen)
+        if (TARGET ${_t})
+            add_dependencies(${target} ${_t})
+        endif ()
+    endforeach ()
+endfunction()
+
+#
 # ivi_wayland_protocols(<target>)
 #
 # Generate the C++ protocol headers the shell code needs and attach them (dep +
@@ -216,7 +257,7 @@ function(ivi_wayland_protocols target)
     # core wayland — always (wl::Registry drives the lease client's globals;
     # wl::KeyboardHandler needs wayland::client::CWlKeyboard on surface builds);
     # core wl_interface tables come from libwayland, so do NOT emit tables.
-    wayland_cxx_generate(PROTOCOL "${IVI_WL_CORE_XML}" MODE client-header
+    _ivi_wl_generate(PROTOCOL "${IVI_WL_CORE_XML}" MODE client-header
         OUTPUT wayland-protocols/wayland_client.hpp TARGET ${target})
 
     # drm-lease-v1 — the wayland-leased-drm backend's entire Wayland surface
@@ -227,7 +268,7 @@ function(ivi_wayland_protocols target)
     # IVI_WL_PROTOCOLS_BASE. No shipped wl/ helper carries its interface
     # tables, so generate self-contained with EMIT_INTERFACE_TABLES.
     if (BUILD_BACKEND_WAYLAND_LEASED_DRM)
-        wayland_cxx_generate(PROTOCOL "${_loc}/drm-lease-v1.xml"
+        _ivi_wl_generate(PROTOCOL "${_loc}/drm-lease-v1.xml"
             MODE client-header EMIT_INTERFACE_TABLES
             OUTPUT wayland-protocols/drm_lease_v1_client.hpp TARGET ${target})
     endif ()
@@ -237,21 +278,21 @@ function(ivi_wayland_protocols target)
     endif ()
 
     # presentation-time — every surface build (IVsyncProvider); no shipped header -> emit tables.
-    wayland_cxx_generate(PROTOCOL "${_pres}" MODE client-header EMIT_INTERFACE_TABLES
+    _ivi_wl_generate(PROTOCOL "${_pres}" MODE client-header EMIT_INTERFACE_TABLES
         OUTPUT wayland-protocols/presentation_time_client.hpp TARGET ${target})
 
     # input-timestamps — every surface build (ivi::InputTimestamps: high-resolution kernel
     # timestamps for the pointer/touch → Flutter path; runtime-optional, the
     # provider no-ops when the compositor doesn't advertise the manager).
     # No shipped header -> emit tables.
-    wayland_cxx_generate(PROTOCOL
+    _ivi_wl_generate(PROTOCOL
         "${IVI_WL_PROTOCOLS_BASE}/unstable/input-timestamps/input-timestamps-unstable-v1.xml"
         MODE client-header EMIT_INTERFACE_TABLES
         OUTPUT wayland-protocols/input_timestamps_client.hpp TARGET ${target})
 
     # viewporter — every surface build (per-surface scaling; stable since wayland-protocols
     # 1.4, so present on Dunfell's 1.20). No shipped header -> emit tables.
-    wayland_cxx_generate(PROTOCOL
+    _ivi_wl_generate(PROTOCOL
         "${IVI_WL_PROTOCOLS_BASE}/stable/viewporter/viewporter.xml"
         MODE client-header EMIT_INTERFACE_TABLES
         OUTPUT wayland-protocols/viewporter_client.hpp TARGET ${target})
@@ -261,7 +302,7 @@ function(ivi_wayland_protocols target)
     # wl/linux_dmabuf.hpp carries the interface tables, so generate WITHOUT
     # --emit-interface-tables (same rule as xdg-shell). Generating it
     # unconditionally costs nothing on stacks that never bind it.
-    wayland_cxx_generate(PROTOCOL
+    _ivi_wl_generate(PROTOCOL
         "${IVI_WL_PROTOCOLS_BASE}/unstable/linux-dmabuf/linux-dmabuf-unstable-v1.xml"
         MODE client-header
         OUTPUT wayland-protocols/linux_dmabuf_client.hpp TARGET ${target})
@@ -270,7 +311,7 @@ function(ivi_wayland_protocols target)
     # wayland-protocols >= 1.31, which Dunfell/Ubuntu-20.04 hosts predate.
     # Both protocols are gated at runtime on the compositor advertising the
     # global, so generating unconditionally costs nothing on old stacks.
-    wayland_cxx_generate(PROTOCOL "${_loc}/fractional-scale-v1.xml"
+    _ivi_wl_generate(PROTOCOL "${_loc}/fractional-scale-v1.xml"
         MODE client-header EMIT_INTERFACE_TABLES
         OUTPUT wayland-protocols/fractional_scale_v1_client.hpp TARGET ${target})
 
@@ -281,7 +322,7 @@ function(ivi_wayland_protocols target)
     # interface tables, so generate self-contained with EMIT_INTERFACE_TABLES.
     # Runtime-gated on the compositor advertising the global, so generating it
     # unconditionally costs nothing on stacks that never bind it.
-    wayland_cxx_generate(PROTOCOL "${_loc}/linux-drm-syncobj-v1.xml"
+    _ivi_wl_generate(PROTOCOL "${_loc}/linux-drm-syncobj-v1.xml"
         MODE client-header EMIT_INTERFACE_TABLES
         OUTPUT wayland-protocols/linux_drm_syncobj_client.hpp TARGET ${target})
 
@@ -291,19 +332,19 @@ function(ivi_wayland_protocols target)
     # is self-contained. Only the text-input-v1/v3 backends have a generated
     # protocol header; the other IME selections (and 'none') generate nothing.
     if (WAYLAND_CXX_IME_BACKEND STREQUAL "text-input-v3")
-        wayland_cxx_generate(PROTOCOL
+        _ivi_wl_generate(PROTOCOL
             "${IVI_WL_PROTOCOLS_BASE}/unstable/text-input/text-input-unstable-v3.xml"
             MODE client-header EMIT_INTERFACE_TABLES
             OUTPUT wayland-protocols/text_input_v3_client.hpp TARGET ${target})
     elseif (WAYLAND_CXX_IME_BACKEND STREQUAL "text-input-v1")
-        wayland_cxx_generate(PROTOCOL
+        _ivi_wl_generate(PROTOCOL
             "${IVI_WL_PROTOCOLS_BASE}/unstable/text-input/text-input-unstable-v1.xml"
             MODE client-header EMIT_INTERFACE_TABLES
             OUTPUT wayland-protocols/text_input_v1_client.hpp TARGET ${target})
     endif ()
 
     if (ENABLE_XDG_CLIENT)
-        wayland_cxx_generate(PROTOCOL "${_xdg}" MODE client-header
+        _ivi_wl_generate(PROTOCOL "${_xdg}" MODE client-header
             OUTPUT wayland-protocols/xdg_shell_client.hpp TARGET ${target})
         target_compile_definitions(${target} PRIVATE ENABLE_XDG_CLIENT=1)
     endif ()
@@ -313,22 +354,22 @@ function(ivi_wayland_protocols target)
         # pinned the protocol version to whatever the table spelled out) and now
         # expects the table generated from the XML. So emit tables here, unlike
         # xdg/simple whose shipped headers still carry wl_iface() inline.
-        wayland_cxx_generate(PROTOCOL "${_bund}/agl-shell.xml" MODE client-header
+        _ivi_wl_generate(PROTOCOL "${_bund}/agl-shell.xml" MODE client-header
             EMIT_INTERFACE_TABLES
             OUTPUT wayland-protocols/agl_shell_client.hpp TARGET ${target})
         target_compile_definitions(${target} PRIVATE ENABLE_AGL_SHELL_CLIENT=1)
     endif ()
     if (ENABLE_IVI_SHELL_CLIENT)
-        wayland_cxx_generate(PROTOCOL "${_bund}/ivi-application.xml" MODE client-header
+        _ivi_wl_generate(PROTOCOL "${_bund}/ivi-application.xml" MODE client-header
             EMIT_INTERFACE_TABLES
             OUTPUT wayland-protocols/ivi_application_client.hpp TARGET ${target})
-        wayland_cxx_generate(PROTOCOL "${_loc}/ivi-wm.xml" MODE client-header
+        _ivi_wl_generate(PROTOCOL "${_loc}/ivi-wm.xml" MODE client-header
             EMIT_INTERFACE_TABLES
             OUTPUT wayland-protocols/ivi_wm_client.hpp TARGET ${target})
         target_compile_definitions(${target} PRIVATE ENABLE_IVI_SHELL_CLIENT=1)
     endif ()
     if (ENABLE_SIMPLE_SHELL_CLIENT)
-        wayland_cxx_generate(PROTOCOL "${_bund}/simpleshell.xml" MODE client-header
+        _ivi_wl_generate(PROTOCOL "${_bund}/simpleshell.xml" MODE client-header
             OUTPUT wayland-protocols/simple_shell_client.hpp TARGET ${target})
         target_compile_definitions(${target} PRIVATE ENABLE_SIMPLE_SHELL_CLIENT=1)
     endif ()

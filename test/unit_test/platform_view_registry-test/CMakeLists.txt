@@ -18,6 +18,13 @@ add_executable(
 
 add_sanitizers(${TESTCASE_NAME})
 
+# TYPICAL_TEST_SOURCES includes the generated protocol headers; they are attached
+# to the shell target by ivi_wayland_protocols(), so without this the test only
+# builds when the shell happened to be built first.
+if (COMMAND ivi_wayland_protocol_deps)
+    ivi_wayland_protocol_deps(${TESTCASE_NAME})
+endif ()
+
 target_compile_definitions(
         ${TESTCASE_NAME}
         PRIVATE

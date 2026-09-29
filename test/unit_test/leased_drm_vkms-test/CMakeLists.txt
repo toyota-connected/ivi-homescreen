@@ -18,13 +18,11 @@ add_executable(
 
 add_sanitizers(${TESTCASE_NAME})
 
-# TYPICAL_TEST_SOURCES now carries lease_client.cc, which includes the generated
-# drm-lease client header. The header is attached to the shell target by
-# ivi_wayland_protocols(), so without this the test only builds when the shell
-# happened to be built first.
-if (TARGET wlcxxgen_wayland_protocols_drm_lease_v1_client_hpp)
-    add_dependencies(${TESTCASE_NAME}
-            wlcxxgen_wayland_protocols_drm_lease_v1_client_hpp)
+# TYPICAL_TEST_SOURCES includes the generated protocol headers; they are attached
+# to the shell target by ivi_wayland_protocols(), so without this the test only
+# builds when the shell happened to be built first.
+if (COMMAND ivi_wayland_protocol_deps)
+    ivi_wayland_protocol_deps(${TESTCASE_NAME})
 endif ()
 
 target_compile_definitions(
