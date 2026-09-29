@@ -29,10 +29,12 @@
  * ihs_get_api().
  *
  * A minor also marks a relaxed rule a plugin may want to rely on: 1.11 allows
- * a retired buffer id to be submitted again (see ihs_pv_retire_buffer).
+ * a retired buffer id to be submitted again (see ihs_pv_retire_buffer). 1.17
+ * lets a requirement name a preferred kind instead of inferring one from the
+ * mask (see IhsPvRequirements::preferred_kind).
  */
 #define IHS_SHARED_ABI_MAJOR 1u
-#define IHS_SHARED_ABI_MINOR 16u
+#define IHS_SHARED_ABI_MINOR 17u
 #define IHS_SHARED_ABI_VERSION \
   ((IHS_SHARED_ABI_MAJOR << 16) | IHS_SHARED_ABI_MINOR)
 

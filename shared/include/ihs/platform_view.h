@@ -196,6 +196,17 @@ typedef struct IhsHdrMetadata {
  *                          metadata kept outside the dma-buf. EGL backends
  *                          only. Added in 1.16.
  * A well-formed requirement that includes SOFTWARE_SHM never hard-fails.
+ *
+ * The order is a tie-break, not a performance ranking. Direct scanout is the
+ * faster path where it applies -- measured on a composited platform view it
+ * nearly halved total frame time, with raster identical and the whole
+ * difference being the composite step it skips (ivi-homescreen#669). Import is
+ * first because it is the *certain* path: a plane may not be allocatable for a
+ * given frame and the scene falls back to composition anyway, so ranking the
+ * certainty first keeps a producer from negotiating for scanout and silently
+ * getting composition. A producer that wants scanout says so with
+ * IhsPvRequirements::preferred_kind rather than by dropping import from its
+ * mask.
  */
 typedef enum IhsPvKind {
   IHS_PV_KIND_NONE = 0,
@@ -462,7 +473,29 @@ typedef struct IhsPvRequirements {
   uint8_t needs_alpha; /* 0 or 1 */
   uint8_t sync;        /* IhsPvSync */
   uint8_t z_order;     /* IhsPvZOrder */
-  uint8_t reserved;    /* pad to 4-byte boundary; must be 0 */
+  /*
+   * One IhsPvKind this view would rather have, or IHS_PV_KIND_NONE (0) for no
+   * preference. Honored when the backend can grant it and @kinds also names it;
+   * otherwise the default best-to-floor order below decides, so a preference
+   * never costs a producer its fallback and is free to ask for.
+   *
+   * It exists because @kinds alone cannot express one. The default order puts
+   * TEXTURE_DMABUF_IMPORT first, so a producer that lists import -- which
+   * nearly all do, since it is the portable path -- could never be granted
+   * DRM_PLANE: to reach direct scanout it had to ask for DRM_PLANE *alone* and
+   * accept hard failure where no plane is available (ivi-homescreen#673).
+   *
+   * Added in 1.17, claiming the byte this struct reserved and required to be 0.
+   * It is not a trailing field, deliberately: sizeof(IhsPvRequirements) is 40
+   * with or without it -- the space was already trailing padding -- so
+   * @struct_size cannot tell a 1.16 caller from a 1.17 one, and a guard on it
+   * would be decoration. A 1.16 caller that honored "must be 0" reads as "no
+   * preference", which is its old behavior exactly.
+   *
+   * uint8_t because every IhsPvKind is a single bit and there are four; a ninth
+   * would need a new field rather than this one.
+   */
+  uint8_t preferred_kind;
 } IhsPvRequirements;
 
 /*

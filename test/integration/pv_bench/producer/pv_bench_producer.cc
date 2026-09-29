@@ -183,22 +183,24 @@ class BenchView {
      */
     req.kinds = IHS_PV_KIND_TEXTURE_DMABUF_IMPORT | IHS_PV_KIND_SOFTWARE_SHM;
     /*
-     * PV_BENCH_DRM_PLANE=1 adds DRM_PLANE to the mask, for measuring the
-     * direct-scanout path instead of the composited one. Off by default so the
-     * numbers above stay comparable across backends; the granted-kind log says
-     * which path a run actually took, and asking is not getting.
+     * PV_BENCH_DRM_PLANE=1 measures the direct-scanout path instead of the
+     * composited one. Off by default so the numbers above stay comparable
+     * across backends; the granted-kind log says which path a run actually
+     * took, and asking is not getting.
+     *
+     * Expressed as a preference, with import and shm left in the mask. Before
+     * 1.17 this had to request DRM_PLANE *alone* -- the default order ranks
+     * import above it, so a producer that also accepted import could never be
+     * granted a plane (#673) -- which meant a plane run had no fallback and
+     * failed outright wherever no plane was available.
      */
     const bool want_plane = [] {
       const char* env = ::getenv("PV_BENCH_DRM_PLANE");
       return env != nullptr && env[0] == '1' && env[1] == '\0';
     }();
     if (want_plane) {
-      // DRM_PLANE *only*, not added to the mask: kKindPriority ranks
-      // TEXTURE_DMABUF_IMPORT above DRM_PLANE, and choose_kind takes the first
-      // match, so a producer that also accepts import can never be granted a
-      // plane. Asking for the plane alone is the only way to exercise direct
-      // scanout -- and it fails loudly rather than quietly composing instead.
-      req.kinds = IHS_PV_KIND_DRM_PLANE;
+      req.kinds |= IHS_PV_KIND_DRM_PLANE;
+      req.preferred_kind = IHS_PV_KIND_DRM_PLANE;
     }
     req.formats = wanted.data();
     req.format_count = wanted.size();

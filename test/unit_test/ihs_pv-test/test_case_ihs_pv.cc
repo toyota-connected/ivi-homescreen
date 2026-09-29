@@ -383,6 +383,153 @@ TEST(IhsPvSurface, NegotiatePicksBestKind) {
   detach_host();
 }
 
+// ── preferred_kind (1.17, #673) ────────────────────────────────────────────
+//
+// The mask alone cannot express a preference and the default order puts import
+// first, so a producer listing import -- nearly all of them, it being the
+// portable path -- could never be granted DRM_PLANE. It had to ask for
+// DRM_PLANE alone and give up its fallback. These cases pin the way out.
+
+// The case the field exists for: both kinds on offer, both requested, and the
+// producer gets the one it asked for instead of the default winner.
+TEST(IhsPvSurface, APreferredKindBeatsTheDefaultOrder) {
+  MockHost host_state;
+  host_state.caps_kinds =
+      IHS_PV_KIND_TEXTURE_DMABUF_IMPORT | IHS_PV_KIND_DRM_PLANE;
+  const IhsPvHost host = make_host(&host_state);
+  ihs_pv_set_host(&host);
+
+  IhsPvRequirements req =
+      make_req(IHS_PV_KIND_TEXTURE_DMABUF_IMPORT | IHS_PV_KIND_DRM_PLANE);
+  req.preferred_kind = IHS_PV_KIND_DRM_PLANE;
+  IhsPvGrant grant{};
+  grant.struct_size = sizeof(grant);
+  ASSERT_EQ(ihs_pv_negotiate(fake_view(), &req, &grant), IHS_PV_OK);
+  EXPECT_EQ(grant.granted_kind, IHS_PV_KIND_DRM_PLANE)
+      << "import won anyway, so the preference did nothing and a producer "
+         "still cannot reach direct scanout without dropping its fallback";
+  EXPECT_EQ(host_state.last_grant_kind, IHS_PV_KIND_DRM_PLANE);
+
+  detach_host();
+}
+
+// A preference is a preference. Where the backend cannot grant it the producer
+// keeps its fallback rather than failing -- that is what makes it free to ask.
+TEST(IhsPvSurface, AnUngrantablePreferenceFallsBackInsteadOfFailing) {
+  MockHost host_state;  // caps = TEXTURE | SHM, no plane
+  const IhsPvHost host = make_host(&host_state);
+  ihs_pv_set_host(&host);
+
+  IhsPvRequirements req =
+      make_req(IHS_PV_KIND_TEXTURE_DMABUF_IMPORT | IHS_PV_KIND_SOFTWARE_SHM);
+  req.preferred_kind = IHS_PV_KIND_DRM_PLANE;
+  IhsPvGrant grant{};
+  grant.struct_size = sizeof(grant);
+  ASSERT_EQ(ihs_pv_negotiate(fake_view(), &req, &grant), IHS_PV_OK)
+      << "an unavailable preference must not be fatal";
+  EXPECT_EQ(grant.granted_kind, IHS_PV_KIND_TEXTURE_DMABUF_IMPORT);
+
+  detach_host();
+}
+
+// A preference the producer did not put in its own mask is not a way to ask for
+// a kind it cannot render into.
+TEST(IhsPvSurface, APreferenceOutsideTheRequestedMaskIsIgnored) {
+  MockHost host_state;
+  host_state.caps_kinds =
+      IHS_PV_KIND_TEXTURE_DMABUF_IMPORT | IHS_PV_KIND_DRM_PLANE;
+  const IhsPvHost host = make_host(&host_state);
+  ihs_pv_set_host(&host);
+
+  IhsPvRequirements req = make_req(IHS_PV_KIND_TEXTURE_DMABUF_IMPORT);
+  req.preferred_kind = IHS_PV_KIND_DRM_PLANE;
+  IhsPvGrant grant{};
+  grant.struct_size = sizeof(grant);
+  ASSERT_EQ(ihs_pv_negotiate(fake_view(), &req, &grant), IHS_PV_OK);
+  EXPECT_EQ(grant.granted_kind, IHS_PV_KIND_TEXTURE_DMABUF_IMPORT)
+      << "a preference granted a kind the producer never said it can produce";
+
+  detach_host();
+}
+
+// A mask in preferred_kind is a caller error, not a list. Honoring the lowest
+// set bit would be a guess about which one was meant.
+TEST(IhsPvSurface, AMultiBitPreferenceIsIgnoredRatherThanGuessed) {
+  MockHost host_state;
+  host_state.caps_kinds =
+      IHS_PV_KIND_TEXTURE_DMABUF_IMPORT | IHS_PV_KIND_DRM_PLANE;
+  const IhsPvHost host = make_host(&host_state);
+  ihs_pv_set_host(&host);
+
+  IhsPvRequirements req =
+      make_req(IHS_PV_KIND_TEXTURE_DMABUF_IMPORT | IHS_PV_KIND_DRM_PLANE);
+  req.preferred_kind = IHS_PV_KIND_DRM_PLANE | IHS_PV_KIND_SOFTWARE_SHM;
+  IhsPvGrant grant{};
+  grant.struct_size = sizeof(grant);
+  ASSERT_EQ(ihs_pv_negotiate(fake_view(), &req, &grant), IHS_PV_OK);
+  EXPECT_EQ(grant.granted_kind, IHS_PV_KIND_TEXTURE_DMABUF_IMPORT)
+      << "a multi-bit preference was treated as naming a kind";
+
+  detach_host();
+}
+
+// The field claims the byte the struct already reserved, so adding it must not
+// move anything or change the size -- otherwise every compiled plugin's layout
+// shifts under it and "additive" is a fiction. sizeof was 40 before 1.17.
+TEST(IhsPvSurface, ThePreferenceFieldDidNotChangeTheStructLayout) {
+  static_assert(sizeof(IhsPvRequirements) == 40,
+                "IhsPvRequirements grew; preferred_kind was meant to occupy "
+                "the reserved byte, not extend the struct");
+  static_assert(offsetof(IhsPvRequirements, kinds) == sizeof(size_t));
+  static_assert(
+      offsetof(IhsPvRequirements, needs_alpha) + sizeof(uint8_t) * 3 ==
+          offsetof(IhsPvRequirements, preferred_kind),
+      "preferred_kind is not where reserved was");
+  SUCCEED();
+}
+
+// A 1.16 caller honored "must be 0" for that byte, so it reads as no
+// preference and behaves exactly as it did before.
+TEST(IhsPvSurface, AZeroedReservedByteReadsAsNoPreference) {
+  MockHost host_state;
+  host_state.caps_kinds =
+      IHS_PV_KIND_TEXTURE_DMABUF_IMPORT | IHS_PV_KIND_DRM_PLANE;
+  const IhsPvHost host = make_host(&host_state);
+  ihs_pv_set_host(&host);
+
+  // What a pre-1.17 plugin built: struct_size of the whole struct, and the
+  // reserved byte zeroed as its contract required.
+  IhsPvRequirements req{};
+  req.struct_size = sizeof(req);
+  req.kinds = IHS_PV_KIND_TEXTURE_DMABUF_IMPORT | IHS_PV_KIND_DRM_PLANE;
+  IhsPvGrant grant{};
+  grant.struct_size = sizeof(grant);
+  ASSERT_EQ(ihs_pv_negotiate(fake_view(), &req, &grant), IHS_PV_OK);
+  EXPECT_EQ(grant.granted_kind, IHS_PV_KIND_TEXTURE_DMABUF_IMPORT)
+      << "a caller expressing no preference did not get the default order";
+
+  detach_host();
+}
+
+// No preference is the old behavior, unchanged.
+TEST(IhsPvSurface, NoPreferenceKeepsTheDefaultOrder) {
+  MockHost host_state;
+  host_state.caps_kinds =
+      IHS_PV_KIND_TEXTURE_DMABUF_IMPORT | IHS_PV_KIND_DRM_PLANE;
+  const IhsPvHost host = make_host(&host_state);
+  ihs_pv_set_host(&host);
+
+  IhsPvRequirements req =
+      make_req(IHS_PV_KIND_TEXTURE_DMABUF_IMPORT | IHS_PV_KIND_DRM_PLANE);
+  ASSERT_EQ(req.preferred_kind, IHS_PV_KIND_NONE) << "make_req zeroes it";
+  IhsPvGrant grant{};
+  grant.struct_size = sizeof(grant);
+  ASSERT_EQ(ihs_pv_negotiate(fake_view(), &req, &grant), IHS_PV_OK);
+  EXPECT_EQ(grant.granted_kind, IHS_PV_KIND_TEXTURE_DMABUF_IMPORT);
+
+  detach_host();
+}
+
 // grant may replace the modifier (1.15) and negotiate reports what came back,
 // so the grant describes the buffer the producer will actually allocate. The
 // case this exists for: a DRM_PLANE grant whose negotiated modifier no plane
