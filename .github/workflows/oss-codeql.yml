@@ -142,30 +142,48 @@ jobs:
       run: |
         set -euo pipefail
         shopt -s nullglob
-        # Anchored on a path separator rather than the string start: Code'L may
-        # emit a URI relative to the source root or an absolute one (which is
-        # why upload-sarif has a checkout_path input), and a start-anchored
-        # match would silently keep everything in the absolute case. The
-        # trailing slash is what keeps a file merely NAMED third_party_*.cc.
-        drop='(^|/)(third_party|build)/'
+        # What goes:
+        #   build/        generated sources (the wlcxxgen wayland-protocols
+        #                 headers), which are build output, not code to review.
+        #   third_party/  vendored upstreams we do not patch here.
+        #
+        # What stays, and why this is not just "everything under third_party":
+        # drm-cxx and wayland-cxx-scanner are ours, vendored as submodules only
+        # because that is how they ship. Filtering them was wrong -- it closed
+        # 201 alerts in code we own, including a critical and a high -- so they
+        # are kept. Their OWN nested third_party (drm-cxx vendors fmt) is still
+        # dropped, which is what the single-occurrence test below enforces: keep
+        # a path whose only "third_party/" is the leading one naming one of ours.
+        #
+        # The match is anchored on a path separator, not the string start:
+        # CodeQL may emit a URI relative to the source root or an absolute one
+        # (which is why upload-sarif has a checkout_path input), and a
+        # start-anchored match would silently keep everything in the absolute
+        # case. The trailing slash is what keeps a file merely NAMED
+        # third_party_*.cc.
+        ours='(^|/)third_party/(drm-cxx|wayland-cxx-scanner)/'
+        filter='
+          def uri: .locations[]?.physicalLocation.artifactLocation.uri // "";
+          def vendored:
+            test("(^|/)build/")
+            or ( test("(^|/)third_party/")
+                 and ( ( test($ours)
+                         and ([match("third_party/"; "g")] | length) == 1 )
+                       | not ) );
+        '
         found=0
         for f in "${{ runner.temp }}"/codeql-sarif/*.sarif; do
           found=1
           before=$(jq '[.runs[].results[]] | length' "$f")
-          # Log what is going, so a wrong assumption about the URI shape shows
-          # up as "dropped 0" beside an empty list instead of passing quietly.
-          jq -r --arg drop "$drop" '
-            [ .runs[].results[]
-              | .locations[]?.physicalLocation.artifactLocation.uri // ""
-              | select(test($drop))
-            ] | unique | .[] | "  dropping: \(.)"
+          # List what goes, so a wrong assumption about the URI shape shows up
+          # as "dropped 0" beside an empty list instead of passing quietly.
+          jq -r --arg ours "$ours" "$filter"'
+            [ .runs[].results[] | uri | select(vendored) ]
+            | unique | .[] | "  dropping: \(.)"
           ' "$f" | head -20
-          jq --arg drop "$drop" '
+          jq --arg ours "$ours" "$filter"'
             .runs |= map(
-              .results |= map(select(
-                [ .locations[]?.physicalLocation.artifactLocation.uri // ""
-                  | test($drop) ] | any | not
-              ))
+              .results |= map(select([ uri | vendored ] | any | not))
             )
           ' "$f" > "$f.filtered"
           mv "$f.filtered" "$f"
