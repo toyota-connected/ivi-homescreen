@@ -13,7 +13,11 @@ jobs:
   analyze:
     if: ${{ github.server_url == 'https://github.com' &&  always() }}
     name: Analyze
-    runs-on: ubuntu-22.04
+    # 24.04, matching drm-kms.yml. That workflow already builds this backend
+    # set on this runner with these packages, so the scan config is proven rather
+    # than assumed; 22.04 was fine for the wayland-only default but was never
+    # exercised with libdrm/libgbm/libseat.
+    runs-on: ubuntu-24.04
     permissions:
       actions: read
       contents: read
@@ -38,6 +42,8 @@ jobs:
           build-essential cmake ninja-build pkg-config
           libwayland-dev wayland-protocols libxkbcommon-dev libpugixml-dev
           mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils
+          libdrm-dev libgbm-dev libinput-dev libudev-dev libseat-dev
+          libxcursor-dev libglib2.0-dev
 
     - name: Show toolchain versions
       run: |
@@ -59,11 +65,38 @@ jobs:
     - name: Configure
       run: |
         mkdir -p ${{github.workspace}}/build/release
+        # CodeQL analyzes what the build compiles, so every option left at its
+        # default in cmake/options.cmake is code it never sees. The defaults
+        # give wayland-egl, wayland-vulkan and the HUD -- 68 of the shell's 136
+        # translation units. The DRM backends, the compositor, the software
+        # backend, headless-vulkan, the watchdog and accessibility were all
+        # unscanned.
+        #
+        # That is not hypothetical. Alert #547 reported GetEncodableInt as
+        # unreachable in watchdog_plugin.cc; its three callers sit behind
+        # #if BUILD_WATCHDOG, which this build did not set, so they were not
+        # compiled and the function genuinely looked dead. A blind spot that
+        # invents a false positive will equally hide a real one.
+        #
+        # BUILD_BACKEND_HEADLESS_EGL stays off: it needs a v4l2-webrtc-codec
+        # checkout beside this repo (cmake/options.cmake:228), and fetching a
+        # second source tree to widen a scan is a worse trade than the one
+        # backend it adds. Same for accesskit, which wants a downloaded SDK.
         cmake -GNinja \
           -B ${{github.workspace}}/build/release \
           -D CMAKE_BUILD_TYPE=Release \
           -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging/usr/local \
-          -D BUILD_NUMBER=${GITHUB_RUN_ID}
+          -D BUILD_NUMBER=${GITHUB_RUN_ID} \
+          -D BUILD_BACKEND_WAYLAND_EGL=ON \
+          -D BUILD_BACKEND_WAYLAND_VULKAN=ON \
+          -D BUILD_BACKEND_DRM_KMS_EGL=ON \
+          -D BUILD_BACKEND_DRM_KMS_VULKAN=ON \
+          -D BUILD_BACKEND_SOFTWARE=ON \
+          -D BUILD_SOFTWARE_SINK_DRM=ON \
+          -D BUILD_BACKEND_HEADLESS_VULKAN=ON \
+          -D BUILD_COMPOSITOR=ON \
+          -D BUILD_WATCHDOG=ON \
+          -D BUILD_ACCESSIBILITY=ON
 
     - name: Build Release Packages
       working-directory: ${{github.workspace}}/build/release
