@@ -109,4 +109,8 @@ class DmabufVulkanImporter {
   PFN_vkGetPhysicalDeviceFormatProperties2 get_format_properties2_{nullptr};
   PFN_vkGetPhysicalDeviceImageFormatProperties2 get_image_format_properties2_{
       nullptr};
+
+  // Bytes the driver adds to an import's allocationSize before checking it
+  // against the dma-buf; see Import. Nonzero on v3dv only.
+  VkDeviceSize import_padding_{0};
 };
