@@ -1828,7 +1828,7 @@ void IhsPluginView::ImportPendingEglLocked(std::unique_lock<std::mutex>& lock,
                                    slot.pending->image_external, &imported)
             : g_egl_importer.Import(f, &imported);
     if (ok) {
-      auto [pos, ins] = buffers_egl.emplace(f.buffer_id, imported);
+      auto pos = buffers_egl.emplace(f.buffer_id, imported).first;
       *slot.current = &pos->second;
       *slot.current_id = f.buffer_id;
       *slot.current_frame = slot.pending->stash_seq;
@@ -2897,7 +2897,7 @@ int SubmitFrame0(void* user_data,
       v->scanout.erase(frame->buffer_id);
     }
     // Import consumed plane_fd[0]; a single-plane RGB frame owns no other fds.
-    auto [pos, inserted] = v->buffers.emplace(frame->buffer_id, imported);
+    auto pos = v->buffers.emplace(frame->buffer_id, imported).first;
     v->current = &pos->second;
     v->current_buffer_id = frame->buffer_id;
     v->current_frame = v->submit_seq;

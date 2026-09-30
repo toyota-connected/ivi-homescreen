@@ -204,25 +204,29 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
   // the dtor so it captures the whole run regardless of which present
   // path was active. No-op when the env-var was unset (counters never
   // accumulated).
-  const auto& s = session_totals_;
-  if (s.presented_frames > 0) {
-    const uint32_t samples =
-        (s.interval_sum_ns > 0) ? s.presented_frames - 1 : s.presented_frames;
-    const uint64_t mean_ns = samples > 0 ? s.interval_sum_ns / samples : 0;
+  const auto& totals = session_totals_;
+  if (totals.presented_frames > 0) {
+    const uint32_t samples = (totals.interval_sum_ns > 0)
+                                 ? totals.presented_frames - 1
+                                 : totals.presented_frames;
+    const uint64_t mean_ns = samples > 0 ? totals.interval_sum_ns / samples : 0;
     const double fps = mean_ns > 0 ? 1e9 / static_cast<double>(mean_ns) : 0.0;
-    const uint32_t total = s.bucket_60hz + s.bucket_30hz + s.bucket_20hz +
-                           s.bucket_slow + s.bucket_idle;
-    const uint64_t s_lat_mean_us =
-        s.pipeline_latency_samples > 0
-            ? (s.pipeline_latency_sum_ns / s.pipeline_latency_samples) / 1000
-            : 0;
+    const uint32_t total = totals.bucket_60hz + totals.bucket_30hz +
+                           totals.bucket_20hz + totals.bucket_slow +
+                           totals.bucket_idle;
+    const uint64_t pipeline_mean_us = totals.pipeline_latency_samples > 0
+                                          ? (totals.pipeline_latency_sum_ns /
+                                             totals.pipeline_latency_samples) /
+                                                1000
+                                          : 0;
     ihs::log::info(
         "[WaylandVulkanBackend] session summary: frames={} fps={:.2f} "
         "mean_interval={}us max_interval={}us present_failures={} "
         "discarded={} flags=0x{:x} pipeline_mean={}us pipeline_max={}us",
-        s.presented_frames, fps, mean_ns / 1000, s.interval_max_ns / 1000,
-        s.present_failures, s.discarded_frames, s.flags_or, s_lat_mean_us,
-        s.pipeline_latency_max_ns / 1000);
+        totals.presented_frames, fps, mean_ns / 1000,
+        totals.interval_max_ns / 1000, totals.present_failures,
+        totals.discarded_frames, totals.flags_or, pipeline_mean_us,
+        totals.pipeline_latency_max_ns / 1000);
     if (total > 0) {
       const double inv = 100.0 / static_cast<double>(total);
       ihs::log::info(
@@ -230,10 +234,11 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
           "60Hz(≤17ms)={} ({:.1f}%) 30Hz(18-33ms)={} ({:.1f}%) "
           "20Hz(34-50ms)={} ({:.1f}%) slow(51-100ms)={} ({:.1f}%) "
           "idle(>100ms)={} ({:.1f}%)",
-          s.bucket_60hz, s.bucket_60hz * inv, s.bucket_30hz,
-          s.bucket_30hz * inv, s.bucket_20hz, s.bucket_20hz * inv,
-          s.bucket_slow, s.bucket_slow * inv, s.bucket_idle,
-          s.bucket_idle * inv);
+          totals.bucket_60hz, totals.bucket_60hz * inv, totals.bucket_30hz,
+          totals.bucket_30hz * inv, totals.bucket_20hz,
+          totals.bucket_20hz * inv, totals.bucket_slow,
+          totals.bucket_slow * inv, totals.bucket_idle,
+          totals.bucket_idle * inv);
     }
   }
 
