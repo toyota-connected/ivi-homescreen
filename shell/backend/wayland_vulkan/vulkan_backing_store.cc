@@ -48,6 +48,11 @@ std::optional<uint32_t> FindMemoryType(VkPhysicalDevice gpu,
 
 }  // namespace
 
+// A constructor cannot report failure and this one does not throw, so every
+// step below follows the same shape: log, Destroy() what was built so far, and
+// return. The object is left with image_ == VK_NULL_HANDLE, which is what
+// IsValid() reports -- so the caller checks IsValid() after constructing, and a
+// store that failed here is inert rather than half-built.
 VulkanBackingStore::VulkanBackingStore(int32_t width,
                                        int32_t height,
                                        VkDevice device,
@@ -70,11 +75,21 @@ VulkanBackingStore::VulkanBackingStore(int32_t width,
   image_info.arrayLayers = 1;
   image_info.samples = VK_SAMPLE_COUNT_1_BIT;
   image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+  // One image serves both present paths, so the usage set is the union of what
+  // they need: COLOR_ATTACHMENT because the engine renders the layer into it,
+  // TRANSFER_SRC because the copy path blits it into the swapchain image
+  // (BlitStoreToSwapchain), and SAMPLED because the layer-compositor path draws
+  // it as a texture instead. TRANSFER_DST is carried as well, though nothing in
+  // this backend currently copies into a store.
   image_info.usage =
       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
       VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
   image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
   image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  // Both the image and its memory have to be told about the export, and they
+  // have to agree: an image created without VkExternalMemoryImageCreateInfo
+  // cannot be bound to exportable memory. Hence the same flag gates the pNext
+  // here and on the allocation below.
   if (export_dma_buf) {
     image_info.pNext = &ext_image_info;
   }
@@ -147,6 +162,13 @@ VulkanBackingStore::VulkanBackingStore(int32_t width,
     return;
   }
 
+  // The second of two independent ways export can end up unavailable. The
+  // first is the allocation retry above, which clears export_dma_buf and skips
+  // this block entirely. This one happens after a *successful* exportable
+  // allocation: the driver may not expose vkGetMemoryFdKHR, or the call may
+  // fail. Either way dma_buf_fd_ stays -1 and the store remains fully valid for
+  // rendering -- only has_dma_buf() goes false, which is why callers test that
+  // rather than inferring it from the export_dma_buf they asked for.
   if (export_dma_buf) {
     VkMemoryGetFdInfoKHR fd_info{};
     fd_info.sType = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR;
@@ -162,6 +184,8 @@ VulkanBackingStore::VulkanBackingStore(int32_t width,
     }
   }
 
+  // Published last, so it is only populated on the path where everything
+  // above succeeded. The engine takes the VkImage as an opaque uint64 handle.
   engine_image_ = {
       .struct_size = sizeof(FlutterVulkanImage),
       .image = reinterpret_cast<uint64_t>(image_),
