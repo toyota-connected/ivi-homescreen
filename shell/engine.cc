@@ -400,12 +400,75 @@ FlutterEngineResult Engine::SendKeyEvent(const FlutterKeyEvent& event,
                                         user_data);
 }
 
+namespace {
+
+// Engine::Run wraps the backend's compositor so every presented frame's layers
+// reach the view's PlatformViewScene, which suspends the platform views that
+// left the scene; the backend's callbacks then run with their own user_data.
+
+bool SceneCreateBackingStore(const FlutterBackingStoreConfig* config,
+                             FlutterBackingStore* out,
+                             void* user_data) {
+  const auto& inner = static_cast<Engine*>(user_data)->BackendCompositor();
+  return inner.create_backing_store_callback(config, out, inner.user_data);
+}
+
+bool SceneCollectBackingStore(const FlutterBackingStore* store,
+                              void* user_data) {
+  const auto& inner = static_cast<Engine*>(user_data)->BackendCompositor();
+  return inner.collect_backing_store_callback(store, inner.user_data);
+}
+
+bool ScenePresentLayers(const FlutterLayer** layers,
+                        const size_t count,
+                        void* user_data) {
+  auto* engine = static_cast<Engine*>(user_data);
+  engine->GetView()->GetPlatformViewScene().Presented(layers, count);
+  const auto& inner = engine->BackendCompositor();
+  return inner.present_layers_callback(layers, count, inner.user_data);
+}
+
+bool ScenePresentView(const FlutterPresentViewInfo* info) {
+  auto* engine = static_cast<Engine*>(info->user_data);
+  // The implicit view only: with several views (one engine on several
+  // outputs), a platform view on one is absent from the others' frames.
+  if (info->view_id == 0) {
+    engine->GetView()->GetPlatformViewScene().Presented(info->layers,
+                                                        info->layers_count);
+  }
+  const auto& inner = engine->BackendCompositor();
+  FlutterPresentViewInfo forwarded = *info;
+  forwarded.user_data = inner.user_data;
+  return inner.present_view_callback(&forwarded);
+}
+
+}  // namespace
+
 FlutterEngineResult Engine::Run(FlutterDesktopEngineState* state) {
   IHS_TRACE("({}) +Engine::Run", m_index);
 
   const auto config = m_backend->GetRenderConfig();
   m_compositor = m_backend->GetCompositorConfig();
+  m_backend_compositor = m_compositor;
+  if (m_view != nullptr && (m_compositor.present_layers_callback != nullptr ||
+                            m_compositor.present_view_callback != nullptr)) {
+    // Every callback shares user_data, so all of them go through the wrapper.
+    m_compositor.user_data = this;
+    if (m_backend_compositor.create_backing_store_callback != nullptr) {
+      m_compositor.create_backing_store_callback = SceneCreateBackingStore;
+    }
+    if (m_backend_compositor.collect_backing_store_callback != nullptr) {
+      m_compositor.collect_backing_store_callback = SceneCollectBackingStore;
+    }
+    if (m_backend_compositor.present_layers_callback != nullptr) {
+      m_compositor.present_layers_callback = ScenePresentLayers;
+    }
+    if (m_backend_compositor.present_view_callback != nullptr) {
+      m_compositor.present_view_callback = ScenePresentView;
+    }
+  }
   if (m_compositor.present_layers_callback != nullptr ||
+      m_compositor.present_view_callback != nullptr ||
       m_compositor.create_backing_store_callback != nullptr) {
     m_args.compositor = &m_compositor;
   }

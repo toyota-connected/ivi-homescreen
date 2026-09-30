@@ -100,6 +100,17 @@ class Engine {
   FlutterEngineResult Run(FlutterDesktopEngineState* state);
 
   /**
+   * @brief The compositor the backend asked for; Run() hands the engine a
+   * wrapper that feeds each frame's layers to the view's PlatformViewScene
+   * and then calls these with their own user_data.
+   * @relation
+   * internal
+   */
+  [[nodiscard]] const FlutterCompositor& BackendCompositor() const {
+    return m_backend_compositor;
+  }
+
+  /**
    * @brief Set window size of flutter
    * @param[in] height Height of flutter window
    * @param[in] width Width of flutter window
@@ -550,6 +561,8 @@ class Engine {
   // Compositor config must outlive FlutterEngineInitialize — the engine
   // retains a pointer to it via m_args.compositor.
   FlutterCompositor m_compositor{};
+  // The backend's own compositor, which m_compositor wraps (see Run()).
+  FlutterCompositor m_backend_compositor{};
   std::string m_clipboard_data;
 
   // [global] enable_mcp. Held rather than read at teardown so stop pairs with

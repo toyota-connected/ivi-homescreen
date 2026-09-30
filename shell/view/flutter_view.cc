@@ -183,7 +183,20 @@ FlutterView::FlutterView(Configuration::Config config,
     : m_display(display),
       m_config(std::move(config)),
       m_index(index),
-      m_name(std::move(name)) {
+      m_name(std::move(name)),
+      m_platform_view_scene([this](const int64_t id, const bool suspended) {
+        // Raster thread; the registry wants the platform thread.
+        PostToPlatformThread([this, id, suspended] {
+#if BUILD_COMPOSITOR
+          if (auto* registry = GetPlatformViewRegistry()) {
+            registry->SetSuspended(static_cast<int32_t>(id),
+                                   suspended || m_suspended);
+          }
+#endif
+        });
+        ihs::log::debug("[FlutterView] view {}: platform view {} {} the scene",
+                        m_index, id, suspended ? "left" : "re-entered");
+      }) {
   // Record the renderer before the backend is built: a backend's constructor
   // decides things that depend on it -- drm_kms_vulkan declares the instance
   // extensions Impeller's capability check reads -- and that runs well before
@@ -426,7 +439,9 @@ void NotifySuspended(const FlutterView* view, const bool suspended) {
   const auto ids = registry->InstanceIds();
   size_t notified = 0;
   for (const int32_t id : ids) {
-    notified += registry->SetSuspended(id, suspended) ? 1 : 0;
+    // Unparking leaves a view that is out of the scene suspended.
+    const bool off = suspended || view->PlatformViewSceneSuspended(id);
+    notified += registry->SetSuspended(id, off) ? 1 : 0;
   }
   ihs::log::debug("[FlutterView] view {}: {} {}/{} platform view(s)",
                   view->GetIndex(), suspended ? "suspended" : "resumed",

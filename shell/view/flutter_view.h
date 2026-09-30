@@ -26,6 +26,7 @@
 #include "display/idisplay.h"
 #include "flutter/fml/macros.h"
 #include "flutter_desktop_view_controller_state.h"
+#include "view/platform_view_scene.h"
 #if BUILD_ACCESSIBILITY
 #include "shell/accessibility/accessibility_tree.h"
 #endif
@@ -189,6 +190,26 @@ class FlutterView {
    * internal
    */
   [[nodiscard]] PlatformViewRegistry* GetPlatformViewRegistry() const;
+
+  /**
+   * @brief Which platform views each presented frame composites; the engine
+   * feeds it every frame, and it suspends the views that leave the scene.
+   * @relation
+   * internal
+   */
+  [[nodiscard]] PlatformViewScene& GetPlatformViewScene() {
+    return m_platform_view_scene;
+  }
+
+  /**
+   * @brief Whether platform view @p id is suspended for having left the
+   * scene.
+   * @relation
+   * internal
+   */
+  [[nodiscard]] bool PlatformViewSceneSuspended(const int64_t id) const {
+    return m_platform_view_scene.Suspended(id);
+  }
 
   /**
    * @brief The config this view was built from.
@@ -443,6 +464,10 @@ class FlutterView {
   // Parked: the view's output went away and its platform views were told to
   // stop producing. Not a teardown -- the engine and surface are untouched.
   bool m_suspended = false;
+
+  // Platform views in and out of the scene, frame by frame; a view that
+  // leaves it is suspended on its own, parked view or not.
+  PlatformViewScene m_platform_view_scene;
 
   // Temporary owner of FlutterDesktopEngineState between FlutterView
   // construction (where engine_state is allocated and populated) and
