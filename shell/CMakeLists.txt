@@ -48,6 +48,7 @@ add_executable(${PROJECT_NAME}
         vsync/consumer_paced_vsync.cc
         timer.cc
         view/flutter_view.cc
+        view/platform_view_scene.cc
         watchdog/watchdog.cc
         watchdog/stats.cc
         task_runner.cc
