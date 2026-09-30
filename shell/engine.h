@@ -27,6 +27,7 @@
 #include <shell/platform/embedder/embedder.h>
 
 #include "backend/backend.h"
+#include "cache_dir.h"
 #include "flutter_desktop_engine_state.h"
 #include "logging/logging.h"
 #if BUILD_ACCESSIBILITY
@@ -187,7 +188,7 @@ class Engine {
    * @relation
    * flutter
    */
-  static std::string GetFilePath(size_t index);
+  static ihs::CacheDir GetCacheDir(size_t index);
 
   /**
    * @brief Send platform message response
@@ -537,7 +538,7 @@ class Engine {
   std::filesystem::path m_assets_path;
   std::filesystem::path m_icu_data_path;
   std::filesystem::path m_aot_path;
-  std::filesystem::path m_cache_path;
+  ihs::CacheDir m_cache_dir;
   size_t m_prev_height;
   size_t m_prev_width;
   double m_prev_pixel_ratio;

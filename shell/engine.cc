@@ -29,6 +29,7 @@
 #include <dlfcn.h>
 #include <cassert>
 
+#include "cache_dir.h"
 #include "config/common.h"
 #include "engine.h"
 #if BUILD_ACCESSIBILITY && BUILD_MCP
@@ -143,7 +144,7 @@ Engine::Engine(FlutterView* view,
       m_running(false),
       m_backend(view->GetBackend()),
       m_view(view),
-      m_cache_path(GetFilePath(index)),
+      m_cache_dir(GetCacheDir(index)),
       m_prev_height(0),
       m_prev_width(0),
       m_prev_pixel_ratio(1.0),
@@ -160,8 +161,15 @@ Engine::Engine(FlutterView* view,
   m_args.dart_entrypoint_argc = static_cast<int>(dart_entrypoint_args_c.size());
   m_args.dart_entrypoint_argv = dart_entrypoint_args_c.data();
   m_args.platform_message_callback = OnFlutterPlatformMessage;
-  m_args.persistent_cache_path = m_cache_path.c_str();
-  m_args.is_persistent_cache_read_only = false;
+  // An unusable cache directory means no path at all: the engine treats a null
+  // persistent_cache_path as "do not persist", which is the correct degrade for
+  // an optimization. A directory we can read but not write is handed over with
+  // the read-only flag the field exists for -- that is a cache warmed at build
+  // time and shipped in the image.
+  m_args.persistent_cache_path =
+      m_cache_dir.usable() ? m_cache_dir.path.c_str() : nullptr;
+  m_args.is_persistent_cache_read_only =
+      m_cache_dir.state == ihs::CacheDirState::kReadOnly;
   m_args.log_message_callback = onLogMessageCallback;
 #if BUILD_ACCESSIBILITY
   m_args.update_semantics_callback2 = onSemanticsUpdateCallback;
@@ -680,21 +688,17 @@ FlutterEngineResult Engine::SetPixelRatio(double pixel_ratio) {
   return kSuccess;
 }
 
-std::string Engine::GetFilePath(size_t index) {
-  auto path = Utils::GetConfigHomePath();
-
-  if (!std::filesystem::is_directory(path) || !std::filesystem::exists(path)) {
-    if (!std::filesystem::create_directories(path)) {
-      if (!std::filesystem::is_directory(path)) {
-        ihs::log::critical("({}) create_directories failed: {}", index, path);
-        exit(EXIT_FAILURE);
-      }
-    }
-  }
-
-  IHS_DEBUG("({}) PersistentCachePath: {}", index, path);
-
-  return path;
+ihs::CacheDir Engine::GetCacheDir(const size_t index) {
+  // Nothing here is fatal. This used to call the throwing overload of
+  // create_directories from the constructor's initializer list, so a read-only
+  // rootfs killed the process in std::terminate with nothing logged (#650).
+  auto dir = ihs::ResolveCacheDir(Utils::GetConfigHomePath(), {},
+                                  "Engine " + std::to_string(index));
+  IHS_DEBUG("({}) PersistentCachePath: {} ({})", index, dir.path.string(),
+            dir.state == ihs::CacheDirState::kWritable   ? "writable"
+            : dir.state == ihs::CacheDirState::kReadOnly ? "read-only"
+                                                         : "unusable");
+  return dir;
 }
 
 FlutterEngineResult Engine::SendPlatformMessageResponse(
