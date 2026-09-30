@@ -344,6 +344,8 @@ void Display::HandleGlobal(wl::CRegistry& reg,
   else if (d->m_vsync.TryBindGlobal(registry, name, interface, version) ||
            d->input_timestamps_.TryBindGlobal(registry, name, interface,
                                               version)) {
+    // Claimed by whichever provider returned true; the bind happened in the
+    // condition and there is nothing left for this branch to do.
   }
   // Everything else: offer the global to each compositor-protocol shell
   // (xdg/agl/ivi/simple); the first that claims it wins.

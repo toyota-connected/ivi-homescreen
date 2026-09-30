@@ -204,8 +204,8 @@ struct JThreadHolder final : JThreadHolderBase {
   }
   void run() override {
     std::apply(
-        [&](auto&&... a) {
-          func(std::move(tok), std::forward<decltype(a)>(a)...);
+        [&](auto&&... unpacked) {
+          func(std::move(tok), std::forward<decltype(unpacked)>(unpacked)...);
         },
         std::move(args));
   }
