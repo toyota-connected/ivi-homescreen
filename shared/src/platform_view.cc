@@ -102,17 +102,40 @@ void zero_out(T* out) {
   out->struct_size = struct_size;
 }
 
-// Surface paths in best-to-floor priority (ihs/platform_view.h): a zero-copy
-// GPU import beats direct-scanout beats the universal software floor.
+// Default order when a requirement expresses no preference. This is a
+// tie-break, not a performance ranking: direct scanout is the faster path where
+// it applies (#669 measured it nearly halving total frame time on a composited
+// view, raster identical, the difference being the composite step it skips).
+// Import is first because it is the *certain* path -- a plane may not be
+// allocatable for a given frame and the scene falls back to composition anyway,
+// so putting the certainty first keeps a producer from negotiating for scanout
+// and silently getting composition instead.
 constexpr uint32_t kKindPriority[] = {
     IHS_PV_KIND_TEXTURE_DMABUF_IMPORT,
     IHS_PV_KIND_DRM_PLANE,
     IHS_PV_KIND_SOFTWARE_SHM,
 };
 
-// Pure policy: the highest-priority kind the plugin can produce AND the backend
-// can grant, or IHS_PV_KIND_NONE when they do not intersect.
-uint32_t choose_kind(uint32_t requested, uint32_t available) {
+// Pure policy: the kind this view gets, or IHS_PV_KIND_NONE when the two sides
+// do not intersect.
+//
+// @preferred wins when it names exactly one kind both sides offer. The mask
+// alone cannot express a preference, and the default order put import first, so
+// a producer that listed import -- nearly all of them, it being the portable
+// path -- could never reach DRM_PLANE without asking for it alone and giving up
+// its fallback (#673). A preference that cannot be honored is ignored rather
+// than fatal, so it costs nothing.
+uint32_t choose_kind(const uint32_t requested,
+                     const uint32_t available,
+                     const uint32_t preferred) {
+  // Exactly one kind: a mask here is a caller error, and honoring the lowest
+  // set bit of it would be a guess.
+  const bool one_kind =
+      preferred != IHS_PV_KIND_NONE && (preferred & (preferred - 1)) == 0;
+  if (one_kind && (requested & preferred) != 0 &&
+      (available & preferred) != 0) {
+    return preferred;
+  }
   for (const uint32_t kind : kKindPriority) {
     if ((requested & kind) != 0 && (available & kind) != 0) {
       return kind;
@@ -367,7 +390,14 @@ extern "C" int ihs_pv_negotiate(IhsPlatformView* view,
     return caps_rc;
   }
 
-  const uint32_t kind = choose_kind(requirements->kinds, caps.kinds);
+  // No struct_size guard on preferred_kind, and that is not an oversight: it
+  // claims the byte this struct already declared reserved and required to be 0,
+  // so sizeof is 40 either way and struct_size cannot distinguish a 1.16 caller
+  // from a 1.17 one. A 1.16 caller that honored "must be 0" reads as "no
+  // preference"; one that did not was already outside the contract, and the
+  // worst it gets is a kind it listed in its own mask.
+  const uint32_t kind = choose_kind(requirements->kinds, caps.kinds,
+                                    requirements->preferred_kind);
   if (kind == IHS_PV_KIND_NONE) {
     return IHS_PV_ERR_UNSUPPORTED;
   }

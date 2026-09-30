@@ -128,6 +128,67 @@ to `caps.formats[0]`. The grant's kind-specific payload is read through the
 accessors declared after `ihs_pv_negotiate`, and is valid only for the current
 grant on that view.
 
+### Which kind wins
+
+With no preference expressed, the first of these that both sides offer:
+
+| order | kind |
+| --- | --- |
+| 1 | `TEXTURE_DMABUF_IMPORT` |
+| 2 | `DRM_PLANE` |
+| 3 | `SOFTWARE_SHM` |
+
+**That is a tie-break, not a performance ranking.** Direct scanout is the faster
+path where it applies: measured on a composited platform view it nearly halved
+total frame time, with raster identical between the two and the whole difference
+being the composite step the plane path skips (ivi-homescreen#669). Import is
+first because it is the *certain* path — a plane may not be allocatable for a
+given frame and the scene falls back to composition anyway — so ranking the
+certainty first keeps a producer from negotiating for scanout and silently
+getting composition.
+
+To prefer scanout, name it (ABI 1.17):
+
+```c
+req.kinds = IHS_PV_KIND_DRM_PLANE | IHS_PV_KIND_TEXTURE_DMABUF_IMPORT |
+            IHS_PV_KIND_SOFTWARE_SHM;
+req.preferred_kind = IHS_PV_KIND_DRM_PLANE;   /* honored if grantable */
+```
+
+`preferred_kind` is honored when it names exactly one kind that both
+`req.kinds` and `caps.kinds` include; otherwise the order above decides. So a
+preference never costs the producer its fallback, and is free to ask for. Before
+1.17 the only way to reach `DRM_PLANE` was to request it *alone* — the order put
+import first, and nearly every producer lists import since it is the portable
+path — which meant giving up the fallback entirely (ivi-homescreen#673).
+
+#### Why the order was not simply changed
+
+Reordering `kKindPriority` to put `DRM_PLANE` first would have given every
+producer that lists both kinds the faster path with no opt-in and no ABI change,
+which is a real advantage over an opt-in field: nothing gets faster here until a
+producer is updated. It was rejected for four reasons, recorded so the next
+reader does not have to re-derive them (ivi-homescreen#673):
+
+- **It changes behavior under producers silently.** A producer tuned for import
+  — buffer counts, formats, sync strategy — would get a path it was never
+  written or tested against, with no version or capability bit marking the
+  change.
+- **A plane grant is a maybe, an import is a certainty.** Where no plane is
+  allocatable for a frame the scene composites anyway. As a default that means a
+  producer believes it negotiated scanout and intermittently gets composition,
+  which is the hardest case to reason about for frame timing and for the
+  `IHS_PV_PRESENTED_ZERO_COPY` flag. As an explicit preference it is an informed
+  choice: note that this is *relocated*, not solved — a producer that prefers a
+  plane still composites on a frame with none available.
+- **Only one backend offers the kind.** `DRM_PLANE` needs a GBM device, so
+  `drm-kms-egl` offers it and the Wayland and Vulkan backends do not (see the
+  kind matrix above). Reordering would therefore change behavior on one backend
+  and not the others, with nothing in the ABI declaring that.
+- **Planes are scarce hardware.** Granting them by default makes allocation
+  order-dependent: whichever views negotiate first consume the planes and later
+  ones quietly do not, which no part of this ABI can express.
+
 ## The renegotiation contract
 
 ### What triggers it

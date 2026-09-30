@@ -20,11 +20,12 @@ not asked for, even though the EGL backend offers it -- taking it there would
 measure direct scanout on one backend and composition on the other, under one
 name.
 
-`PV_BENCH_DRM_PLANE=1` asks for `DRM_PLANE` *alone* rather than adding it to the
-mask, and that is not a stylistic choice: `kKindPriority` ranks
-`TEXTURE_DMABUF_IMPORT` above `DRM_PLANE` and `choose_kind` takes the first
-match, so a producer that also accepts import is never granted a plane. Adding
-the kind to the mask changes nothing.
+`PV_BENCH_DRM_PLANE=1` adds `DRM_PLANE` to the mask *and* names it in
+`IhsPvRequirements::preferred_kind` (ABI 1.17). The preference is the part that
+matters: the default order ranks `TEXTURE_DMABUF_IMPORT` above `DRM_PLANE` and
+`choose_kind` takes the first match, so adding the kind to the mask alone
+changes nothing (#673). Before 1.17 the only way through was to request
+`DRM_PLANE` alone, which left the run with no fallback.
 
 The producer logs the granted kind at startup. If it does not say
 `kind=0x1`, the run is not measuring the import path and the numbers are not
@@ -87,7 +88,7 @@ previous process has released DRM master gives a run that produces no report.
 | `PV_BENCH_DRM_NODE` | *(unset)* | allocate on this node instead of probing |
 | `PV_BENCH_PAD_ROWS` | tile-rounded | rows of allocation headroom; 0 reproduces \#598 |
 | `PV_BENCH_LAYERS` | `1` | layers per submit (1..3) through `ihs_pv_submit_layers`: the buffer whole, then cropped, placed and mirrored, then cropped, placed and turned a quarter |
-| `PV_BENCH_DRM_PLANE` | *(unset)* | ask for `DRM_PLANE` **alone** instead of import: measures direct scanout rather than composition. Offered only by `drm-kms-egl`; the run logs whether a plane was actually granted, so a fallback cannot be mistaken for a plane measurement |
+| `PV_BENCH_DRM_PLANE` | *(unset)* | prefer `DRM_PLANE`, keeping import and shm as fallbacks: measures direct scanout rather than composition. Offered only by `drm-kms-egl`; the run logs whether a plane was actually granted, so a fallback cannot be mistaken for a plane measurement |
 
 `PV_BENCH_NO_PV=1` is the control: same Flutter content, no layer. The difference
 between the two runs is what the layer costs.
