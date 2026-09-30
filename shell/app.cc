@@ -205,6 +205,28 @@ std::vector<std::shared_ptr<IDisplay>> App::BuildDisplays(
   return per_config;
 }
 
+void App::WireReactor([[maybe_unused]] IDisplay& display) {
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
+  // The Wayland connection registers its display fd (and the keyboard repeat
+  // timerfd) on the reactor. Multiple connections each register onto the same
+  // primary_ioc_.
+  if (auto* d = dynamic_cast<Display*>(&display)) {
+    d->SetEventLoop(primary_ioc_);
+    return;
+  }
+#endif
+
+#if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN
+  // DRM hotplug uevents arrive on the session's own thread; installing the
+  // reactor is what lets them be marshalled onto it before any listener is
+  // attached.
+  if (auto* d = dynamic_cast<DrmDisplay*>(&display)) {
+    d->SetEventLoop(primary_ioc_);
+    return;
+  }
+#endif
+}
+
 std::shared_ptr<IDisplay> App::DisplayForContext(
     const Configuration::Config& config) {
   auto& reg = backend::BackendRegistry::Instance();
@@ -303,6 +325,9 @@ FlutterView* App::AddView(const Configuration::Config& config) {
   // leave it registered but never pumping, and the next view would reuse it
   // seeing display_is_new == false and never start it either.
   if (m_displays.size() != display_count_before) {
+    // Wire the reactor before watching or starting: StartEvents constructs the
+    // asio descriptors over it, and the constructor's wiring pass is long past.
+    WireReactor(*display);
     WatchDisplayOutputs(display);
     // The constructor's StartEvents pass has already run by the time anything
     // calls AddView after Run(); a display created now has to be started here
@@ -415,27 +440,11 @@ App::App(const std::vector<Configuration::Config>& configs) {
   next_pet_ = std::chrono::steady_clock::now();
 #endif
 
-#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
-  // Wire the App-owned shared reactor onto the Wayland connection before it
-  // arms its display fd. Multiple connections would each register onto the same
-  // primary_ioc_.
+  // Wire the App-owned shared reactor onto every display before any of them
+  // arms an event source.
   for (const auto& display : m_displays) {
-    if (auto* d = dynamic_cast<Display*>(display.get())) {
-      d->SetEventLoop(primary_ioc_);
-    }
+    WireReactor(*display);
   }
-#endif
-
-#if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN
-  // Same for the DRM displays: their hotplug uevents arrive on the session's
-  // own thread, and installing the reactor here is what lets them be
-  // marshalled onto it before any listener is attached below.
-  for (const auto& display : m_displays) {
-    if (auto* d = dynamic_cast<DrmDisplay*>(display.get())) {
-      d->SetEventLoop(primary_ioc_);
-    }
-  }
-#endif
 
   // Watch outputs before the event sources start, so nothing announced in the
   // first burst is missed. Views already exist above, so the first re-resolve
