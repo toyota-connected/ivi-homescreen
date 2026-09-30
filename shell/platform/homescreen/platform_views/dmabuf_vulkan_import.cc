@@ -25,6 +25,9 @@
 
 namespace {
 
+// V3D_TFU_READAHEAD_SIZE in Mesa's v3dv (src/broadcom/vulkan/v3dv_private.h).
+constexpr VkDeviceSize kV3dvTfuReadahead = 64;
+
 constexpr uint32_t Fourcc(char a, char b, char c, char d) {
   return static_cast<uint32_t>(static_cast<uint8_t>(a)) |
          (static_cast<uint32_t>(static_cast<uint8_t>(b)) << 8) |
@@ -156,6 +159,26 @@ bool DmabufVulkanImporter::Init(VkInstance instance,
         "[ihs_pv] dma-buf import unavailable: the backend's Vulkan device is "
         "missing an external-memory-fd entry point");
     return false;
+  }
+
+  // v3dv pads every allocation, imports included, by its TFU read-ahead
+  // (V3D_TFU_READAHEAD_SIZE, 64 bytes) and rounds up to a page before
+  // checking the dma-buf is that large. A dma-buf sized exactly to its image
+  // -- what the v3d GL driver hands a client -- is then a page short and the
+  // import fails with VK_ERROR_INVALID_EXTERNAL_HANDLE (#691). Mesa 25.0.7;
+  // main still leaves such a dma-buf 64 bytes short.
+  if (auto get_properties2 =
+          reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2>(
+              instance_fn("vkGetPhysicalDeviceProperties2"))) {
+    VkPhysicalDeviceDriverProperties driver{};
+    driver.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
+    VkPhysicalDeviceProperties2 props{};
+    props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    props.pNext = &driver;
+    get_properties2(physical_device, &props);
+    if (driver.driverID == VK_DRIVER_ID_MESA_V3DV) {
+      import_padding_ = kV3dvTfuReadahead;
+    }
   }
 
   instance_ = instance;
@@ -426,7 +449,19 @@ bool DmabufVulkanImporter::Import(const IhsFrame& frame,
   VkDeviceMemory memory = VK_NULL_HANDLE;
   // On success Vulkan owns the imported fd; on failure ownership stays with the
   // caller, so leave it untouched here.
-  const VkResult alloc_rc = allocate_memory_(device_, &mai, nullptr, &memory);
+  VkResult alloc_rc = allocate_memory_(device_, &mai, nullptr, &memory);
+  if (alloc_rc == VK_ERROR_INVALID_EXTERNAL_HANDLE && import_padding_ != 0 &&
+      req.size > import_padding_) {
+    // v3dv (see Init): ask the padding short, so the size it checks the
+    // dma-buf against is the image's own. Only a dma-buf at least that large
+    // gets here; a short one fails below as it would anyway.
+    const off_t held = ::lseek(frame.plane_fd[0], 0, SEEK_END);
+    ::lseek(frame.plane_fd[0], 0, SEEK_SET);
+    if (held >= 0 && static_cast<VkDeviceSize>(held) >= req.size) {
+      mai.allocationSize = req.size - import_padding_;
+      alloc_rc = allocate_memory_(device_, &mai, nullptr, &memory);
+    }
+  }
   if (alloc_rc != VK_SUCCESS) {
     // The two numbers that explain this failure, and the reason it was
     // unreadable without them: a driver refuses the import when the image needs
