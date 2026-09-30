@@ -45,6 +45,14 @@ jobs:
           libdrm-dev libgbm-dev libinput-dev libudev-dev libseat-dev
           libxcursor-dev libglib2.0-dev
 
+    # third_party/drm-cxx requires libdisplay-info >= 0.2.0 (its
+    # CMakeLists.txt:148), and ubuntu-24.04 ships 0.1.1 -- so enabling the DRM
+    # backends means this step, exactly as drm-kms.yml and lint.yml do it. It
+    # uses the host library when new enough and otherwise builds the pinned tag
+    # from source, exporting PKG_CONFIG_PATH for the configure below.
+    - name: Setup libdisplay-info (system or from-source)
+      uses: ./.github/actions/setup-libdisplay-info
+
     - name: Show toolchain versions
       run: |
           cmake --version
