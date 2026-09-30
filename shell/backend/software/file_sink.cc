@@ -23,6 +23,10 @@
 #include <utility>
 #include <vector>
 
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include "backend/software/pixel_swizzle.h"
 #include "logging.h"
 
@@ -78,9 +82,24 @@ bool FileSink::WritePam(const std::string& path,
     // may already exist. The fopen below will surface a real error.
   }
 
-  FILE* fp = std::fopen(path.c_str(), "wb");
+  // open() rather than fopen() for the mode argument: fopen creates at
+  // 0666 & ~umask, so a deployment running with a permissive umask (0 is not
+  // unheard of in an embedded init) would leave every captured frame
+  // world-writable. The flags are what "wb" means -- write, create, truncate --
+  // plus O_CLOEXEC so a dump fd is not inherited by anything this process
+  // spawns. O_NOFOLLOW is deliberately not set: the path pattern is the
+  // operator's own, and pointing it through a symlink is a legitimate thing for
+  // them to do.
+  const int fd = ::open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC,
+                        S_IRUSR | S_IWUSR);
+  if (fd < 0) {
+    ihs::log::error("[FileSink] cannot open '{}' for writing", path);
+    return false;
+  }
+  FILE* fp = ::fdopen(fd, "wb");
   if (fp == nullptr) {
     ihs::log::error("[FileSink] cannot open '{}' for writing", path);
+    ::close(fd);
     return false;
   }
 
