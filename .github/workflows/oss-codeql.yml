@@ -66,8 +66,8 @@ jobs:
         # security-and-quality keeps the maintainability queries on our own
         # code. third_party submodules are compiled into the build, so CodeQL
         # extracts and reports them regardless of paths-ignore (a known
-        # compiled-language limitation); their alerts are dismissed as
-        # "won't fix" in the security dashboard rather than filtered here.
+        # compiled-language limitation); their results are dropped from the
+        # SARIF before upload -- see the filter step below.
         queries: +security-and-quality
 
     - name: Configure
@@ -113,7 +113,72 @@ jobs:
         ninja -C . package
         ls -la _packages
 
+    # Analyze but do not upload: the SARIF is filtered first (next step).
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v3
       with:
+        category: "/language:${{matrix.language}}"
+        upload: never
+        output: ${{ runner.temp }}/codeql-sarif
+
+    # Drop results outside our own source before the dashboard ever sees them.
+    #
+    # paths-ignore cannot do this. It applies to interpreted languages, or to a
+    # compiled language analyzed *without* building -- and this workflow builds,
+    # so every third_party submodule compiled into the shell gets extracted and
+    # reported. Enabling the DRM backends brought drm-cxx and friends in, which
+    # is 922 vendored alerts against 27 of our own: a dashboard nobody reads.
+    #
+    # Two prefixes go:
+    #   third_party/  vendored submodules -- we do not patch them here, and a
+    #                 submodule bump would otherwise refill the dashboard.
+    #   build/        generated sources (e.g. the wlcxxgen wayland-protocols
+    #                 headers), which are build output, not code to review.
+    #
+    # Filtering rather than dismissing also retires what is already recorded:
+    # an alert absent from a later analysis of the same tool/category/ref is
+    # closed as fixed, so the existing vendored alerts age out on their own.
+    - name: Drop vendored and generated results from the SARIF
+      run: |
+        set -euo pipefail
+        shopt -s nullglob
+        # Anchored on a path separator rather than the string start: Code'L may
+        # emit a URI relative to the source root or an absolute one (which is
+        # why upload-sarif has a checkout_path input), and a start-anchored
+        # match would silently keep everything in the absolute case. The
+        # trailing slash is what keeps a file merely NAMED third_party_*.cc.
+        drop='(^|/)(third_party|build)/'
+        found=0
+        for f in "${{ runner.temp }}"/codeql-sarif/*.sarif; do
+          found=1
+          before=$(jq '[.runs[].results[]] | length' "$f")
+          # Log what is going, so a wrong assumption about the URI shape shows
+          # up as "dropped 0" beside an empty list instead of passing quietly.
+          jq -r --arg drop "$drop" '
+            [ .runs[].results[]
+              | .locations[]?.physicalLocation.artifactLocation.uri // ""
+              | select(test($drop))
+            ] | unique | .[] | "  dropping: \(.)"
+          ' "$f" | head -20
+          jq --arg drop "$drop" '
+            .runs |= map(
+              .results |= map(select(
+                [ .locations[]?.physicalLocation.artifactLocation.uri // ""
+                  | test($drop) ] | any | not
+              ))
+            )
+          ' "$f" > "$f.filtered"
+          mv "$f.filtered" "$f"
+          after=$(jq '[.runs[].results[]] | length' "$f")
+          echo "$(basename "$f"): kept $after of $before (dropped $((before - after)))"
+        done
+        if [ "$found" -eq 0 ]; then
+          echo "no SARIF produced in ${{ runner.temp }}/codeql-sarif" >&2
+          exit 1
+        fi
+
+    - name: Upload filtered results
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ runner.temp }}/codeql-sarif
         category: "/language:${{matrix.language}}"
