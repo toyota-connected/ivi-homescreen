@@ -1457,7 +1457,6 @@ bool VulkanDrmBackend::CreateBackingStoreImpl(
     return false;
   }
   ReportIfEngineNeverPresents();
-  CompositorState& c = *compositor_;
   const auto w = static_cast<uint32_t>(config->size.width);
   const auto h = static_cast<uint32_t>(config->size.height);
 
