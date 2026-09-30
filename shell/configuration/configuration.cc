@@ -422,6 +422,17 @@ void Configuration::get_cli_override(const std::string& bundle_path,
                                      const Config& cli) {
   instance.view.bundle_path = bundle_path;
 
+  // One rule, applied field by field: a value the CLI actually supplied wins
+  // over whatever the bundle's own config.toml set, and a value it did not
+  // supply leaves the TOML value alone. "Actually supplied" is has_value() for
+  // the scalars and not-empty for the strings and vectors -- which is why every
+  // scalar flag is an optional: --disable-cursor=false has to be able to
+  // override a config.toml that turned the cursor off, and a plain bool could
+  // not tell that apart from an absent flag. The strings have no such escape
+  // hatch: an empty CLI string cannot clear a TOML value, it only fails to
+  // replace it.
+
+  // Identity and process-wide behavior.
   if (!cli.app_id.empty()) {
     instance.app_id = cli.app_id;
   }
@@ -440,6 +451,8 @@ void Configuration::get_cli_override(const std::string& bundle_path,
   if (cli.enable_mcp.has_value()) {
     instance.enable_mcp = cli.enable_mcp.value();
   }
+  // The two argument lists are the one exception to "CLI replaces TOML": they
+  // append, so a bundle's own engine/Dart args survive alongside the CLI's.
   if (!cli.view.engine_args.empty()) {
     for (auto const& arg : cli.view.engine_args) {
       instance.view.engine_args.emplace_back(arg);
@@ -450,6 +463,7 @@ void Configuration::get_cli_override(const std::string& bundle_path,
       instance.view.dart_args.emplace_back(arg);
     }
   }
+  // Window, shell and output selection.
   if (!cli.view.window_type.empty()) {
     instance.view.window_type = cli.view.window_type;
   }
@@ -462,6 +476,9 @@ void Configuration::get_cli_override(const std::string& bundle_path,
   if (cli.view.wl_output_index.has_value()) {
     instance.view.wl_output_index = cli.view.wl_output_index.value();
   }
+  // The only field that is transformed rather than copied: the raw integer is
+  // masked to the seven defined FlutterAccessibilityFeature bits, so a garbage
+  // value from the command line cannot reach the engine.
   if (cli.view.accessibility_features.has_value()) {
     instance.view.accessibility_features =
         mask_accessibility_features(cli.view.accessibility_features.value());
@@ -481,6 +498,9 @@ void Configuration::get_cli_override(const std::string& bundle_path,
   if (cli.view.fullscreen.has_value()) {
     instance.view.fullscreen = cli.view.fullscreen.value();
   }
+  // DRM/KMS scanout, consumed by the drm_kms_* backends when the view resolves
+  // to one. Copied through unconditionally either way: which backend a view
+  // ends up on is not known here.
   if (cli.view.drm_device.has_value()) {
     instance.view.drm_device = cli.view.drm_device.value();
   }
