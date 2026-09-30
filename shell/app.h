@@ -155,6 +155,22 @@ class App final {
   // Tell one view's platform views their grant is stale.
   static void RenegotiateView(const FlutterView* view);
 
+  // The single shared reactor (the "primary" io_context) that Run() drives on
+  // the main thread for every backend. Each Wayland Display connection
+  // registers its {wl-fd, repeat-fd} onto it (so all connections stay
+  // single-threaded with no per-connection strand); DRM/software displays
+  // self-drive their own threads and only use the reactor's refresh-rate pump +
+  // shutdown waker. The work guard keeps run() alive across idle gaps.
+  asio::io_context primary_ioc_;
+  asio::executor_work_guard<asio::io_context::executor_type> primary_work_{
+      asio::make_work_guard(primary_ioc_)};
+  //
+  // Declared ahead of every display/view member below, and so destroyed after
+  // all of them: a Display holds asio descriptors registered on this reactor
+  // and detaches them in its own destructor. ~App's body stops the displays
+  // first, but an exception escaping the tail of the constructor skips that
+  // body and leaves member destruction order as the only guarantee.
+
   // The displays the App drives. One entry per distinct device-context; a
   // homogeneous config set yields a single shared display.
   std::vector<std::shared_ptr<IDisplay>> m_displays;
@@ -173,19 +189,14 @@ class App final {
   mutable std::chrono::steady_clock::time_point next_pet_;
 #endif
 
+  // Wire the App-owned shared reactor onto @p display before it arms its event
+  // sources. Both the constructor's pass and AddView's runtime path go through
+  // here, so a display created after construction is never started unwired.
+  void WireReactor(IDisplay& display);
+
   // Reductions across the owned displays.
   [[nodiscard]] bool AnyHasRepeatTimer() const;
   [[nodiscard]] double MaxRefreshRate() const;
-
-  // The single shared reactor (the "primary" io_context) that Run() drives on
-  // the main thread for every backend. Each Wayland Display connection
-  // registers its {wl-fd, repeat-fd} onto it (so all connections stay
-  // single-threaded with no per-connection strand); DRM/software displays
-  // self-drive their own threads and only use the reactor's refresh-rate pump +
-  // shutdown waker. The work guard keeps run() alive across idle gaps.
-  asio::io_context primary_ioc_;
-  asio::executor_work_guard<asio::io_context::executor_type> primary_work_{
-      asio::make_work_guard(primary_ioc_)};
 
 #if BUILD_BACKEND_HEADLESS_VULKAN
   // Optional in-process ihs-vk-export bridge (enabled by IVI_VK_BRIDGE_SO).
