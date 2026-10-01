@@ -2,6 +2,7 @@
 
 #include "app.h"
 #include "configuration/configuration.h"
+#include "logging/logger.hpp"
 #include "unit_test_utils.h"
 
 /****************************************************************
@@ -53,4 +54,19 @@ TEST(HomescreenAppLoop, Lv1Normal002) {
 
   // No checks/assertions, if method succeeds, program will continue.  If it
   // fails, program should abort, which will fail this test.
+}
+
+// Own main, so the shell's logging is running for the duration of the tests.
+// ihs::log::* gates every level -- critical included -- on a valid
+// IhsLogContext, and a context is only valid once ihs_log_start() has run.
+// gtest_main never calls it, so a test binary that does not do this itself
+// discards every diagnostic the code under test emits, silently: #685's
+// "exits 1 with no output" was a critical from Configuration::ParseArgcArgv
+// going nowhere. Same shape as cache_dir-test and the two drm_backend_vkms
+// tests. Linking gtest_main alongside is fine: the linker does not pull its
+// main() when this object already defines one.
+int main(int argc, char** argv) {
+  IHS_LOGGING_START("TEST", "app test");
+  ::testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
 }
