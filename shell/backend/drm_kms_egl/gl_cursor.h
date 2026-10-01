@@ -70,6 +70,15 @@ class GlCursor final : public ICursorPositionSink, public ICursorShapeSink {
   // or the shape couldn't be loaded; the current sprite then stays.
   bool SetShape(const char* xcursor_name) override;
 
+  // ICursorShapeSink: the sprite from the application's own pixels. Converts
+  // premultiplied ARGB8888 to the premultiplied RGBA the GL texture wants and
+  // queues it exactly as SetShape does.
+  bool SetImage(const uint32_t* argb,
+                uint32_t width,
+                uint32_t height,
+                int32_t hot_x,
+                int32_t hot_y) override;
+
   // Rasterizer thread, EGL context current, FBO 0 holding the rendered frame.
   // Composites the cursor over it. No-op until the cursor is visible.
   void Draw(uint32_t fb_w, uint32_t fb_h);

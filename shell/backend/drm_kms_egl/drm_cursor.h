@@ -113,6 +113,20 @@ class DrmCursor final : public ICursorShapeSink {
   // HW cursor (visibility is gated by pointer motion, not the sprite).
   bool SetShape(const char* xcursor_name) override;
 
+  // ICursorShapeSink: the sprite from the application's own pixels, rather
+  // than a theme shape. Premultiplied ARGB8888, as drm::cursor carries it, so
+  // the frame goes to Cursor::from_argb unconverted. Recorded under the same
+  // lock as SetShape and applied on the render-owning thread; the last of the
+  // two to be called wins.
+  //
+  // The sprite may be smaller than the cursor plane: the drm-cxx Renderer
+  // centers it into the plane buffer and carries the hotspot with it.
+  bool SetImage(const uint32_t* argb,
+                uint32_t width,
+                uint32_t height,
+                int32_t hot_x,
+                int32_t hot_y) override;
+
   // Enable staged mode. In staged mode the cursor plane is driven by the
   // compositor via Stage() instead of self-committing — used on drivers
   // (nvidia-drm) where a separate cursor commit on the CRTC starves the
@@ -166,8 +180,9 @@ class DrmCursor final : public ICursorShapeSink {
   struct Impl;
   std::unique_ptr<Impl> impl_;
 
-  // Apply a pending SetShape() request on the render-owning thread. Called at
-  // the head of Stage()/Move(); no-op when no shape change is queued.
+  // Apply a pending SetShape() or SetImage() request on the render-owning
+  // thread. Called at the head of Stage()/Move(); no-op when nothing is
+  // queued.
   void ApplyPendingShape();
 
   explicit DrmCursor(std::unique_ptr<Impl> impl);
