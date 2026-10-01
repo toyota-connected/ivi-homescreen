@@ -17,6 +17,7 @@
 #include "logging/logging.h"
 
 #include <linux/input-event-codes.h>
+#include <sys/mman.h>
 #include <unistd.h>
 #include <xkbcommon/xkbcommon.h>
 #include <algorithm>
@@ -1378,6 +1379,117 @@ bool Display::ActivateSystemCursor(const int32_t device,
   }
 
   return true;
+}
+
+void Display::ReleaseCustomCursor() {
+  if (m_custom_cursor_buffer) {
+    wl_buffer_destroy(m_custom_cursor_buffer);
+    m_custom_cursor_buffer = nullptr;
+  }
+  if (m_custom_cursor_pool) {
+    wl_shm_pool_destroy(m_custom_cursor_pool);
+    m_custom_cursor_pool = nullptr;
+  }
+  if (m_custom_cursor_data) {
+    munmap(m_custom_cursor_data, m_custom_cursor_size);
+    m_custom_cursor_data = nullptr;
+    m_custom_cursor_size = 0;
+  }
+}
+
+bool Display::SetCustomCursor(const int32_t device,
+                              const std::vector<uint8_t>& pixels,
+                              const int32_t width,
+                              const int32_t height,
+                              const int32_t hotspot_x,
+                              const int32_t hotspot_y) {
+  (void)device;
+
+  if (width <= 0 || height <= 0) {
+    IHS_DEBUG("Custom cursor: {}x{} is not a size", width, height);
+    return false;
+  }
+  const auto stride = static_cast<size_t>(width) * 4;
+  const size_t needed = stride * static_cast<size_t>(height);
+  // Checked rather than trusted: the pixels cross a channel from another
+  // language, and a short buffer here is a read past the end of the mapping
+  // the compositor is about to draw from.
+  if (pixels.size() != needed) {
+    IHS_DEBUG("Custom cursor: got {} bytes, {}x{} needs {}", pixels.size(),
+              width, height, needed);
+    return false;
+  }
+  if (!m_shm || !m_cursor_surface || !m_pointer.wl_pointer) {
+    IHS_DEBUG("Custom cursor: no shm, cursor surface or pointer");
+    return false;
+  }
+
+  // A fresh mapping per cursor. These are a few tens of KiB and change when
+  // the application changes its art, not per frame, so reusing one would buy
+  // nothing and would have to handle the size changing anyway.
+  const int fd = memfd_create("ihs-cursor", MFD_CLOEXEC);
+  if (fd < 0) {
+    IHS_DEBUG("Custom cursor: memfd_create failed: {}", strerror(errno));
+    return false;
+  }
+  if (ftruncate(fd, static_cast<off_t>(needed)) < 0) {
+    IHS_DEBUG("Custom cursor: ftruncate failed: {}", strerror(errno));
+    close(fd);
+    return false;
+  }
+  void* data = mmap(nullptr, needed, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+  if (data == MAP_FAILED) {
+    IHS_DEBUG("Custom cursor: mmap failed: {}", strerror(errno));
+    close(fd);
+    return false;
+  }
+  std::memcpy(data, pixels.data(), needed);
+
+  wl_shm_pool* pool =
+      wl_shm_create_pool(m_shm, fd, static_cast<int32_t>(needed));
+  // The pool holds its own reference to the fd, so ours is done either way.
+  close(fd);
+  if (!pool) {
+    munmap(data, needed);
+    return false;
+  }
+  // ARGB8888 is the one format every compositor must support, and it is what
+  // a toolkit hands over: premultiplied, little-endian BGRA in memory.
+  wl_buffer* buffer = wl_shm_pool_create_buffer(pool, 0, width, height,
+                                                static_cast<int32_t>(stride),
+                                                WL_SHM_FORMAT_ARGB8888);
+  if (!buffer) {
+    wl_shm_pool_destroy(pool);
+    munmap(data, needed);
+    return false;
+  }
+
+  // Only now is the old one unreachable: a failure above leaves the cursor
+  // that was working alone rather than clearing it.
+  ReleaseCustomCursor();
+  m_custom_cursor_pool = pool;
+  m_custom_cursor_buffer = buffer;
+  m_custom_cursor_data = data;
+  m_custom_cursor_size = needed;
+  m_custom_cursor_active = true;
+
+  wl_pointer_set_cursor(m_pointer.wl_pointer, m_pointer.serial,
+                        m_cursor_surface, hotspot_x, hotspot_y);
+  wl_surface_attach(m_cursor_surface, buffer, 0, 0);
+  wl_surface_damage(m_cursor_surface, 0, 0, width, height);
+  wl_surface_commit(m_cursor_surface);
+  return true;
+}
+
+bool Display::ClearCustomCursor(const int32_t device) {
+  if (!m_custom_cursor_active) {
+    return true;
+  }
+  m_custom_cursor_active = false;
+  ReleaseCustomCursor();
+  // Back to whatever the theme calls "basic", which is where the cursor would
+  // have been had nothing set a custom one.
+  return ActivateSystemCursor(device, "basic");
 }
 
 int32_t Display::GetBufferScale(uint32_t index) const {

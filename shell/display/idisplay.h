@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <string>
 #include <utility>
+#include <vector>
 
 struct FlutterDesktopViewControllerState;
 
@@ -49,6 +50,35 @@ class IDisplay {
   [[nodiscard]] virtual bool ActivateSystemCursor(
       int32_t device,
       const std::string& kind) const = 0;
+
+  /// A cursor drawn from pixels the application supplies, rather than a shape
+  /// named out of the cursor theme.
+  ///
+  /// `activateSystemCursor` can only ask for the shapes a theme ships, and an
+  /// application with its own art -- a game whose pointer is part of its look
+  /// -- has no way to say so. The alternative is to hide the real cursor and
+  /// draw one inside the toolkit, which costs a frame of latency and puts the
+  /// pointer behind everything the compositor composites above the surface.
+  ///
+  /// [pixels] is ARGB8888, premultiplied, [width] * [height] * 4 bytes, rows
+  /// top to bottom. The hotspot is in the same pixels.
+  ///
+  /// Not pure: a backend without a way to do this keeps the default and
+  /// answers false, so adding one does not break the others.
+  [[nodiscard]] virtual bool SetCustomCursor(
+      int32_t /* device */,
+      const std::vector<uint8_t>& /* pixels */,
+      int32_t /* width */,
+      int32_t /* height */,
+      int32_t /* hotspot_x */,
+      int32_t /* hotspot_y */) {
+    return false;
+  }
+
+  /// Drops a custom cursor set earlier, back to the themed shape.
+  [[nodiscard]] virtual bool ClearCustomCursor(int32_t /* device */) {
+    return false;
+  }
 
   [[nodiscard]] virtual bool HasRepeatTimer() const = 0;
 
