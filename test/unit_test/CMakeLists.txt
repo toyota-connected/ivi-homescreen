@@ -297,9 +297,9 @@ add_subdirectory(pixel_swizzle-test)
 add_subdirectory(scale_policy-test)
 add_subdirectory(semantics_action_args-test)
 add_subdirectory(text_input-test)
-# texture-test requires a live Wayland compositor, Flutter engine, and an app
-# bundle on disk — it is an integration test and has been moved to
-# test/integration/texture-test/.  Do NOT re-add it here.
+# texture-test is gone: 812ea05f removed textures/texture.h, the header its only
+# case included, and there is no textures/ anywhere in the tree. The test went
+# with it rather than being repaired against code that no longer exists.
 
 # The accessibility sources are only part of the shell target (and therefore of
 # TYPICAL_TEST_SOURCES) when BUILD_ACCESSIBILITY is configured on.

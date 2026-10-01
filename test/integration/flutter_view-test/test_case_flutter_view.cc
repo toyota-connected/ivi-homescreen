@@ -17,7 +17,10 @@ FlutterView* createFlutterViewInstance() {
   Configuration::Config config = configs.back();
 
   auto wayland_display = std::make_shared<Display>(false, "", "", configs);
-  auto* view = new FlutterView(config, 0, wayland_display);
+  // The third argument is the view's name, which App derives from the bundle
+  // directory (App::NameForView). That is private to App, and the name only
+  // shows up in log lines, so a literal does here.
+  auto* view = new FlutterView(config, 0, "flutter_view-test", wayland_display);
   return view;
 }
 
@@ -27,6 +30,7 @@ Use Case Name: Provide wayland client function
 Test Summary：Test the constructor of FlutterView class
 ***************************************************************/
 TEST(HomescreenFlutterViewConstructor, Lv1Normal001) {
+  SKIP_WITHOUT_APP_BUNDLE();
   // call target function
   FlutterView* view = createFlutterViewInstance();
 
