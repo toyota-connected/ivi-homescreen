@@ -42,7 +42,7 @@ class Engine;
 // the just-presented gbm_bo is imported as a texture and packed RGBA->NV12 on
 // the GPU straight into a dma-buf handed to an INv12Consumer (a file encoder or
 // a WebRTC send). It is the zero-copy counterpart of the software backend's CPU
-// EncoderSink: the GPU both rasterizes and colour-converts, no CPU touches the
+// EncoderSink: the GPU both rasterizes and color-converts, no CPU touches the
 // pixels.
 //
 // A real swap chain (gbm_surface + eglSwapBuffers) is used rather than a single

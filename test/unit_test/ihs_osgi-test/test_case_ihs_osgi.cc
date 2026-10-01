@@ -22,7 +22,7 @@
  * reads one atomic pointer, and calls through it. So what is testable here is
  * exactly that -- argument validation, the safe defaults with no host, a host
  * table too short to call through, and that a real table is forwarded to with
- * the arguments unchanged. The registry behaviour behind the table is the
+ * the arguments unchanged. The registry behavior behind the table is the
  * shell's, and is covered by osgi_bridge-test.
  */
 

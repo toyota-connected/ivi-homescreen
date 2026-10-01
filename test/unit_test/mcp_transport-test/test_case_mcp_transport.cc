@@ -603,7 +603,7 @@ TEST_F(McpTransportTest, SubscribeWithoutAUriIsRefused) {
 
 namespace {
 
-// The smallest provider that can be registered and signalled. Notifications
+// The smallest provider that can be registered and signaled. Notifications
 // originate in the registry's watcher, so a real provider is the only way to
 // exercise delivery end to end.
 struct SignallingProvider {

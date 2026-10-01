@@ -82,7 +82,7 @@ when the draw data is empty).
 - **`VulkanHud`** — Vulkan render backend over `imgui_impl_vulkan`. It is built
   `IMGUI_IMPL_VULKAN_NO_PROTOTYPES`, so it resolves every Vulkan entry point
   through the shell's interposed `vkGetInstanceProcAddr` — the same
-  queue-serialising loader the rest of the compositor uses — rather than linking
+  queue-serializing loader the rest of the compositor uses — rather than linking
   libvulkan. Its render pass loads (preserves) the composited image in `GENERAL`
   layout and records the overlay into the caller's command buffer and target
   image view; framebuffers are cached per image view and dropped on swapchain
@@ -181,7 +181,7 @@ either source turns it on (they are OR-ed in the backend). It is a
 non-interactive overlay — no hot key, no pointer capture, no title bar — so once
 enabled it simply appears in the configured corner and updates every present.
 The window is created lazily on the first present after enablement; if the imgui
-render backend fails to initialise, the backend logs a warning
+render backend fails to initialize, the backend logs a warning
 (`HUD unavailable (...)`) and never retries.
 
 Enable via config:

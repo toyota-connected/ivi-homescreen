@@ -30,7 +30,7 @@ namespace ihs::hud {
 // Threading: input methods run on the platform thread (imgui queues them);
 // RenderFrame + WantCapture* run on the raster/present thread. The concrete
 // backend is responsible for not racing the two (both are cheap and the shared
-// queue/GL context serialises the GPU work).
+// queue/GL context serializes the GPU work).
 class HudBase : public IHud {
  public:
   ~HudBase() override;
@@ -45,7 +45,7 @@ class HudBase : public IHud {
   HudBase() = default;
 
   // Create the imgui context + style (call once from the concrete Create before
-  // initialising the render backend). Returns false only on version mismatch.
+  // initializing the render backend). Returns false only on version mismatch.
   bool InitContext();
   void MakeCurrent() const;
 

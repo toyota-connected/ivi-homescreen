@@ -132,7 +132,7 @@ class BundleStartupOrchestrator final : public IBundleLifecycleObserver {
   StartupPlan plan_;
 
   mutable std::mutex mutex_;
-  // Signalled by NotifyActive/NotifyStopped so a critical wait wakes early
+  // Signaled by NotifyActive/NotifyStopped so a critical wait wakes early
   // rather than always burning its full deadline.
   std::condition_variable cv_;
 

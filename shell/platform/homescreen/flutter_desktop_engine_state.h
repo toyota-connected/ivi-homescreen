@@ -105,7 +105,7 @@ struct FlutterDesktopEngineState {
   // describes needs the per-view state the engine holds.
   Engine* engine = nullptr;
 
-  // The hub registration this engine publishes its tree to, travelling beside
+  // The hub registration this engine publishes its tree to, traveling beside
   // the tree because the two are only meaningful together: publishing without
   // it means the last engine to run owns the only tree there is.
   IhsSemanticsSource* semantics_source = nullptr;

@@ -237,7 +237,7 @@ bool EglDmabufImporter::Import(const IhsFrame& frame,
     close(frame.plane_fd[p]);  // EGL dup'd them
   }
 
-  // A YUV image carries its colour conversion in the sampler, which only
+  // A YUV image carries its color conversion in the sampler, which only
   // GL_TEXTURE_EXTERNAL_OES provides. Bound as GL_TEXTURE_2D the driver
   // exposes the first plane alone, so a plain sampler2D reads luma into red.
   const GLenum target = external ? GL_TEXTURE_EXTERNAL_OES : GL_TEXTURE_2D;

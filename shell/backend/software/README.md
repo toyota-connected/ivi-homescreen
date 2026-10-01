@@ -282,7 +282,7 @@ IVI_SW_STOP_AFTER_FRAMES=5 \
 ```
 
 For a single-shot capture (steady-state frame after N frames have
-stabilised):
+stabilized):
 
 ```sh
 IVI_SW_SINK=file:out/initial.pam IVI_SW_STOP_AFTER_FRAMES=60 ./homescreen ...
@@ -430,7 +430,7 @@ Coverage:
 | Source | What it does |
 |---|---|
 | Pointer | Relative + absolute motion clamped to the viewport, BTN_LEFT / RIGHT / MIDDLE / SIDE / EXTRA buttons, horizontal + vertical scroll axes. |
-| Keyboard | evdev keycode + 8 → xkb scancode via `xkb_state_key_get_one_sym`; system-default RMLVO (`XKB_DEFAULT_*` env vars honoured). Delivered through the project-wide `KeyCallback`. |
+| Keyboard | evdev keycode + 8 → xkb scancode via `xkb_state_key_get_one_sym`; system-default RMLVO (`XKB_DEFAULT_*` env vars honored). Delivered through the project-wide `KeyCallback`. |
 | Key repeat | timerfd polled alongside libinput's fd; armed on press of an `xkb_keymap_key_repeats`-positive key at 500 ms / 33 ms (~30 Hz) cadence, disarmed on release of the currently-repeating key. Most-recently-pressed wins when a second repeating key arrives. |
 | Touch | libinput slots → Flutter per-finger `device` ids. Per slot: `kAdd + kDown` on touch-down, `kMove` on motion, `kUp + kRemove` on release, `kCancel + kRemove` on libinput cancellation. Bounded to 16 slots. |
 
@@ -547,7 +547,7 @@ the rasterizer parks on `flip_pending_`, and the spin-wait
 eventually trips its 5×-refresh deadline and force-clears the flag.
 The histogram exits the stall correctly (vsync-off r3 w4 recovers
 to ~58 fps), but a CI run hitting this on a longer bundle would
-see the same artefact. Not a regression — same behaviour with
+see the same artefact. Not a regression — same behavior with
 vsync wiring off. On a real panel with a connected scanout
 consumer this doesn't occur.
 

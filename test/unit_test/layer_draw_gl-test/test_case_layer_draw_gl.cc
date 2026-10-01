@@ -121,7 +121,7 @@ class LayerDrawGl : public ::testing::Test {
   }
 
   // A w x h RGBA texture from rows of pixels, first row first (top-first, as a
-  // dma-buf import is). Nearest filtering, so each destination pixel centre
+  // dma-buf import is). Nearest filtering, so each destination pixel center
   // reads exactly one source pixel.
   static GLuint MakeTexture(int w, int h, const std::vector<uint8_t>& rgba) {
     GLuint tex = 0;
@@ -329,7 +329,7 @@ TEST_F(LayerDrawGl, SurfaceLayersStackClipAndOrientOnEitherTarget) {
     const auto c = ColorOf(i);
     std::memcpy(&bg[Px(i, 0, 0)], c.data(), 4);
   }
-  // The strip shows colours A then B left to right. At IHS_TRANSFORM_90 the
+  // The strip shows colors A then B left to right. At IHS_TRANSFORM_90 the
   // producer rotated it counter-clockwise into a 1 x 2 buffer: B above A.
   const std::array<uint8_t, 4> kA = {250, 0, 0, 255};
   const std::array<uint8_t, 4> kB = {0, 0, 250, 255};

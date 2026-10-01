@@ -28,7 +28,7 @@
 #
 # On a spanned multi-monitor desktop a compositor maps an unassociated touch
 # device across the *whole* logical desktop, so contacts sized to one output
-# scatter onto the neighbours. Pass the full span and the target output's
+# scatter onto the neighbors. Pass the full span and the target output's
 # offset so every contact lands on the app's output:
 #   sudo ./inject_ten_finger.py --width 2560 --height 1440 \
 #                               --desktop-width 3840 --desktop-height 1440 \
@@ -75,7 +75,7 @@ class Panel:
         # onto the target output and clamps it to the desktop. On a spanned
         # multi-monitor compositor (which maps an unassociated touch device
         # across the *whole* desktop) this keeps every contact on the app's
-        # output instead of scattering onto the neighbours. Defaults (origin
+        # output instead of scattering onto the neighbors. Defaults (origin
         # 0,0 / bounds == output) are a no-op for single-output and the
         # direct-libinput backends.
         self.origin = origin

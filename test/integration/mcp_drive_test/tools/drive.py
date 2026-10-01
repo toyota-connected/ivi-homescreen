@@ -325,7 +325,7 @@ def main():
         for label, role in (("status", None), ("Save", "button"),
                             ("Locked", "button"), ("Destination", None)):
             if find(tree, label=label, role=role) is None:
-                raise Failure(f"no node labelled {label!r}"
+                raise Failure(f"no node labeled {label!r}"
                               + (f" with role {role}" if role else ""))
         save = find(tree, label="Save", role="button", identifier="save")
         if "tap" not in (save.get("actions") or []):

@@ -302,7 +302,7 @@ bool ExplicitSync::SlotReleased(uint64_t release_point) const {
   }
   uint32_t handle = impl_->release_syncobj;
   uint64_t point = release_point;
-  // Zero timeout: returns 0 iff the point is already signalled (compositor done
+  // Zero timeout: returns 0 iff the point is already signaled (compositor done
   // reading), a timeout error otherwise. The non-blocking release poll.
   const int r = drmSyncobjTimelineWait(
       impl_->drm_fd, &handle, &point, 1,

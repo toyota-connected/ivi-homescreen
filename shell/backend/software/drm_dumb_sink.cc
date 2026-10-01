@@ -48,7 +48,7 @@ namespace {
 
 // Sample the IVI_SW_DRM_FORMAT env var once at Create() time. Default
 // (unset / empty / unrecognized) is kXRGB8888 — bit-for-bit identical
-// to the pre-RGB565 behaviour. Unrecognized values warn so a CI typo
+// to the pre-RGB565 behavior. Unrecognized values warn so a CI typo
 // doesn't silently land the operator on a different format.
 DrmDumbSink::Format RequestedFormatFromEnv() {
   const char* env = std::getenv("IVI_SW_DRM_FORMAT");

@@ -28,7 +28,7 @@
 #include "backend/software/nv12_consumer.h"
 
 // GPU RGBA -> NV12 packer for the headless-EGL encode path: given the Flutter
-// frame as a GL RGBA texture (the render FBO's colour attachment) and a current
+// frame as a GL RGBA texture (the render FBO's color attachment) and a current
 // GLES3 context, it converts to NV12 straight into a dma-buf and hands that
 // buffer to an INv12Consumer -- no CPU touches the pixels. Each NV12 buffer is
 // one contiguous CMA dma-heap allocation imported as a single tall R8 EGL image

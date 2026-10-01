@@ -129,7 +129,7 @@ TEST(PixelSwizzle, RGB565_AlphaIsDiscarded) {
 // the boundary handoff between vector and scalar paths.
 TEST(PixelSwizzle, RGB565_ScalarTail_17px) {
   std::vector<uint8_t> src(17 * 4);
-  // Per-pixel varied colour so a wrong loop bound shows up.
+  // Per-pixel varied color so a wrong loop bound shows up.
   for (size_t i = 0; i < 17; ++i) {
     src[i * 4 + 0] = static_cast<uint8_t>(i * 15);      // B
     src[i * 4 + 1] = static_cast<uint8_t>(i * 11 + 4);  // G

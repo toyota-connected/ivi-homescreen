@@ -94,7 +94,7 @@ void WakeWatcher(Registry& registry) {
   } while (written < 0 && errno == EINTR);
 }
 
-// Drains an fd a provider signalled. The count is irrelevant: the contract is
+// Drains an fd a provider signaled. The count is irrelevant: the contract is
 // that a signal means "something changed, go look", and coalescing several
 // into one notification is the point rather than a loss.
 //

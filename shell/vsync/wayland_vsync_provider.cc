@@ -267,7 +267,7 @@ void WaylandVsyncProvider::Stop() {
     std::lock_guard<std::mutex> lock(feedback_mu_);
     drained.swap(feedback_in_flight_);
   }
-  drained.clear();  // destroys each feedback proxy, cancelling its listener
+  drained.clear();  // destroys each feedback proxy, canceling its listener
   feedback_pending_.store(false, std::memory_order_release);
 
   // Base drops the parked baton, clears engine/runner, and logs the session

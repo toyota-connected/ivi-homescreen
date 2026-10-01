@@ -144,7 +144,7 @@ void ConsumerPacedVsyncSource::ArmCeiling(uint64_t ns) {
       *runner_->GetStrandContext(), [this](const asio::error_code& ec) {
         ceiling_armed_ = false;
         if (ec || !running_.load(std::memory_order_acquire)) {
-          return;  // cancelled (teardown) or io_context stopped
+          return;  // canceled (teardown) or io_context stopped
         }
         TryDeliver();
       }));
