@@ -28,6 +28,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include <drm-cxx/core/device.hpp>
 #include <drm-cxx/cursor/cursor.hpp>
@@ -130,6 +131,17 @@ struct DrmCursor::Impl {
   std::mutex shape_mtx;
   std::string pending_shape;
   bool shape_dirty{false};
+
+  // A sprite the application supplied, queued the same way. Kept separate
+  // from pending_shape rather than converted into one: there is no theme name
+  // that means "these pixels", and whichever of the two was set last is the
+  // one ApplyPendingShape builds.
+  std::vector<uint32_t> pending_argb;
+  uint32_t pending_argb_w{0};
+  uint32_t pending_argb_h{0};
+  int32_t pending_argb_hot_x{0};
+  int32_t pending_argb_hot_y{0};
+  bool image_dirty{false};
 
   Impl(drm::cursor::Renderer r,
        drm::cursor::Theme t,
@@ -354,15 +366,68 @@ bool DrmCursor::SetShape(const char* const xcursor_name) {
   return true;
 }
 
+bool DrmCursor::SetImage(const uint32_t* const argb,
+                         const uint32_t width,
+                         const uint32_t height,
+                         const int32_t hot_x,
+                         const int32_t hot_y) {
+  if (argb == nullptr || width == 0 || height == 0) {
+    return false;
+  }
+  const auto count = static_cast<size_t>(width) * height;
+  std::vector<uint32_t> copy(argb, argb + count);
+  const std::lock_guard<std::mutex> lock(impl_->shape_mtx);
+  impl_->pending_argb = std::move(copy);
+  impl_->pending_argb_w = width;
+  impl_->pending_argb_h = height;
+  impl_->pending_argb_hot_x = hot_x;
+  impl_->pending_argb_hot_y = hot_y;
+  impl_->image_dirty = true;
+  // A queued theme shape would otherwise be applied after this one and
+  // silently undo it.
+  impl_->shape_dirty = false;
+  return true;
+}
+
 void DrmCursor::ApplyPendingShape() {
   std::string name;
+  std::vector<uint32_t> argb;
+  uint32_t argb_w = 0;
+  uint32_t argb_h = 0;
+  int32_t argb_hot_x = 0;
+  int32_t argb_hot_y = 0;
   {
     const std::lock_guard<std::mutex> lock(impl_->shape_mtx);
-    if (!impl_->shape_dirty) {
+    if (impl_->image_dirty) {
+      argb = std::move(impl_->pending_argb);
+      impl_->pending_argb.clear();
+      argb_w = impl_->pending_argb_w;
+      argb_h = impl_->pending_argb_h;
+      argb_hot_x = impl_->pending_argb_hot_x;
+      argb_hot_y = impl_->pending_argb_hot_y;
+      impl_->image_dirty = false;
+    } else if (impl_->shape_dirty) {
+      name = impl_->pending_shape;
+      impl_->shape_dirty = false;
+    } else {
       return;
     }
-    name = impl_->pending_shape;
-    impl_->shape_dirty = false;
+  }
+
+  if (!argb.empty()) {
+    auto cursor = drm::cursor::Cursor::from_argb(
+        drm::span<const uint32_t>(argb.data(), argb.size()), argb_w, argb_h,
+        argb_hot_x, argb_hot_y);
+    if (!cursor) {
+      ihs::log::warn("[DrmCursor] from_argb {}x{}: {}; keeping current sprite",
+                     argb_w, argb_h, cursor.error().message());
+      return;
+    }
+    if (auto r = impl_->renderer.set_cursor(std::move(*cursor)); !r) {
+      ihs::log::warn("[DrmCursor] set_cursor (custom image): {}",
+                     r.error().message());
+    }
+    return;
   }
   auto cursor = drm::cursor::Cursor::load(impl_->theme, name, impl_->theme_name,
                                           impl_->sprite_size);

@@ -322,6 +322,36 @@ class Display : public IDisplay,
       const std::string& kind) const override;
 
   /**
+   * @brief Set a cursor drawn from application-supplied pixels
+   * @param device pointer device id, unused
+   * @param pixels ARGB8888, premultiplied, width * height * 4
+   * @param width cursor width in pixels
+   * @param height cursor height in pixels
+   * @param hotspot_x hotspot, in cursor pixels
+   * @param hotspot_y hotspot, in cursor pixels
+   * @return bool
+   * @retval true the cursor was set
+   * @retval false no pointer, no shm, or the buffer did not match the size
+   * @relation
+   * wayland
+   */
+  [[nodiscard]] bool SetCustomCursor(int32_t device,
+                                     const std::vector<uint8_t>& pixels,
+                                     int32_t width,
+                                     int32_t height,
+                                     int32_t hotspot_x,
+                                     int32_t hotspot_y) override;
+
+  /**
+   * @brief Drop a custom cursor, back to the themed shape
+   * @param device pointer device id, unused
+   * @return bool
+   * @relation
+   * wayland
+   */
+  [[nodiscard]] bool ClearCustomCursor(int32_t device) override;
+
+  /**
    * @brief Get wl_output of a specified index of a view
    * @param[in] index Index of a view
    * @return wl_output*
@@ -644,6 +674,19 @@ class Display : public IDisplay,
 
   // for cursor
   struct wl_cursor_theme* m_cursor_theme{};
+
+  // The buffer behind a custom cursor, kept alive for as long as the cursor
+  // surface is showing it: wl_surface_attach does not copy, and releasing the
+  // pool out from under the compositor leaves the pointer drawing freed
+  // memory. Replaced, not accumulated -- one custom cursor at a time.
+  struct wl_buffer* m_custom_cursor_buffer{};
+  struct wl_shm_pool* m_custom_cursor_pool{};
+  void* m_custom_cursor_data{};
+  size_t m_custom_cursor_size{};
+  bool m_custom_cursor_active{};
+
+  /// Frees whatever [SetCustomCursor] last allocated.
+  void ReleaseCustomCursor();
 
   std::vector<std::shared_ptr<output_info_t>> m_all_outputs;
 

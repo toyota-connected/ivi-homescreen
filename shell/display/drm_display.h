@@ -281,6 +281,18 @@ class DrmDisplay final : public IDisplay {
     return {width_, height_};
   }
 
+  // The pointer from the application's own pixels, forwarded to whichever
+  // cursor sink the backend registered: the hardware cursor plane when the
+  // CRTC has one, else the GL-composited fallback. False when neither can.
+  [[nodiscard]] bool SetCustomCursor(int32_t device,
+                                     const std::vector<uint8_t>& pixels,
+                                     int32_t width,
+                                     int32_t height,
+                                     int32_t hotspot_x,
+                                     int32_t hotspot_y) override;
+
+  [[nodiscard]] bool ClearCustomCursor(int32_t device) override;
+
   [[nodiscard]] bool ActivateSystemCursor(
       int32_t device,
       const std::string& kind) const override;

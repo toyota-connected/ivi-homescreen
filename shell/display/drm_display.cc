@@ -634,6 +634,44 @@ bool DrmDisplay::ActivateSystemCursor(const int32_t /*device*/,
   return shape_sink_->SetShape(homescreen::CursorKindToXcursorName(kind));
 }
 
+bool DrmDisplay::SetCustomCursor(const int32_t /*device*/,
+                                 const std::vector<uint8_t>& pixels,
+                                 const int32_t width,
+                                 const int32_t height,
+                                 const int32_t hotspot_x,
+                                 const int32_t hotspot_y) {
+  if (shape_sink_ == nullptr) {
+    return false;
+  }
+  if (width <= 0 || height <= 0) {
+    return false;
+  }
+  // Checked rather than trusted: these bytes cross a channel from another
+  // language, and the sink reads width * height whole pixels out of them.
+  const auto needed =
+      static_cast<size_t>(width) * static_cast<size_t>(height) * 4;
+  if (pixels.size() != needed) {
+    ihs::log::warn("[DrmDisplay] custom cursor: got {} bytes, {}x{} needs {}",
+                   pixels.size(), width, height, needed);
+    return false;
+  }
+  // The channel carries bytes; the sinks take whole premultiplied pixels.
+  // Copied rather than reinterpreted in place because the vector's data has
+  // only byte alignment.
+  std::vector<uint32_t> argb(static_cast<size_t>(width) *
+                             static_cast<size_t>(height));
+  std::memcpy(argb.data(), pixels.data(), needed);
+  return shape_sink_->SetImage(argb.data(), static_cast<uint32_t>(width),
+                               static_cast<uint32_t>(height), hotspot_x,
+                               hotspot_y);
+}
+
+bool DrmDisplay::ClearCustomCursor(const int32_t device) {
+  // Back to the themed shape, which is where the cursor would have been had
+  // nothing set a custom one.
+  return ActivateSystemCursor(device, "basic");
+}
+
 void DrmDisplay::SetInputTransforms(const std::vector<std::string>& specs) {
   if (auto* drm_seat = dynamic_cast<homescreen::DrmSeat*>(seat_.get())) {
     drm_seat->SetInputTransforms(specs);

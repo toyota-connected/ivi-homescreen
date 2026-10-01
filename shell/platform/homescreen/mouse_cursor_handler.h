@@ -37,8 +37,24 @@ class MouseCursorHandler {
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result)
       const;
 
+  // Called when a method is called on |custom_channel_|.
+  void HandleCustomMethodCall(
+      const flutter::MethodCall<flutter::EncodableValue>& method_call,
+      std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result)
+      const;
+
   // The MethodChannel used for communication with the Flutter engine.
   std::unique_ptr<flutter::MethodChannel<>> channel_;
+
+  // The application-facing channel, for cursors the framework has no vocabulary
+  // for.
+  //
+  // Separate from `flutter/mousecursor` on purpose: that name belongs to the
+  // framework, which only ever sends `activateSystemCursor` on it, and a shell
+  // that answers extra methods there is squatting on a channel it does not
+  // own. An application asking for its own cursor art is not the framework
+  // talking, so it gets its own name.
+  std::unique_ptr<flutter::MethodChannel<>> custom_channel_;
 
   // A reference to the opaque data pointer, if any. Null in headless mode.
   FlutterView* view_;

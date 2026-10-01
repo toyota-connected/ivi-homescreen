@@ -158,6 +158,39 @@ bool GlCursor::SetShape(const char* const xcursor_name) {
 #endif
 }
 
+bool GlCursor::SetImage(const uint32_t* const argb,
+                        const uint32_t width,
+                        const uint32_t height,
+                        const int32_t hot_x,
+                        const int32_t hot_y) {
+  if (argb == nullptr || width == 0 || height == 0) {
+    return false;
+  }
+  // Same conversion SetShape does on a themed frame: drm::cursor and this
+  // interface both carry premultiplied 0xAARRGGBB, the GL texture wants
+  // premultiplied [R,G,B,A].
+  const auto count = static_cast<size_t>(width) * height;
+  std::vector<uint8_t> rgba(count * 4);
+  for (size_t i = 0; i < count; ++i) {
+    const uint32_t px = argb[i];
+    rgba[i * 4 + 0] = static_cast<uint8_t>((px >> 16) & 0xFF);
+    rgba[i * 4 + 1] = static_cast<uint8_t>((px >> 8) & 0xFF);
+    rgba[i * 4 + 2] = static_cast<uint8_t>(px & 0xFF);
+    rgba[i * 4 + 3] = static_cast<uint8_t>((px >> 24) & 0xFF);
+  }
+  {
+    const std::lock_guard<std::mutex> lock(shape_mtx_);
+    pending_rgba_ = std::move(rgba);
+    pending_w_ = width;
+    pending_h_ = height;
+    pending_hot_x_ = hot_x;
+    pending_hot_y_ = hot_y;
+    shape_dirty_ = true;
+  }
+  SetVisible(true);
+  return true;
+}
+
 void GlCursor::ApplyPendingShape() {
   const std::lock_guard<std::mutex> lock(shape_mtx_);
   if (!shape_dirty_) {

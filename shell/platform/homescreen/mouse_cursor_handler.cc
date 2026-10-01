@@ -17,11 +17,39 @@
 
 #include <flutter/standard_method_codec.h>
 
+#include <optional>
+#include <vector>
+
 #include "display/idisplay.h"
 #include "engine.h"
 #include "view/flutter_view.h"
 
 static constexpr char kNoViewError[] = "Missing view error";
+static constexpr char kBadArgumentsError[] = "Bad arguments";
+static constexpr char kCustomCursorChannel[] = "ivi-homescreen/mouse_cursor";
+
+namespace {
+// The value under |key|, when it is an int of either width.
+//
+// The standard codec writes a small integer as int32 and a large one as
+// int64, and which one arrives depends on the value rather than on the Dart
+// declaration -- so reading only int32 works until a hotspot is computed
+// rather than written as a literal.
+std::optional<int32_t> IntAt(const flutter::EncodableMap& map,
+                             const char* key) {
+  const auto it = map.find(flutter::EncodableValue(std::string(key)));
+  if (it == map.end()) {
+    return std::nullopt;
+  }
+  if (const auto* v32 = std::get_if<int32_t>(&it->second)) {
+    return *v32;
+  }
+  if (const auto* v64 = std::get_if<int64_t>(&it->second)) {
+    return static_cast<int32_t>(*v64);
+  }
+  return std::nullopt;
+}
+}  // namespace
 
 MouseCursorHandler::MouseCursorHandler(flutter::BinaryMessenger* messenger,
                                        FlutterView* view)
@@ -34,6 +62,69 @@ MouseCursorHandler::MouseCursorHandler(flutter::BinaryMessenger* messenger,
       [this](const flutter::MethodCall<flutter::EncodableValue>& call,
              std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
                  result) { HandleMethodCall(call, std::move(result)); });
+
+  custom_channel_ = std::make_unique<flutter::MethodChannel<>>(
+      messenger, kCustomCursorChannel,
+      &flutter::StandardMethodCodec::GetInstance());
+  custom_channel_->SetMethodCallHandler(
+      [this](const flutter::MethodCall<flutter::EncodableValue>& call,
+             std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+                 result) { HandleCustomMethodCall(call, std::move(result)); });
+}
+
+void MouseCursorHandler::HandleCustomMethodCall(
+    const flutter::MethodCall<flutter::EncodableValue>& method_call,
+    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result)
+    const {
+  const std::string& method = method_call.method_name();
+
+  if (!view_) {
+    result->Error(kNoViewError, "View is not set.");
+    return;
+  }
+
+  if (method == "setCustomCursor") {
+    const auto* args =
+        std::get_if<flutter::EncodableMap>(method_call.arguments());
+    if (args == nullptr) {
+      result->Error(kBadArgumentsError, "setCustomCursor wants a map.");
+      return;
+    }
+    const auto it = args->find(flutter::EncodableValue(std::string("buffer")));
+    const auto* pixels = it == args->end()
+                             ? nullptr
+                             : std::get_if<std::vector<uint8_t>>(&it->second);
+    const std::optional<int32_t> width = IntAt(*args, "width");
+    const std::optional<int32_t> height = IntAt(*args, "height");
+    if (pixels == nullptr || !width || !height) {
+      result->Error(kBadArgumentsError,
+                    "setCustomCursor wants buffer, width and height.");
+      return;
+    }
+    // The hotspot is optional and defaults to the top-left, which is what a
+    // caller that has not thought about it means.
+    const int32_t hotspot_x = IntAt(*args, "hotspotX").value_or(0);
+    const int32_t hotspot_y = IntAt(*args, "hotspotY").value_or(0);
+    const int32_t device = IntAt(*args, "device").value_or(0);
+
+    const bool res = view_->GetIDisplay()->SetCustomCursor(
+        device, *pixels, *width, *height, hotspot_x, hotspot_y);
+    result->Success(flutter::EncodableValue(res));
+    return;
+  }
+
+  if (method == "clearCustomCursor") {
+    int32_t device = 0;
+    if (const auto* args =
+            std::get_if<flutter::EncodableMap>(method_call.arguments())) {
+      device = IntAt(*args, "device").value_or(0);
+    }
+    const bool res = view_->GetIDisplay()->ClearCustomCursor(device);
+    result->Success(flutter::EncodableValue(res));
+    return;
+  }
+
+  result->NotImplemented();
 }
 
 void MouseCursorHandler::HandleMethodCall(
