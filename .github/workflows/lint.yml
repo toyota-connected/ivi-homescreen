@@ -161,6 +161,10 @@ jobs:
       - name: config reference (parser table + --help in sync)
         run: python3 scripts/gen_config_reference.py --check
 
+      # US English, as a gate rather than a habit: review kept missing it.
+      - name: spelling (US English)
+        run: scripts/check_spelling.sh
+
   lint-tidy-shard:
     if: ${{ github.server_url == 'https://github.com' }}
     needs: lint-build
