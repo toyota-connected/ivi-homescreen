@@ -750,7 +750,7 @@ int App::Run() {
   on_pump = [&](const std::error_code& ec) {
     pump_armed = false;
     if (ec) {
-      return;  // cancelled
+      return;  // canceled
     }
     service();
     if (needs_periodic()) {
@@ -772,7 +772,7 @@ int App::Run() {
   };
   on_wd_timer = [&](const std::error_code& ec) {
     if (ec) {
-      return;  // cancelled
+      return;  // canceled
     }
 
     // Pet the dogs
@@ -797,7 +797,7 @@ int App::Run() {
   };
   on_wake = [&](const std::error_code& ec) {
     if (ec) {
-      return;  // cancelled
+      return;  // canceled
     }
     // Drain the eventfd counter.
     uint64_t drained = 0;

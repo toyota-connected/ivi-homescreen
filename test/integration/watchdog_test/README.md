@@ -31,7 +31,7 @@ Source IDs used in the tests (3, 4, 5, 99, 1,000,000) are all outside the
 embedder-reserved range (0–2). There is no upper-bound restriction on source
 IDs — only negative values are rejected.
 
-### Skip behaviour
+### Skip behavior
 
 If `channel_available` detects the channel is absent (`MissingPluginException`
 or an `unhandled_method` `PlatformException`), all remaining checks are marked
@@ -103,7 +103,7 @@ normal termination.
 
 The app shows a full-screen list of check rows:
 
-- ⬤ grey — pending (not yet run)
+- ⬤ gray — pending (not yet run)
 - ⬤ green — pass
 - ⬤ red — fail
 - ⬤ amber — skip

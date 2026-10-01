@@ -542,7 +542,7 @@ void SoftwareSeat::HandleTouchDown(libinput_event_touch* t) {
     return;
   }
   // Touch input → hide the mouse cursor (it reappears on the next pointer
-  // motion). Matches typical desktop behaviour.
+  // motion). Matches typical desktop behavior.
   if (cursor_) {
     cursor_->SetVisible(false);
   }

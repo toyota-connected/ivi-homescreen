@@ -821,7 +821,7 @@ void FlutterView::RunTasks() {
   // Flush any coalesced pointer events on every wake. The main loop is now
   // event-driven (woken by Engine::CoalesceMouseEvent/CoalesceTouchEvent), so
   // there is no per-frame busy-loop to throttle against — flushing
-  // immediately minimises input latency, and SendPointerEvents() no-ops when
+  // immediately minimizes input latency, and SendPointerEvents() no-ops when
   // the queue is empty. Events that arrive in a burst are still coalesced in
   // Engine::m_pointer_events between wakes.
   m_flutter_engine->SendPointerEvents();

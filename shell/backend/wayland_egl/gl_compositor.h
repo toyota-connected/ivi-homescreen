@@ -161,7 +161,7 @@ class GlCompositor {
    * composite and torn down on EndFrame, so subsequent quad composites
    * within the frame skip ~13 redundant GL calls each. If BeginFrame is
    * not called, CompositeToDefault keeps its per-call setup+teardown
-   * behaviour for one-off compositions.
+   * behavior for one-off compositions.
    *
    * Calls must be balanced. Re-entrancy is not supported.
    */

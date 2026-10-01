@@ -1126,7 +1126,7 @@ bool TryOpenEventStream(const int fd,
 // makes the answer reliably arrive.
 //
 // The drain is bounded in both bytes and time: this runs before any
-// authorisation has succeeded, so a peer that keeps sending must not be able
+// authorization has succeeded, so a peer that keeps sending must not be able
 // to hold the accept thread. Whatever is left when the bound is reached is
 // abandoned -- at that point the response has had every chance to land, and
 // the peer is misbehaving anyway.

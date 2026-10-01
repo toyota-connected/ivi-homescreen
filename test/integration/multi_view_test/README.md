@@ -11,7 +11,7 @@ supports single-engine multi-monitor.
   single engine drives all monitors, every screen shows the **same tick value in
   lockstep**. Divergent values would mean separate engines (that would be case
   A, and the test fails).
-- Each view shows its own `VIEW n` label and a distinct background colour, so
+- Each view shows its own `VIEW n` label and a distinct background color, so
   the outputs are visibly distinct views.
 
 ## Build the bundle

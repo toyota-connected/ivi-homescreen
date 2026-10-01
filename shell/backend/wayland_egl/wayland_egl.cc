@@ -976,7 +976,7 @@ void WaylandEglBackend::CompositeLayer(const FlutterBackingStore* store,
   // Texture subtype: the engine wrapped our texture in its own private FBO
   // during rendering. For the compositor we either (a) attach the texture to
   // a scratch FBO and use the blit path, or (b) use the quad path directly.
-  // Favour the blit path when available since it's a fixed-function copy.
+  // Favor the blit path when available since it's a fixed-function copy.
   auto* tex = baton->tex_store;
   if (!blend && m_gl_caps.has_blit_framebuffer) {
     if (!m_texture_blit_fbo_) {
@@ -1059,7 +1059,7 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
   // Alpha=0 so regions left uncovered by any composited layer fall through
   // to the Wayland compositor. The surface has no wl_surface_set_opaque_region
   // set by default, and the EGL config has EGL_ALPHA_SIZE=8, so per-pixel
-  // alpha is honoured downstream.
+  // alpha is honored downstream.
   //
   // Skip the clear when the first composited layer is a window-sized
   // BackingStore at offset (0,0): its blend=false path overwrites the
@@ -1136,7 +1136,7 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
       }
       // Snapshot the shared_ptr under the lock, drop the lock before the
       // OnPresent callback. Holding the mutex across plugin GL work would
-      // serialise register/unregister with rendering.
+      // serialize register/unregister with rendering.
       std::shared_ptr<ICompositorSurface> surface_sp;
       {
         std::lock_guard<std::mutex> lock(m_compositor_surfaces_mu_);

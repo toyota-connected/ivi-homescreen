@@ -3151,7 +3151,7 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
 
   // The previous frame's flip has now completed, so every platform-view buffer
   // displaced up to and including that frame is off the plane -- return them to
-  // their producers here, one present after drm-cxx signalled the release. See
+  // their producers here, one present after drm-cxx signaled the release. See
   // deferred_releases_.
   DrainDeferredScanoutReleases();
 

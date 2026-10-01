@@ -589,7 +589,7 @@ void OnNotify(IhsMcpNotification kind, const char* uri, void* /*user_data*/) {
 
 }  // namespace
 
-// A provider signalling its notify_fd must reach the sink, which is the only
+// A provider signaling its notify_fd must reach the sink, which is the only
 // route a server has to tell clients anything changed.
 TEST_F(McpProviderTest, SignallingTheNotifyFdReachesTheSink) {
   SinkRecord record;

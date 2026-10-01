@@ -49,7 +49,7 @@ struct KeyEventCallbackData {
   // the atomic will be false, and the callback must not touch engine/plugin.
   std::weak_ptr<std::atomic<bool>> handler_alive;
   // Platform strand used to post the TextInputPlugin fallback call so
-  // that all TextInputPlugin state mutations are serialised on one thread.
+  // that all TextInputPlugin state mutations are serialized on one thread.
   asio::io_context::strand* strand;
 };
 
@@ -210,7 +210,7 @@ void KeyEventHandler::KeyboardHook(const bool released,
 
   // pressed_logical_keys_ is touched from the input thread (real key events)
   // and, on the Wayland backend, the main thread (key-repeat via EventTimer),
-  // so the read-modify-write must be serialised.
+  // so the read-modify-write must be serialized.
   {
     const std::lock_guard<std::mutex> lk(pressed_keys_mutex_);
     if (!released) {

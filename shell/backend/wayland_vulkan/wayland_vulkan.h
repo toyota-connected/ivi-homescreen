@@ -528,7 +528,7 @@ class WaylandVulkanBackend final : public Backend {
   /// Destroy imported acquire semaphores whose frame has completed.
   void ReapAcquireWaits();
 
-  /// After the frame submit that signalled release_sem_, export a release fence
+  /// After the frame submit that signaled release_sem_, export a release fence
   /// (sync_file) and hand each platform view composited this frame its own dup,
   /// so the producer/host can wait it before reusing or freeing the buffer.
   void PublishReleaseFences();
@@ -540,7 +540,7 @@ class WaylandVulkanBackend final : public Backend {
   std::vector<std::pair<uint64_t, VkSemaphore>> acquire_wait_retire_;
   // Platform-view surfaces composited this frame; each gets a release fence.
   std::vector<ICompositorSurface*> frame_pv_surfaces_;
-  // Signalled by any frame that sampled a platform view, exported per-frame as
+  // Signaled by any frame that sampled a platform view, exported per-frame as
   // release sync_files. Created lazily as SYNC_FD-exportable; null if the
   // device can't export (then no release fences are published).
   VkSemaphore release_sem_{VK_NULL_HANDLE};

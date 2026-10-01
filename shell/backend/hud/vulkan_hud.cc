@@ -12,7 +12,7 @@
 
 #include <cstring>
 
-// Shared dynamic dispatch (the backend owns/initialises the loader storage), so
+// Shared dynamic dispatch (the backend owns/initializes the loader storage), so
 // the HUD's own render-pass/framebuffer calls resolve through the same
 // interposed loader as the rest of the compositor.
 #define VULKAN_HPP_NO_EXCEPTIONS 1
@@ -32,7 +32,7 @@ const auto& d() {
 
 // imgui is built IMGUI_IMPL_VULKAN_NO_PROTOTYPES, so it resolves every Vulkan
 // entry point through this loader — the interposed vkGetInstanceProcAddr, which
-// serialises vkQueue* on the shared queue lock. One HUD, one imgui context.
+// serializes vkQueue* on the shared queue lock. One HUD, one imgui context.
 struct LoaderCtx {
   PFN_vkGetInstanceProcAddr gipa{nullptr};
   VkInstance instance{VK_NULL_HANDLE};

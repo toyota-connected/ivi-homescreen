@@ -441,7 +441,7 @@ TEST_F(McpSemanticsProviderTest, SetTextSurvivesEscapesInTheValue) {
 }
 
 // An agent that can type into a password field can also read back what it
-// wrote through the application's own behaviour, so the field is refused.
+// wrote through the application's own behavior, so the field is refused.
 TEST_F(McpSemanticsProviderTest, SetTextIsRefusedOnAnObscuredField) {
   TreeBuilder tree;
   tree.Add(0, "root", IHS_SEMANTICS_ROLE_WINDOW);
@@ -895,7 +895,7 @@ TEST_F(McpSemanticsProviderTest, QueryLimitReportsWhatItLeftOut) {
 // ---------------------------------------------------------------------------
 // Argument decoding
 //
-// The provider is handed (pointer, length) and must honour both. It used to
+// The provider is handed (pointer, length) and must honor both. It used to
 // scan the raw text for a quoted key, which read to a terminator the ABI does
 // not promise and could not tell a key from a key-like substring inside a
 // value a client chose. Fuzzing found the first; the second falls out of the

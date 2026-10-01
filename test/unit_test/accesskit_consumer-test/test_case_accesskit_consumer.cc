@@ -238,10 +238,10 @@ TEST(AccessKitConsumer, NonLabelRolesKeepTheirOwnValue) {
   EXPECT_EQ(Owned(accesskit_node_value(built.get())), "21.5");
 
   // And a Label that already has a value keeps it rather than being clobbered.
-  IhsSemanticsPublishNode labelled =
+  IhsSemanticsPublishNode labeled =
       PlainNode("ignored", IHS_SEMANTICS_ROLE_LABEL);
-  labelled.value = "explicit";
-  const BuiltNode built_label(labelled);
+  labeled.value = "explicit";
+  const BuiltNode built_label(labeled);
   EXPECT_EQ(Owned(accesskit_node_value(built_label.get())), "explicit");
 }
 

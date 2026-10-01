@@ -1770,7 +1770,7 @@ void IhsPluginView::ImportPendingEglLocked(std::unique_lock<std::mutex>& lock,
     int pr = 0;
     while ((pr = ::poll(&pfd, 1, 1000)) < 0 && errno == EINTR) {
     }
-    // Only POLLIN means the fence signalled; poll() can also wake on
+    // Only POLLIN means the fence signaled; poll() can also wake on
     // POLLERR/POLLHUP/POLLNVAL (>0 with no POLLIN), which is a failure, not a
     // signal. Sample best-effort either way, but warn.
     if (pr <= 0 || (pfd.revents & POLLIN) == 0) {
@@ -2740,7 +2740,7 @@ int SubmitFrame0(void* user_data,
       // offered) is never scanned out, so no plane release will fire for it --
       // signal its release here so the producer reclaims that slot. A frame
       // that WAS delivered rides the plane release and must not be
-      // double-signalled.
+      // double-signaled.
       if (v->OwnsSupersededReleaseLocked(v->offer0, v->pending_egl)) {
         v->SignalRelease(v->pending_egl.frame.buffer_id);
       }
@@ -2775,7 +2775,7 @@ int SubmitFrame0(void* user_data,
     // Per-frame release eventfd: hand the producer a dup to wait on before it
     // reuses this ring slot; the compositor signals our copy from
     // OnScanoutRelease. A stale entry for this buffer_id (the producer reused
-    // the slot without our having signalled) is retired first.
+    // the slot without our having signaled) is retired first.
     v->HandBackReleaseEventfd(frame->buffer_id, out_release_fence_fd);
     ApplyLayerListLocked(v, update, /*vulkan=*/false);
     // Extra layers the list dropped may have been showing a retired frame.

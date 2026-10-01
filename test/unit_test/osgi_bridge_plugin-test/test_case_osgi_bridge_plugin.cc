@@ -319,7 +319,7 @@ TEST_F(OsgiBridgePluginTest, ActiveFromAnUnregisteredBundleIsRejected) {
 
 // ReportStopped answers true whatever the registry knows, so this is the one
 // report that succeeds without a registration. Asserted so a change to that
-// behaviour is deliberate rather than incidental.
+// behavior is deliberate rather than incidental.
 TEST_F(OsgiBridgePluginTest, StoppedIsAcceptedEvenWithoutARegistration) {
   const Reply reply = Invoke(OsgiBridgePlugin::kMethodStopped,
                              Map({{flutter::EncodableValue("symbolic_name"),

@@ -48,7 +48,7 @@ namespace wl_vulkan {
 // behind a PIMPL so this header stays free of them.
 class ExplicitSync {
  public:
-  // A frame's acquire (GPU-signalled) and release (compositor-signalled)
+  // A frame's acquire (GPU-signaled) and release (compositor-signaled)
   // timeline points. Both are monotonic; release is recorded per slot.
   struct FramePoints {
     uint64_t acquire = 0;
@@ -84,7 +84,7 @@ class ExplicitSync {
   // called between wl_surface.attach and wl_surface.commit.
   void SetSurfacePoints(const FramePoints& points);
 
-  // Non-blocking: has the compositor signalled the release syncobj at
+  // Non-blocking: has the compositor signaled the release syncobj at
   // @p release_point yet? Replaces wl_buffer.release for slot reclaim.
   // @p release_point == 0 (slot never committed) returns true.
   [[nodiscard]] bool SlotReleased(uint64_t release_point) const;

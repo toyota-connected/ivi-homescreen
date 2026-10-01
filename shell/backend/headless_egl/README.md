@@ -6,7 +6,7 @@ window surface backed by a `gbm_surface`; on `eglSwapBuffers` the presented
 buffer is imported as a GL texture and packed RGBA→NV12 on the GPU, then handed
 to an `INv12Consumer` (file encoder or WebRTC) via dma-buf. It is the
 zero-copy counterpart of the software backend's CPU `EncoderSink`: the GPU
-both rasterizes and colour-converts, and no CPU touches the pixels.
+both rasterizes and color-converts, and no CPU touches the pixels.
 
 ## Features
 
@@ -212,7 +212,7 @@ on its wall-clock scheduler.
    MP4) or a player that accepts raw H.264.
 5. **No WebRTC validation in-tree** — the `webrtc:` consumer is implemented
    but not exercised by any integration test; the socket framing and
-   signalling are a follow-up.
+   signaling are a follow-up.
 6. **GBM linear modifier requirement** — the swap chain forces
    `DRM_FORMAT_MOD_LINEAR` so the presented buffers import cleanly as
    `GL_TEXTURE_2D`. A driver that rejects the forced modifier falls back to

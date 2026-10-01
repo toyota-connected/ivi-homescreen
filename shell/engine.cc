@@ -1220,7 +1220,7 @@ int Engine::SendSyntheticTap(const int64_t view_id,
 
   // Accepted for delivery. Whether anything was under the point is not
   // knowable here, and reporting success as though it were would be the
-  // silent-guess behaviour this path is deliberately not: a coordinate tap is
+  // silent-guess behavior this path is deliberately not: a coordinate tap is
   // asked for explicitly, never substituted for a failed lookup.
   return IHS_SEMANTICS_OK;
 }

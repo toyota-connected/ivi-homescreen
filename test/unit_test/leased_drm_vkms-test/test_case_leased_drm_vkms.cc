@@ -288,7 +288,7 @@ TEST(LeasedDrmVkms, RevokedLeaseLosesItsObjectsButKeepsTheFd) {
   }
 }
 
-// The one kernel-behaviour claim the whole EGL
+// The one kernel-behavior claim the whole EGL
 // recovery design rests on, and the reason egl's lease_on_revoke default is
 // `exit` until this is evidenced: "leases partition mode objects only. GEM
 // allocation, prime export/import and render ioctls were never lease-scoped, so
