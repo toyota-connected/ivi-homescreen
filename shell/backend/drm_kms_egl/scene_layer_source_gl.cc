@@ -30,10 +30,17 @@ GbmBackingStoreLayerSource::GbmBackingStoreLayerSource(
 
 drm::expected<drm::scene::AcquiredBuffer, std::error_code>
 GbmBackingStoreLayerSource::acquire() {
-  // The active slot is what Flutter most-recently rendered into. The
-  // scene's commit window is short enough that slot rotation (which
-  // happens in DrmCompositor::PresentLayers after commit) cannot move
-  // it under us mid-acquire.
+  // The active slot is what Flutter most-recently rendered into. The scene's
+  // commit window is short enough that slot rotation cannot move it under us
+  // mid-acquire -- but that rotation is DrmCompositor::OnFlipComplete's, driven
+  // off PAGE_FLIP_EVENT, not PresentLayers' after the commit as this said
+  // before. The distinction matters to anyone reasoning about which thread may
+  // be in here: rotation runs on the page-flip thread, so "after commit" is not
+  // where to look for it.
+  //
+  // Nothing here touches GL either. ensure_fb_id_ is DrmCompositor::
+  // EnsureDrmFbId, which is gbm_bo_get_* plus drmModeAddFB2, so no EGL context
+  // need be current on whatever thread calls this.
   if (!ensure_fb_id_(*store_) || store_->active().drm_fb_id == 0) {
     return drm::unexpected<std::error_code>(
         std::make_error_code(std::errc::resource_unavailable_try_again));
