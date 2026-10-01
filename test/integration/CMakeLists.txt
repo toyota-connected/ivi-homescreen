@@ -1,5 +1,5 @@
-# Integration tests require external resources (a live Wayland compositor for
-# app-test and flutter_view-test; a Flutter app bundle for texture-test).  They
+# Integration tests require external resources: a live Wayland compositor for
+# app-test and flutter_view-test, and a Flutter app bundle for app-test.  They
 # cannot run in a headless CI unit-test-coverage job and are therefore excluded
 # by default.
 #
@@ -29,4 +29,3 @@ endif ()
 
 add_subdirectory(app-test)
 add_subdirectory(flutter_view-test)
-add_subdirectory(texture-test)

@@ -2,8 +2,7 @@
 
 #include "app.h"
 #include "configuration/configuration.h"
-
-static constexpr char kBundlePath[] = TEST_APP_BUNDLE_PATH;
+#include "unit_test_utils.h"
 
 /****************************************************************
 Test Case Name.Test Name： HomescreenAppLoop_Lv1Normal001
@@ -12,6 +11,7 @@ Test Summary：Test Loop without window_type
 ***************************************************************/
 
 TEST(HomescreenAppLoop, Lv1Normal001) {
+  SKIP_WITHOUT_APP_BUNDLE();
   constexpr int argc = 3;
   const char* argv[3] = {"homescreen", "-b", kBundlePath};
   const auto argv_p = reinterpret_cast<char**>(&argv);
@@ -36,6 +36,7 @@ Test Summary：Test Loop with window_type BG
 ***************************************************************/
 
 TEST(HomescreenAppLoop, Lv1Normal002) {
+  SKIP_WITHOUT_APP_BUNDLE();
   constexpr int argc = 5;
   const char* argv[5] = {"homescreen", "-b", kBundlePath, "--window-type",
                          "BG"};
