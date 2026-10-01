@@ -197,8 +197,11 @@ if (BUILD_COMPOSITOR AND (BUILD_BACKEND_WAYLAND_VULKAN OR BUILD_BACKEND_DRM_KMS_
     add_subdirectory(layer_draw_vk-test)
 endif ()
 add_subdirectory(deferred_retire_set-test)
-# The EGL dma-buf importer only exists when an EGL backend is built.
-if (BUILD_COMPOSITOR AND (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_DRM_KMS_EGL))
+# The EGL dma-buf importer only exists when an EGL backend is built. The test
+# also includes drm_fourcc.h for the format constants, so it needs libdrm in its
+# own right -- same gate the two drm_* tests below use.
+if (BUILD_COMPOSITOR AND (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_DRM_KMS_EGL)
+        AND TARGET PkgConfig::DRM)
     add_subdirectory(egl_import_modifiers-test)
 endif ()
 # The PAGE_FLIP_EVENT drain race behind #367. Drives libdrm and an eventfd

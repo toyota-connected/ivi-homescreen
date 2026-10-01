@@ -23,8 +23,12 @@ add_executable(${TESTCASE_NAME} test_case_egl_import_modifiers.cc)
 add_sanitizers(${TESTCASE_NAME})
 target_include_directories(${TESTCASE_NAME} PRIVATE
         ${PROJECT_SOURCE_DIR}/shell/platform/homescreen/platform_views)
+# libdrm for the DRM_FORMAT_* / DRM_FORMAT_MOD_* constants the cases compare
+# against. It built without this only because homescreen_ut_shell happened to
+# carry libdrm's include path whenever a DRM backend was configured; with the
+# DRM backends off, drm_fourcc.h was not on the search path at all.
 target_link_libraries(${TESTCASE_NAME} PRIVATE
-        gtest_main homescreen_ut_shell EGL)
+        gtest_main homescreen_ut_shell EGL PkgConfig::DRM)
 
 add_test(
         NAME ${TESTCASE_NAME}
