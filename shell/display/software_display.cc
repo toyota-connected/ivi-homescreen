@@ -17,9 +17,12 @@
 #include "display/software_display.h"
 
 #include <cstdint>
+#include <cstring>
 #include <utility>
+#include <vector>
 
 #include "config/common.h"  // BUILD_SOFTWARE_INPUT_LIBINPUT
+#include "logging/logging.h"
 #if BUILD_SOFTWARE_INPUT_LIBINPUT
 #include "backend/software/input/software_seat.h"
 #endif
@@ -64,6 +67,45 @@ void SoftwareDisplay::SetCursor(std::shared_ptr<SoftwareCursor> cursor) {
     sw_seat->SetCursor(cursor_);
   }
 #endif
+}
+
+bool SoftwareDisplay::SetCustomCursor(const int32_t /*device*/,
+                                      const std::vector<uint8_t>& pixels,
+                                      const int32_t width,
+                                      const int32_t height,
+                                      const int32_t hotspot_x,
+                                      const int32_t hotspot_y) {
+  if (!cursor_) {
+    return false;
+  }
+  if (width <= 0 || height <= 0) {
+    return false;
+  }
+  // Checked rather than trusted: these bytes cross a channel from another
+  // language, and SetShape reads width * height whole pixels out of them.
+  const auto needed =
+      static_cast<size_t>(width) * static_cast<size_t>(height) * 4;
+  if (pixels.size() != needed) {
+    ihs::log::warn(
+        "[SoftwareDisplay] custom cursor: got {} bytes, {}x{} needs {}",
+        pixels.size(), width, height, needed);
+    return false;
+  }
+  // Copied into uint32 storage rather than reinterpreted in place: the
+  // vector's data has only byte alignment.
+  std::vector<uint32_t> argb(static_cast<size_t>(width) *
+                             static_cast<size_t>(height));
+  std::memcpy(argb.data(), pixels.data(), needed);
+  cursor_->SetShape(argb.data(), static_cast<uint32_t>(width),
+                    static_cast<uint32_t>(height), hotspot_x, hotspot_y);
+  cursor_->SetVisible(true);
+  return true;
+}
+
+bool SoftwareDisplay::ClearCustomCursor(const int32_t device) {
+  // Back to the themed shape, which is where the cursor would have been had
+  // nothing set a custom one.
+  return ActivateSystemCursor(device, "basic");
 }
 
 bool SoftwareDisplay::ActivateSystemCursor(const int32_t /*device*/,

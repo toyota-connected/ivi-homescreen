@@ -93,6 +93,29 @@ class SoftwareDisplay final : public IDisplay {
       int32_t device,
       const std::string& kind) const override;
 
+  // The pointer from the application's own pixels, straight into the software
+  // cursor's bitmap. SoftwareCursor::SetShape already takes premultiplied
+  // ARGB8888 with a hotspot and copies under the lock BlendXRGB reads, so
+  // there is nothing to queue here.
+  //
+  // False when there is no cursor at all, which is how the headless tiers
+  // answer: MakeHeadlessEglDisplay and MakeHeadlessVulkanDisplay build a
+  // SoftwareDisplay without calling SetCursor, so nothing would draw it.
+  //
+  // What this cannot see is the software tier pointed at an encoder sink
+  // (IVI_ENC_SINK): the cursor exists and only DrmDumbSink composites it, so
+  // the sprite is accepted and shows up nowhere. ActivateSystemCursor has the
+  // same blind spot today -- the display does not know what its sink does --
+  // and telling them apart needs the sink to say so.
+  [[nodiscard]] bool SetCustomCursor(int32_t device,
+                                     const std::vector<uint8_t>& pixels,
+                                     int32_t width,
+                                     int32_t height,
+                                     int32_t hotspot_x,
+                                     int32_t hotspot_y) override;
+
+  [[nodiscard]] bool ClearCustomCursor(int32_t device) override;
+
   [[nodiscard]] bool HasRepeatTimer() const override { return false; }
 
   // wayland-leased-drm: everything the backend needs to build a DrmDumbSink on
