@@ -2444,7 +2444,7 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
   // Export the release fence to each platform view composited this frame.
   PublishReleaseFences();
   // The imported acquire semaphores are now owned by this submit; retire them
-  // after a margin so they are destroyed once its fence has signalled.
+  // after a margin so they are destroyed once its fence has signaled.
   for (VkSemaphore s : frame_acquire_waits_) {
     acquire_wait_retire_.emplace_back(acquire_wait_seq_ + 4, s);
   }
@@ -2684,7 +2684,7 @@ void WaylandVulkanBackend::PublishReleaseFences() {
   if (frame_pv_surfaces_.empty()) {
     return;
   }
-  // release_sem_ was signalled by the frame submit; export a sync_file that
+  // release_sem_ was signaled by the frame submit; export a sync_file that
   // fires when the frame retires and give each composited view its own dup.
   int release_fd = -1;
   if (release_sem_ != VK_NULL_HANDLE) {
@@ -3075,7 +3075,7 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
     }
   }
   // Refresh pacing. Block until the previous frame's wl_surface.frame callback
-  // fired — the compositor signalling it is ready for the next frame — before
+  // fired — the compositor signaling it is ready for the next frame — before
   // producing this one. This is the dma-buf path's backpressure; the swapchain
   // path gets the equivalent from vkQueuePresentKHR blocking at vblank under
   // FIFO. Bounded so an occluded/unmapped surface (whose callbacks stop firing)
@@ -3298,7 +3298,7 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
         d().vkWaitForFences(device_, 1, &slot.fence, VK_TRUE, UINT64_MAX));
   }
   // The imported acquire semaphores are owned by this submit now; retire them
-  // to be destroyed once its fence has signalled.
+  // to be destroyed once its fence has signaled.
   for (VkSemaphore s : frame_acquire_waits_) {
     acquire_wait_retire_.emplace_back(acquire_wait_seq_ + 4, s);
   }

@@ -660,7 +660,7 @@ const IhsSemanticsNode* ResolveNode(const IhsSemanticsSnapshot* snapshot,
 
 struct Provider {
   std::mutex mutex;
-  // Signalled by the hub on publish and watched by the MCP registry; see
+  // Signaled by the hub on publish and watched by the MCP registry; see
   // where it is created for why one descriptor serves both.
   int notify_fd = -1;
   IhsMcpProvider* mcp = nullptr;
@@ -1246,7 +1246,7 @@ int CallTool(void* /* user_data */,
   if (tool->action == IHS_SEMANTICS_ACTION_SET_TEXT) {
     // Refusing to type into a password field is a deliberate limit, not an
     // oversight: an agent that can set text into an obscured field can also
-    // read back what it wrote through the app's own behaviour.
+    // read back what it wrote through the app's own behavior.
     if (obscured) {
       FillPayload(
           out_result,

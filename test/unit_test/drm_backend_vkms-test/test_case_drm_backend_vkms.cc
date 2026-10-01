@@ -1198,7 +1198,7 @@ TEST_F(DrmBackendVkmsScene, ADisplacedSlotComesBackWithItsReleaseFence) {
   // on a sync_file still has the eventfd, so both must arrive.
   EXPECT_EQ(view->released().front(), 0u) << "the eventfd release still fires";
   EXPECT_TRUE(view->ReleaseFenceSignals(1000))
-      << "the fence handed back never signalled, so a producer waiting on it "
+      << "the fence handed back never signaled, so a producer waiting on it "
          "would stall rather than reuse the slot";
 
   compositor_->UnregisterSurface(25);
@@ -1627,7 +1627,7 @@ TEST_F(PvHostVkms, ExplicitSyncSubmitLoopDoesNotLeakFds) {
          "per frame (#593)";
 
   EXPECT_EQ(release_failures, 0)
-      << "a release eventfd never signalled; the host could not write to an fd "
+      << "a release eventfd never signaled; the host could not write to an fd "
          "it owns, which means one was closed underneath it";
 
   for (int& fd : held) {

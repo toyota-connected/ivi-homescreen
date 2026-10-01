@@ -243,7 +243,7 @@ dma-buf path removes that layer:
    validation layer.
 5. Refresh pacing via `wl_surface.frame`. Each commit arms a frame callback; the
    next present's rasterizer thread blocks until it fires (the compositor
-   signalling it is ready for the next frame). This is the backpressure the
+   signaling it is ready for the next frame). This is the backpressure the
    swapchain path gets for free from `vkQueuePresentKHR` blocking at vblank under
    FIFO — without it the non-blocking dma-buf commit lets the rasterizer run
    free. The callback fires on the Display event thread; a `condition_variable`

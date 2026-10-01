@@ -102,7 +102,7 @@ TEST(SemanticsTranslator, LabelOnlyLeafVsGenericContainer) {
                       /*has_children=*/false)
                 .role,
             Role::kLabel);
-  // A labelled node with children is a container, not a label.
+  // A labeled node with children is a container, not a label.
   EXPECT_EQ(Translate(1, Flags(0), kNoAction, true, true).role,
             Role::kGenericContainer);
   // No label, no distinguishing flag -> generic container.
@@ -216,7 +216,7 @@ TEST(SemanticsTranslator, CustomActionIsReadFromTheEngineMask) {
           .action_custom_action);
 }
 
-// The neighbouring actions, so a future edit that renumbers or drops one is
+// The neighboring actions, so a future edit that renumbers or drops one is
 // caught here rather than in a flow that mysteriously stops working.
 TEST(SemanticsTranslator, ActionBitsAreReadIndividually) {
   const NodeSpec tap =

@@ -24,7 +24,7 @@ arena — so the raw stream reaches the checks unmodified.
 | # | Check | What it validates |
 | --- | --- | --- |
 | C1 | concurrency | ≥ `EXPECT_FINGERS` (10) simultaneous contacts with that many distinct device ids |
-| C2 | legality | per-device phase machine: no down-while-down, no move/up/cancel-while-up. Catches lost transitions and the historical cancel bug (only device 0 cancelled → 9 contacts stuck down → next session violates) |
+| C2 | legality | per-device phase machine: no down-while-down, no move/up/cancel-while-up. Catches lost transitions and the historical cancel bug (only device 0 canceled → 9 contacts stuck down → next session violates) |
 | C3 | churn | ≥ `EXPECT_CHURN_IDS` (24) distinct device ids across the run. The pre-fix Wayland path indexed a fixed `surface_x[kMaxTouchFinger]` array by the `wl_touch` id — an out-of-bounds write for id ≥ 10. **Wayland backends only**; see [C3 only applies to the Wayland backends](#c3-only-applies-to-the-wayland-backends) |
 | C4 | frame batch | contacts in one hardware scan arrive with one shared timestamp (the embedder stamps the batch once). Mean move-group size during the synchronized 10-finger drag must be ≥ `EXPECT_BATCH_MEAN` (6.0). An unbatched embedder stamps each contact separately → mean ≈ 1 |
 | C5 | cancel | after a compositor cancel, every down contact receives `PointerCancel` within 500 ms. Advisory until a cancel is observed (trigger one manually via a compositor system gesture) |
@@ -56,11 +56,11 @@ session, both parsed by `json.load`, 14 keys each.
 
 | Embedder | C1 | C2 | C3 † | C4 (mean batch) |
 | --- | --- | --- | --- | --- |
-| pre touch-frame-batching | pass | pass* | Wayland: **undefined behaviour** (OOB write for id ≥ 10) — drm/software: n/a | **fail** (≈ 1.0) |
+| pre touch-frame-batching | pass | pass* | Wayland: **undefined behavior** (OOB write for id ≥ 10) — drm/software: n/a | **fail** (≈ 1.0) |
 | with touch-frame-batching | pass | pass | Wayland: pass — drm/software: n/a | pass (≈ 10) |
 
 \* C2 fails pre-fix if a compositor cancel occurs mid-session (only device 0
-was cancelled, at the mouse position).
+was canceled, at the mouse position).
 
 † C3 as written can only be reached on the Wayland backends. On drm/software it
 reports the panel's slot count and stops there, by design — see below.
@@ -124,7 +124,7 @@ to the output resolution so injected coordinates land on the app. Phases:
 
 A nesting compositor (mutter, KWin) maps an unassociated touch device across
 the **whole logical desktop**, so contacts sized to one output scatter onto
-the neighbours — e.g. on a 2560+1280 dual-head only 6 of 10 fingers land on a
+the neighbors — e.g. on a 2560+1280 dual-head only 6 of 10 fingers land on a
 2560-wide fullscreen app. Pass the full span and the app output's offset so
 every contact lands on the app:
 

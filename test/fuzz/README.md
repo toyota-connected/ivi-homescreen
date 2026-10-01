@@ -99,7 +99,7 @@ plus the HTTP-level cases worth starting from (event-stream handshake, plain
 `GET`, an `Origin` header, a missing/unparseable/oversized `Content-Length`, a
 body shorter than declared, mixed-case header names).
 
-Seeds are for reaching code, not for asserting behaviour. Anything the fuzzer
+Seeds are for reaching code, not for asserting behavior. Anything the fuzzer
 finds that should stay found belongs in a unit test beside the code it pins —
 `test/unit_test/mcp_transport-test/` — where it runs in CI and says what the
 correct answer is. A crashing input parked in a corpus directory only says

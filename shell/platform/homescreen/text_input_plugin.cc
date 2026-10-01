@@ -396,7 +396,7 @@ void TextInputPlugin::KeyboardHook(bool released,
         default: {
           const char32_t utf32 = xkb_keysym_to_utf32(keysym);
           if (unicode_hex_.size() < 6 && IsHexDigit(utf32)) {
-            // Normalise to lowercase for display and stoul().
+            // Normalize to lowercase for display and stoul().
             const char32_t lower =
                 (utf32 >= U'A' && utf32 <= U'F')
                     ? static_cast<char32_t>(utf32 - U'A' + U'a')

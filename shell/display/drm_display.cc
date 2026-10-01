@@ -550,7 +550,7 @@ void DrmDisplay::ArmHotplugWait() {
       asio::posix::stream_descriptor::wait_read,
       [this](const std::error_code& ec) {
         if (ec) {
-          return;  // cancelled at teardown
+          return;  // canceled at teardown
         }
         // dispatch() drains every pending uevent and calls the handler for
         // each that passes its DRM + HOTPLUG filter; the handler only sets the

@@ -934,7 +934,7 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   // are in play and the choice can still cost a modifier.
   const uint32_t scanout_fourcc =
       plane_layers_ ? DRM_FORMAT_ARGB8888 : DRM_FORMAT_XRGB8888;
-  // Probe through the lease fd when we have one. Not an optimisation: the
+  // Probe through the lease fd when we have one. Not an optimization: the
   // kernel scopes that fd's view to the leased objects, so this finds exactly
   // the connector we hold, where re-opening the card by path would enumerate
   // the whole card and could pick one the compositor is still driving -- and

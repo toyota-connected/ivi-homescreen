@@ -47,7 +47,7 @@ import time
 TREE_URI_PREFIX = "ui://semantics/"
 
 # Roles worth telling apart at a glance. Anything unlisted renders plain,
-# which keeps an unfamiliar role visible rather than mis-coloured.
+# which keeps an unfamiliar role visible rather than mis-colored.
 ROLE_COLOR = {
     "window": "\033[95m",
     "button": "\033[92m",

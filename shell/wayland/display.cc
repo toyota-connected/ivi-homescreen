@@ -952,13 +952,13 @@ void Display::touch_handle_cancel(void* data, struct wl_touch* /* wl_touch */) {
   auto* d = static_cast<Display*>(data);
   IHS_DEBUG("touch_handle_cancel");
 
-  // The compositor cancelled the whole touch session (e.g. it recognized a
-  // system gesture). Every active contact must be cancelled in the engine —
+  // The compositor canceled the whole touch session (e.g. it recognized a
+  // system gesture). Every active contact must be canceled in the engine —
   // a contact left in the down phase trips
   // FML_DCHECK(!state.is_down) in the engine's PointerDataPacketConverter on
   // the next session's down for that device, and leaks its gesture-arena
   // entry in the framework. Cancel each contact at its last known position
-  // (the previous code cancelled only device 0, at the *mouse* position).
+  // (the previous code canceled only device 0, at the *mouse* position).
   d->m_touch.frame.clear();  // pending updates for this session are moot
   // The synthesized cancels have no hardware moment; drop any latched
   // high-res stamp so the flush uses arrival time (cancel itself carries no
@@ -1038,7 +1038,7 @@ void Display::ArmWaylandRead() {
   // Canonical libwayland + reactor integration: prepare a read on the calling
   // (reactor) thread, flush outbound requests, then wait for the display fd to
   // become readable. The handler reads + dispatches and re-arms itself, so the
-  // io_context never returns from run() until the descriptor is cancelled.
+  // io_context never returns from run() until the descriptor is canceled.
   while (wl_display_prepare_read(m_display) != 0) {
     wl_display_dispatch_pending(m_display);
   }
@@ -1050,10 +1050,10 @@ void Display::ArmWaylandRead() {
                        const bool was_armed = read_armed_;
                        read_armed_ = false;
                        if (ec) {
-                         // Cancelled (teardown) — undo the pending
+                         // Canceled (teardown) — undo the pending
                          // prepare_read, unless ReleaseWaylandFd already did.
                          // Only one of the two may: libwayland counts readers,
-                         // and cancelling twice would drop the count below what
+                         // and canceling twice would drop the count below what
                          // is outstanding.
                          if (was_armed) {
                            wl_display_cancel_read(m_display);

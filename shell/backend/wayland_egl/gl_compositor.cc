@@ -51,7 +51,7 @@ constexpr char kVertSrc[] =
     "}\n";
 
 // u_opaque forces alpha to 1: an XRGB buffer's alpha is undefined, and
-// premultiplied colour is unchanged by it.
+// premultiplied color is unchanged by it.
 constexpr char kFragSrc[] =
     "precision mediump float;\n"
     "varying vec2 v_uv;\n"
@@ -64,7 +64,7 @@ constexpr char kFragSrc[] =
 
 // The same quad, sampling an external image. A dma-buf holding planar YUV can
 // only be sampled through samplerExternalOES, which is what applies the
-// colour-space conversion; the driver picks BT.601/709 from the image. Built
+// color-space conversion; the driver picks BT.601/709 from the image. Built
 // only when the context advertises the extension, so a driver without it keeps
 // working for packed formats.
 constexpr char kFragSrcExternal[] =

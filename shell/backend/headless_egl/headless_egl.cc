@@ -443,7 +443,7 @@ void HeadlessEglBackend::ArmVsyncTimer() {
       *platform_task_runner_->GetStrandContext(),
       [this](const asio::error_code& ec) {
         if (ec || !vsync_running_.load(std::memory_order_acquire)) {
-          return;  // cancelled (teardown) or io_context stopped
+          return;  // canceled (teardown) or io_context stopped
         }
         vsync_.DeliverParkedBaton();  // no-op if the engine is idle
         ArmVsyncTimer();

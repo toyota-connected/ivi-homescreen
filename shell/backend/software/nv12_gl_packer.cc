@@ -298,7 +298,7 @@ void Nv12GlPacker::PackAndSubmit(GLuint rgba_tex,
 
   Slot& slot = ring_[idx];
   // The Flutter engine leaves its own GL state (blend, scissor, depth/stencil,
-  // colour mask) set after rendering the frame. Reset what the pack pass needs
+  // color mask) set after rendering the frame. Reset what the pack pass needs
   // so a stray blend or masked channel can't corrupt the packed NV12.
   glDisable(GL_BLEND);
   glDisable(GL_SCISSOR_TEST);

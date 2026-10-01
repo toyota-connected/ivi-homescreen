@@ -57,7 +57,7 @@ class Worker {
   std::atomic<std::uint64_t> flush_done_{0};
   std::atomic<bool> running_{false};
 
-  // Producers push lock-free without signalling, so the worker polls. It
+  // Producers push lock-free without signaling, so the worker polls. It
   // polls tightly while there is traffic and backs off to a low-power idle
   // cadence after a quiet spell, so an ENABLE_DLT=ON build does not spin at
   // 100 Hz while nothing is logging. An explicit flush() still wakes it

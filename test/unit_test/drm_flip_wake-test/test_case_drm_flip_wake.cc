@@ -29,7 +29,7 @@
 // hold both before and after a fix lands:
 //
 //   * with nothing in the poll set but the card fd, the poll burns its budget
-//   * with an eventfd in the poll set, signalled where the flag is cleared,
+//   * with an eventfd in the poll set, signaled where the flag is cleared,
 //     the poll returns at once
 //
 // Everything skips (not fails) without vkms and DRM master, so this is safe to
@@ -270,7 +270,7 @@ TEST_F(VkmsFlip, DrainBurnsItsBudgetWhenTheReaderWon) {
       << "expected the poll to burn its budget; took " << waited << " ms";
 }
 
-// With an eventfd in the poll set, signalled where the flag is cleared, the
+// With an eventfd in the poll set, signaled where the flag is cleared, the
 // same interleaving returns at once. This is the shape of the fix.
 TEST_F(VkmsFlip, AWakerInThePollSetEndsTheWaitImmediately) {
   if (!skip_.empty()) {
