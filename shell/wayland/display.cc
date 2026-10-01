@@ -533,6 +533,12 @@ void Display::pointer_handle_enter(void* data,
   d->m_pointer.event.surface_y = wl_fixed_to_double(sy);
   d->m_pointer.serial = serial;
 
+  // The cursor image is undefined on enter until the client sets it with this
+  // enter's serial, so a shape set once survives only until the pointer leaves
+  // the surface. Re-assert it here, before the engine hears about the enter:
+  // the application should not have to re-send a cursor it has not changed.
+  d->RestoreCursor();
+
   if (d->m_active_engine) {
     d->m_active_engine->CoalesceMouseEvent(
         kFlutterPointerSignalKindNone, kAdd, d->m_pointer.event.surface_x,
@@ -1334,10 +1340,18 @@ bool Display::ActivateSystemCursor(const int32_t device,
                                    const std::string& kind) const {
   (void)device;
   if (!m_enable_cursor) {
+    if (!m_pointer.wl_pointer) {
+      return true;
+    }
     wl_pointer_set_cursor(m_pointer.wl_pointer, m_pointer.serial, nullptr, 0,
                           0);
-    wl_surface_damage(m_cursor_surface, 0, 0, 0, 0);
-    wl_surface_commit(m_cursor_surface);
+    // The surface exists only when the compositor is v3 or better and shm
+    // arrived; hiding the pointer does not need it, and this is now reached on
+    // every pointer enter rather than once.
+    if (m_cursor_surface) {
+      wl_surface_damage(m_cursor_surface, 0, 0, 0, 0);
+      wl_surface_commit(m_cursor_surface);
+    }
     return true;
   }
 
@@ -1355,6 +1369,8 @@ bool Display::ActivateSystemCursor(const int32_t device,
       IHS_DEBUG("Cursor Kind = {}", kind);
       return false;
     }
+
+    m_cursor_kind = kind;
 
     const auto cursor = wl_cursor_theme_get_cursor(m_cursor_theme, cursor_name);
     if (cursor == nullptr) {
@@ -1471,14 +1487,40 @@ bool Display::SetCustomCursor(const int32_t device,
   m_custom_cursor_buffer = buffer;
   m_custom_cursor_data = data;
   m_custom_cursor_size = needed;
+  m_custom_cursor_width = width;
+  m_custom_cursor_height = height;
+  m_custom_cursor_hotspot_x = hotspot_x;
+  m_custom_cursor_hotspot_y = hotspot_y;
   m_custom_cursor_active = true;
 
-  wl_pointer_set_cursor(m_pointer.wl_pointer, m_pointer.serial,
-                        m_cursor_surface, hotspot_x, hotspot_y);
-  wl_surface_attach(m_cursor_surface, buffer, 0, 0);
-  wl_surface_damage(m_cursor_surface, 0, 0, width, height);
-  wl_surface_commit(m_cursor_surface);
+  ApplyCustomCursor();
   return true;
+}
+
+void Display::ApplyCustomCursor() const {
+  if (!m_custom_cursor_buffer || !m_cursor_surface || !m_pointer.wl_pointer) {
+    return;
+  }
+  wl_pointer_set_cursor(m_pointer.wl_pointer, m_pointer.serial,
+                        m_cursor_surface, m_custom_cursor_hotspot_x,
+                        m_custom_cursor_hotspot_y);
+  wl_surface_attach(m_cursor_surface, m_custom_cursor_buffer, 0, 0);
+  wl_surface_damage(m_cursor_surface, 0, 0, m_custom_cursor_width,
+                    m_custom_cursor_height);
+  wl_surface_commit(m_cursor_surface);
+}
+
+void Display::RestoreCursor() const {
+  if (!m_pointer.wl_pointer) {
+    return;
+  }
+  if (m_custom_cursor_active) {
+    ApplyCustomCursor();
+    return;
+  }
+  // Not an error worth reporting: the shape is whatever the application last
+  // asked for, and a theme that cannot supply it has already said so once.
+  (void)ActivateSystemCursor(0, m_cursor_kind);
 }
 
 bool Display::ClearCustomCursor(const int32_t device) {
