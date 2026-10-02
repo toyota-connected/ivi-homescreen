@@ -1339,6 +1339,11 @@ void Display::HandleGlobalRemove(const uint32_t global_name) {
 bool Display::ActivateSystemCursor(const int32_t device,
                                    const std::string& kind) const {
   (void)device;
+
+  // Recorded whether or not it takes effect now, so RestoreCursor and
+  // ClearCustomCursor have a shape to go back to.
+  m_cursor_kind = kind;
+
   if (!m_enable_cursor) {
     if (!m_pointer.wl_pointer) {
       return true;
@@ -1352,6 +1357,17 @@ bool Display::ActivateSystemCursor(const int32_t device,
       wl_surface_damage(m_cursor_surface, 0, 0, 0, 0);
       wl_surface_commit(m_cursor_surface);
     }
+    return true;
+  }
+
+  // A cursor the application supplied outranks the framework's generic shapes.
+  // Flutter's mouse tracker resolves a cursor for the region under the pointer
+  // on every enter and sends activateSystemCursor("basic"); left alone that
+  // overwrites the custom buffer immediately after it is applied, so a custom
+  // cursor survives only until the pointer next crosses into the surface.
+  // ClearCustomCursor drops the flag before calling through here, so releasing
+  // one still works.
+  if (m_custom_cursor_active) {
     return true;
   }
 
@@ -1369,8 +1385,6 @@ bool Display::ActivateSystemCursor(const int32_t device,
       IHS_DEBUG("Cursor Kind = {}", kind);
       return false;
     }
-
-    m_cursor_kind = kind;
 
     const auto cursor = wl_cursor_theme_get_cursor(m_cursor_theme, cursor_name);
     if (cursor == nullptr) {
