@@ -685,8 +685,34 @@ class Display : public IDisplay,
   size_t m_custom_cursor_size{};
   bool m_custom_cursor_active{};
 
+  // Geometry of the buffer above, kept because re-applying the cursor on a
+  // pointer enter has to pass the hotspot again and the damage rectangle has
+  // to match the buffer.
+  int32_t m_custom_cursor_width{};
+  int32_t m_custom_cursor_height{};
+  int32_t m_custom_cursor_hotspot_x{};
+  int32_t m_custom_cursor_hotspot_y{};
+
+  // The last shape asked for through ActivateSystemCursor, so a pointer enter
+  // can restore it. "basic" is where the pointer starts.
+  mutable std::string m_cursor_kind{"basic"};
+
   /// Frees whatever [SetCustomCursor] last allocated.
   void ReleaseCustomCursor();
+
+  /// Points the cursor surface at the current custom buffer.
+  ///
+  /// Separate from [SetCustomCursor] because the surface has to be re-pointed
+  /// on every wl_pointer.enter, with that enter's serial, and no new buffer is
+  /// involved when it does.
+  void ApplyCustomCursor() const;
+
+  /// Re-asserts the cursor after a wl_pointer.enter.
+  ///
+  /// The protocol leaves the cursor image undefined on enter until the client
+  /// calls wl_pointer.set_cursor with that enter's serial, so a shape set once
+  /// lasts only until the pointer leaves the surface.
+  void RestoreCursor() const;
 
   std::vector<std::shared_ptr<output_info_t>> m_all_outputs;
 
