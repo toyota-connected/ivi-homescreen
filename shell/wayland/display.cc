@@ -902,6 +902,10 @@ void Display::touch_handle_down(void* data,
   d->m_active_surface = surface;
   d->m_touch_engine = engine;
 
+  // Another contact event means the frame that should have followed the last
+  // up never came -- do not let the next frame mistake itself for that one.
+  d->m_touch.up_awaiting_frame = false;
+
   d->m_touch.points[id] = {x_w, y_w};
   touch_push(d,
              {FlutterPointerPhase::kDown, wl_fixed_to_double(x_w),
@@ -931,6 +935,13 @@ void Display::touch_handle_up(void* data,
               wl_fixed_to_double(it->second.second), id},
              ts_us);
   d->m_touch.points.erase(it);
+
+  // See m_touch.frame_follows_up. Flush until a frame has been seen to follow
+  // an up; the flag below is what lets the next frame observe that.
+  if (!d->m_touch.frame_follows_up) {
+    d->m_touch.up_awaiting_frame = true;
+    touch_flush_frame(d);
+  }
 }
 
 void Display::touch_handle_motion(void* data,
@@ -942,6 +953,9 @@ void Display::touch_handle_motion(void* data,
   auto* d = static_cast<Display*>(data);
   // Take before the unknown-id early return (see touch_handle_up).
   const uint64_t ts_us = d->input_timestamps_.TakeTouchTimeUs();
+  // As in touch_handle_down: a contact event after an up means the frame that
+  // should have followed it never came.
+  d->m_touch.up_awaiting_frame = false;
 
   const auto it = d->m_touch.points.find(id);
   if (it == d->m_touch.points.end()) {
@@ -957,6 +971,8 @@ void Display::touch_handle_motion(void* data,
 void Display::touch_handle_cancel(void* data, struct wl_touch* /* wl_touch */) {
   auto* d = static_cast<Display*>(data);
   IHS_DEBUG("touch_handle_cancel");
+  // The session is over; no frame is owed for the last up.
+  d->m_touch.up_awaiting_frame = false;
 
   // The compositor canceled the whole touch session (e.g. it recognized a
   // system gesture). Every active contact must be canceled in the engine —
@@ -980,7 +996,14 @@ void Display::touch_handle_cancel(void* data, struct wl_touch* /* wl_touch */) {
 }
 
 void Display::touch_handle_frame(void* data, struct wl_touch* /* wl_touch */) {
-  touch_flush_frame(static_cast<Display*>(data));
+  auto* d = static_cast<Display*>(data);
+  // A frame arriving while an up is outstanding proves this compositor sends
+  // them after up; stop flushing on up from here on.
+  if (d->m_touch.up_awaiting_frame) {
+    d->m_touch.frame_follows_up = true;
+    d->m_touch.up_awaiting_frame = false;
+  }
+  touch_flush_frame(d);
 }
 
 void Display::touch_flush_frame(Display* d) {

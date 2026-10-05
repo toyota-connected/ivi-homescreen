@@ -668,6 +668,23 @@ class Display : public IDisplay,
     // one shared stamp keeps the engine's resampler from interpolating skew
     // between fingers). 0 -> no high-res source -> arrival-time stamping.
     uint64_t frame_time_us;
+    // weston <= 11 clears the touch focus in its up handler, so the frame
+    // that should follow an up has no client left to send to and is dropped
+    // (weston!980; fixed in 12.0.0, and the "backport to weston 11" label on
+    // that MR never landed -- no 11.0.x tag carries it). Frames after down
+    // and motion still arrive, so "has a frame ever arrived" does not
+    // distinguish the two compositors; only "has a frame ever followed an
+    // up" does, and that is what these track.
+    //
+    // up_awaiting_frame: an up was the last event and no frame has come
+    // since. frame_follows_up: latched the first time a frame arrives while
+    // that is true. Until it latches, up flushes for itself -- otherwise the
+    // release sits in the accumulator until the next contact. After it
+    // latches, up stops flushing, so a frame carrying one contact's up plus
+    // another's motion stays a single batch. Keying on the defect avoids
+    // needing a compositor version the protocol does not expose.
+    bool up_awaiting_frame;
+    bool frame_follows_up;
     uint32_t state;
     FlutterPointerPhase phase;
   } m_touch{};
