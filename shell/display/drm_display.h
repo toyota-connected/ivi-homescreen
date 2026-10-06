@@ -212,7 +212,7 @@ class DrmDisplay final : public IDisplay {
 
   void StartEvents() override;
   void StopEvents() override;
-  [[nodiscard]] int PollEvents() const override { return 0; }
+  [[nodiscard]] int PollEvents() override { return 0; }
 
   // Gate the input seat. When false, StartEvents() does not start the seat, so
   // libinput never opens /dev/input/event*. Default true. The leased factory

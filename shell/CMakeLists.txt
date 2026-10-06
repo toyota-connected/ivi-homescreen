@@ -79,6 +79,10 @@ endif ()
 if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN)
     target_sources(${PROJECT_NAME} PRIVATE
             wayland/display.cc
+            # Touch-frame accumulator, split out of display.cc so the
+            # multi-contact batching has a unit test (test/unit_test/
+            # touch_frame-test); display.cc needs a live compositor.
+            wayland/touch_frame.cc
             wayland/window.cc
             view/present_layer_sequencer.cc
             # Compositor-protocol shell layer (xdg/agl/ivi/simple) + factory.

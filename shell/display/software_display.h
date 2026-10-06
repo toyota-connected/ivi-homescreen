@@ -70,7 +70,7 @@ class SoftwareDisplay final : public IDisplay {
 
   void StartEvents() override;
   void StopEvents() override;
-  [[nodiscard]] int PollEvents() const override { return 0; }
+  [[nodiscard]] int PollEvents() override { return 0; }
 
   void SetViewControllerState(
       FlutterDesktopViewControllerState* state) override;

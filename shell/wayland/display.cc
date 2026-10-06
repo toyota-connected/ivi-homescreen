@@ -897,20 +897,13 @@ void Display::touch_handle_down(void* data,
   // first.
   Engine* engine = d->m_surface_engine_map[surface];
   if (engine != d->m_touch_engine) {
-    touch_flush_frame(d);
+    d->m_touch_frame.Flush();
   }
   d->m_active_surface = surface;
   d->m_touch_engine = engine;
 
-  // Another contact event means the frame that should have followed the last
-  // up never came -- do not let the next frame mistake itself for that one.
-  d->m_touch.up_awaiting_frame = false;
-
-  d->m_touch.points[id] = {x_w, y_w};
-  touch_push(d,
-             {FlutterPointerPhase::kDown, wl_fixed_to_double(x_w),
-              wl_fixed_to_double(y_w), id},
-             ts_us);
+  d->m_touch_frame.Down(id, wl_fixed_to_double(x_w), wl_fixed_to_double(y_w),
+                        ts_us);
 }
 
 void Display::touch_handle_up(void* data,
@@ -923,25 +916,11 @@ void Display::touch_handle_up(void* data,
   // pending stamp must be consumed even for dropped events.
   const uint64_t ts_us = d->input_timestamps_.TakeTouchTimeUs();
 
-  // wl_touch.up carries no coordinates; reuse the contact's last position.
-  // Unknown id (no prior down seen, e.g. attach mid-session) is dropped —
-  // the engine was never told this device went down.
-  const auto it = d->m_touch.points.find(id);
-  if (it == d->m_touch.points.end()) {
-    return;
-  }
-  touch_push(d,
-             {kUp, wl_fixed_to_double(it->second.first),
-              wl_fixed_to_double(it->second.second), id},
-             ts_us);
-  d->m_touch.points.erase(it);
-
-  // See m_touch.frame_follows_up. Flush until a frame has been seen to follow
-  // an up; the flag below is what lets the next frame observe that.
-  if (!d->m_touch.frame_follows_up) {
-    d->m_touch.up_awaiting_frame = true;
-    touch_flush_frame(d);
-  }
+  // No flush here. #714 flushed on up to cover weston <= 11 dropping the
+  // post-up frame, which split every multi-contact scan; the dispatch-round
+  // flush in PollEvents / ArmWaylandRead covers that compositor instead. See
+  // touch_frame.h.
+  d->m_touch_frame.Up(id, ts_us);
 }
 
 void Display::touch_handle_motion(void* data,
@@ -953,90 +932,35 @@ void Display::touch_handle_motion(void* data,
   auto* d = static_cast<Display*>(data);
   // Take before the unknown-id early return (see touch_handle_up).
   const uint64_t ts_us = d->input_timestamps_.TakeTouchTimeUs();
-  // As in touch_handle_down: a contact event after an up means the frame that
-  // should have followed it never came.
-  d->m_touch.up_awaiting_frame = false;
-
-  const auto it = d->m_touch.points.find(id);
-  if (it == d->m_touch.points.end()) {
-    return;
-  }
-  it->second = {x_w, y_w};
-  touch_push(d,
-             {FlutterPointerPhase::kMove, wl_fixed_to_double(x_w),
-              wl_fixed_to_double(y_w), id},
-             ts_us);
+  d->m_touch_frame.Motion(id, wl_fixed_to_double(x_w), wl_fixed_to_double(y_w),
+                          ts_us);
 }
 
 void Display::touch_handle_cancel(void* data, struct wl_touch* /* wl_touch */) {
   auto* d = static_cast<Display*>(data);
   IHS_DEBUG("touch_handle_cancel");
-  // The session is over; no frame is owed for the last up.
-  d->m_touch.up_awaiting_frame = false;
-
-  // The compositor canceled the whole touch session (e.g. it recognized a
-  // system gesture). Every active contact must be canceled in the engine —
-  // a contact left in the down phase trips
-  // FML_DCHECK(!state.is_down) in the engine's PointerDataPacketConverter on
-  // the next session's down for that device, and leaks its gesture-arena
-  // entry in the framework. Cancel each contact at its last known position
-  // (the previous code canceled only device 0, at the *mouse* position).
-  d->m_touch.frame.clear();  // pending updates for this session are moot
-  // The synthesized cancels have no hardware moment; drop any latched
-  // high-res stamp so the flush uses arrival time (cancel itself carries no
-  // wl timestamp, so no stamp is pending for it).
-  d->m_touch.frame_time_us = 0;
-  for (const auto& [id, pos] : d->m_touch.points) {
-    d->m_touch.frame.push_back({kCancel, wl_fixed_to_double(pos.first),
-                                wl_fixed_to_double(pos.second), id});
-  }
-  d->m_touch.points.clear();
-  // The protocol does not guarantee a frame event after cancel; flush now.
-  touch_flush_frame(d);
+  // Every active contact must be canceled in the engine, not just device 0: a
+  // contact left in the down phase trips FML_DCHECK(!state.is_down) in the
+  // engine's PointerDataPacketConverter on the next session's down for that
+  // device, and leaks its gesture-arena entry in the framework.
+  d->m_touch_frame.Cancel();
 }
 
 void Display::touch_handle_frame(void* data, struct wl_touch* /* wl_touch */) {
-  auto* d = static_cast<Display*>(data);
-  // A frame arriving while an up is outstanding proves this compositor sends
-  // them after up; stop flushing on up from here on.
-  if (d->m_touch.up_awaiting_frame) {
-    d->m_touch.frame_follows_up = true;
-    d->m_touch.up_awaiting_frame = false;
-  }
-  touch_flush_frame(d);
+  static_cast<Display*>(data)->m_touch_frame.Frame();
 }
 
-void Display::touch_flush_frame(Display* d) {
-  if (d->m_touch.frame.empty()) {
+void Display::DeliverTouchFrame(const ihs::TouchEvent* events,
+                                const std::size_t count,
+                                const uint64_t frame_time_us) {
+  if (m_touch_engine == nullptr) {
     return;
   }
-  if (d->m_touch_engine) {
-    // One motion-to-photon sample per touch frame (contacts share the frame's
-    // hardware scan timestamp), not one per contact.
-    d->NoteInput(d->m_touch.frame_time_us);
-    d->m_touch_engine->CoalesceTouchFrame(d->m_touch.frame.data(),
-                                          d->m_touch.frame.size(),
-                                          d->m_touch.frame_time_us);
-  }
-  d->m_touch.frame.clear();
-  d->m_touch.frame_time_us = 0;
-}
-
-void Display::touch_push(Display* d,
-                         const Engine::TouchEvent& ev,
-                         const uint64_t ts_us) {
-  // Latch the frame's shared stamp from the first contact event that carried
-  // one (contacts in a frame are one hardware scan; see touch_.frame_time_us).
-  if (d->m_touch.frame_time_us == 0) {
-    d->m_touch.frame_time_us = ts_us;
-  }
-  d->m_touch.frame.push_back(ev);
-  // wl_touch.frame is the normal flush boundary, but the protocol can't force
-  // a compositor to send it; cap the batch so a stream without frame markers
-  // can't grow the accumulator unbounded (parity with the drm/software seats).
-  if (d->m_touch.frame.size() >= static_cast<size_t>(kMaxPointerEvent)) {
-    touch_flush_frame(d);
-  }
+  IHS_TRACE("[touch] scan: {} contact update(s), stamp {}", count,
+            frame_time_us);
+  // One motion-to-photon sample per scan, not one per contact.
+  NoteInput(frame_time_us);
+  m_touch_engine->CoalesceTouchFrame(events, count, frame_time_us);
 }
 
 constexpr wl_touch_listener Display::touch_listener = {
@@ -1053,14 +977,21 @@ constexpr wl_touch_listener Display::touch_listener = {
 #endif
 };
 
-int Display::PollEvents() const {
+int Display::PollEvents() {
   while (wl_display_prepare_read(m_display) != 0) {
     wl_display_dispatch_pending(m_display);
   }
   wl_display_flush(m_display);
 
   wl_display_read_events(m_display);
-  return wl_display_dispatch_pending(m_display);
+  const int n = wl_display_dispatch_pending(m_display);
+  // The round drained, so every event of the current touch scan has been
+  // delivered. Flush a scan whose wl_touch.frame never came -- weston <= 11
+  // drops the one after an up. Free when a frame did arrive: the accumulator is
+  // already empty. This is what replaced #714's flush-on-up, which split every
+  // multi-contact scan; see wayland/touch_frame.h.
+  m_touch_frame.EndOfDispatch();
+  return n;
 }
 
 void Display::ArmWaylandRead() {
@@ -1091,6 +1022,9 @@ void Display::ArmWaylandRead() {
                        }
                        wl_display_read_events(m_display);
                        wl_display_dispatch_pending(m_display);
+                       // See PollEvents: close out a touch scan whose frame
+                       // the compositor never sent.
+                       m_touch_frame.EndOfDispatch();
                        ArmWaylandRead();
                      });
 }

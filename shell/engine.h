@@ -36,6 +36,7 @@
 #include "shell/accessibility/accesskit_consumer.h"
 #endif
 #endif
+#include "shell/input/touch_event.h"
 #include "task_runner.h"
 #include "view/flutter_view.h"
 
@@ -355,12 +356,10 @@ class Engine {
   /**
    * @brief One touch contact update within a hardware scan (touch frame)
    */
-  struct TouchEvent {
-    FlutterPointerPhase phase;
-    double x;
-    double y;
-    int32_t device;
-  };
+  /// Defined in shell/input/touch_event.h so the wayland frame accumulator can
+  /// be unit-tested without linking the engine. Alias, so every existing
+  /// Engine::TouchEvent spelling still resolves.
+  using TouchEvent = ihs::TouchEvent;
 
   /**
    * @brief Coalesce one complete touch frame (a group of logically
