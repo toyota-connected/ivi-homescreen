@@ -3150,6 +3150,42 @@ const char* HostAssetsPath(void* user_data) {
 // registry's callbacks and ScheduleEngineFrame run on, so it is ordered with
 // them. The task is the plugin's code; it does not touch the engine, so it
 // needs no shutdown re-check on arrival.
+int HostRequestRenegotiate(void* user_data, IhsPlatformView* view) {
+  auto* state = static_cast<FlutterDesktopEngineState*>(user_data);
+  if (state == nullptr) {
+    return IHS_PV_ERR_NO_BACKEND;
+  }
+  TaskRunner* runner = state->platform_task_runner;
+  if (runner == nullptr || runner->GetStrandContext() == nullptr) {
+    return IHS_PV_ERR_NO_BACKEND;  // before start-up or after teardown
+  }
+  // Read the id now, on the caller's thread, while the producer's contract
+  // still guarantees the view: the deferred half then carries only the id, so
+  // a dispose between here and the strand leaves nothing dangling -- the
+  // lookup simply misses. Capturing `view` would not survive that.
+  // Exact: GetIdentifier widens the view's own int32_t id to the compositor
+  // interface's 64-bit one.
+  const auto id = static_cast<int32_t>(
+      reinterpret_cast<IhsPluginView*>(view)->GetIdentifier());
+  asio::post(*runner->GetStrandContext(), [state, id]() {
+    // Through the registry rather than the view's callback directly, so this
+    // takes exactly the path a host-initiated renegotiation takes (App's
+    // output-change handler calls the same Renegotiate), including its
+    // dispatch-outside-the-lock rule.
+    PlatformViewRegistry* registry = state->platform_view_registry.get();
+    if (registry == nullptr) {
+      return;
+    }
+    if (!registry->Renegotiate(id)) {
+      ihs::log::debug(
+          "[ihs_pv] request_renegotiate: view {} is gone or has no "
+          "renegotiate callback",
+          id);
+    }
+  });
+  return IHS_PV_OK;
+}
+
 int HostPostPlatformTask(void* user_data,
                          IhsPvTaskFn fn,
                          void* task_user_data) {
@@ -3237,6 +3273,7 @@ void InstallPlatformViewHost(FlutterDesktopEngineState* engine_state) {
   g_host.is_platform_thread = HostIsPlatformThread;
   g_host.retire_buffer = HostRetireBuffer;
   g_host.submit_layers = HostSubmitLayers;
+  g_host.request_renegotiate = HostRequestRenegotiate;
   ihs_pv_set_host(&g_host);
 
   // Bring up the dma-buf importer once, on this thread, from the backend's

@@ -193,16 +193,32 @@ reader does not have to re-derive them (ivi-homescreen#673):
 
 ### What triggers it
 
-A grant is not permanent. The shell revokes and re-offers when the surface
-underneath it changes — an output or mode change, a plane becoming unavailable,
-a DRM lease withdrawn. `App::RenegotiateView` (`shell/app.cc`) drives this from
-output transitions.
+A grant is not permanent. The shell re-offers when the surface underneath it
+changes — an output or mode change, a plane becoming unavailable, a DRM lease
+withdrawn. `App::RenegotiateView` (`shell/app.cc`) drives this from output
+transitions.
+
+Re-offering is notification only: `PlatformViewRegistry::Renegotiate` invokes
+the callback and nothing else. The old grant is not torn down behind the
+plugin's back — it is replaced when the plugin calls `ihs_pv_negotiate` again,
+and kept if it never does.
 
 Notification is **per view, not global**. `RenegotiateView` walks
 `registry->InstanceIds()` and calls `PlatformViewRegistry::Renegotiate(id)` for
 the views on the output that changed, deliberately not `RenegotiateAll()` — a
 second view on another output of the same display has not moved and must not be
 told it has.
+
+### Asking for one
+
+A producer can also ask, with `ihs_pv_request_renegotiate(view)` (ABI 1.18).
+It schedules the same per-view callback on the platform thread and returns
+immediately; it is callable from any thread, like `ihs_pv_submit`.
+
+This covers the case the triggers above do not: a producer whose submits keep
+failing concludes its grant is dead and stops submitting, and no output change
+is coming to revive the view. Asking is not a promise of a different path — the
+host may grant the same kind again.
 
 ### Where it runs
 
@@ -214,7 +230,9 @@ On the **platform thread**. The registry is platform-thread-only, so
 
 Stale. Treat the previous grant and its kind-specific payload as no longer
 valid the moment `renegotiate` fires — the payload accessors are documented as
-valid only for the current grant.
+valid only for the current grant. The pointers do not become invalid at that
+instant (nothing revoked them), but what they describe no longer matches the
+surface the shell is serving.
 
 ### What the plugin must do
 

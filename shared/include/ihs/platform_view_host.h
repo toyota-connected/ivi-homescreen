@@ -156,6 +156,11 @@ typedef struct IhsPvHost {
                        size_t layer_count,
                        uint64_t seq,
                        int* out_release_fence_fds);
+
+  /* Appended after submit_layers; read only when struct_size covers it.
+   * Schedule this view's renegotiate callback on the platform thread. Called
+   * from any thread. See ihs_pv_request_renegotiate. Added in 1.18. */
+  int (*request_renegotiate)(void* user_data, IhsPlatformView* view);
 } IhsPvHost;
 
 /*
