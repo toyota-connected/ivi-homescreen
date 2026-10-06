@@ -353,6 +353,14 @@ class VulkanDrmBackend final : public Backend {
   /// Put the latch up without a commit, so a case can be sure it is testing the
   /// clearing rather than racing a flip event that cleared it first.
   void SetFlipPendingForTest(bool pending);
+  /// Slots the plane-layer path is holding (scanning + pending). These are the
+  /// lists AcquireScanoutSlot excludes, so a nonzero count after resume means
+  /// the ring is reserving buffers nothing scans out.
+  [[nodiscard]] size_t PlaneSlotsHeldForTest() const;
+  /// Reserve slots on the plane lists without committing plane frames, so a
+  /// lifecycle case tests the clearing rather than the plane path that fills
+  /// them.
+  void SetPlaneSlotsHeldForTest(size_t scanning, size_t pending);
   /// Runs on the raster thread right after a commit ioctl returns, with the
   /// flip in flight -- the window in which its event may be dispatched. A test
   /// reads the serial here: that is the value OnFlipEvent would use, so this is
