@@ -95,12 +95,21 @@ class DltBridge {
 
  private:
   DltBridge();
+  // Never runs: the bridge lives for the process (see instance()).
   ~DltBridge();
   DltBridge(const DltBridge&) = delete;
   DltBridge& operator=(const DltBridge&) = delete;
 
+  // Runs at exit, in every process that inherited the handler; stops the
+  // bridge only in the one that started it.
+  static void stop_at_exit();
+  // True in the process that called start(), false in a fork of it.
+  [[nodiscard]] bool in_owner() const noexcept;
+
   RingRegistry& registry_;
   ContextCache cache_;
+  // The process that started the drain thread; a fork has no such thread.
+  std::atomic<int> owner_pid_{0};
   Worker worker_;
   SinkSet sink_set_;  // built from the environment at start()
   // Records at or above this severity (numerically <=) are enqueued; more

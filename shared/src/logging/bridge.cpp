@@ -4,15 +4,36 @@
 #include "ring_slot.hpp"
 #include "thread_ring.hpp"
 
+#include <unistd.h>
+
+#include <cstdlib>
+
 #if ENABLE_DLT
 #include "libdlt_loader.hpp"
 #endif
 
 namespace ihs::dlt {
 
+// Never destroyed. A static's destructor runs at exit in every process,
+// including a fork that calls exit() -- libseat's builtin seat server is one.
+// The fork has none of the parent's threads, so the worker's join and
+// condition-variable teardown would block forever there. The process that
+// started the bridge stops it from an atexit handler instead.
 DltBridge& DltBridge::instance() {
-  static DltBridge the_bridge;
-  return the_bridge;
+  static auto* const the_bridge = new DltBridge();
+  return *the_bridge;
+}
+
+void DltBridge::stop_at_exit() {
+  DltBridge& bridge = instance();
+  if (bridge.in_owner()) {
+    bridge.stop();
+  }
+}
+
+bool DltBridge::in_owner() const noexcept {
+  return owner_pid_.load(std::memory_order_acquire) ==
+         static_cast<int>(::getpid());
 }
 
 DltBridge::DltBridge()
@@ -33,6 +54,11 @@ bool DltBridge::start(const char* app_id, const char* description) {
   (void)app_id;
   (void)description;
 #endif
+  owner_pid_.store(static_cast<int>(::getpid()), std::memory_order_release);
+  // Registered after the registry and context cache exist, so it runs before
+  // their teardown at exit.
+  static const bool registered = std::atexit(&DltBridge::stop_at_exit) == 0;
+  (void)registered;
   // Resolve sinks from the environment (IHS_LOG_SINK/LEVEL/FILE). There is
   // always at least the console fallback, and console/file sinks work without
   // libdlt, so the drain worker runs regardless of DLT availability.
@@ -44,6 +70,9 @@ bool DltBridge::start(const char* app_id, const char* description) {
 }
 
 void DltBridge::stop() {
+  if (!in_owner()) {
+    return;  // a fork: the drain thread is the parent's
+  }
   bool expected = true;
   if (!started_.compare_exchange_strong(expected, false)) {
     return;
@@ -55,7 +84,8 @@ void DltBridge::stop() {
 }
 
 void DltBridge::flush() noexcept {
-  if (started_.load(std::memory_order_acquire)) {
+  // In a fork no drain thread exists to answer the flush.
+  if (started_.load(std::memory_order_acquire) && in_owner()) {
     worker_.flush();
   }
 }
