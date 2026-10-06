@@ -1910,9 +1910,24 @@ TEST_F(PvHostVkmsPlanes, EachLayerOfAViewGetsItsOwnPlane) {
   }
   ASSERT_TRUE(Present());
 
+  // Three planes: the view's two layers, plus the shell's own full-mode frame.
+  // That third one is new as of drm-cxx v4.0.0. vkms planes advertise no zpos
+  // (min == max == UINT64_MAX), and the zpos range gate that used to reject
+  // such a range refused the shell's frame a plane -- so only the view's
+  // 128x128 region had a framebuffer and the rest of the display had none.
+  // Assert what is on each plane rather than a bare count, so the next
+  // allocator change that adds or merges a plane fails on content and not on
+  // arithmetic.
   const std::vector<PlaneState> planes = ActivePlanes(card_.path);
-  ASSERT_EQ(planes.size(), 2U)
-      << "the view's two layers should be on two planes, and nothing else";
+  const auto shell =
+      std::find_if(planes.begin(), planes.end(), [this](const PlaneState& p) {
+        return p.crtc_w == card_.mode_w && p.crtc_h == card_.mode_h;
+      });
+  ASSERT_NE(shell, planes.end())
+      << "the shell's own frame is not on a plane; the view's layers are not "
+         "the only thing that has to reach the display";
+  ASSERT_EQ(planes.size(), 3U)
+      << "expected the view's two layers plus the shell's frame, nothing else";
   const auto whole =
       std::find_if(planes.begin(), planes.end(), [](const PlaneState& p) {
         return p.crtc_w == kViewW && p.crtc_h == kViewH;
@@ -1954,9 +1969,19 @@ TEST_F(PvHostVkmsPlanes, AReusedRetiredIdScansOutItsNewMemory) {
   int first_release = -1;
   ASSERT_EQ(submit(first, &first_release), IHS_PV_OK);
   ASSERT_TRUE(Present());
+  // Two planes: the view's single layer and the shell's own full-mode frame --
+  // see EachLayerOfAViewGetsItsOwnPlane for why the shell's frame gets one.
+  // Find the view's plane by its size; it is not necessarily first.
+  const auto view_plane = [this](const std::vector<PlaneState>& ps) {
+    return std::find_if(ps.begin(), ps.end(), [this](const PlaneState& p) {
+      return p.crtc_w == kViewW && p.crtc_h == kViewH;
+    });
+  };
   std::vector<PlaneState> planes = ActivePlanes(card_.path);
-  ASSERT_EQ(planes.size(), 1U);
-  const uint32_t first_fb = planes[0].fb_id;
+  ASSERT_EQ(planes.size(), 2U);
+  auto view_it = view_plane(planes);
+  ASSERT_NE(view_it, planes.end()) << "the view's layer is not on a plane";
+  const uint32_t first_fb = view_it->fb_id;
 
   ASSERT_EQ(ihs_pv_retire_buffer(producer_.view, 5), IHS_PV_OK);
   int second_release = -1;
@@ -1969,8 +1994,10 @@ TEST_F(PvHostVkmsPlanes, AReusedRetiredIdScansOutItsNewMemory) {
   }
 
   planes = ActivePlanes(card_.path);
-  ASSERT_EQ(planes.size(), 1U);
-  EXPECT_NE(planes[0].fb_id, first_fb)
+  ASSERT_EQ(planes.size(), 2U);
+  view_it = view_plane(planes);
+  ASSERT_NE(view_it, planes.end()) << "the view's layer left the display";
+  EXPECT_NE(view_it->fb_id, first_fb)
       << "the reused id is still scanned out through the framebuffer of the "
          "memory it used to name";
   if (second_release >= 0) {
