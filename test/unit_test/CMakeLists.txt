@@ -164,6 +164,8 @@ add_subdirectory(utils-test)
 add_subdirectory(cache_dir-test)
 # wl_touch frame batching; no compositor needed (see that dir's CMakeLists).
 add_subdirectory(touch_frame-test)
+# Watchdog shutdown latency (the systemctl stop hang).
+add_subdirectory(watchdog_shutdown-test)
 # flutter_view-test and app-test require a live Wayland compositor connection
 # (Display::Display calls wl_display_connect / App::BuildDisplays).  They have
 # been moved to test/integration/ and are not run by the unit-test-coverage job.

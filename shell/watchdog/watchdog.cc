@@ -192,7 +192,13 @@ void Watchdog::stop(const WatchdogSource source) {
 }
 
 void Watchdog::shutdown() {
-  running_.store(false);
+  {
+    // Under the lock, so the service thread cannot be between its predicate
+    // check and its wait when the notify lands.
+    std::lock_guard<std::mutex> lock(mutex_);
+    running_.store(false);
+  }
+  wake_.notify_all();
 #if BUILD_SYSTEMD_WATCHDOG
   sd_notify(0, "STOPPING=1");
 #endif
@@ -204,60 +210,56 @@ void Watchdog::shutdown() {
 }
 
 void Watchdog::watchdogService() {
+  // Ping systemd at half the interval, and wait on a condition variable rather
+  // than sleeping: shutdown() clears running_ and notifies, so a stop returns
+  // at once instead of waiting out the rest of the current period.
+  //
+  // This used to be select(0, nullptr, nullptr, nullptr, &timeout) -- a sleep
+  // with no descriptors, which nothing can wake. shutdown() set running_ and
+  // then joined, so `systemctl stop` blocked for whatever was left of
+  // intervalMs_ / 2: 2.5 s on the 5 s default, and up to 60 s under systemd,
+  // whose WatchdogSec is commonly 120. Reported as stop and restart hanging.
+  std::unique_lock<std::mutex> lock(mutex_);
   while (running_.load()) {
-    fd_set readfds;
-    FD_ZERO(&readfds);
-
-    timeval timeout{};
-
-    // Convert 1/2 of the interval to seconds and microseconds
-    auto halfIntervalMs = intervalMs_ / 2;
-    timeout.tv_sec = static_cast<__time_t>(halfIntervalMs) / 1000;
-    timeout.tv_usec = static_cast<__suseconds_t>(halfIntervalMs % 1000) * 1000;
-
-    // Wait for the timeout using select
-    if (int ret = select(0, &readfds, nullptr, nullptr, &timeout);
-        ret == 0) {  // Timeout occurred
-      std::lock_guard<std::mutex> lock(mutex_);
+    // Returns true only when the predicate holds, i.e. a stop was asked for.
+    if (wake_.wait_for(lock, std::chrono::milliseconds(intervalMs_ / 2),
+                       [this] { return !running_.load(); })) {
+      break;
+    }
 
 #if BUILD_SYSTEMD_WATCHDOG
-      sd_notify(0, "WATCHDOG=1");
+    sd_notify(0, "WATCHDOG=1");
 #endif
 
-      Stats::ProcessStats stats{};
-      Stats::getSelfStats(stats);
-      ihs::log::debug("Threads: {}, VIRT: {}, RES: {}", stats.num_threads,
-                      stats.virtual_memory, stats.resident_set_size);
+    Stats::ProcessStats stats{};
+    Stats::getSelfStats(stats);
+    ihs::log::debug("Threads: {}, VIRT: {}, RES: {}", stats.num_threads,
+                    stats.virtual_memory, stats.resident_set_size);
 
-      // Check for any timeouts
-      auto now = std::chrono::steady_clock::now();
-      for (auto it = activeSources_.begin(); it != activeSources_.end();) {
-        auto source = it->first;
+    // Check for any timeouts
+    auto now = std::chrono::steady_clock::now();
+    for (auto it = activeSources_.begin(); it != activeSources_.end();) {
+      auto source = it->first;
 
-        if (auto startTime = it->second;
-            std::chrono::duration_cast<std::chrono::milliseconds>(now -
-                                                                  startTime)
-                .count() >= static_cast<int64_t>(intervalMs_)) {
-          // Timeout occurred for this source
-          const auto nameIt2 = sourceNames_.find(source);
-          ihs::log::error(
-              "Watchdog Timeout: source {} ({})", static_cast<int64_t>(source),
-              nameIt2 != sourceNames_.end() ? nameIt2->second : "?");
+      if (auto startTime = it->second;
+          std::chrono::duration_cast<std::chrono::milliseconds>(now - startTime)
+              .count() >= static_cast<int64_t>(intervalMs_)) {
+        // Timeout occurred for this source
+        const auto nameIt2 = sourceNames_.find(source);
+        ihs::log::error("Watchdog Timeout: source {} ({})",
+                        static_cast<int64_t>(source),
+                        nameIt2 != sourceNames_.end() ? nameIt2->second : "?");
 #if BUILD_SYSTEMD_WATCHDOG
-          sd_notify(0, "WATCHDOG=trigger");
+        sd_notify(0, "WATCHDOG=trigger");
 #endif
-          running_.store(false);
-          abort();
+        running_.store(false);
+        abort();
 
-          // After timeout behavior: remove the source
-          it = activeSources_.erase(it);
-        } else {
-          ++it;
-        }
+        // After timeout behavior: remove the source
+        it = activeSources_.erase(it);
+      } else {
+        ++it;
       }
-    } else if (ret < 0) {
-      // Handles errors in the select call
-      ihs::log::error("Error in select call; watchdog thread exiting.");
     }
   }
 
