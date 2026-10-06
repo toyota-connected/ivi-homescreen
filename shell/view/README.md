@@ -46,7 +46,7 @@ Key details:
 
 - `OnPresent` runs on the engine's rasterizer thread. If your plugin renders on its own thread, marshal work there.
 - The Vulkan backend hands the engine a `VkImage` in `VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL`. The compositor records all layout transitions — plugins that *consume* the image via `ICompositorSurface::OnPresent` should be prepared to sample in `VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL` (compositor transitions it to `TRANSFER_SRC_OPTIMAL` during the blit; see `WaylandVulkanBackend::BlitStoreToSwapchain`).
-- With `-DBUILD_COMPOSITOR_DMABUF_EXPORT=ON`, a plugin can query `WaylandVulkanBackend::HasDmaBufExport()` to know whether the store exposes a DMA-BUF fd for zero-copy import into EGL/KMS/Filament.
+- With `-DBUILD_COMPOSITOR_DMABUF_EXPORT=ON`, a plugin can query `WaylandVulkanBackend::HasDmaBufExport()` to know whether the store exposes a DMA-BUF fd for zero-copy import into EGL/KMS/Filament. Whether an export is possible at all is a driver question, decided by query at device creation (`VulkanBackingStore::PlanExport`): most drivers only export a DRM-modifier-tiled image, so an exporting store is created that way and reports the modifier it got plus a per-plane offset and stride (`dma_buf_modifier()`, `dma_buf_planes()`). An importer needs those along with the fd — the fd on its own does not describe the buffer.
 - On pure GLES2 drivers, the EGL compositor falls back to a textured-quad program instead of `glBlitFramebuffer`; no plugin action required.
 
 Compositor mode is opt-in. The default (`BUILD_COMPOSITOR=OFF`) build is unchanged, so existing plugins that draw via a legacy `wl_subsurface` path keep working as before.

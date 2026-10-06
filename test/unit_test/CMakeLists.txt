@@ -198,6 +198,10 @@ endif ()
 if (BUILD_COMPOSITOR AND (BUILD_BACKEND_WAYLAND_VULKAN OR BUILD_BACKEND_DRM_KMS_VULKAN))
     add_subdirectory(layer_draw_vk-test)
 endif ()
+# VulkanBackingStore belongs to the wayland-vulkan backend.
+if (BUILD_BACKEND_WAYLAND_VULKAN)
+    add_subdirectory(vk_store_dmabuf-test)
+endif ()
 add_subdirectory(deferred_retire_set-test)
 # The EGL dma-buf importer only exists when an EGL backend is built. The test
 # also includes drm_fourcc.h for the format constants, so it needs libdrm in its
