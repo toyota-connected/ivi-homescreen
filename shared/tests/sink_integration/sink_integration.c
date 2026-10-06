@@ -26,14 +26,19 @@
  *                                 back to console (missing-list #17 contract)
  *   sink_integration drops     -- a burst into a 16-slot ring: capacity reads
  *                                 back, and the drop count matches refusals
+ *   sink_integration fork_exit -- a forked child that calls exit() returns
+ *                                 promptly; logging in the parent carries on
  *
  * The scenarios that inspect console output redirect stderr to a temp file,
  * flush, then read it back.
  */
 
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "ihs/logging.h"
@@ -304,6 +309,74 @@ static int scenario_drops(void) {
   return 0;
 }
 
+/* A fork has none of the parent's threads, the log drain thread included. A
+ * child that calls exit() -- libseat's builtin seat server does -- must not
+ * wait on that thread at exit, and the parent must keep logging. */
+static int scenario_fork_exit(void) {
+  static char logpath[] = "/tmp/ihs_sink_forkXXXXXX";
+  int fd = mkstemp(logpath);
+  if (fd < 0) {
+    FAILF("mkstemp");
+  }
+  close(fd);
+  setenv("IHS_LOG_SINK", "file", 1);
+  setenv("IHS_LOG_FILE", logpath, 1);
+  if (ihs_log_start("SINK", "sink integration") != 1) {
+    FAILF("ihs_log_start");
+  }
+  const int32_t ctx = ihs_log_context_open("FORK", NULL);
+  if (ctx < 0) {
+    FAILF("context_open");
+  }
+  ihs_log(ctx, IHS_LEVEL_INFO, "before-fork", strlen("before-fork"));
+  ihs_log_flush();
+
+  const pid_t child = fork();
+  if (child < 0) {
+    FAILF("fork");
+  }
+  if (child == 0) {
+    ihs_log(ctx, IHS_LEVEL_INFO, "in-child", strlen("in-child"));
+    ihs_log_flush(); /* must not wait for the parent's drain thread */
+    exit(0);         /* runs exit handlers and static destructors */
+  }
+
+  /* Five seconds is generous: a child that exits cleanly is gone in
+   * milliseconds, and one that hangs never returns. */
+  int status = 0;
+  pid_t done = 0;
+  for (int i = 0; i < 500 && done == 0; ++i) {
+    done = waitpid(child, &status, WNOHANG);
+    if (done == 0) {
+      const struct timespec ten_ms = {0, 10 * 1000 * 1000};
+      nanosleep(&ten_ms, NULL);
+    }
+  }
+  if (done == 0) {
+    kill(child, SIGKILL);
+    waitpid(child, &status, 0);
+    remove(logpath);
+    FAILF("a forked child that called exit() did not return within 5 s");
+  }
+  if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+    remove(logpath);
+    FAILF("forked child ended abnormally (status 0x%x)", status);
+  }
+
+  ihs_log(ctx, IHS_LEVEL_INFO, "after-fork", strlen("after-fork"));
+  ihs_log_flush();
+  ihs_log_stop();
+  char* text = slurp(logpath);
+  const int have_after = text != NULL && strstr(text, "after-fork") != NULL;
+  free(text);
+  remove(logpath);
+  if (!have_after) {
+    FAILF("the parent's log stopped after the fork");
+  }
+  printf("OK fork_exit\n");
+  return 0;
+}
+
 int main(int argc, char** argv) {
   if (argc < 2) {
     fprintf(stdout, "usage: %s console|file|level|fallback|drops\n", argv[0]);
@@ -323,6 +396,9 @@ int main(int argc, char** argv) {
   }
   if (strcmp(argv[1], "drops") == 0) {
     return scenario_drops();
+  }
+  if (strcmp(argv[1], "fork_exit") == 0) {
+    return scenario_fork_exit();
   }
   fprintf(stdout, "unknown scenario: %s\n", argv[1]);
   return 2;
