@@ -36,7 +36,9 @@ class IDisplay {
 
   virtual void StartEvents() = 0;
   virtual void StopEvents() = 0;
-  [[nodiscard]] virtual int PollEvents() const = 0;
+  // Not const: the wayland implementation closes out a touch scan whose
+  // wl_touch.frame never arrived once the dispatch round drains.
+  [[nodiscard]] virtual int PollEvents() = 0;
 
   virtual void SetViewControllerState(
       FlutterDesktopViewControllerState* state) = 0;

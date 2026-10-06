@@ -73,6 +73,7 @@
 #include "vsync/wayland_vsync_provider.h"
 #include "wayland/input_timestamps.h"
 #include "wayland/shell/wayland_shell.h"
+#include "wayland/touch_frame.h"
 
 class Engine;
 class WaylandWindow;
@@ -265,7 +266,7 @@ class Display : public IDisplay,
    * @relation
    * wayland
    */
-  [[nodiscard]] int PollEvents() const override;
+  [[nodiscard]] int PollEvents() override;
 
   /**
    * @brief Start wayland event thread
@@ -648,46 +649,21 @@ class Display : public IDisplay,
   struct touch_ {
     struct wl_touch* touch;
     struct touch_event event;
-    // Active contacts: wl_touch id -> last surface position. Replaces the
-    // former fixed surface_x/surface_y[kMaxTouchFinger] arrays: compositor
-    // assigned touch ids are only guaranteed unique per session, not bounded
-    // by kMaxTouchFinger, so indexing an array by id was an out-of-bounds
-    // write waiting for an id >= 10 (finger churn on a 10-slot controller,
-    // or any >10-slot panel). The map also lets wl_touch.cancel terminate
-    // every active contact instead of just device 0.
-    std::unordered_map<int32_t, std::pair<wl_fixed_t, wl_fixed_t>> points;
-    // Per-contact updates accumulated since the last wl_touch.frame. The
-    // frame event is the protocol's atomicity boundary: everything between
-    // two frames is one logically-simultaneous hardware scan, so it is
-    // handed to the engine as one batch (one lock, one main-loop wake, one
-    // FlutterEngineSendPointerEvent group).
-    std::vector<Engine::TouchEvent> frame;
-    // Shared high-resolution timestamp for the pending frame: the first
-    // nonzero zwp_input_timestamps_v1 value taken by a contact event since
-    // the last flush (contacts in one frame are logically simultaneous, and
-    // one shared stamp keeps the engine's resampler from interpolating skew
-    // between fingers). 0 -> no high-res source -> arrival-time stamping.
-    uint64_t frame_time_us;
-    // weston <= 11 clears the touch focus in its up handler, so the frame
-    // that should follow an up has no client left to send to and is dropped
-    // (weston!980; fixed in 12.0.0, and the "backport to weston 11" label on
-    // that MR never landed -- no 11.0.x tag carries it). Frames after down
-    // and motion still arrive, so "has a frame ever arrived" does not
-    // distinguish the two compositors; only "has a frame ever followed an
-    // up" does, and that is what these track.
-    //
-    // up_awaiting_frame: an up was the last event and no frame has come
-    // since. frame_follows_up: latched the first time a frame arrives while
-    // that is true. Until it latches, up flushes for itself -- otherwise the
-    // release sits in the accumulator until the next contact. After it
-    // latches, up stops flushing, so a frame carrying one contact's up plus
-    // another's motion stays a single batch. Keying on the defect avoids
-    // needing a compositor version the protocol does not expose.
-    bool up_awaiting_frame;
-    bool frame_follows_up;
     uint32_t state;
     FlutterPointerPhase phase;
   } m_touch{};
+
+  // The per-scan touch accumulator. Split into ihs::TouchFrame so the batching
+  // has a unit test -- Display needs a live compositor to construct, which is
+  // how #714 shipped a single-contact state machine that multi-touch defeated.
+  // See shell/wayland/touch_frame.h for what replaced it.
+  ihs::TouchFrame m_touch_frame{[this](const ihs::TouchEvent* events,
+                                       const std::size_t count,
+                                       const uint64_t frame_time_us) {
+                                  DeliverTouchFrame(events, count,
+                                                    frame_time_us);
+                                },
+                                static_cast<std::size_t>(kMaxPointerEvent)};
 
   // for cursor
   struct wl_cursor_theme* m_cursor_theme{};
@@ -1213,6 +1189,13 @@ class Display : public IDisplay,
    */
   static void touch_handle_frame(void* data, struct wl_touch* wl_touch);
 
+  /// Hand one complete touch scan to the engine. The ihs::TouchFrame sink; a
+  /// named method rather than a lambda body so it reads as code and not as an
+  /// initializer.
+  void DeliverTouchFrame(const ihs::TouchEvent* events,
+                         std::size_t count,
+                         uint64_t frame_time_us);
+
   /**
    * @brief Hand the touch updates accumulated since the last wl_touch.frame
    * to the active engine as one batch, then reset the accumulator. No-op
@@ -1222,7 +1205,6 @@ class Display : public IDisplay,
    * @relation
    * wayland, flutter
    */
-  static void touch_flush_frame(Display* d);
 
   /**
    * @brief Append one contact update to the pending touch frame, flushing
@@ -1239,9 +1221,6 @@ class Display : public IDisplay,
    * @relation
    * wayland, flutter
    */
-  static void touch_push(Display* d,
-                         const Engine::TouchEvent& ev,
-                         uint64_t ts_us);
 
   static const wl_touch_listener touch_listener;
 };
