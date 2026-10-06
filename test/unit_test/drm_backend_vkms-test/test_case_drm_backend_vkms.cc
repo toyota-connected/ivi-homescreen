@@ -1874,6 +1874,58 @@ class PvHostVkmsPlanes : public PvHostVkms {
   FakeProducer producer_;
 };
 
+// An import-granted view is placed on a plane like any other dma-buf, so the
+// plane accessor reports the plane it is on rather than 0. It used to return 0
+// for anything but a DRM_PLANE grant, which answered "what kind was granted"
+// when the caller asked "where did my frame land" -- and an import grant is
+// scanned out routinely, so the answer was wrong rather than merely narrow
+// (ivi-homescreen#704).
+TEST_F(PvHostVkmsPlanes, AnImportGrantReportsThePlaneItIsScannedOutOn) {
+  IhsPvRequirements reqs{};
+  reqs.struct_size = sizeof(reqs);
+  // Import only: no DRM_PLANE in the mask, so the grant cannot be that.
+  reqs.kinds = IHS_PV_KIND_TEXTURE_DMABUF_IMPORT;
+  reqs.sync = IHS_PV_SYNC_IMPLICIT;
+  IhsPvGrant grant{};
+  grant.struct_size = sizeof(grant);
+  ASSERT_EQ(ihs_pv_negotiate(producer_.view, &reqs, &grant), IHS_PV_OK);
+  ASSERT_EQ(grant.granted_kind, IHS_PV_KIND_TEXTURE_DMABUF_IMPORT)
+      << "this case is about what an import grant reports";
+
+  const int fd = display_->SharedDevice()->fd();
+  GbmSolidBuffer buffer;
+  ASSERT_TRUE(buffer.Create(fd, kViewW, kViewH, 0xFF1E7A46u));
+  ASSERT_EQ(SubmitSeq(buffer, 3, 1), IHS_PV_OK);
+  ASSERT_TRUE(Present());
+
+  // KMS first: the view really is on a plane. Without this the accessor could
+  // agree with a compositor that never placed anything.
+  const std::vector<PlaneState> planes = ActivePlanes(card_.path);
+  const auto placed =
+      std::find_if(planes.begin(), planes.end(), [](const PlaneState& p) {
+        return p.crtc_w == kViewW && p.crtc_h == kViewH;
+      });
+  ASSERT_NE(placed, planes.end())
+      << "the import-granted view was not scanned out on a plane, so there is "
+         "nothing for the accessor to report";
+  EXPECT_NE(ihs_pv_grant_drm_plane_id(producer_.view), 0U)
+      << "on a plane per KMS, but the accessor still reports 0";
+}
+
+// The other half of the rule: a kind that cannot reach a plane reports 0. shm
+// is CPU-filled, so there is no plane to name whatever the compositor does.
+TEST_F(PvHostVkmsPlanes, ASoftwareGrantReportsNoPlane) {
+  IhsPvRequirements reqs{};
+  reqs.struct_size = sizeof(reqs);
+  reqs.kinds = IHS_PV_KIND_SOFTWARE_SHM;
+  reqs.sync = IHS_PV_SYNC_IMPLICIT;
+  IhsPvGrant grant{};
+  grant.struct_size = sizeof(grant);
+  ASSERT_EQ(ihs_pv_negotiate(producer_.view, &reqs, &grant), IHS_PV_OK);
+  ASSERT_EQ(grant.granted_kind, IHS_PV_KIND_SOFTWARE_SHM);
+  EXPECT_EQ(ihs_pv_grant_drm_plane_id(producer_.view), 0U);
+}
+
 // Each layer of a view is scanned out on a plane of its own, with its own
 // crop, place and rotation -- read back from KMS, not from the compositor.
 TEST_F(PvHostVkmsPlanes, EachLayerOfAViewGetsItsOwnPlane) {
