@@ -578,6 +578,14 @@ void WaylandEglBackend::NoteSampled(
   const uint32_t buffer_id = texture.buffer_id;
   presentation_->NoteRetire(
       [surface, buffer_id] { surface->OnScanoutRelease(buffer_id); });
+  // Remembered so a release fence can be exported for this frame's draws once
+  // they are all queued; see the PublishGlReleaseFence call after EndFrame.
+  // Deduplicated: a view drawn as several layers is sampled several times and
+  // needs one fence, not one per layer.
+  if (std::find(frame_sampled_surfaces_.begin(), frame_sampled_surfaces_.end(),
+                surface) == frame_sampled_surfaces_.end()) {
+    frame_sampled_surfaces_.push_back(surface);
+  }
 }
 #endif  // BUILD_COMPOSITOR
 
@@ -1216,6 +1224,16 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
   }
 
   m_gl_compositor->EndFrame();
+  // Every draw that sampled a platform view is queued by now, so one fence
+  // exported here covers all of them. A producer on an explicit-sync grant
+  // gets this instead of the per-slot eventfd and can wait on it in the GPU
+  // (#720); the eventfd still backs the implicit paths and any display that
+  // cannot export a fence. Context is current and the surfaces are the ones
+  // NoteSampled collected during the loop above.
+  for (const auto& s : frame_sampled_surfaces_) {
+    s->PublishGlReleaseFence();
+  }
+  frame_sampled_surfaces_.clear();
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
 #if BUILD_HUD
   MaybeRenderHud(layers, count);

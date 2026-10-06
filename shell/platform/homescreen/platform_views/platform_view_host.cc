@@ -602,6 +602,9 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   // plane stops scanning that frame out, so the producer reuses the slot only
   // then. Guarded by `mutex`. Any left over are closed at dispose.
   mutable std::map<uint32_t, int> release_efds;
+  // Whether the last submit handed back the compositor's sync_file rather than
+  // the per-slot eventfd; drives a one-line log when that changes.
+  bool released_with_fence{false};
 
   // ---- Layers (ihs_pv_submit_layers) --------------------------------------
   //
@@ -1218,6 +1221,10 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     release_fence_fd = fd;
   }
 
+  // Defined out of line: it exports the fence through g_egl_importer, which is
+  // declared below this class.
+  void PublishGlReleaseFence() override;
+
   // Producer buffer_id of the frame currently bound as a GL texture. Raster
   // thread, same as GetGlTextureName.
   //
@@ -1442,15 +1449,33 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
         return;     // producer never got a fence to wait on
       }
       // The caller may already have stored a dup of the compositor's release
-      // fence here (HandBackReleaseFence runs first on the EGL path). The
-      // eventfd supersedes it; overwriting without closing leaked one sync_file
-      // per explicit-sync submit, which grew the fd table through each power
-      // of two (a ~100 ms RCU stall on a Pi 4 at 256 and 512) and reached the
-      // 1024 soft limit about half a minute into a 30fps stream.
-      if (*out_fd >= 0) {
-        close(*out_fd);
+      // fence here (HandBackReleaseFence runs first on the EGL path), which
+      // happens only on an explicit-sync submit and only once a backend
+      // publishes one. That fence wins: it is a sync_file the producer can
+      // wait on in the GPU, where this eventfd forces a CPU round trip per
+      // frame (#720). The eventfd is still created and stored below -- it is
+      // what SignalRelease fires, and it is what an implicit-sync submit or a
+      // display with no exportable fence gets handed instead.
+      //
+      // Whichever one loses is closed here. Overwriting without closing leaked
+      // one sync_file per explicit-sync submit, which grew the fd table
+      // through each power of two (a ~100 ms RCU stall on a Pi 4 at 256 and
+      // 512) and reached the 1024 soft limit about half a minute into a 30fps
+      // stream.
+      const bool kept_fence = *out_fd >= 0;
+      if (kept_fence) {
+        close(dup_fd);  // the producer keeps the sync_file it already has
+      } else {
+        *out_fd = dup_fd;
       }
-      *out_fd = dup_fd;
+      // Logged on change, not per frame: which of the two a producer is
+      // actually getting is the difference between a GPU wait and a CPU one,
+      // and nothing else in a log distinguishes them.
+      if (kept_fence != released_with_fence) {
+        released_with_fence = kept_fence;
+        ihs::log::debug("[ihs_pv] release fence for this view is now a {}",
+                        kept_fence ? "sync_file" : "eventfd");
+      }
     }
     release_efds[buffer_id] = ef;
   }
@@ -1473,7 +1498,30 @@ DmabufVulkanImporter g_importer;
 // at host install when the active backend is EGL (and Vulkan is absent). Stays
 // not-ready on a Vulkan backend.
 EglDmabufImporter g_egl_importer;
+
 #endif
+
+// One sync_file per frame per sampled view, exported from the GL command
+// stream the compositor just queued. This is the EGL answer to the Vulkan
+// backend's PublishReleaseFences and the DRM path's OUT_FENCE: those paths
+// have a semaphore or a KMS fence to export, a GL composite has neither, so
+// the fence has to be made from the command stream itself.
+//
+// Published through the same field the other backends set, so the submit path
+// hands it back unchanged. When the display cannot export one the field is
+// left alone and the producer stays on the per-slot eventfd.
+//
+// Defined outside the EGL guard, body inside it: the override exists in the
+// vtable in every configuration, so a build with no EGL backend needs this
+// symbol too, and there it is simply a no-op.
+void IhsPluginView::PublishGlReleaseFence() {
+#if IVI_HAVE_EGL
+  const int fd = g_egl_importer.CreateReleaseFenceFd();
+  if (fd >= 0) {
+    SetReleaseFenceFd(fd);  // takes ownership
+  }
+#endif
+}
 
 // Margin, in submits, before a retired import is destroyed: safely more than
 // the frames the compositor keeps in flight, so no present command buffer still
@@ -2683,10 +2731,11 @@ void ApplyLayerListLocked(IhsPluginView* v,
     } else if (const auto efd = v->release_efds.find(bid);
                efd != v->release_efds.end() && es.out_release_fd != nullptr) {
       // The same buffer again: hand back the same release, not a second one.
-      if (*es.out_release_fd >= 0) {
-        close(*es.out_release_fd);  // HandBackReleaseFence's dup, superseded
+      // A sync_file from HandBackReleaseFence still wins over the eventfd, for
+      // the reason given in HandBackReleaseEventfd.
+      if (*es.out_release_fd < 0) {
+        *es.out_release_fd = ::dup(efd->second);
       }
-      *es.out_release_fd = ::dup(efd->second);
     }
 #endif
   }

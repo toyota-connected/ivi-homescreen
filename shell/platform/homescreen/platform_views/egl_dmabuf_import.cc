@@ -134,6 +134,14 @@ bool EglDmabufImporter::Init(void* egl_display) {
         reinterpret_cast<void*>(eglGetProcAddress("eglDestroySyncKHR"));
     wait_sync_ = reinterpret_cast<void*>(eglGetProcAddress("eglWaitSyncKHR"));
   }
+  // The export half, for handing a producer a release fence it can wait on in
+  // the GPU. Needs the same extension but a different entry point, so it is
+  // resolved whenever that extension is present rather than alongside the
+  // wait path's three.
+  if (has_native_fence) {
+    dup_native_fence_fd_ = reinterpret_cast<void*>(
+        eglGetProcAddress("eglDupNativeFenceFDANDROID"));
+  }
   // The modifier query is optional too: without it the capability query offers
   // its assumed LINEAR list, as it always has. Matched as a whole token --
   // strstr would find it inside a longer name.
@@ -142,17 +150,25 @@ bool EglDmabufImporter::Init(void* egl_display) {
     query_modifiers_ = reinterpret_cast<void*>(
         eglGetProcAddress("eglQueryDmaBufModifiersEXT"));
   }
-  // All three or none: a half-resolved set would let WaitAcquireFence create a
-  // sync it cannot wait on or destroy, leaking the producer's fd every frame.
+  // A half-resolved set would let WaitAcquireFence create a sync it cannot wait
+  // on or destroy, leaking the producer's fd every frame. wait_sync_ goes when
+  // the wait path is incomplete; create/destroy stay only while the export
+  // path can still use them, and go too when neither direction is viable.
   if (!has_native_fence_sync()) {
-    create_sync_ = nullptr;
-    destroy_sync_ = nullptr;
     wait_sync_ = nullptr;
   }
+  if (!has_release_fence()) {
+    dup_native_fence_fd_ = nullptr;
+  }
+  if (!has_native_fence_sync() && !has_release_fence()) {
+    create_sync_ = nullptr;
+    destroy_sync_ = nullptr;
+  }
   ihs::log::debug(
-      "[EglDmabufImporter] explicit-sync acquire: {} (fence_sync={}, "
-      "native_fence_sync={}, wait_sync={})",
+      "[EglDmabufImporter] explicit-sync acquire: {}, release: {} "
+      "(fence_sync={}, native_fence_sync={}, wait_sync={})",
       has_native_fence_sync() ? "available" : "unavailable",
+      has_release_fence() ? "available" : "unavailable",
       has_fence_sync ? "y" : "n", has_native_fence ? "y" : "n",
       has_wait_sync ? "y" : "n");
   return true;
@@ -324,6 +340,49 @@ void EglDmabufImporter::Destroy(ImportedTexture* out) const {
   }
   // An adopted image is the producer's to destroy.
   out->egl_image = nullptr;
+}
+
+int EglDmabufImporter::CreateReleaseFenceFd() const {
+  if (!has_release_fence()) {
+    return -1;
+  }
+  auto create_sync = reinterpret_cast<PFNEGLCREATESYNCKHRPROC>(create_sync_);
+  auto destroy_sync = reinterpret_cast<PFNEGLDESTROYSYNCKHRPROC>(destroy_sync_);
+  auto dup_fd =
+      reinterpret_cast<PFNEGLDUPNATIVEFENCEFDANDROIDPROC>(dup_native_fence_fd_);
+  const auto dpy = static_cast<EGLDisplay>(egl_display_);
+
+  // No fd in: this creates a fence for work already queued rather than
+  // wrapping one of the producer's.
+  const EGLint attribs[] = {EGL_SYNC_NATIVE_FENCE_FD_ANDROID,
+                            EGL_NO_NATIVE_FENCE_FD_ANDROID, EGL_NONE};
+  const EGLSyncKHR sync =  // NOLINT(misc-misplaced-const)
+      create_sync(dpy, EGL_SYNC_NATIVE_FENCE_ANDROID, attribs);
+  if (sync == EGL_NO_SYNC_KHR) {
+    ihs::log::warn(
+        "[EglDmabufImporter] eglCreateSyncKHR(NATIVE_FENCE, no fd): 0x{:x}; "
+        "this frame releases on the eventfd alone",
+        eglGetError());
+    return -1;
+  }
+
+  // Required before the dup: the extension only guarantees an exportable fd
+  // once the sync has been flushed to the GL server. Without it the dup
+  // returns EGL_NO_NATIVE_FENCE_FD_ANDROID on a conformant driver, and on a
+  // lenient one yields a fence for a command stream that has not been
+  // submitted.
+  glFlush();
+
+  const int fd = dup_fd(dpy, sync);
+  destroy_sync(dpy, sync);
+  if (fd < 0) {
+    ihs::log::warn(
+        "[EglDmabufImporter] eglDupNativeFenceFDANDROID: 0x{:x}; this frame "
+        "releases on the eventfd alone",
+        eglGetError());
+    return -1;
+  }
+  return fd;
 }
 
 bool EglDmabufImporter::WaitAcquireFence(int fence_fd) const {

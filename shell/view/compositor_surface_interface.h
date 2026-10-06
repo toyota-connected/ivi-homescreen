@@ -409,6 +409,21 @@ class ICompositorSurface {
   }
 
   /**
+   * @brief Export a GL release fence for the work that just sampled this
+   * surface, and publish it as if through @c SetReleaseFenceFd.
+   *
+   * For the EGL compositor paths, which have no KMS OUT_FENCE and no Vulkan
+   * semaphore to export: the fence has to come from the GL command stream
+   * itself, and only the implementation holding the EGL importer can make one.
+   * Call once per frame per sampled surface, on the raster thread with the
+   * compositor's GL context current and after the draws that sampled it.
+   *
+   * The default does nothing, which leaves the producer on whatever release
+   * signal it already had.
+   */
+  virtual void PublishGlReleaseFence() {}
+
+  /**
    * @brief The plane has stopped scanning out the frame the producer submitted
    * with @p buffer_id (Dmabuf::buffer_id); that ring slot is free to reuse.
    *
