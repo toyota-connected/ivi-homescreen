@@ -462,6 +462,9 @@ class WaylandVulkanBackend final : public Backend {
 
 #if BUILD_COMPOSITOR
   bool dma_buf_export_ok_{false};
+  // Queried once after device creation; disabled when the build or the driver
+  // does not support an exportable backing store.
+  VulkanStoreExportPlan store_export_plan_{};
 
   BackingStorePool<VulkanBackingStore> m_store_pool;
   PresentLayerSequencer m_sequencer;

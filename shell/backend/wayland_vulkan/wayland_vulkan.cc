@@ -848,6 +848,29 @@ void WaylandVulkanBackend::createLogicalDevice() {
   // engine's submissions on the same queue_mutex_ the backend already
   // takes. See issue #208.
   ihs::vulkan::QueueInterposer::RegisterQueue(queue_, &queue_mutex_);
+
+#if BUILD_COMPOSITOR
+  // Decided once per device, not once per store: whether a backing store can
+  // export a dma-buf at all, and with which tiling. The answer depends on the
+  // driver, so it is queried rather than assumed -- see
+  // VulkanBackingStore::PlanExport. Backing stores only exist in a compositor
+  // build, which is where VulkanBackingStore is declared.
+  if (BUILD_COMPOSITOR_DMABUF_EXPORT != 0) {
+    const bool have_modifier_ext = std::any_of(
+        enabled_device_extensions_.begin(), enabled_device_extensions_.end(),
+        [](const char* name) {
+          return strcmp(name,
+                        VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME) == 0;
+        });
+    store_export_plan_ =
+        VulkanBackingStore::PlanExport(physical_device_, have_modifier_ext);
+    if (!store_export_plan_.enabled) {
+      IHS_DEBUG(
+          "DMA-BUF export requested but no exportable image configuration; "
+          "backing stores stay local");
+    }
+  }
+#endif
 }
 
 bool WaylandVulkanBackend::InitializeSwapChain() {
@@ -2022,9 +2045,8 @@ bool WaylandVulkanBackend::CreateBackingStoreImpl(
   const auto w = static_cast<int32_t>(config->size.width);
   const auto h = static_cast<int32_t>(config->size.height);
 
-  const bool want_dma_buf = BUILD_COMPOSITOR_DMABUF_EXPORT != 0;
   auto store =
-      m_store_pool.Acquire(w, h, device_, physical_device_, want_dma_buf);
+      m_store_pool.Acquire(w, h, device_, physical_device_, store_export_plan_);
   if (!store->IsValid()) {
     ihs::log::error("WaylandVulkanBackend: failed to create backing store");
     return false;
