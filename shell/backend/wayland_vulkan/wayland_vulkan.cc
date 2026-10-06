@@ -864,7 +864,11 @@ void WaylandVulkanBackend::createLogicalDevice() {
         });
     store_export_plan_ =
         VulkanBackingStore::PlanExport(physical_device_, have_modifier_ext);
-    if (!store_export_plan_.enabled) {
+    if (store_export_plan_.enabled) {
+      IHS_DEBUG("DMA-BUF export: tiling {} ({} candidate modifier(s))",
+                static_cast<int>(store_export_plan_.tiling),
+                store_export_plan_.modifiers.size());
+    } else {
       IHS_DEBUG(
           "DMA-BUF export requested but no exportable image configuration; "
           "backing stores stay local");

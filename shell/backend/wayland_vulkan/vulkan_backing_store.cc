@@ -431,6 +431,14 @@ VulkanBackingStore::VulkanBackingStore(int32_t width,
     }
   }
 
+  if (dma_buf_fd_ >= 0) {
+    ihs::log::debug(
+        "VulkanBackingStore: {}x{} exported fd {} (modifier {:#x}, {} "
+        "plane(s))",
+        width_, height_, dma_buf_fd_, dma_buf_modifier_.value_or(0),
+        dma_buf_planes_.size());
+  }
+
   // Published last, so it is only populated on the path where everything
   // above succeeded. The engine takes the VkImage as an opaque uint64 handle.
   engine_image_ = {
