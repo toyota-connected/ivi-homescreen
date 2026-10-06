@@ -134,7 +134,11 @@ if (BUILD_COMPOSITOR)
     # consume the PUBLIC registry/handler sources above.
     target_sources(platform_homescreen PRIVATE
             platform_views/platform_view_host.cc
+            platform_views/fence_relay.cc
+            platform_views/shm_slots.cc
     )
+    # shm_slots loads libgbm at run time.
+    target_link_libraries(platform_homescreen PRIVATE ${CMAKE_DL_LIBS})
 
     # The Vulkan dma-buf importer is only reachable on a Vulkan backend; it (and
     # the host's Vulkan path) #include <vulkan/vulkan.h>. Compile it and put the

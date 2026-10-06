@@ -79,7 +79,8 @@ extern "C" {
  *
  *                 Payloads:
  *                   DRM_PLANE     -> *out_drm_plane_id
- *                   SOFTWARE_SHM  -> *out_shm_fd, *out_shm_stride
+ *                   SOFTWARE_SHM  -> *out_shm_fd, *out_shm_stride: slot
+ *                                    0 of grant_shm_slots
  *                   TEXTURE_*     -> no pull-side payload (the plugin submits)
  *   revoke        release whatever grant reserved for @view.
  *   grant_drm_plane_id/grant_shm_fd
@@ -161,6 +162,15 @@ typedef struct IhsPvHost {
    * Schedule this view's renegotiate callback on the platform thread. Called
    * from any thread. See ihs_pv_request_renegotiate. Added in 1.18. */
   int (*request_renegotiate)(void* user_data, IhsPlatformView* view);
+
+  /* Appended after request_renegotiate; read only when struct_size covers it.
+   * The buffers of @view's SOFTWARE_SHM grant. See ihs_pv_grant_shm_slots.
+   * Added in 1.19. */
+  size_t (*grant_shm_slots)(void* user_data,
+                            IhsPlatformView* view,
+                            int* out_fds,
+                            size_t max_fds,
+                            size_t* out_stride);
 } IhsPvHost;
 
 /*

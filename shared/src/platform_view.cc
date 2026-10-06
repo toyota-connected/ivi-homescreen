@@ -470,6 +470,26 @@ extern "C" int ihs_pv_grant_shm_fd(IhsPlatformView* view, size_t* out_stride) {
   return h->grant_shm_fd(h->user_data, view, out_stride);
 }
 
+// grant_shm_slots was appended after request_renegotiate; a host built against
+// an older header does not have it.
+extern "C" size_t ihs_pv_grant_shm_slots(IhsPlatformView* view,
+                                         int* out_fds,
+                                         size_t max_fds,
+                                         size_t* out_stride) {
+  if (out_stride != nullptr) {
+    *out_stride = 0;
+  }
+  const IhsPvHost* h = host();
+  constexpr size_t kNeeded =
+      offsetof(IhsPvHost, grant_shm_slots) + sizeof(IhsPvHost::grant_shm_slots);
+  if (view == nullptr || h == nullptr || h->struct_size < kNeeded ||
+      h->grant_shm_slots == nullptr) {
+    return 0;
+  }
+  return h->grant_shm_slots(h->user_data, view, out_fds,
+                            out_fds != nullptr ? max_fds : 0, out_stride);
+}
+
 extern "C" int ihs_pv_submit(IhsPlatformView* view,
                              const IhsFrame* frame,
                              int acquire_fence_fd,
@@ -517,6 +537,7 @@ const IhsPlatformViewApi* platform_view_api() noexcept {
       &ihs_pv_assets_path,        &ihs_pv_post_platform_task,
       &ihs_pv_is_platform_thread, &ihs_pv_retire_buffer,
       &ihs_pv_submit_layers,      &ihs_pv_request_renegotiate,
+      &ihs_pv_grant_shm_slots,
   };
   return &api;
 }

@@ -52,6 +52,9 @@ struct MockHost {
   int submit_calls = 0;
   int renegotiate_requests = 0;
   IhsPlatformView* last_renegotiate_view = nullptr;
+  int shm_slot_calls = 0;
+  IhsPlatformView* last_shm_slots_view = nullptr;
+  size_t last_shm_slots_max = 0;
   uint32_t last_grant_kind = IHS_PV_KIND_NONE;
   // Stands in for a host whose planes cannot scan out what was negotiated:
   // when set, grant rewrites the modifier and negotiate must report it back.
@@ -149,6 +152,24 @@ int mock_request_renegotiate(void* u, IhsPlatformView* view) {
   return IHS_PV_OK;
 }
 
+size_t mock_grant_shm_slots(void* u,
+                            IhsPlatformView* view,
+                            int* out_fds,
+                            size_t max_fds,
+                            size_t* out_stride) {
+  auto* m = static_cast<MockHost*>(u);
+  ++m->shm_slot_calls;
+  m->last_shm_slots_view = view;
+  m->last_shm_slots_max = max_fds;
+  for (size_t i = 0; i < max_fds && i < 2; ++i) {
+    out_fds[i] = 7 + static_cast<int>(i);
+  }
+  if (out_stride != nullptr) {
+    *out_stride = 256;
+  }
+  return 2;
+}
+
 IhsPvHost make_host(MockHost* m) {
   IhsPvHost h{};
   h.struct_size = sizeof(h);
@@ -164,6 +185,7 @@ IhsPvHost make_host(MockHost* m) {
   h.grant_shm_fd = mock_grant_shm;
   h.submit = mock_submit;
   h.request_renegotiate = mock_request_renegotiate;
+  h.grant_shm_slots = mock_grant_shm_slots;
   return h;
 }
 
@@ -204,6 +226,10 @@ TEST(IhsPvSurface, SubTableAliasesFlatEntryPoints) {
   EXPECT_EQ(api->platform_view->query_capabilities, &ihs_pv_query_capabilities);
   EXPECT_EQ(api->platform_view->negotiate, &ihs_pv_negotiate);
   EXPECT_EQ(api->platform_view->submit, &ihs_pv_submit);
+  ASSERT_GE(api->platform_view->struct_size,
+            offsetof(IhsPlatformViewApi, grant_shm_slots) +
+                sizeof(IhsPlatformViewApi::grant_shm_slots));
+  EXPECT_EQ(api->platform_view->grant_shm_slots, &ihs_pv_grant_shm_slots);
 }
 
 // With no host installed, every stateful call reports cleanly.
@@ -267,6 +293,60 @@ TEST(IhsPvRequestRenegotiate, DeclinesAHostThatPredatesTheEntry) {
 
   EXPECT_EQ(ihs_pv_request_renegotiate(fake_view()), IHS_PV_ERR_NO_REGISTRY);
   EXPECT_EQ(host_state.renegotiate_requests, 0);
+
+  detach_host();
+}
+
+// The SOFTWARE_SHM buffers come from the host. #721.
+TEST(IhsPvGrantShmSlots, ForwardsToTheHost) {
+  MockHost host_state;
+  const IhsPvHost host = make_host(&host_state);
+  ihs_pv_set_host(&host);
+
+  int fds[4] = {-1, -1, -1, -1};
+  size_t stride = 0;
+  EXPECT_EQ(ihs_pv_grant_shm_slots(fake_view(), fds, 4, &stride), 2u);
+  EXPECT_EQ(host_state.shm_slot_calls, 1);
+  EXPECT_EQ(host_state.last_shm_slots_view, fake_view());
+  EXPECT_EQ(fds[0], 7);
+  EXPECT_EQ(fds[1], 8);
+  EXPECT_EQ(fds[2], -1);
+  EXPECT_EQ(stride, 256u);
+
+  // A count alone: no fds array means nothing may be written to one.
+  EXPECT_EQ(ihs_pv_grant_shm_slots(fake_view(), nullptr, 4, nullptr), 2u);
+  EXPECT_EQ(host_state.last_shm_slots_max, 0u);
+
+  detach_host();
+}
+
+TEST(IhsPvGrantShmSlots, NoneWithoutAHostOrAView) {
+  detach_host();
+  size_t stride = 99;
+  int fd = -1;
+  EXPECT_EQ(ihs_pv_grant_shm_slots(fake_view(), &fd, 1, &stride), 0u);
+  EXPECT_EQ(stride, 0u);
+  EXPECT_EQ(fd, -1);
+
+  MockHost host_state;
+  const IhsPvHost host = make_host(&host_state);
+  ihs_pv_set_host(&host);
+  EXPECT_EQ(ihs_pv_grant_shm_slots(nullptr, &fd, 1, &stride), 0u);
+  EXPECT_EQ(host_state.shm_slot_calls, 0);
+  detach_host();
+}
+
+// grant_shm_slots was appended to IhsPvHost; a host built against 1.18 stops
+// short of it.
+TEST(IhsPvGrantShmSlots, DeclinesAHostThatPredatesTheEntry) {
+  MockHost host_state;
+  IhsPvHost host = make_host(&host_state);
+  host.struct_size = offsetof(IhsPvHost, grant_shm_slots);
+  ihs_pv_set_host(&host);
+
+  int fd = -1;
+  EXPECT_EQ(ihs_pv_grant_shm_slots(fake_view(), &fd, 1, nullptr), 0u);
+  EXPECT_EQ(host_state.shm_slot_calls, 0);
 
   detach_host();
 }

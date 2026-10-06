@@ -39,6 +39,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -59,6 +60,8 @@
 #include "backend/backend.h"
 #include "backend/drm_render_node.h"
 #include "deferred_retire_set.h"
+#include "fence_relay.h"
+#include "shm_slots.h"
 #if IVI_HAVE_VULKAN
 #include "dmabuf_vulkan_import.h"
 #endif
@@ -347,7 +350,15 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
                      request.top,
                      request.width,
                      request.height),
+        shm_width(Pixels(request.width)),
+        shm_height(Pixels(request.height)),
         id_(request.id) {}
+
+  // A view dimension as whole pixels for a buffer: rounded up, and 0 for one
+  // no buffer could have.
+  static uint32_t Pixels(const double v) {
+    return v > 0 && v <= 16384 ? static_cast<uint32_t>(std::ceil(v)) : 0;
+  }
 
   ~IhsPluginView() override;
 
@@ -391,8 +402,31 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   // thread via SetScanoutPlane, read on the platform thread via the DRM_PLANE
   // accessor, so it is atomic. Feeds ihs_pv_grant_drm_plane_id.
   std::atomic<uint32_t> drm_plane_id{0};
-  int shm_fd{-1};
-  size_t shm_stride{0};
+
+  // SOFTWARE_SHM (#721). The grant's buffers, or null while the view has no
+  // size. Guarded by `mutex`: a submit checks its frame against them on the
+  // producer's thread while a resize replaces them on the platform thread.
+  bool shm_granted{false};
+  std::unique_ptr<ShmSlots> shm;
+  // The size the next grant's buffers take: the view's, from create and
+  // resize. Platform thread.
+  uint32_t shm_width{0};
+  uint32_t shm_height{0};
+  // When each SOFTWARE_SHM buffer was last sampled, on a clock that ticks per
+  // sample; and the clock when the compositor last reported a release fence,
+  // which covers every sample before it, since a composite's fence signals
+  // after every earlier one. Guarded by `mutex`.
+  mutable uint64_t shm_sample_clock{0};
+  mutable uint64_t shm_fenced_clock{0};
+  mutable std::map<uint32_t, uint64_t> shm_last_sampled;
+  // Buffers the view stopped showing whose last sample no reported fence
+  // covers yet: released with the next one. Guarded by `mutex`.
+  mutable std::vector<uint32_t> shm_superseded;
+  // Whether the compositor reports a release fence per composite. The
+  // wayland-egl backend does not; there implicit sync on the dma-buf, which the
+  // producer's DMA_BUF_IOCTL_SYNC waits on, orders its writes after the reads.
+  // Guarded by `mutex`.
+  mutable bool release_fences_seen{false};
 
   // The plugin submits from its own thread while the compositor samples on the
   // raster thread, so `mutex` guards the import block(s) below (Vulkan and/or
@@ -716,6 +750,7 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     if (current == nullptr || current->image == VK_NULL_HANDLE) {
       return nullptr;
     }
+    ShmSampledLocked(current_buffer_id);
     if (width != nullptr) {
       *width = static_cast<int32_t>(current->width);
     }
@@ -799,6 +834,9 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
       img = current;
       out.geometry = geom0;
       out.frame = current_frame;
+      if (img != nullptr) {
+        ShmSampledLocked(current_buffer_id);
+      }
     } else if (const ExtraLayer* x = ExtraAtLocked(index); x != nullptr) {
       img = x->current;
       out.geometry = x->geom;
@@ -1160,7 +1198,9 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     if (out == nullptr || !ResolveLayerLocked(0, &ref)) {
       return DmabufState::kNoNewFrame;
     }
-    if (!extra_order.empty() || !ref.geom.IsWhole()) {
+    // SOFTWARE_SHM buffers are always composited: their release follows the
+    // composite's fence, and a plane would hold them past it.
+    if (shm_granted || !extra_order.empty() || !ref.geom.IsWhole()) {
       return ref.fresh ? DmabufState::kNotScanoutCapable
                        : DmabufState::kNoNewFrame;
     }
@@ -1178,6 +1218,10 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     out->geometry = ref.geom;
     out->buffer_width = ref.width;
     out->buffer_height = ref.height;
+    if (shm_granted) {
+      return ref.fresh ? DmabufState::kNotScanoutCapable
+                       : DmabufState::kNoNewFrame;
+    }
     // One buffer in two layers has one release, and two planes would each
     // report it, the first while the second still scans it out.
     if (ref.fresh && LayersShowingLocked(ref.buffer_id) > 1) {
@@ -1215,6 +1259,9 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   // previous one (the newest frame's completion implies the older).
   void SetReleaseFenceFd(int fd) override {
     const std::lock_guard<std::mutex> lock(mutex);
+    release_fences_seen = true;
+    shm_fenced_clock = shm_sample_clock;
+    ReleaseShmSupersededLocked(fd);
     if (release_fence_fd >= 0) {
       close(release_fence_fd);
     }
@@ -1426,6 +1473,64 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
         });
   }
 #endif
+
+  // A composite is about to sample SOFTWARE_SHM buffer @id. Caller holds
+  // `mutex`.
+  void ShmSampledLocked(const uint32_t id) const {
+    if (shm_granted) {
+      shm_last_sampled[id] = ++shm_sample_clock;
+    }
+  }
+
+  // A SOFTWARE_SHM view stopped showing buffer @from for @to. @from is
+  // released as soon as the composites that sampled it are done: now when
+  // none did, on the last reported fence when that covers them, and on the
+  // next one otherwise. @fenced: this backend reports a release fence per
+  // composite even if none has arrived yet (the Vulkan ones). Caller holds
+  // `mutex`.
+  void ShmSwitchedLocked(const uint32_t from,
+                         const uint32_t to,
+                         const bool fenced) const {
+    if (!shm_granted || from == to) {
+      return;
+    }
+    // @to is shown again, so a release still owed for it is not.
+    shm_superseded.erase(
+        std::remove(shm_superseded.begin(), shm_superseded.end(), to),
+        shm_superseded.end());
+    const auto it = shm_last_sampled.find(from);
+    const uint64_t sampled = it != shm_last_sampled.end() ? it->second : 0;
+    if (sampled == 0 || (!fenced && !release_fences_seen)) {
+      SignalRelease(from);
+    } else if (sampled <= shm_fenced_clock) {
+      RelayReleaseLocked(from, release_fence_fd);
+    } else if (std::find(shm_superseded.begin(), shm_superseded.end(), from) ==
+               shm_superseded.end()) {
+      shm_superseded.push_back(from);
+    }
+  }
+
+  // Signal @id's release eventfd once @fence does (now for -1). Borrows
+  // @fence. Caller holds `mutex`.
+  void RelayReleaseLocked(const uint32_t id, const int fence) const {
+    const auto it = release_efds.find(id);
+    if (it == release_efds.end()) {
+      return;
+    }
+    const int efd = it->second;
+    release_efds.erase(it);
+    FenceRelay::Get().Add(fence >= 0 ? ::dup(fence) : -1, efd);
+  }
+
+  // Release every superseded SOFTWARE_SHM buffer once @fence (a composite's
+  // release fence, or -1 for none) signals. Borrows @fence. Caller holds
+  // `mutex`.
+  void ReleaseShmSupersededLocked(const int fence) const {
+    for (const uint32_t id : shm_superseded) {
+      RelayReleaseLocked(id, fence);
+    }
+    shm_superseded.clear();
+  }
 
   // Create this frame's release eventfd, hand the producer a dup as its release
   // fence (via *out_fd), and keep our copy keyed on buffer_id to signal later.
@@ -1851,6 +1956,9 @@ void IhsPluginView::ImportPendingEglLocked(std::unique_lock<std::mutex>& lock,
     }
   }
   IhsFrame& f = slot.pending->frame;
+  // What was shown until now, for a SOFTWARE_SHM view's release.
+  const bool showed = *slot.current != nullptr;
+  const uint32_t shown_id = *slot.current_id;
   if (slot.pending->reimport) {
     // Not RetireEglImportLocked: the id's release eventfd is this new frame's.
     DropEglImportLocked(f.buffer_id);
@@ -1902,6 +2010,9 @@ void IhsPluginView::ImportPendingEglLocked(std::unique_lock<std::mutex>& lock,
   }
   *slot.geom = slot.pending->geom;
   slot.pending->valid = false;
+  if (showed && *slot.current != nullptr) {
+    ShmSwitchedLocked(shown_id, *slot.current_id, /*fenced=*/false);
+  }
   // A retired frame that was on screen may be off it now.
   for (const uint32_t id : deferred_retire.ReleaseOffScreen(
            [this](uint32_t id) { return OnScreenEglLocked(id); })) {
@@ -1924,6 +2035,9 @@ uint32_t IhsPluginView::GetGlTextureName() const {
     s->geom = &geom0;
     return true;
   });
+  if (current_egl != nullptr) {
+    ShmSampledLocked(current_egl_buffer_id);
+  }
   return current_egl != nullptr ? current_egl->texture : 0;
 }
 
@@ -1996,10 +2110,27 @@ ICompositorSurface::GlLayerTexture IhsPluginView::GetLayerGlTexture(
 // object, flushing or dropping the cached pointer events without a platform
 // message. So a plugin's callbacks stay unreached on Linux until something
 // drives that channel — the host side is simply no longer the reason why.
+void DropShmGrant(IhsPluginView* v);
+
 void ListenerResize(double width, double height, void* data) {
   auto* view = static_cast<IhsPluginView*>(data);
+  const uint32_t w = IhsPluginView::Pixels(width);
+  const uint32_t h = IhsPluginView::Pixels(height);
+  // A SOFTWARE_SHM grant's buffers have the view's size, so a new size ends
+  // the grant, and the producer negotiates again for buffers that fit (#721).
+  const bool revoke = view->granted_kind == IHS_PV_KIND_SOFTWARE_SHM &&
+                      (w != view->shm_width || h != view->shm_height);
+  view->shm_width = w;
+  view->shm_height = h;
+  if (revoke) {
+    DropShmGrant(view);
+    view->granted_kind = IHS_PV_KIND_NONE;
+  }
   if (view->callbacks.resize != nullptr) {
     view->callbacks.resize(view->plugin_user_data, width, height);
+  }
+  if (revoke && view->callbacks.renegotiate != nullptr) {
+    view->callbacks.renegotiate(view->plugin_user_data);
   }
 }
 
@@ -2468,13 +2599,41 @@ int HostEglContext(void* user_data, IhsEglContext* out) {
   return IHS_PV_OK;
 }
 
+int HostRetireBuffer(void* user_data,
+                     IhsPlatformView* view,
+                     uint32_t buffer_id);
+
+// End @v's SOFTWARE_SHM grant, if it has one. Its buffers are freed (frames
+// already imported keep their own references), and their ids retired, so a
+// later grant's buffers under the same ids are imported afresh rather than
+// matched to these imports. Releases still owed are paid now: the producer
+// does not write these buffers again. Platform thread.
+void DropShmGrant(IhsPluginView* v) {
+  {
+    const std::lock_guard<std::mutex> lock(v->mutex);
+    if (!v->shm_granted) {
+      return;
+    }
+    for (const uint32_t id : v->shm_superseded) {
+      v->SignalRelease(id);
+    }
+    v->shm_superseded.clear();
+    v->shm_last_sampled.clear();
+    v->shm.reset();
+    v->shm_granted = false;
+  }
+  for (uint32_t id = 0; id < ShmSlots::kCount; ++id) {
+    HostRetireBuffer(nullptr, reinterpret_cast<IhsPlatformView*>(v), id);
+  }
+}
+
 int HostGrant(void* user_data,
               IhsPlatformView* view,
               uint32_t kind,
               IhsFormatModifier* format,
               uint32_t* /*out_drm_plane_id*/,
-              int* /*out_shm_fd*/,
-              size_t* /*out_shm_stride*/) {
+              int* out_shm_fd,
+              size_t* out_shm_stride) {
   // A scanned-out buffer is read by the display controller, but the modifier
   // was chosen against what this shell can import -- on a tiler a disjoint set,
   // so a producer can be handed one it cannot even allocate, and then it never
@@ -2504,15 +2663,67 @@ int HostGrant(void* user_data,
       }
     }
   }
-  // Record the granted kind on the view. Reserving a DRM plane / shm buffer for
-  // the non-Vulkan kinds is wired with the submit path; the Vulkan
-  // texture-import kind needs no pull-side reservation.
-  reinterpret_cast<IhsPluginView*>(view)->granted_kind = kind;
+  auto* v = reinterpret_cast<IhsPluginView*>(view);
+  // SOFTWARE_SHM: the host allocates the buffers (#721). Done before anything
+  // changes, so a grant that cannot be honored leaves the old one in place.
+  std::unique_ptr<ShmSlots> slots;
+  if (kind == IHS_PV_KIND_SOFTWARE_SHM && format != nullptr) {
+    if (ShmSlots::BytesPerPixel(format->fourcc) == 0) {
+      format->fourcc = HostFourcc('X', 'R', '2', '4');  // XRGB8888
+    }
+    format->modifier = 0;  // LINEAR
+    // No size yet: the grant has no buffers until the resize that gives it
+    // one, which revokes it and renegotiates.
+    if (v->shm_width != 0 && v->shm_height != 0) {
+      IhsPvCapabilities caps{};
+      caps.struct_size = sizeof(caps);
+      HostQueryCapabilities(user_data, &caps);
+      // With no render node, the backend's own GBM device, if it has one.
+      void* backend_gbm = nullptr;
+#if IVI_HAVE_EGL
+      if (Backend* backend = BackendOf(user_data); backend != nullptr) {
+        BackendEglContext egl{};
+        if (backend->GetEglContext(&egl)) {
+          backend_gbm = egl.gbm_device;
+        }
+      }
+#endif
+      slots = ShmSlots::Allocate(caps.render_device, backend_gbm, v->shm_width,
+                                 v->shm_height, format->fourcc);
+      if (slots == nullptr) {
+        ihs::log::warn(
+            "[ihs_pv] SOFTWARE_SHM grant refused: no {}x{} buffers on render "
+            "device {:#x}{}",
+            v->shm_width, v->shm_height, caps.render_device,
+            backend_gbm != nullptr ? " or the backend's GBM device" : "");
+        return IHS_PV_ERR_UNSUPPORTED;
+      }
+    }
+  }
+  DropShmGrant(v);
+  if (kind == IHS_PV_KIND_SOFTWARE_SHM) {
+    const std::lock_guard<std::mutex> lock(v->mutex);
+    v->shm_granted = true;
+    v->shm = std::move(slots);
+    if (v->shm != nullptr) {
+      if (out_shm_fd != nullptr) {
+        *out_shm_fd = v->shm->fd(0);
+      }
+      if (out_shm_stride != nullptr) {
+        *out_shm_stride = v->shm->stride();
+      }
+    }
+  }
+  // Reserving a DRM plane for the plane kind is wired with the submit path;
+  // the texture-import kind needs no pull-side reservation.
+  v->granted_kind = kind;
   return IHS_PV_OK;
 }
 
 void HostRevoke(void* /*user_data*/, IhsPlatformView* view) {
-  reinterpret_cast<IhsPluginView*>(view)->granted_kind = IHS_PV_KIND_NONE;
+  auto* v = reinterpret_cast<IhsPluginView*>(view);
+  DropShmGrant(v);
+  v->granted_kind = IHS_PV_KIND_NONE;
 }
 
 uint32_t HostGrantDrmPlaneId(void* /*user_data*/, IhsPlatformView* view) {
@@ -2537,10 +2748,30 @@ int HostGrantShmFd(void* /*user_data*/,
                    IhsPlatformView* view,
                    size_t* out_stride) {
   auto* v = reinterpret_cast<IhsPluginView*>(view);
+  const std::lock_guard<std::mutex> lock(v->mutex);
   if (out_stride != nullptr) {
-    *out_stride = v->shm_stride;
+    *out_stride = v->shm != nullptr ? v->shm->stride() : 0;
   }
-  return v->shm_fd;
+  return v->shm != nullptr ? v->shm->fd(0) : -1;
+}
+
+size_t HostGrantShmSlots(void* /*user_data*/,
+                         IhsPlatformView* view,
+                         int* out_fds,
+                         const size_t max_fds,
+                         size_t* out_stride) {
+  auto* v = reinterpret_cast<IhsPluginView*>(view);
+  const std::lock_guard<std::mutex> lock(v->mutex);
+  if (v->shm == nullptr) {
+    return 0;
+  }
+  for (size_t i = 0; i < max_fds && i < ShmSlots::kCount; ++i) {
+    out_fds[i] = v->shm->fd(static_cast<uint32_t>(i));
+  }
+  if (out_stride != nullptr) {
+    *out_stride = v->shm->stride();
+  }
+  return ShmSlots::kCount;
 }
 
 // Hand back a dup of the compositor's latest release fence for this view
@@ -2877,6 +3108,15 @@ int SubmitFrame0(void* user_data,
   ++v->submit_seq;
   v->presentation_sink->Submitted(v->submit_seq, seq);
   HandBackReleaseFence(v, acquire_fence_fd, out_release_fence_fd);
+  // A SOFTWARE_SHM submit always gets a release fence: its own eventfd, which
+  // fires once a later frame replaced it and the composites that sampled it
+  // are done (ShmSwitchedLocked).
+  if (v->shm_granted) {
+    v->HandBackReleaseEventfd(frame->buffer_id, out_release_fence_fd);
+  }
+  // What was shown until now, for a SOFTWARE_SHM view's release.
+  const bool showed = v->current != nullptr;
+  const uint32_t shown_id = v->current_buffer_id;
   // Stash this frame's acquire fence (a sync_file) for the compositor to wait
   // on before sampling; it supersedes any previous unconsumed one, since the
   // compositor only ever samples the latest submit (v->current). -1 is an
@@ -2946,13 +3186,18 @@ int SubmitFrame0(void* user_data,
     // Dup for scanout first: Import consumes the fds, and after it there is
     // nothing left to give a plane. A dup that fails is not fatal -- the view
     // is simply composited rather than placed -- so the frame still imports.
+    // A SOFTWARE_SHM buffer is never placed (see GetDmabuf).
     IhsPluginView::ScanoutBuffer sb;
-    const bool scanout_ok = DupForScanout(*frame, &sb);
+    const bool scanout_ok = !v->shm_granted && DupForScanout(*frame, &sb);
 
     DmabufVulkanImporter::ImportedImage imported;
     if (!g_importer.Import(*frame, &imported)) {
       CloseFrameFds(frame);  // import left the fds untouched on failure
       CloseScanoutBuffer(&sb);
+      // Nothing will sample a frame that was not imported.
+      if (v->shm_granted) {
+        v->SignalRelease(frame->buffer_id);
+      }
       return IHS_PV_ERR_INVALID;
     }
     if (scanout_ok) {
@@ -2993,6 +3238,9 @@ int SubmitFrame0(void* user_data,
            [v](uint32_t id) { return OnScreenVulkanLocked(v, id); })) {
     RetireVulkanImportLocked(v, id);
   }
+  if (showed) {
+    v->ShmSwitchedLocked(shown_id, frame->buffer_id, /*fenced=*/true);
+  }
 
   // The plugin re-rendered the buffer before submitting, so the compositor
   // transitions from GENERAL to read it. A spec-correct foreign-queue-family
@@ -3011,6 +3259,41 @@ int SubmitFrame0(void* user_data,
   return IHS_PV_OK;
 }
 #endif  // IVI_HAVE_VULKAN
+
+// Whether a frame for @v may go on: any frame when the grant is not
+// SOFTWARE_SHM, and otherwise only one of the grant's own buffers, described as
+// it was granted. @in is the frame as submitted, @frame as normalized.
+bool ShmFrameAccepted(IhsPluginView* v,
+                      const IhsFrame* in,
+                      const IhsFrame& frame) {
+  const std::lock_guard<std::mutex> lock(v->mutex);
+  if (!v->shm_granted) {
+    return true;
+  }
+  const ShmSlots* slots = v->shm.get();
+  const char* why = nullptr;
+  if (slots == nullptr) {
+    why = "the grant has no buffers yet";
+  } else if (in->struct_size <
+             offsetof(IhsFrame, buffer_id) + sizeof(IhsFrame::buffer_id)) {
+    why = "the frame carries no buffer_id";
+  } else if (frame.plane_count != 1 || frame.plane_offset[0] != 0 ||
+             frame.plane_stride[0] != slots->stride() ||
+             frame.width != slots->width() || frame.height != slots->height() ||
+             frame.format.fourcc != slots->fourcc() ||
+             frame.format.modifier != 0 /* LINEAR */) {
+    why = "the frame does not describe a granted buffer";
+  } else if (frame.buffer_id >= ShmSlots::kCount ||
+             !slots->Matches(frame.buffer_id, frame.plane_fd[0])) {
+    why = "the fd is not the granted buffer for that buffer_id";
+  }
+  if (why == nullptr) {
+    return true;
+  }
+  ihs::log::warn("[ihs_pv] SOFTWARE_SHM submit rejected: {} (buffer_id {})",
+                 why, frame.buffer_id);
+  return false;
+}
 
 // ihs_pv_submit: one full-view layer, which also clears any layers a previous
 // ihs_pv_submit_layers left above it.
@@ -3036,6 +3319,13 @@ int HostSubmit(void* user_data,
     ihs::log::warn(
         "[ihs_pv] submit rejected: IhsFrame struct_size {} too small",
         frame != nullptr ? frame->struct_size : 0);
+    return IHS_PV_ERR_INVALID;
+  }
+  if (!ShmFrameAccepted(v, frame, normalized)) {
+    CloseFrameFds(&normalized);
+    if (acquire_fence_fd >= 0) {
+      close(acquire_fence_fd);
+    }
     return IHS_PV_ERR_INVALID;
   }
   return SubmitFrame0(user_data, v, &normalized, acquire_fence_fd,
@@ -3101,6 +3391,18 @@ int HostSubmitLayers(void* user_data,
       }
     }
   };
+  bool shm = false;
+  {
+    const std::lock_guard<std::mutex> lock(v->mutex);
+    shm = v->shm_granted;
+  }
+  if (shm) {
+    ihs::log::warn(
+        "[ihs_pv] submit_layers rejected: a SOFTWARE_SHM view submits with "
+        "ihs_pv_submit");
+    close_from(0);
+    return IHS_PV_ERR_UNSUPPORTED;
+  }
   if (layer_count == 0) {
     {
       const std::lock_guard<std::mutex> lock(v->mutex);
@@ -3317,6 +3619,7 @@ void InstallPlatformViewHost(FlutterDesktopEngineState* engine_state) {
   g_host.revoke = HostRevoke;
   g_host.grant_drm_plane_id = HostGrantDrmPlaneId;
   g_host.grant_shm_fd = HostGrantShmFd;
+  g_host.grant_shm_slots = HostGrantShmSlots;
   g_host.submit = HostSubmit;
   g_host.post_platform_task = HostPostPlatformTask;
   g_host.is_platform_thread = HostIsPlatformThread;
