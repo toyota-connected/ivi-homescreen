@@ -186,16 +186,26 @@ typedef struct IhsHdrMetadata {
  *   SOFTWARE_SHM           universal floor: a CPU-filled shared-memory buffer.
  *   TEXTURE_EGL_IMAGE      an EGLImage on the backend's own EGLDisplay (see
  *                          ihs_pv_egl_context), sampled as it is: carried by
- *                          an IhsLayer's @image. Not negotiated: a backend
- *                          that samples image layers reports this kind in
- *                          IhsPvCapabilities::kinds, and a view granted
- *                          TEXTURE_DMABUF_IMPORT may then submit them. For
+ *                          an IhsLayer's @image. Not negotiated, and not gated
+ *                          by the grant: a backend that samples image layers
+ *                          reports this kind in IhsPvCapabilities::kinds, and
+ *                          any view on that backend may then submit them. For
  *                          buffers a dma-buf cannot fully describe, such as
  *                          ones a Wayland EGL implementation shares through
  *                          EGL_WL_bind_wayland_display with compression
  *                          metadata kept outside the dma-buf. EGL backends
  *                          only. Added in 1.16.
  * A well-formed requirement that includes SOFTWARE_SHM never hard-fails.
+ *
+ * A grant names what the producer delivers, not where the frame lands. Both
+ * dma-buf kinds are placed the same way: a backend running the plane compositor
+ * puts a submitted dma-buf on a KMS plane when one can be allocated for that
+ * frame and composites it when one cannot, and that decision is remade every
+ * frame. So TEXTURE_DMABUF_IMPORT is scanned out on a plane routinely, and
+ * DRM_PLANE is composited when the planes are spoken for. Read
+ * ihs_pv_grant_drm_plane_id each frame to learn which happened; it reports the
+ * plane under either dma-buf grant. What the kinds still decide is the format
+ * negotiation and the accessors, not the path (ivi-homescreen#704).
  *
  * The order is a tie-break, not a performance ranking. Direct scanout is the
  * faster path where it applies -- measured on a composited platform view it
@@ -494,6 +504,12 @@ typedef struct IhsPvRequirements {
    *
    * uint8_t because every IhsPvKind is a single bit and there are four; a ninth
    * would need a new field rather than this one.
+   *
+   * It selects which grant you are given, not where your frames land: both
+   * dma-buf kinds are placed per frame by the same rule, so asking for
+   * DRM_PLANE does not buy a plane that import would not also get
+   * (ivi-homescreen#704). What it still decides is which format negotiation
+   * applies to the grant.
    */
   uint8_t preferred_kind;
 } IhsPvRequirements;
@@ -693,8 +709,11 @@ IHS_EXPORT int ihs_pv_negotiate(IhsPlatformView* view,
 /* clang-format off */
 /*
  * Kind-specific grant payload, valid only for the current grant on @view.
- * Each returns 0 / NULL when the current granted_kind does not match.
- *   drm_plane_id   DRM_PLANE: the reserved KMS plane object id.
+ * Each returns 0 / NULL when the current grant cannot carry it.
+ *   drm_plane_id   Either dma-buf kind: the KMS plane this view was scanned out
+ *                  on at the last present, or 0 if it was composited instead.
+ *                  Placement is per frame, so read it per frame; it is not a
+ *                  reservation. 0 for the kinds that cannot reach a plane.
  *   shm_fd         SOFTWARE_SHM: the shared-memory fd plus stride the plugin
  *                  fills in grant.format; ownership stays with the registry.
  *                  There is no software native-context accessor — the software

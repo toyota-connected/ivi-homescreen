@@ -2427,13 +2427,23 @@ int HostGrant(void* user_data,
               uint32_t* /*out_drm_plane_id*/,
               int* /*out_shm_fd*/,
               size_t* /*out_shm_stride*/) {
-  // A DRM_PLANE buffer is read by the display controller, but the modifier was
-  // chosen against what this shell can import -- on a tiler a disjoint set, so
-  // a producer can be handed one it cannot even allocate, and then it never
+  // A scanned-out buffer is read by the display controller, but the modifier
+  // was chosen against what this shell can import -- on a tiler a disjoint set,
+  // so a producer can be handed one it cannot even allocate, and then it never
   // starts (#642). The backend owns the plane table, so ask it to reconcile.
-  // negotiate reports back whatever is left here. The other kinds are sampled
-  // rather than scanned out and keep the import-side answer.
-  if (kind == IHS_PV_KIND_DRM_PLANE && format != nullptr) {
+  // negotiate reports back whatever is left here.
+  //
+  // Both dma-buf kinds, not DRM_PLANE alone (#704). A backend that runs the
+  // plane compositor puts *any* submitted dma-buf on a plane when one can be
+  // allocated for the frame, whatever kind was granted -- the grant says what
+  // the producer delivers, not where it lands. Reconciling only the DRM_PLANE
+  // grant left an import-granted view holding a modifier no plane takes, so it
+  // was composited every frame with nothing saying why. A backend with no
+  // planes has no opinion and returns false, so this is a no-op there rather
+  // than a worse modifier for sampling.
+  if ((kind == IHS_PV_KIND_DRM_PLANE ||
+       kind == IHS_PV_KIND_TEXTURE_DMABUF_IMPORT) &&
+      format != nullptr) {
     const Backend* backend = BackendOf(user_data);
     if (backend != nullptr) {
       const uint64_t asked = format->modifier;
@@ -2459,11 +2469,17 @@ void HostRevoke(void* /*user_data*/, IhsPlatformView* view) {
 
 uint32_t HostGrantDrmPlaneId(void* /*user_data*/, IhsPlatformView* view) {
   auto* v = reinterpret_cast<IhsPluginView*>(view);
-  // Per the ABI, the accessor is 0 unless the current grant is DRM_PLANE.
-  // Otherwise it is the plane the compositor scanned this view out on at the
-  // last present -- and 0 while the view is GL-composited (no plane), so a
-  // direct-scanout producer sees when its zero-GPU path is not being honored.
-  if (v->granted_kind != IHS_PV_KIND_DRM_PLANE) {
+  // The plane the compositor scanned this view out on at the last present, and
+  // 0 while it is composited instead -- so a producer sees when its zero-GPU
+  // path is not being honored.
+  //
+  // Either dma-buf grant, not DRM_PLANE alone (#704). Placement is decided per
+  // frame for any submitted dma-buf, so an import-granted view is routinely on
+  // a plane; reporting 0 for it described the grant rather than the placement,
+  // which is what the caller is asking about. The other kinds cannot be on a
+  // plane -- shm is CPU-filled, an image layer is sampled -- so they stay 0.
+  if (v->granted_kind != IHS_PV_KIND_DRM_PLANE &&
+      v->granted_kind != IHS_PV_KIND_TEXTURE_DMABUF_IMPORT) {
     return 0;
   }
   return v->drm_plane_id.load(std::memory_order_relaxed);
