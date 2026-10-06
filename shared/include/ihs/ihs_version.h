@@ -34,7 +34,7 @@
  * mask (see IhsPvRequirements::preferred_kind).
  */
 #define IHS_SHARED_ABI_MAJOR 1u
-#define IHS_SHARED_ABI_MINOR 18u
+#define IHS_SHARED_ABI_MINOR 19u
 #define IHS_SHARED_ABI_VERSION \
   ((IHS_SHARED_ABI_MAJOR << 16) | IHS_SHARED_ABI_MINOR)
 

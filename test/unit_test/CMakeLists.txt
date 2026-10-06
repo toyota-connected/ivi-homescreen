@@ -205,6 +205,11 @@ if (BUILD_BACKEND_WAYLAND_VULKAN)
     add_subdirectory(vk_store_dmabuf-test)
 endif ()
 add_subdirectory(deferred_retire_set-test)
+# The SOFTWARE_SHM grant's buffers and release relay live in the platform-view
+# host, which only a compositor build has.
+if (BUILD_COMPOSITOR)
+    add_subdirectory(shm_slots-test)
+endif ()
 # The EGL dma-buf importer only exists when an EGL backend is built. The test
 # also includes drm_fourcc.h for the format constants, so it needs libdrm in its
 # own right -- same gate the two drm_* tests below use.

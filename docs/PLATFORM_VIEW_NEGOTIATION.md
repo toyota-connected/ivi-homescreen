@@ -14,7 +14,7 @@ of the current implementation rather than a guarantee of the ABI, it says so.
 
 | Kind | Bit | What the plugin submits |
 | --- | --- | --- |
-| `IHS_PV_KIND_SOFTWARE_SHM` | `1u << 2` | CPU-written pixels in shared memory |
+| `IHS_PV_KIND_SOFTWARE_SHM` | `1u << 2` | CPU-written pixels in buffers the host allocates (see [SOFTWARE_SHM buffers](#software_shm-buffers)) |
 | `IHS_PV_KIND_TEXTURE_DMABUF_IMPORT` | `1u << 0` | a dma-buf the shell imports as a texture |
 | `IHS_PV_KIND_DRM_PLANE` | `1u << 1` | a dma-buf scanned out directly on a KMS overlay plane |
 
@@ -38,7 +38,9 @@ Consequences worth stating plainly, because they are what a plugin plans
 against:
 
 - **`SOFTWARE_SHM` is the only universal kind.** It is the floor and is always
-  offered. A plugin that implements the floor always has a path.
+  offered. A plugin that implements the floor has a path wherever the host can
+  allocate its buffers: GBM on a render node. Without libgbm or a render node,
+  the grant is refused with `IHS_PV_ERR_UNSUPPORTED`.
 - **`TEXTURE_DMABUF_IMPORT` is not universal.** It requires a GPU context. A
   build running the software backend with neither a Vulkan nor an EGL context
   offers `SOFTWARE_SHM` alone. Do not assume dma-buf import is available without
@@ -114,14 +116,15 @@ Result codes (`IhsPvResult`):
 | `IHS_PV_OK` | `0` | a grant was made, possibly the software floor |
 | `IHS_PV_ERR_INVALID` | `-1` | null or oversized arguments, bad `struct_size` |
 | `IHS_PV_ERR_NO_BACKEND` | `-2` | no active backend to negotiate against |
-| `IHS_PV_ERR_UNSUPPORTED` | `-3` | the requirement excludes even the floor |
+| `IHS_PV_ERR_UNSUPPORTED` | `-3` | the requirement excludes even the floor, or the floor's buffers cannot be allocated |
 | `IHS_PV_ERR_NO_REGISTRY` | `-4` | registry unavailable (headless) |
 
 `IHS_PV_OK` does **not** mean you got the kind you asked for. It means a grant
 was made — read `grant.kind` to find out which, and be prepared for the floor.
-`IHS_PV_ERR_UNSUPPORTED` is returned only when the requirement set excludes even
+`IHS_PV_ERR_UNSUPPORTED` is returned when the requirement set excludes even
 `SOFTWARE_SHM`, i.e. the plugin cleared the floor bit and no higher kind could
-be granted.
+be granted, and when `SOFTWARE_SHM` is the kind chosen but the host cannot
+allocate its buffers.
 
 An empty requirement format list means "any the backend offers", which resolves
 to `caps.formats[0]`. The grant's kind-specific payload is read through the
@@ -188,6 +191,28 @@ reader does not have to re-derive them (ivi-homescreen#673):
 - **Planes are scarce hardware.** Granting them by default makes allocation
   order-dependent: whichever views negotiate first consume the planes and later
   ones quietly do not, which no part of this ABI can express.
+
+## SOFTWARE_SHM buffers
+
+The host allocates them (ABI 1.19, #721). `ihs_pv_grant_shm_slots` returns
+their fds, borrowed, and their stride; `ihs_pv_grant_shm_fd` is the first of
+them. There are two, so the producer writes one while the compositor samples
+the other, which it does in place, without a copy.
+
+- Each is a LINEAR dma-buf of the granted format at the view's size, with room
+  for one more row, opened read-write. A view with no size yet has none until
+  the resize that gives it one.
+- The producer maps it, brackets its writes with `DMA_BUF_IOCTL_SYNC`, and
+  submits it with `ihs_pv_submit`: one plane, a dup of its fd, offset 0, its
+  stride, `buffer_id` its index, acquire fence -1. A frame naming any other
+  buffer for that index is refused.
+- Every submit returns a release fence, an eventfd. It fires once a later
+  frame replaced the buffer and the composites that sampled it are done. The
+  producer writes the buffer again only after that.
+- A resize revokes the grant: the host calls `resize`, then `renegotiate`, and
+  the producer negotiates there for buffers of the new size.
+- These buffers are always composited, never placed on a plane, and
+  `ihs_pv_submit_layers` does not take them.
 
 ## The renegotiation contract
 
