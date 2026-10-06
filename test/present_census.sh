@@ -178,6 +178,27 @@ present_label() {
     esac
 }
 
+# Wait until $1 holds at least $3 present windows for label $2, giving up after
+# $4 seconds (rc 1).
+#
+# This is the "startup is over" signal, and it has to come from the workload
+# rather than from the fd count. A count reads flat both when the shell has
+# finished opening lazily and when it has not begun, and those are
+# indistinguishable from the outside: a baseline of 8 was taken on a slow runner
+# against a settled ~58, so ordinary opening afterwards read as fds+32 and
+# failed a backend that leaks nothing. Two windows means the startup transient
+# the fold already drops has passed and frames are flowing.
+await_windows() {  # await_windows <log> <label> <count> <deadline_s>
+    local log="$1" label="$2" want="$3" deadline="$4" waited=0 have
+    while (( waited < deadline )); do
+        have="$(grep -c "\[${label}\] profile (n=" "$log" 2>/dev/null)" || have=0
+        (( have >= want )) && return 0
+        sleep 1
+        waited=$(( waited + 1 ))
+    done
+    return 1
+}
+
 # ─── Census capture ──────────────────────────────────────────────────────────
 # Fold every steady-state present window for $label (skipping the first, which
 # carries the startup transient) into: frames discarded stalls b60 b30 b20 bslow
@@ -252,8 +273,20 @@ census_backend() {  # census_backend <backend>
     if [[ "$COUNT_FDS" == "1" && "$CENSUS_SECS" -gt "$FD_GRACE" ]]; then
         sleep "$FD_GRACE"
         local settle_t0="$SECONDS" rest
-        fd_base="$(settle_fds "$pid" "$FD_SETTLE_STEP" "$FD_SETTLE_TRIES" \
-                              "$FD_SETTLE_DELTA")" || fd_base=""
+        # Frames first, then flatness. Waiting for a steady present window is
+        # what tells startup from a stalled launch; settle_fds then rides out the
+        # jitter once the shell is actually working.
+        if await_windows "$hs_log" "$(present_label "$backend")" 2 \
+                         "$(( CENSUS_SECS - 2 ))"; then
+            fd_base="$(settle_fds "$pid" "$FD_SETTLE_STEP" "$FD_SETTLE_TRIES" \
+                                  "$FD_SETTLE_DELTA")" || fd_base=""
+        else
+            fd_base=""
+            log "$backend no steady present window in $(( CENSUS_SECS - 2 ))s;" \
+                "fd check skipped (the frames floor below covers this run)"
+        fi
+        [[ -n "$fd_base" ]] && log "$backend fd baseline ${fd_base} taken" \
+            "$(( SECONDS - settle_t0 ))s after the grace"
         # Settling comes out of the steady-state window rather than on top of it,
         # so the census still runs for about CENSUS_SECS. Keep a floor: a leak
         # needs some frames to show, and a baseline read right before the final
