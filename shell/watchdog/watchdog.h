@@ -18,6 +18,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <map>
 #include <mutex>
@@ -67,6 +68,10 @@ class Watchdog {
   std::map<WatchdogSource, std::string>
       sourceNames_;   // Source ID to name mapping
   std::mutex mutex_;  // Protect access to activeSources_ and sourceNames_
+  // Wakes the service thread's half-interval wait so a shutdown does not have
+  // to wait it out. Signaled under mutex_ with running_ already false, which
+  // is what makes the wakeup impossible to miss.
+  std::condition_variable wake_;
   std::atomic<bool> running_{false};  // Whether the watchdog thread is running
   std::thread watchdogThread_;        // Single thread handling timeouts
 
