@@ -35,7 +35,15 @@
 #               fds a backend may gain before COUNT_FDS fails it (default 16)
 #   FD_GRACE    seconds to let the run settle before the fd baseline is taken
 #               (default 4). Must be less than CENSUS_SECS or the check is
-#               skipped.
+#               skipped. The grace is a floor, not the whole wait: the baseline
+#               is then read until it stops climbing, because a count still
+#               rising is not a baseline.
+#   FD_SETTLE_STEP / FD_SETTLE_TRIES / FD_SETTLE_DELTA
+#               seconds between baseline reads, how many to take at most, and
+#               the jitter two reads may differ by and still count as settled
+#               (defaults 1, 8, 2). The last read is the baseline whether or not
+#               it settled -- see test/lib/fd_count.sh for why not giving up is
+#               what keeps a real leak from being skipped.
 #   BASELINE    baseline file for --check when no path argument is given
 #   KEEP_LOG    1 = keep the per-backend homescreen logs on exit and say where
 #               (default 0). Every census figure is folded out of those logs, so
@@ -68,6 +76,9 @@ KEEPUP_MIN="${KEEPUP_MIN:-0.90}"
 COUNT_FDS="${COUNT_FDS:-0}"
 FD_GROWTH_LIMIT="${FD_GROWTH_LIMIT:-16}"
 FD_GRACE="${FD_GRACE:-4}"
+FD_SETTLE_STEP="${FD_SETTLE_STEP:-1}"
+FD_SETTLE_TRIES="${FD_SETTLE_TRIES:-8}"
+FD_SETTLE_DELTA="${FD_SETTLE_DELTA:-2}"
 
 MODE="selfcheck"     # selfcheck | write | check
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -240,8 +251,16 @@ census_backend() {  # census_backend <backend>
     local fd_base="" fd_why=""
     if [[ "$COUNT_FDS" == "1" && "$CENSUS_SECS" -gt "$FD_GRACE" ]]; then
         sleep "$FD_GRACE"
-        fd_base="$(count_fds "$pid")" || fd_base=""
-        sleep $(( CENSUS_SECS - FD_GRACE ))
+        local settle_t0="$SECONDS" rest
+        fd_base="$(settle_fds "$pid" "$FD_SETTLE_STEP" "$FD_SETTLE_TRIES" \
+                              "$FD_SETTLE_DELTA")" || fd_base=""
+        # Settling comes out of the steady-state window rather than on top of it,
+        # so the census still runs for about CENSUS_SECS. Keep a floor: a leak
+        # needs some frames to show, and a baseline read right before the final
+        # one would pass anything.
+        rest=$(( CENSUS_SECS - FD_GRACE - (SECONDS - settle_t0) ))
+        (( rest < 2 )) && rest=2
+        sleep "$rest"
     else
         sleep "$CENSUS_SECS"
     fi
