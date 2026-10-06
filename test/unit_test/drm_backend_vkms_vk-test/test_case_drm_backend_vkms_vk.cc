@@ -292,6 +292,36 @@ TEST_F(VulkanDrmVkms, AVtSwitchLeavesTheBackendAbleToPresent) {
       << "the backend returned true but committed nothing after resume";
 }
 
+// Resume has to release the plane-layer path's slots too, not just the
+// single-plane indexes.
+//
+// The plane path tracks its live stores in plane_scanning_slots and
+// plane_pending_slots rather than scanning_slot/pending_slot, and
+// AcquireScanoutSlot excludes all four when hunting for a reusable slot.
+// Resume used to clear only the two indexes, so after a VT switch the plane
+// lists still reserved slots nothing was scanning out -- with the ring full,
+// every CreateBackingStoreImpl afterwards failed with "scanout ring
+// exhausted" rather than reusing a released buffer.
+//
+// The lists are seeded directly: what is under test is the clearing, not the
+// plane path that fills them, and the fixture's vkms has no second plane to
+// commit a real plane frame onto.
+TEST_F(VulkanDrmVkms, AVtSwitchReleasesThePlaneLayerSlots) {
+  ASSERT_TRUE(PresentOneFrame()) << "the first present is the blocking modeset";
+
+  backend_->SetPlaneSlotsHeldForTest(3, 2);
+  ASSERT_EQ(backend_->PlaneSlotsHeldForTest(), 5U)
+      << "the fixture did not take the seeded slots";
+
+  backend_->OnSessionPaused();
+  backend_->OnSessionResumed(backend_->DrmFdForTest());
+
+  EXPECT_EQ(backend_->PlaneSlotsHeldForTest(), 0U)
+      << "master loss ended that scanout, so resume must hand the slots back; "
+         "left populated they reserve buffers nothing is using";
+  EXPECT_TRUE(PresentOneFrame()) << "nothing presented after the switch back";
+}
+
 // ─── Stall detector (#660) ─────────────────────────────────────────────────
 //
 // The EGL backend got this in #659; this one can stall the same way and was

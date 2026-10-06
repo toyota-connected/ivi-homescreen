@@ -1638,6 +1638,29 @@ bool VulkanDrmBackend::FlipPendingForTest() const {
          compositor_->flip_pending.load(std::memory_order_acquire);
 }
 
+size_t VulkanDrmBackend::PlaneSlotsHeldForTest() const {
+  if (!compositor_) {
+    return 0;
+  }
+  return compositor_->plane_scanning_slots.size() +
+         compositor_->plane_pending_slots.size();
+}
+
+void VulkanDrmBackend::SetPlaneSlotsHeldForTest(const size_t scanning,
+                                                const size_t pending) {
+  if (!compositor_) {
+    return;
+  }
+  compositor_->plane_scanning_slots.clear();
+  compositor_->plane_pending_slots.clear();
+  for (size_t i = 0; i < scanning; ++i) {
+    compositor_->plane_scanning_slots.push_back(i);
+  }
+  for (size_t i = 0; i < pending; ++i) {
+    compositor_->plane_pending_slots.push_back(scanning + i);
+  }
+}
+
 void VulkanDrmBackend::SetFlipPendingForTest(const bool pending) {
   if (compositor_) {
     compositor_->flip_pending.store(pending, std::memory_order_release);
@@ -1679,9 +1702,11 @@ void VulkanDrmBackend::OnSessionPaused() {
 void VulkanDrmBackend::OnSessionResumed(const int new_fd) {
   ihs::log::info("[VulkanDrmBackend] session resumed (VT switch-in, fd={})",
                  new_fd);
-  session_paused_.store(false, std::memory_order_release);
   CompositorState* c = compositor_.get();
   if (c == nullptr) {
+    // No slot state to reset, so nothing to order the flag behind -- but it
+    // still has to come back, or the backend stays paused for good.
+    session_paused_.store(false, std::memory_order_release);
     return;
   }
   // preserve-fd contract, as on the EGL side: per-fd state (FB ids, the
@@ -1707,8 +1732,21 @@ void VulkanDrmBackend::OnSessionResumed(const int new_fd) {
   c->plane_topology_changed = true;
   c->scanning_slot = -1;
   c->pending_slot = -1;
+  // The plane-layer path keeps its live stores in these two lists instead of
+  // the single-plane indexes above, and AcquireScanoutSlot excludes both when
+  // looking for a reusable slot. Master loss ended that scanout as surely as
+  // the single-plane one, so leaving them populated reserves slots nothing is
+  // using: with the ring full, every CreateBackingStoreImpl after a VT switch
+  // fails with "scanout ring exhausted" instead of reusing a released buffer.
+  c->plane_scanning_slots.clear();
+  c->plane_pending_slots.clear();
   c->flip_pending.store(false, std::memory_order_release);
   vsync_.SetSourcePending(false);
+  // Published last, not first: CommitPlaneFrame on the raster thread gates on
+  // this flag, and clearing it before the slot bookkeeping above would let a
+  // commit run against stale scanning/pending state. Nothing between here and
+  // the top of this function reads it.
+  session_paused_.store(false, std::memory_order_release);
   // Getting a frame out of Flutter again is the whole point of resuming, and
   // there are two cases. A baton parked before the revoke has nothing coming to
   // return it -- the blocking re-modeset sends no event either -- so hand it
