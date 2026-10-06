@@ -151,8 +151,9 @@ Module responsibilities:
 - **Platform views.** The `ihs_pv_*` surface — factory install/remove,
   `negotiate`, the capability query, the native-context and grant accessors,
   and every `IhsPvCallbacks` entry but `presented` and `scanout_hint` — is
-  **platform-thread only**. The exceptions are `ihs_pv_submit`, `ihs_pv_submit_layers` and
-  `ihs_pv_retire_buffer`, which any producer thread may call; `presented`
+  **platform-thread only**. The exceptions are `ihs_pv_submit`,
+  `ihs_pv_submit_layers`, `ihs_pv_retire_buffer` and
+  `ihs_pv_request_renegotiate`, which any producer thread may call; `presented`
   and `scanout_hint`, which the shell calls from its display thread (ABI 1.12
   and 1.13); and
   `ihs_pv_post_platform_task` / `ihs_pv_is_platform_thread`, which exist so a
@@ -348,7 +349,8 @@ dlt-receive -a localhost
   the platform thread. Calling from any other thread is undefined behavior.
   A plugin on another thread posts the work with
   `ihs_pv_post_platform_task()` (ABI 1.8); `ihs_pv_submit`,
-  `ihs_pv_submit_layers` and `ihs_pv_retire_buffer` are any-thread, and the
+  `ihs_pv_submit_layers`, `ihs_pv_retire_buffer` and
+  `ihs_pv_request_renegotiate` are any-thread, and the
   shell calls `IhsPvCallbacks::presented` and `scanout_hint` from its display
   thread.
 - **The library cannot be unloaded.** `libihs_shared.so.1` is linked with

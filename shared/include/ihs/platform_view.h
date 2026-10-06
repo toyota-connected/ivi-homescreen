@@ -43,7 +43,8 @@
  *      reads the kind-specific payload from the grant accessors, and renders.
  *   4. An output/mode change or plane-pressure event revokes the grant and
  *      fires IhsPvCallbacks::renegotiate; a plugin that ignores it is dropped
- *      to the software floor automatically.
+ *      to the software floor automatically. A producer that needs one before
+ *      the host would ask asks with ihs_pv_request_renegotiate.
  *
  * Threading: register/unregister-factory and negotiate are platform-thread
  * only. The factory and every IhsPvCallbacks entry are invoked on the platform
@@ -293,6 +294,32 @@ typedef struct IhsPvCapabilities {
   size_t format_count;
   uint64_t render_device; /* dev_t; 0 when unknown (1.14) */
 } IhsPvCapabilities;
+
+/*
+ * Ask the host to renegotiate this view's surface path. Schedules
+ * IhsPvCallbacks::renegotiate on the platform thread and returns immediately;
+ * the callback re-runs ihs_pv_negotiate as it would for a host-initiated one.
+ *
+ * Callable from any thread, like ihs_pv_submit, because a producer notices the
+ * need from whatever thread it submits on. Same lifetime rule as submit: the
+ * view must still be registered for the duration of the call. The scheduled
+ * half is safe either way -- it carries the view id, not the pointer, and does
+ * nothing if the view is gone by the time it runs.
+ *
+ * This exists because a producer seeing repeated ihs_pv_submit failures
+ * concludes its grant is dead and stops submitting, and nothing else would
+ * ever revive the view: only an output/mode change or plane pressure makes the
+ * host renegotiate on its own, and neither may happen.
+ *
+ * Returns IHS_PV_OK once scheduled, IHS_PV_ERR_INVALID for a NULL view,
+ * IHS_PV_ERR_NO_REGISTRY when no host is installed or it predates this call,
+ * or IHS_PV_ERR_NO_BACKEND when the platform task runner is not up.
+ * Scheduling is not a promise that the path changes: the host may grant the
+ * same kind again.
+ *
+ * Added in 1.18.
+ */
+IHS_EXPORT int ihs_pv_request_renegotiate(IhsPlatformView* view);
 
 /*
  * Report the surface kinds (and formats) the active backend can grant into
@@ -1043,6 +1070,9 @@ typedef struct IhsPlatformViewApi {
                        size_t layer_count,
                        uint64_t seq,
                        int* out_release_fence_fds);
+  /* Appended after submit_layers; read only when struct_size covers it.
+   * See ihs_pv_request_renegotiate. Added in 1.18. */
+  int (*request_renegotiate)(IhsPlatformView* view);
 } IhsPlatformViewApi;
 
 #ifdef __cplusplus

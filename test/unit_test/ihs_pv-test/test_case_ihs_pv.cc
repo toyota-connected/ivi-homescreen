@@ -50,6 +50,8 @@ struct MockHost {
   int query_calls = 0;
   int grant_calls = 0;
   int submit_calls = 0;
+  int renegotiate_requests = 0;
+  IhsPlatformView* last_renegotiate_view = nullptr;
   uint32_t last_grant_kind = IHS_PV_KIND_NONE;
   // Stands in for a host whose planes cannot scan out what was negotiated:
   // when set, grant rewrites the modifier and negotiate must report it back.
@@ -140,6 +142,13 @@ int mock_submit(void* u,
   return IHS_PV_OK;
 }
 
+int mock_request_renegotiate(void* u, IhsPlatformView* view) {
+  auto* m = static_cast<MockHost*>(u);
+  ++m->renegotiate_requests;
+  m->last_renegotiate_view = view;
+  return IHS_PV_OK;
+}
+
 IhsPvHost make_host(MockHost* m) {
   IhsPvHost h{};
   h.struct_size = sizeof(h);
@@ -154,6 +163,7 @@ IhsPvHost make_host(MockHost* m) {
   h.grant_drm_plane_id = mock_grant_plane;
   h.grant_shm_fd = mock_grant_shm;
   h.submit = mock_submit;
+  h.request_renegotiate = mock_request_renegotiate;
   return h;
 }
 
@@ -216,6 +226,49 @@ TEST(IhsPvSurface, HeadlessDegradesCleanly) {
   grant.struct_size = sizeof(grant);
   EXPECT_EQ(ihs_pv_negotiate(fake_view(), &req, &grant),
             IHS_PV_ERR_NO_REGISTRY);
+  EXPECT_EQ(ihs_pv_request_renegotiate(fake_view()), IHS_PV_ERR_NO_REGISTRY);
+}
+
+// A producer that sees its submits failing has no other way to revive the view:
+// only an output/mode change or plane pressure makes the host renegotiate on
+// its own, and neither need ever happen. #719.
+TEST(IhsPvRequestRenegotiate, ForwardsToTheHost) {
+  MockHost host_state;
+  const IhsPvHost host = make_host(&host_state);
+  ihs_pv_set_host(&host);
+
+  EXPECT_EQ(ihs_pv_request_renegotiate(fake_view()), IHS_PV_OK);
+  EXPECT_EQ(host_state.renegotiate_requests, 1);
+  EXPECT_EQ(host_state.last_renegotiate_view, fake_view());
+
+  detach_host();
+}
+
+TEST(IhsPvRequestRenegotiate, RejectsANullView) {
+  MockHost host_state;
+  const IhsPvHost host = make_host(&host_state);
+  ihs_pv_set_host(&host);
+
+  EXPECT_EQ(ihs_pv_request_renegotiate(nullptr), IHS_PV_ERR_INVALID);
+  EXPECT_EQ(host_state.renegotiate_requests, 0)
+      << "a null view must be rejected before the host is called";
+
+  detach_host();
+}
+
+// request_renegotiate was appended to IhsPvHost, so a host compiled against an
+// older header has a struct_size that stops short of it. Reading the member
+// anyway would be a read past the end of what the host actually allocated.
+TEST(IhsPvRequestRenegotiate, DeclinesAHostThatPredatesTheEntry) {
+  MockHost host_state;
+  IhsPvHost host = make_host(&host_state);
+  host.struct_size = offsetof(IhsPvHost, request_renegotiate);
+  ihs_pv_set_host(&host);
+
+  EXPECT_EQ(ihs_pv_request_renegotiate(fake_view()), IHS_PV_ERR_NO_REGISTRY);
+  EXPECT_EQ(host_state.renegotiate_requests, 0);
+
+  detach_host();
 }
 
 TEST(IhsPvSurface, NullArgumentsRejected) {

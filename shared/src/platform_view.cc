@@ -244,6 +244,26 @@ extern "C" int ihs_pv_post_platform_task(IhsPvTaskFn fn, void* user_data) {
   return h->post_platform_task(h->user_data, fn, user_data);
 }
 
+// request_renegotiate was appended after submit_layers; a host built against an
+// older header does not have it.
+static const IhsPvHost* host_with_request_renegotiate() {
+  const IhsPvHost* h = host();
+  constexpr size_t kNeeded = offsetof(IhsPvHost, request_renegotiate) +
+                             sizeof(IhsPvHost::request_renegotiate);
+  return (h != nullptr && h->struct_size >= kNeeded) ? h : nullptr;
+}
+
+extern "C" int ihs_pv_request_renegotiate(IhsPlatformView* view) {
+  if (view == nullptr) {
+    return IHS_PV_ERR_INVALID;
+  }
+  const IhsPvHost* h = host_with_request_renegotiate();
+  if (h == nullptr || h->request_renegotiate == nullptr) {
+    return IHS_PV_ERR_NO_REGISTRY;
+  }
+  return h->request_renegotiate(h->user_data, view);
+}
+
 extern "C" int ihs_pv_is_platform_thread(void) {
   const IhsPvHost* h = host_with_platform_thread();
   if (h == nullptr || h->is_platform_thread == nullptr) {
@@ -496,7 +516,7 @@ const IhsPlatformViewApi* platform_view_api() noexcept {
       &ihs_pv_grant_shm_fd,       &ihs_pv_submit,
       &ihs_pv_assets_path,        &ihs_pv_post_platform_task,
       &ihs_pv_is_platform_thread, &ihs_pv_retire_buffer,
-      &ihs_pv_submit_layers,
+      &ihs_pv_submit_layers,      &ihs_pv_request_renegotiate,
   };
   return &api;
 }
