@@ -74,6 +74,13 @@ struct BackendVulkanContext {
   // outlives the context; null/0 when the backend does not report them.
   const char* const* device_extensions;
   size_t device_extension_count;
+  // The Vulkan version usable on @device: the lower of what the instance asked
+  // for and what the physical device supports. 0 when not reported.
+  uint32_t api_version;
+  // The instance extensions the backend enabled, backend-owned like
+  // @device_extensions; null/0 when not reported.
+  const char* const* instance_extensions;
+  size_t instance_extension_count;
 };
 
 // The unified display-target interface: a Backend owns surface lifecycle, the

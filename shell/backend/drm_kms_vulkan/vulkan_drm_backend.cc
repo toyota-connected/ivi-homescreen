@@ -91,6 +91,17 @@ const auto& d() {
   return vk::detail::defaultDispatchLoaderDynamic;
 }
 
+// The version the instance asks for. A device is used no further than that,
+// whatever it supports.
+constexpr uint32_t kInstanceApiVersion = VK_API_VERSION_1_1;
+
+// The Vulkan version usable on @physical_device under this instance.
+uint32_t UsableApiVersion(VkPhysicalDevice physical_device) {
+  VkPhysicalDeviceProperties props{};
+  d().vkGetPhysicalDeviceProperties(physical_device, &props);
+  return std::min(props.apiVersion, kInstanceApiVersion);
+}
+
 // Owns a file descriptor for the rest of its scope.
 //
 // The scanout barrier hands back an owned sync_file on every explicit-sync
@@ -3635,7 +3646,7 @@ bool VulkanDrmBackend::CreateInstance(std::string& refusal_reason) {
   VkApplicationInfo app{};
   app.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
   app.pApplicationName = "ivi-homescreen";
-  app.apiVersion = VK_API_VERSION_1_1;
+  app.apiVersion = kInstanceApiVersion;
 
   if (enable_validation_) {
     uint32_t layer_count = 0;
@@ -4149,6 +4160,9 @@ bool VulkanDrmBackend::GetVulkanContext(BackendVulkanContext* out) const {
       reinterpret_cast<void*>(&PluginInstanceProcAddr);
   out->device_extensions = enabled_device_extensions_.data();
   out->device_extension_count = enabled_device_extensions_.size();
+  out->api_version = UsableApiVersion(physical_device_);
+  out->instance_extensions = enabled_instance_extensions_.data();
+  out->instance_extension_count = enabled_instance_extensions_.size();
   return true;
 }
 

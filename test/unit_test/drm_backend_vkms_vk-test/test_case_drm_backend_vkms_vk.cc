@@ -27,6 +27,7 @@
 // to drive a real commit and a real page flip, which is what every ordering
 // question about this backend needs.
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -449,6 +450,35 @@ TEST_F(VulkanDrmVkms, APausedSessionIsNotReportedAsAStall) {
 
   backend_->OnSessionResumed(backend_->DrmFdForTest());
   EXPECT_FALSE(backend_->SessionPaused());
+}
+
+// What a plugin on the shared device gates its entry points on: the version
+// usable on the device, which is not the physical device's own when the
+// instance asked for less, and the instance extensions it may rely on.
+TEST_F(VulkanDrmVkms, TheVulkanContextReportsTheUsableVersion) {
+  BackendVulkanContext vk{};
+  ASSERT_TRUE(backend_->GetVulkanContext(&vk));
+  ASSERT_NE(vk.get_instance_proc_addr, nullptr);
+  auto gipa =
+      reinterpret_cast<PFN_vkGetInstanceProcAddr>(vk.get_instance_proc_addr);
+  auto props = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties>(gipa(
+      static_cast<VkInstance>(vk.instance), "vkGetPhysicalDeviceProperties"));
+  ASSERT_NE(props, nullptr);
+  VkPhysicalDeviceProperties p{};
+  props(static_cast<VkPhysicalDevice>(vk.physical_device), &p);
+
+  EXPECT_NE(vk.api_version, 0u) << "the version went unreported";
+  EXPECT_EQ(vk.api_version, std::min(p.apiVersion, VK_API_VERSION_1_1))
+      << "the reported version is not the lower of the instance's and the "
+         "physical device's";
+  // This backend enables instance extensions only for validation or a
+  // surface, so the list may be empty; what is listed must be there.
+  if (vk.instance_extension_count > 0) {
+    ASSERT_NE(vk.instance_extensions, nullptr);
+  }
+  for (size_t i = 0; i < vk.instance_extension_count; ++i) {
+    EXPECT_NE(vk.instance_extensions[i], nullptr) << "entry " << i;
+  }
 }
 
 int main(int argc, char** argv) {
