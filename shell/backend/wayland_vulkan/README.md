@@ -110,10 +110,13 @@ internal wall-clock scheduler. The decision is logged once at startup.
   `SetVsyncBaton`; `RequestPresentationFeedback` mints a per-commit feedback
   object; `StopVsyncMonitor` cancels outstanding objects before engine
   teardown.
-- **Queue serialization.** `wayland_vulkan::VulkanQueueInterposer` serializes
-  host access to the single `VkQueue` shared between the Flutter raster thread
-  and the platform thread, via the embedder's
-  `get_instance_proc_address_callback` proc-swap contract.
+- **Queue serialization.** `ihs::vulkan::QueueInterposer`
+  (`../vulkan/queue_interposer.{h,cc}`) serializes host access to the single
+  `VkQueue` shared between the Flutter raster thread, the platform thread and
+  platform-view producers, via the embedder's
+  `get_instance_proc_address_callback` proc-swap contract. `vkDeviceWaitIdle`
+  holds every queue lock registered for the device, the engine's shutdown idle
+  and the backend's own included.
 - **Compositor (`BUILD_COMPOSITOR`).** `wl_vulkan::LayerCompositor`
   src-over-blends the Flutter layer stack into a slot image so platform-view
   layers under transparent Flutter overlays compose correctly;
@@ -131,7 +134,6 @@ internal wall-clock scheduler. The decision is logged once at startup.
 | Path | Responsibility |
 |------|----------------|
 | [wayland_vulkan.h](wayland_vulkan.h) / [wayland_vulkan.cc](wayland_vulkan.cc) | `WaylandVulkanBackend` — Vulkan/WSI bring-up, swapchain present, vsync forwarding, present-mode selection, profiling, compositor + dma-buf present paths |
-| [vulkan_queue_interposer.h](vulkan_queue_interposer.h) / [vulkan_queue_interposer.cc](vulkan_queue_interposer.cc) | `VulkanQueueInterposer` — externally-synchronized host access to the shared `VkQueue` via the embedder proc-address swap |
 | [vulkan_backing_store.h](vulkan_backing_store.h) / [vulkan_backing_store.cc](vulkan_backing_store.cc) | `VulkanBackingStore` — device-local `VkImage` render target (optionally dma-buf-exported), layout tracking (`BUILD_COMPOSITOR`) |
 | [wl_layer_compositor.h](wl_layer_compositor.h) / [wl_layer_compositor.cc](wl_layer_compositor.cc) | `LayerCompositor` — premultiplied src-over layer composition into a slot image (`BUILD_COMPOSITOR`) |
 | [wl_dmabuf_present.h](wl_dmabuf_present.h) / [wl_dmabuf_present.cc](wl_dmabuf_present.cc) | `DmabufImage` / `WlDmabufBuffer` + `NegotiateModifiers` — modifier-tiled dma-buf slots and modifier negotiation (`IVI_VK_DMABUF`) |

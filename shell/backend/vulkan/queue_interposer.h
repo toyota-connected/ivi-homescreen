@@ -55,6 +55,12 @@ namespace ihs::vulkan {
  * procs through a vkGetDeviceProcAddr that it obtained from the same
  * callback — which Interpose() shims.
  *
+ * vkDeviceWaitIdle is interposed too. The spec requires host access to every
+ * VkQueue created from the device to be externally synchronized for its
+ * duration, so the trampoline holds every mutex registered for that device.
+ * The engine idles the device during shutdown while platform-view producers
+ * may still be submitting; without this, that call races them.
+ *
  * Calls on a queue that was never registered (or was unregistered) pass
  * through to the real proc without locking.
  */
@@ -69,7 +75,7 @@ class QueueInterposer {
    * handed the queue. The mutex must outlive every submission on the queue;
    * unregister before it (or the queue's device) is destroyed.
    */
-  static void RegisterQueue(VkQueue queue, std::mutex* mutex);
+  static void RegisterQueue(VkDevice device, VkQueue queue, std::mutex* mutex);
 
   /**
    * @brief Remove a queue's registration. Safe to call for a queue that was
@@ -78,14 +84,23 @@ class QueueInterposer {
   static void UnregisterQueue(VkQueue queue);
 
   /**
+   * @brief vkDeviceWaitIdle with every queue registered for @p device locked.
+   *
+   * For the backend's own device idles; the interposed vkDeviceWaitIdle uses
+   * the same path. The caller must not hold any of those queue mutexes.
+   */
+  static VkResult DeviceWaitIdle(VkDevice device, PFN_vkDeviceWaitIdle real);
+
+  /**
    * @brief Interpose a proc-address lookup from the engine.
    *
    * If @p procname is a vkQueue* entry point requiring external
    * synchronization (vkQueueSubmit, vkQueueSubmit2[KHR], vkQueueWaitIdle,
-   * vkQueuePresentKHR, vkQueueBindSparse, vkQueue*DebugUtilsLabelEXT) or
-   * vkGetDeviceProcAddr, resolves the real proc via @p gipa, caches it, and
-   * returns a locking trampoline. Returns nullptr for every other name; the
-   * caller should then fall through to its normal resolution.
+   * vkQueuePresentKHR, vkQueueBindSparse, vkQueue*DebugUtilsLabelEXT),
+   * vkDeviceWaitIdle or vkGetDeviceProcAddr, resolves the real proc via @p
+   * gipa, caches it, and returns a locking trampoline. Returns nullptr for
+   * every other name; the caller should then fall through to its normal
+   * resolution.
    */
   static PFN_vkVoidFunction Interpose(VkInstance instance,
                                       const char* procname,
