@@ -833,12 +833,41 @@ IHS_EXPORT size_t ihs_pv_grant_shm_slots(IhsPlatformView* view,
  * double close does not report itself -- it lands several submits later on an
  * unrelated fd that reused the number.
  */
+/*
+ * What a frame says about itself beyond its format.
+ *
+ * Claimed in 1.20 from the first of the two bytes IhsFrame reserved and
+ * required to be 0, so a producer built against an older header already sends
+ * 0 here, which means exactly what the registry assumed before: top-first
+ * rows. No struct_size guard, for the same reason -- the byte is inside the
+ * struct as first published, and a guard on it would be decoration.
+ *
+ * Unknown bits are ignored rather than rejected, so a frame from a newer
+ * producer still composites.
+ */
+typedef enum IhsFrameFlags {
+  IHS_PV_FRAME_FLAGS_NONE = 0,
+  /*
+   * Row 0 is the bottom row, the order a GL producer renders in. Without this
+   * the registry reads the rows top-first, so a GL producer had to blit its
+   * frame upside down into the ring every frame to be shown the right way up.
+   * Set it instead and render straight into the ring: the compositor samples
+   * the texture flipped, which costs nothing it was not already doing for the
+   * opposite case.
+   *
+   * Only the import path honors it -- a frame that reaches a DRM plane is
+   * scanned out by the display controller, which has no such control.
+   */
+  IHS_PV_FRAME_BOTTOM_UP = 1u << 0
+} IhsFrameFlags;
+
 typedef struct IhsFrame {
   size_t struct_size;
   IhsFormatModifier format;
   uint8_t color_space; /* IhsColorSpace — YUV frames; DEFAULT for RGB */
   uint8_t color_range; /* IhsColorRange */
-  uint8_t reserved[2]; /* pad; must be 0 */
+  uint8_t flags;       /* IhsFrameFlags; 0 is what it has always meant (1.20) */
+  uint8_t reserved;    /* pad; must be 0 */
   uint32_t width;      /* source pixels; the registry scales to the view rect */
   uint32_t height;
   uint32_t plane_count; /* 1..4 */

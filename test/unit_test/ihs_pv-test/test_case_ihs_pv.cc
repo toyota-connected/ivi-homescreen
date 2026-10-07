@@ -63,6 +63,8 @@ struct MockHost {
   uint64_t last_grant_modifier_in = 0;
   IhsPvFactory last_factory = nullptr;
   IhsPlatformView* last_submit_view = nullptr;
+  // IhsFrame::flags as the host saw it; that byte was reserved before 1.20.
+  uint8_t last_submit_flags = 0;
 };
 
 int mock_register(void* u,
@@ -133,12 +135,13 @@ int mock_grant_shm(void* /*u*/, IhsPlatformView* /*view*/, size_t* out_stride) {
 
 int mock_submit(void* u,
                 IhsPlatformView* view,
-                const IhsFrame* /*frame*/,
+                const IhsFrame* frame,
                 int /*acquire_fence_fd*/,
                 int* out_release_fence_fd) {
   auto* m = static_cast<MockHost*>(u);
   ++m->submit_calls;
   m->last_submit_view = view;
+  m->last_submit_flags = frame != nullptr ? frame->flags : 0;
   if (out_release_fence_fd != nullptr) {
     *out_release_fence_fd = -1;
   }
@@ -773,6 +776,37 @@ TEST(IhsPvSurface, SubmitForwardsToHost) {
   EXPECT_EQ(host_state.submit_calls, 1);
   EXPECT_EQ(host_state.last_submit_view, fake_view());
   EXPECT_EQ(release_fd, -1);
+  // An old producer leaves the byte at 0, which is the top-first row order the
+  // registry assumed before the byte was claimed.
+  EXPECT_EQ(host_state.last_submit_flags, 0u);
+
+  detach_host();
+}
+
+// IHS_PV_FRAME_BOTTOM_UP reaches the host as written (#718). Claimed in 1.20
+// from a byte IhsFrame had reserved, so there is no struct_size to widen and
+// nothing for a producer to opt into beyond setting it.
+TEST(IhsPvFrameFlags, BottomUpReachesTheHost) {
+  MockHost host_state;
+  const IhsPvHost host = make_host(&host_state);
+  ihs_pv_set_host(&host);
+
+  IhsFrame frame{};
+  frame.struct_size = sizeof(frame);
+  frame.width = 64;
+  frame.height = 64;
+  frame.plane_count = 1;
+  frame.flags = IHS_PV_FRAME_BOTTOM_UP;
+  int release_fd = 0;
+  EXPECT_EQ(ihs_pv_submit(fake_view(), &frame, -1, &release_fd), IHS_PV_OK);
+  EXPECT_EQ(host_state.last_submit_flags, IHS_PV_FRAME_BOTTOM_UP);
+
+  // A bit this build does not know is carried, not rejected: a frame from a
+  // newer producer still composites, minus whatever that bit asked for.
+  frame.flags = static_cast<uint8_t>(IHS_PV_FRAME_BOTTOM_UP | 0x80u);
+  EXPECT_EQ(ihs_pv_submit(fake_view(), &frame, -1, &release_fd), IHS_PV_OK);
+  EXPECT_EQ(host_state.last_submit_flags & IHS_PV_FRAME_BOTTOM_UP,
+            IHS_PV_FRAME_BOTTOM_UP);
 
   detach_host();
 }
