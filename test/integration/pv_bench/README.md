@@ -89,6 +89,7 @@ previous process has released DRM master gives a run that produces no report.
 | `PV_BENCH_PAD_ROWS` | tile-rounded | rows of allocation headroom; 0 reproduces \#598 |
 | `PV_BENCH_LAYERS` | `1` | layers per submit (1..3) through `ihs_pv_submit_layers`: the buffer whole, then cropped, placed and mirrored, then cropped, placed and turned a quarter |
 | `PV_BENCH_DRM_PLANE` | *(unset)* | prefer `DRM_PLANE`, keeping import and shm as fallbacks: measures direct scanout rather than composition. Offered only by `drm-kms-egl`; the run logs whether a plane was actually granted, so a fallback cannot be mistaken for a plane measurement |
+| `PV_BENCH_SHM` | *(unset)* | prefer `SOFTWARE_SHM` and fill the host's buffers (ABI 1.19) instead of the producer's own ring: the CPU floor, composited. One layer only. The per-second log's release timeouts should stay 0 |
 
 `PV_BENCH_NO_PV=1` is the control: same Flutter content, no layer. The difference
 between the two runs is what the layer costs.

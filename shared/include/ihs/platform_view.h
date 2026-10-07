@@ -184,7 +184,8 @@ typedef struct IhsHdrMetadata {
  *                          plugin owns its rendering.
  *   DRM_PLANE              bypass: the frame is scanned out directly on a KMS
  *                          overlay plane (zero GPU) — direct-scanout HDR video.
- *   SOFTWARE_SHM           universal floor: a CPU-filled shared-memory buffer.
+ *   SOFTWARE_SHM           universal floor: CPU-filled buffers the host
+ *                          allocates; see ihs_pv_grant_shm_slots.
  *   TEXTURE_EGL_IMAGE      an EGLImage on the backend's own EGLDisplay (see
  *                          ihs_pv_egl_context), sampled as it is: carried by
  *                          an IhsLayer's @image. Not negotiated, and not gated
@@ -196,7 +197,8 @@ typedef struct IhsHdrMetadata {
  *                          EGL_WL_bind_wayland_display with compression
  *                          metadata kept outside the dma-buf. EGL backends
  *                          only. Added in 1.16.
- * A well-formed requirement that includes SOFTWARE_SHM never hard-fails.
+ * A well-formed requirement that includes SOFTWARE_SHM never hard-fails while
+ * the host can allocate its buffers (see ihs_pv_grant_shm_slots).
  *
  * A grant names what the producer delivers, not where the frame lands. Both
  * dma-buf kinds are placed the same way: a backend running the plane compositor
@@ -741,14 +743,10 @@ IHS_EXPORT int ihs_pv_negotiate(IhsPlatformView* view,
  *                  on at the last present, or 0 if it was composited instead.
  *                  Placement is per frame, so read it per frame; it is not a
  *                  reservation. 0 for the kinds that cannot reach a plane.
- *   shm_fd         SOFTWARE_SHM: the shared-memory fd plus stride the plugin
- *                  fills in grant.format; ownership stays with the registry.
- *                  There is no software native-context accessor — the software
- *                  backend is a CPU blitter over a pluggable sink (DRM dumb,
- *                  fbdev, file, SPI LCD), so the plugin never touches the sink;
- *                  it writes grant.format (which the active sink dictates:
- *                  RGB565 for an ST7789, XRGB8888 for fbdev, ...) and the sink
- *                  consumes the buffer.
+ *   shm_fd         SOFTWARE_SHM: slot 0 of ihs_pv_grant_shm_slots, and its
+ *                  stride; ownership stays with the registry. A plugin that
+ *                  uses only this one buffer submits buffer_id 0 and waits on
+ *                  each release fence before writing it again.
  * TEXTURE_DMABUF_IMPORT has no pull-side payload: the plugin renders with the
  * shared context from its native-context accessor and exports a dma-buf per
  * frame via ihs_pv_submit (declared with the producer surface).
@@ -756,6 +754,47 @@ IHS_EXPORT int ihs_pv_negotiate(IhsPlatformView* view,
 /* clang-format on */
 IHS_EXPORT uint32_t ihs_pv_grant_drm_plane_id(IhsPlatformView* view);
 IHS_EXPORT int ihs_pv_grant_shm_fd(IhsPlatformView* view, size_t* out_stride);
+
+/*
+ * The buffers of a SOFTWARE_SHM grant: the host allocates them, the plugin
+ * fills them with the CPU, and the compositor samples them where they are.
+ * There are two, so the plugin can write one while the compositor samples the
+ * other.
+ *
+ * Writes up to @max_fds of their fds to @out_fds and the stride, in bytes, to
+ * *@out_stride (either may be NULL), and returns how many there are: 0 when
+ * the current grant is not SOFTWARE_SHM, or the view has no size yet. The fds
+ * are borrowed and stay open until the grant is revoked; dup one to keep it
+ * longer.
+ *
+ * Each buffer is a LINEAR dma-buf of grant.format at the view's size (the
+ * size IhsPvCallbacks::resize last reported, or the size the view was created
+ * with), with room for at least one more row. It is opened read-write:
+ *   1. mmap it PROT_READ | PROT_WRITE, MAP_SHARED, for stride * (height + 1)
+ *      bytes;
+ *   2. bracket each write with DMA_BUF_IOCTL_SYNC, DMA_BUF_SYNC_START |
+ *      DMA_BUF_SYNC_WRITE before and DMA_BUF_SYNC_END | DMA_BUF_SYNC_WRITE
+ *      after;
+ *   3. submit it with ihs_pv_submit: one plane, a dup of the buffer's fd,
+ *      offset 0, the stride above, @buffer_id its index here, and acquire
+ *      fence -1. A frame naming any other buffer for that index is refused
+ *      with IHS_PV_ERR_INVALID.
+ *   4. Write that buffer again only after the release fence the submit
+ *      returned fires. A SOFTWARE_SHM submit always returns one.
+ * ihs_pv_submit_layers does not take SOFTWARE_SHM frames.
+ *
+ * A resize revokes the grant: these fds stop being accepted, and the host
+ * calls IhsPvCallbacks::resize and then IhsPvCallbacks::renegotiate, from
+ * which the plugin negotiates again and reads the new buffers. Frames already
+ * submitted still release normally.
+ *
+ * Platform-thread only, like ihs_pv_negotiate. Returns 0 when no host is
+ * installed or it predates this call. Added in 1.19.
+ */
+IHS_EXPORT size_t ihs_pv_grant_shm_slots(IhsPlatformView* view,
+                                         int* out_fds,
+                                         size_t max_fds,
+                                         size_t* out_stride);
 
 /*
  * A produced frame: a dma-buf with up to 4 planes (NV12/YUYV and other
@@ -1073,6 +1112,12 @@ typedef struct IhsPlatformViewApi {
   /* Appended after submit_layers; read only when struct_size covers it.
    * See ihs_pv_request_renegotiate. Added in 1.18. */
   int (*request_renegotiate)(IhsPlatformView* view);
+  /* Appended after request_renegotiate; read only when struct_size covers it.
+   * See ihs_pv_grant_shm_slots. Added in 1.19. */
+  size_t (*grant_shm_slots)(IhsPlatformView* view,
+                            int* out_fds,
+                            size_t max_fds,
+                            size_t* out_stride);
 } IhsPlatformViewApi;
 
 #ifdef __cplusplus

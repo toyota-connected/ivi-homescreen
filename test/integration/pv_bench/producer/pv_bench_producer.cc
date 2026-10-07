@@ -30,11 +30,16 @@
  *
  * Load it over FFI and call pv_bench_register() from the platform thread; then
  * put up a platform view of type "pv_bench". See lib/main.dart.
+ *
+ * PV_BENCH_SHM=1 fills the host's SOFTWARE_SHM buffers instead of its own ring
+ * (ABI 1.19): the CPU floor, imported and composited the same way.
  */
 
 #include <fcntl.h>
 #include <gbm.h>
 #include <poll.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <unistd.h>
 #include <cerrno>
 
@@ -49,6 +54,7 @@
 #include <vector>
 
 #include <drm_fourcc.h>
+#include <linux/dma-buf.h>
 
 #include "ihs/platform_view.h"
 
@@ -73,9 +79,9 @@ void Log(const char* fmt, ...) {
  * releasing must not park this thread forever, and a torn frame beats a hang
  * in a benchmark whose whole output is a frame rate.
  */
-void WaitAndCloseFence(int fd) {
+bool WaitAndCloseFence(int fd) {
   if (fd < 0) {
-    return;
+    return true;
   }
   const auto deadline = std::chrono::steady_clock::now() +
                         std::chrono::milliseconds(kFenceWaitMs);
@@ -92,6 +98,16 @@ void WaitAndCloseFence(int fd) {
     }
   }
   ::close(fd);
+  return (pfd.revents & POLLIN) != 0;
+}
+
+// DMA_BUF_IOCTL_SYNC, retried as the kernel asks.
+void DmabufSync(int fd, uint64_t flags) {
+  dma_buf_sync sync{};
+  sync.flags = flags;
+  while (::ioctl(fd, DMA_BUF_IOCTL_SYNC, &sync) != 0 &&
+         (errno == EINTR || errno == EAGAIN)) {
+  }
 }
 
 /* One ring buffer: allocated once, mapped once, handed over many times. */
@@ -106,6 +122,10 @@ struct Slot {
   uint32_t planes = 1;
   int release_fence = -1;
   bool submitted = false;
+  /* A SOFTWARE_SHM buffer: the host's, mapped with mmap rather than gbm, and
+   * written between DMA_BUF_IOCTL_SYNC calls. */
+  bool shm = false;
+  size_t map_bytes = 0;
 };
 
 class BenchView {
@@ -145,6 +165,14 @@ class BenchView {
       Log("capability query failed; nothing to negotiate against");
       return false;
     }
+    shm_ = [] {
+      const char* env = ::getenv("PV_BENCH_SHM");
+      return env != nullptr && env[0] == '1' && env[1] == '\0';
+    }();
+    if (shm_ && layers_ > 1) {
+      Log("PV_BENCH_SHM=1 submits one layer: SOFTWARE_SHM takes no layer list");
+      layers_ = 1;
+    }
     Log("backend=%s kinds=0x%x explicit_sync=%u formats=%zu",
         caps.backend_key ? caps.backend_key : "?", caps.kinds,
         caps.explicit_sync, caps.format_count);
@@ -166,7 +194,7 @@ class BenchView {
       return false;
     }
 
-    if (!OpenGbm()) {
+    if (!shm_ && !OpenGbm()) {
       Log("no gbm device; nothing to submit");
       return false;
     }
@@ -202,6 +230,9 @@ class BenchView {
       req.kinds |= IHS_PV_KIND_DRM_PLANE;
       req.preferred_kind = IHS_PV_KIND_DRM_PLANE;
     }
+    if (shm_) {
+      req.preferred_kind = IHS_PV_KIND_SOFTWARE_SHM;
+    }
     req.formats = wanted.data();
     req.format_count = wanted.size();
     req.needs_alpha = 0;
@@ -227,11 +258,16 @@ class BenchView {
               ? "PV_BENCH_DRM_PLANE=1: granted a DRM plane (direct scanout)"
               : "PV_BENCH_DRM_PLANE=1 but the grant is NOT a plane: this run "
                 "measures the composited path");
+    } else if (shm_) {
+      if (grant.granted_kind != IHS_PV_KIND_SOFTWARE_SHM) {
+        Log("PV_BENCH_SHM=1 but the grant is NOT SOFTWARE_SHM");
+        return false;
+      }
     } else if (grant.granted_kind != IHS_PV_KIND_TEXTURE_DMABUF_IMPORT) {
       Log("not a dma-buf import grant: the plane path is NOT being measured");
     }
 
-    if (!AllocRing()) {
+    if (!(shm_ ? AdoptShmSlots() : AllocRing())) {
       return false;
     }
 
@@ -248,7 +284,9 @@ class BenchView {
     for (Slot& s : slots_) {
       WaitAndCloseFence(s.release_fence);
       s.release_fence = -1;
-      if (s.map) {
+      if (s.map && s.shm) {
+        ::munmap(s.map, s.map_bytes);
+      } else if (s.map) {
         gbm_bo_unmap(s.bo, s.map_data);
       }
       if (s.fd >= 0) {
@@ -327,6 +365,46 @@ class BenchView {
       drm_fd_ = -1;
     }
     return false;
+  }
+
+  /*
+   * The host's buffers for a SOFTWARE_SHM grant: borrowed fds, so each is
+   * dup'd for the life of the slot, and mapped for the image plus the row of
+   * room the host allocates beyond it.
+   */
+  bool AdoptShmSlots() {
+    int fds[4] = {-1, -1, -1, -1};
+    size_t stride = 0;
+    const size_t n = ihs_pv_grant_shm_slots(view_, fds, 4, &stride);
+    if (n == 0 || n > 4) {
+      Log("SOFTWARE_SHM grant has no buffers (%zu)", n);
+      return false;
+    }
+    for (size_t i = 0; i < n; ++i) {
+      Slot s;
+      s.shm = true;
+      s.fd = ::dup(fds[i]);
+      s.stride = static_cast<uint32_t>(stride);
+      s.map_stride = s.stride;
+      s.modifier = DRM_FORMAT_MOD_LINEAR;
+      s.map_bytes = stride * (height_ + 1);
+      void* map = s.fd >= 0
+                      ? ::mmap(nullptr, s.map_bytes, PROT_READ | PROT_WRITE,
+                               MAP_SHARED, s.fd, 0)
+                      : MAP_FAILED;
+      if (map == MAP_FAILED) {
+        Log("mmap of SOFTWARE_SHM buffer %zu failed: %s", i, strerror(errno));
+        if (s.fd >= 0) {
+          ::close(s.fd);
+        }
+        return false;
+      }
+      s.map = map;
+      slots_.push_back(s);
+    }
+    Log("SOFTWARE_SHM: %zu host buffers %ux%u, stride %zu", n, width_, height_,
+        stride);
+    return true;
   }
 
   bool AllocRing() {
@@ -435,6 +513,16 @@ class BenchView {
    * suffer.
    */
   void Fill(const Slot& s, uint32_t frame) const {
+    if (s.shm) {
+      DmabufSync(s.fd, DMA_BUF_SYNC_START | DMA_BUF_SYNC_WRITE);
+    }
+    FillRows(s, frame);
+    if (s.shm) {
+      DmabufSync(s.fd, DMA_BUF_SYNC_END | DMA_BUF_SYNC_WRITE);
+    }
+  }
+
+  void FillRows(const Slot& s, uint32_t frame) const {
     auto* base = static_cast<uint8_t*>(s.map);
     const uint32_t band = (frame * 4) % height_;
     for (uint32_t y = 0; y < height_; ++y) {
@@ -459,7 +547,7 @@ class BenchView {
     f.height = height_;
     f.plane_count = 1;
     f.hdr = nullptr;
-    f.buffer_id = frame % kRingSlots;
+    f.buffer_id = frame % static_cast<uint32_t>(slots_.size());
     /* The registry consumes the fds it is handed -- on the import and again as
      * redundant on a cache hit -- so it gets a dup and the ring keeps its own
      * for the life of the slot. */
@@ -557,6 +645,8 @@ class BenchView {
     auto window = next;
     uint64_t window_frames = 0;
     uint64_t window_wait_ns = 0;
+    uint64_t window_timeouts = 0;
+    uint64_t window_fill_ns = 0;
 
     while (running_.load(std::memory_order_acquire)) {
       next += kFramePeriod;
@@ -572,7 +662,9 @@ class BenchView {
        * ring there is legitimately no fence yet. */
       const auto wait_began = std::chrono::steady_clock::now();
       if (s.submitted) {
-        WaitAndCloseFence(s.release_fence);
+        if (!WaitAndCloseFence(s.release_fence)) {
+          ++window_timeouts;
+        }
         s.release_fence = -1;
       }
       window_wait_ns += static_cast<uint64_t>(
@@ -580,7 +672,12 @@ class BenchView {
               std::chrono::steady_clock::now() - wait_began)
               .count());
 
+      const auto fill_began = std::chrono::steady_clock::now();
       Fill(s, frame);
+      window_fill_ns += static_cast<uint64_t>(
+          std::chrono::duration_cast<std::chrono::nanoseconds>(
+              std::chrono::steady_clock::now() - fill_began)
+              .count());
       Submit(s, frame);
       ++frame;
       ++window_frames;
@@ -600,21 +697,28 @@ class BenchView {
             presented_.exchange(0, std::memory_order_relaxed);
         const uint64_t direct =
             zero_copy_.exchange(0, std::memory_order_relaxed);
-        Log("%.1f submits/s, %.1f presented/s (%.0f%% zero-copy), release "
-            "wait %.2f ms/frame, %llu total",
+        Log("%.1f submits/s, %.1f presented/s (%.0f%% zero-copy), fill %.2f "
+            "ms/frame, release wait %.2f ms/frame, %llu release timeouts, %llu "
+            "total",
             static_cast<double>(window_frames) / secs,
             static_cast<double>(shown) / secs,
             shown ? 100.0 * static_cast<double>(direct) /
                         static_cast<double>(shown)
                   : 0.0,
             window_frames
+                ? static_cast<double>(window_fill_ns) / window_frames / 1e6
+                : 0.0,
+            window_frames
                 ? static_cast<double>(window_wait_ns) / window_frames / 1e6
                 : 0.0,
+            static_cast<unsigned long long>(window_timeouts),
             static_cast<unsigned long long>(
                 submitted_.load(std::memory_order_relaxed)));
         window = now;
         window_frames = 0;
         window_wait_ns = 0;
+        window_timeouts = 0;
+        window_fill_ns = 0;
       }
 
       /* Pace to the display rate. If a frame ran long, skip ahead rather than
@@ -645,6 +749,8 @@ class BenchView {
   uint64_t submit_errors_ = 0;
   // Layers per submit (PV_BENCH_LAYERS, 1..3); 1 is a plain ihs_pv_submit.
   uint32_t layers_ = 1;
+  // PV_BENCH_SHM=1: the host's SOFTWARE_SHM buffers.
+  bool shm_ = false;
 };
 
 void OnResize(void* user_data, double w, double h) {
