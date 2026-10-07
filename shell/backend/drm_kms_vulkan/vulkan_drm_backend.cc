@@ -502,6 +502,8 @@ VulkanDrmBackend::~VulkanDrmBackend() {
   hud_.reset();
 #endif
 #if BUILD_COMPOSITOR
+  // Frees a late dispose deferred that no present reaped. The device is idle.
+  RunAllDeferredDestroys();
   // ~LayerCompositor destroys its render pass, pipelines, samplers, descriptor
   // pools and cached framebuffers/views. As a member it would otherwise be
   // destroyed after this body -- and so after Teardown() -- calling vkDestroy*
@@ -2312,6 +2314,49 @@ std::pair<size_t, size_t> VulkanDrmBackend::FramePlaneDemand(
   return {needed, shape};
 }
 
+void VulkanDrmBackend::ScheduleDeferredDestroy(std::function<void()> fn) {
+  if (!fn) {
+    return;
+  }
+  const std::lock_guard<std::mutex> lock(deferred_destroy_mu_);
+  // A margin of presents past every slot of the scanout ring: a frame that
+  // bound the resource has been submitted by then, and its fence waited when
+  // its slot came round again. Reaped at the top of present, so no frame is
+  // mid-record.
+  deferred_destroys_.emplace_back(deferred_epoch_ + 6, std::move(fn));
+}
+
+void VulkanDrmBackend::ReapDeferredDestroys() {
+  std::vector<std::function<void()>> ready;
+  {
+    const std::lock_guard<std::mutex> lock(deferred_destroy_mu_);
+    ++deferred_epoch_;
+    for (auto it = deferred_destroys_.begin();
+         it != deferred_destroys_.end();) {
+      if (deferred_epoch_ >= it->first) {
+        ready.push_back(std::move(it->second));
+        it = deferred_destroys_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+  for (auto& fn : ready) {
+    fn();  // outside the lock: frees an import through the host's importer
+  }
+}
+
+void VulkanDrmBackend::RunAllDeferredDestroys() {
+  std::vector<std::pair<uint64_t, std::function<void()>>> all;
+  {
+    const std::lock_guard<std::mutex> lock(deferred_destroy_mu_);
+    all.swap(deferred_destroys_);
+  }
+  for (auto& [epoch, fn] : all) {
+    fn();
+  }
+}
+
 #endif  // BUILD_COMPOSITOR
 
 // Both present paths stage a serial -- the plane path and the root-surface ring
@@ -3166,6 +3211,10 @@ bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
     return true;
   }
   CompositorState& c = *compositor_;
+#if BUILD_COMPOSITOR
+  // Before anything records: no frame of this present binds what is freed.
+  ReapDeferredDestroys();
+#endif
   static const bool stage_profile_enabled =
       profiling::FrameProfile::Enabled("IVI_DRMVK_PROFILE");
   const uint64_t t0 = stage_profile_enabled ? MonotonicNs() : 0;
