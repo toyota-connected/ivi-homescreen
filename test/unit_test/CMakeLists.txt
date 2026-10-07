@@ -212,6 +212,11 @@ if (BUILD_COMPOSITOR AND (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_DRM_KMS_EGL
         AND TARGET PkgConfig::DRM)
     add_subdirectory(egl_import_modifiers-test)
 endif ()
+# The EGL release fence the platform-view paths hand an explicit-sync producer.
+# No libdrm here: the case asserts on the exported fd, not on format constants.
+if (BUILD_COMPOSITOR AND (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_DRM_KMS_EGL))
+    add_subdirectory(egl_release_fence-test)
+endif ()
 # The PAGE_FLIP_EVENT drain race behind #367. Drives libdrm and an eventfd
 # directly -- no shell sources -- so it builds wherever libdrm was found, not
 # only under a DRM-KMS backend. Skips itself without vkms + DRM master.

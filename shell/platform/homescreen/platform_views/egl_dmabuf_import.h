@@ -81,6 +81,28 @@ class EglDmabufImporter {
            destroy_sync_ != nullptr && wait_sync_ != nullptr;
   }
 
+  // Whether this display can export a sync_file for work it has queued, i.e.
+  // whether CreateReleaseFenceFd returns anything. Separate from
+  // has_native_fence_sync(): waiting on a producer's fence and exporting one of
+  // our own are different entry points, and a driver may resolve one and not
+  // the other.
+  [[nodiscard]] bool has_release_fence() const {
+    return egl_display_ != nullptr && create_sync_ != nullptr &&
+           destroy_sync_ != nullptr && dup_native_fence_fd_ != nullptr;
+  }
+
+  // Export a sync_file that signals when the GL work queued so far has
+  // completed, for a producer to wait on before it reuses a buffer the
+  // compositor sampled in that work.
+  //
+  // Returns an owned fd, or -1 when there is no native fence sync or the
+  // export failed -- the caller then falls back to whatever release signal it
+  // has (on the platform-view path, the per-slot eventfd).
+  //
+  // GL context must be current: the sync is created against the current
+  // context's command stream, and this flushes it so the fence is exportable.
+  [[nodiscard]] int CreateReleaseFenceFd() const;
+
   // Make the GL driver wait for @fence_fd (a producer acquire sync_file) before
   // any subsequent draw samples the import, by wrapping it in an
   // EGL_SYNC_NATIVE_FENCE_ANDROID and issuing a server-side eglWaitSyncKHR.
@@ -145,6 +167,9 @@ class EglDmabufImporter {
   void* create_sync_{nullptr};   // PFNEGLCREATESYNCKHRPROC
   void* destroy_sync_{nullptr};  // PFNEGLDESTROYSYNCKHRPROC
   void* wait_sync_{nullptr};     // PFNEGLWAITSYNCKHRPROC
+  // PFNEGLDUPNATIVEFENCEFDANDROIDPROC; the export half, used by
+  // CreateReleaseFenceFd. Resolved with the two above.
+  void* dup_native_fence_fd_{nullptr};
   // Optional: null without EGL_EXT_image_dma_buf_import_modifiers, which
   // leaves ImportableModifiers empty.
   void* query_modifiers_{nullptr};  // PFNEGLQUERYDMABUFMODIFIERSEXTPROC

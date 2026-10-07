@@ -420,6 +420,11 @@ class WaylandEglBackend : public Egl, public Backend {
 #if BUILD_COMPOSITOR
   // A platform view's frame was drawn into this frame: note it for the
   // presentation report and for its release. Raster thread.
+  // Views sampled by the frame being composited, collected by NoteSampled and
+  // drained right after EndFrame to export one release fence each. Raster
+  // thread only, cleared every frame.
+  std::vector<std::shared_ptr<ICompositorSurface>> frame_sampled_surfaces_;
+
   void NoteSampled(const std::shared_ptr<ICompositorSurface>& surface,
                    const ICompositorSurface::GlLayerTexture& texture);
 #endif
