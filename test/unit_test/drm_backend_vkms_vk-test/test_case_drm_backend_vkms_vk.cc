@@ -505,6 +505,31 @@ TEST_F(VulkanDrmVkms, ADeferredFreeWaitsForLaterPresents) {
                             "frame still in flight";
 }
 
+// The same margin on the root-surface path, which presents through
+// present_image instead of present_layers: --drm-compositor gl, or Impeller
+// without planes.
+TEST_F(VulkanDrmVkms, ADeferredFreeIsReapedOnTheRootSurfacePath) {
+  FlutterFrameInfo info{};
+  info.struct_size = sizeof(FlutterFrameInfo);
+  info.size = FlutterUIntSize{card_.mode_w, card_.mode_h};
+  auto present_root = [&] {
+    const FlutterVulkanImage image =
+        VulkanDrmBackend::GetNextImageForTest(&info);
+    return image.image != 0 && VulkanDrmBackend::PresentImageForTest(&image);
+  };
+  ASSERT_TRUE(present_root()) << "the first present is the blocking modeset";
+  std::atomic<int> runs{0};
+  backend_->ScheduleDeferredDestroy([&] { runs.fetch_add(1); });
+  int presents = 0;
+  while (runs.load() == 0 && presents < 12) {
+    ASSERT_TRUE(present_root());
+    ++presents;
+  }
+  EXPECT_EQ(runs.load(), 1) << "12 root-surface presents and the free never "
+                               "ran: only teardown would have freed it";
+  EXPECT_GE(presents, 2);
+}
+
 // One a present never reaped still runs, once the device is idle.
 TEST_F(VulkanDrmVkms, AnUnreapedDeferredFreeRunsAtTeardown) {
   std::atomic<int> runs{0};

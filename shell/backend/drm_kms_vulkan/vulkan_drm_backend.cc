@@ -1410,6 +1410,12 @@ bool VulkanDrmBackend::PresentImageCb(void* /*user_data*/,
   const auto slot = static_cast<size_t>(c.root_slot);
   c.root_slot = -1;
   c.slots[slot].engine_owned = false;
+#if BUILD_COMPOSITOR
+  // As at the top of the compositor path. Skipped here, a disposed platform
+  // view's imports were queued and never freed: each one kept its memory and,
+  // on a driver that holds an fd per import, that fd too.
+  self->ReapDeferredDestroys();
+#endif
   static const bool stage_profile_enabled =
       profiling::FrameProfile::Enabled("IVI_DRMVK_PROFILE");
   const uint64_t t0 = stage_profile_enabled ? MonotonicNs() : 0;
