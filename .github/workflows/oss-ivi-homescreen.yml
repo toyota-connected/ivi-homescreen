@@ -82,16 +82,47 @@ jobs:
       # The C++ dependencies are submodules and carry no package metadata, so a
       # scanner walking the tree reports nothing. Generated here rather than
       # committed, so it cannot drift from .gitmodules.
+      #
+      # The OpenVEX document is a second file because no scanner reads both
+      # formats: the SBOM carries the same assertions inline for a CycloneDX-aware
+      # tool, and grype only honors them via `--vex`. Generating the SBOM also
+      # re-verifies every VEX claim against the pinned submodule, so a pin moved
+      # back behind a fix fails this step rather than shipping a stale
+      # not_affected.
+      # The checkout above takes everything at depth 1 with no tags, and
+      # gen_sbom reads both. Tags name each component's release, and are fetched
+      # for all of them: a component without one falls back to its commit, which
+      # says less and makes the document depend on how it was cloned. Full
+      # history is only needed where a VEX entry asserts an ancestor -- one
+      # submodule -- and the script names which, so this cannot drift from the
+      # assertions that need it.
+      #
+      # The superproject's tags are fetched on the same principle, though at this
+      # depth describe still cannot reach one, so the SBOM names this build by
+      # commit. That is honest for an untagged build and becomes a version once
+      # releases are tagged and reachable.
+      - name: Fetch the tags and history the SBOM reads
+        run: |
+          git fetch --tags --quiet origin || true
+          git submodule foreach --quiet 'git fetch --tags --quiet origin || true'
+          for m in $(python3 scripts/gen_sbom.py --deep-submodules); do
+            git -C "$m" fetch --unshallow --quiet origin || true
+          done
+
       - name: Generate SBOM
         run: |
-          python3 scripts/gen_sbom.py --output homescreen.cdx.json
+          python3 scripts/gen_sbom.py \
+            --output homescreen.cdx.json \
+            --vex-output homescreen.openvex.json
           python3 -c "import json;d=json.load(open('homescreen.cdx.json'));print(len(d['components']),'components')"
 
       - name: Publish SBOM
         uses: actions/upload-artifact@v7
         with:
           name: homescreen.cdx.json
-          path: homescreen.cdx.json
+          path: |
+            homescreen.cdx.json
+            homescreen.openvex.json
 
       - name: Publish Debug Artifact TGZ
         uses: actions/upload-artifact@v7
