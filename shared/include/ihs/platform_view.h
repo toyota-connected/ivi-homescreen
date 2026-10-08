@@ -409,9 +409,14 @@ IHS_EXPORT IHS_WEAK_IMPORT int ihs_pv_is_platform_thread(void);
  *
  * The plugin MUST resolve every Vulkan function through
  * @get_instance_proc_addr. It is the same interposed loader the engine is
- * given: it returns the real entry points, except that
- * vkQueueSubmit/vkQueueSubmit2/vkQueuePresentKHR (and their device-level
- * resolution) are wrapped to take the shared-queue lock. So a plugin that
+ * given: it returns the real entry points, except that vkQueueSubmit,
+ * vkQueueSubmit2, vkQueueSubmit2KHR, vkQueueWaitIdle, vkQueuePresentKHR,
+ * vkQueueBindSparse and vkQueue{Begin,End,Insert}DebugUtilsLabelEXT (and their
+ * resolution through the vkGetDeviceProcAddr it returns) are wrapped to take
+ * the shared-queue lock for the length of the call. The lock is not
+ * recursive. vkDeviceWaitIdle is not wrapped and cannot be: it would need
+ * every queue of the device, so a plugin on this device never calls it. So a
+ * plugin that
  * resolves through it is serialized on the queue automatically, the same way
  * the engine is — resolving through any other loader reintroduces the data
  * race.
@@ -433,10 +438,13 @@ IHS_EXPORT IHS_WEAK_IMPORT int ihs_pv_is_platform_thread(void);
  * exposes no engine->backend hand-off semaphore, so the engine, the backend and
  * the plugin all submit on @queue (one graphics queue) — host access to a
  * VkQueue must be externally synchronized (issue #208). Per-submit
- * serialization is handled for you by the interposed loader above; use
- * @queue_lock / @queue_unlock only to make a multi-call sequence atomic (e.g. a
- * vkQueueSubmit immediately followed by a vkQueuePresentKHR). Both are NULL
- * when the active backend is not Vulkan.
+ * serialization is handled for you by the interposed loader above.
+ * @queue_lock / @queue_unlock, for making a multi-call sequence atomic, are
+ * not provided yet: both are NULL on every backend.
+ *
+ * @api_version is the version usable on @device: the lower of what the
+ * backend's instance asked for and what the physical device supports. Do not
+ * use the physical device's own apiVersion instead; it can be higher.
  */
 typedef struct IhsVulkanContext {
   size_t struct_size;
@@ -445,13 +453,13 @@ typedef struct IhsVulkanContext {
   void* device;          /* VkDevice */
   void* queue;           /* VkQueue (shared engine/backend/plugin) */
   uint32_t queue_family_index;
-  uint32_t api_version;         /* VK_API_VERSION the device was created with */
+  uint32_t api_version;         /* usable VK_API_VERSION; see above */
   void* get_instance_proc_addr; /* interposed PFN_vkGetInstanceProcAddr */
   const char* const* device_extensions;
   size_t device_extension_count;
   const char* const* instance_extensions;
   size_t instance_extension_count;
-  void (*queue_lock)(void); /* only for multi-call atomicity; see above */
+  void (*queue_lock)(void); /* NULL: not provided yet; see above */
   void (*queue_unlock)(void);
   /* The backend's VmaAllocator, so a plugin allocates from the same memory
      pools / budget / defrag rather than a competing allocator. NULL until VMA

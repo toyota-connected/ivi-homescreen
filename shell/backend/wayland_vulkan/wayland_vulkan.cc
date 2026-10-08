@@ -66,6 +66,17 @@ static const auto& d() {
   return vk::detail::defaultDispatchLoaderDynamic;
 }
 
+// The version the instance asks for. A device is used no further than that,
+// whatever it supports.
+static constexpr uint32_t kInstanceApiVersion = VK_API_VERSION_1_1;
+
+// The Vulkan version usable on @physical_device under this instance.
+static uint32_t UsableApiVersion(VkPhysicalDevice physical_device) {
+  VkPhysicalDeviceProperties props{};
+  d().vkGetPhysicalDeviceProperties(physical_device, &props);
+  return std::min(props.apiVersion, kInstanceApiVersion);
+}
+
 #define S1(x) #x
 #define S2(x) S1(x)
 #define LOCATION __FILE__ " : " S2(__LINE__)
@@ -144,9 +155,13 @@ bool WaylandVulkanBackend::GetVulkanContext(BackendVulkanContext* out) const {
   out->get_instance_proc_addr =
       reinterpret_cast<void*>(&WaylandVulkanBackend::PluginInstanceProcAddr);
   // enabled_device_extensions_ outlives every context handed out (it is set
-  // once at device creation), so exposing its storage directly is safe.
+  // once at device creation), so exposing its storage directly is safe; so
+  // does enabled_instance_extensions_.
   out->device_extensions = enabled_device_extensions_.data();
   out->device_extension_count = enabled_device_extensions_.size();
+  out->api_version = UsableApiVersion(physical_device_);
+  out->instance_extensions = enabled_instance_extensions_.data();
+  out->instance_extension_count = enabled_instance_extensions_.size();
   return true;
 }
 
@@ -437,7 +452,7 @@ void WaylandVulkanBackend::createInstance() {
   app_info.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
   app_info.pEngineName = "No Engine";
   app_info.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-  app_info.apiVersion = VK_MAKE_VERSION(1, 1, 0);
+  app_info.apiVersion = kInstanceApiVersion;
 
   VkInstanceCreateInfo info{};
   info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;

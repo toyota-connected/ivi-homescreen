@@ -35,6 +35,7 @@ VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
@@ -65,6 +66,17 @@ namespace {
 // so there is no static-init-order dependency across TUs.
 const auto& d() {
   return vk::detail::defaultDispatchLoaderDynamic;
+}
+
+// The version the instance asks for. A device is used no further than that,
+// whatever it supports.
+constexpr uint32_t kInstanceApiVersion = VK_API_VERSION_1_1;
+
+// The Vulkan version usable on @physical_device under this instance.
+uint32_t UsableApiVersion(VkPhysicalDevice physical_device) {
+  VkPhysicalDeviceProperties props{};
+  d().vkGetPhysicalDeviceProperties(physical_device, &props);
+  return std::min(props.apiVersion, kInstanceApiVersion);
 }
 
 HeadlessVulkanBackend* BackendOf(void* user_data) {
@@ -331,7 +343,7 @@ bool HeadlessVulkanBackend::CreateInstance() {
   VkApplicationInfo app{};
   app.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
   app.pApplicationName = "ivi-homescreen headless_vulkan";
-  app.apiVersion = VK_API_VERSION_1_1;
+  app.apiVersion = kInstanceApiVersion;
 
   // Optional instance extensions for a later export path: enable them only when
   // the loader advertises them so this stays minimal and cross-driver safe.
@@ -1449,6 +1461,9 @@ bool HeadlessVulkanBackend::GetVulkanContext(BackendVulkanContext* out) const {
       reinterpret_cast<void*>(d().vkGetInstanceProcAddr);
   out->device_extensions = enabled_device_extensions_.data();
   out->device_extension_count = enabled_device_extensions_.size();
+  out->api_version = UsableApiVersion(physical_device_);
+  out->instance_extensions = enabled_instance_extensions_.data();
+  out->instance_extension_count = enabled_instance_extensions_.size();
   return true;
 }
 

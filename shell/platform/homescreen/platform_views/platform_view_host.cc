@@ -2597,8 +2597,10 @@ int HostVulkanContext(void* user_data, IhsVulkanContext* out) {
   // outlives this context.
   out->device_extensions = vk.device_extensions;
   out->device_extension_count = vk.device_extension_count;
-  // Instance extensions, queue lock, and the VMA allocator are not exposed by
-  // the backend yet; the plugin allocates manually until then.
+  out->api_version = vk.api_version;
+  out->instance_extensions = vk.instance_extensions;
+  out->instance_extension_count = vk.instance_extension_count;
+  // No queue lock or VMA allocator yet: both stay null.
   return IHS_PV_OK;
 }
 
