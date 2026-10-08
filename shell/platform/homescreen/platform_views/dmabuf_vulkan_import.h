@@ -93,6 +93,43 @@ class DmabufVulkanImporter {
 
   void Destroy(ImportedImage* image) const;
 
+  // A driver can require more of an imported dma-buf than the image it backs.
+  // v3dv allocates align(allocationSize + V3D_TFU_READAHEAD_SIZE, page) and
+  // refuses an fd smaller than that (Mesa 25.0.7, v3dv_AllocateMemory ->
+  // device_import_bo), while v3d's own GBM allocator adds no such slack -- so
+  // an image whose size leaves fewer than @padding spare bytes in its last
+  // page cannot be imported at req.size, the only allocationSize a dedicated
+  // allocation may use (#723). These two state that arithmetic; Import applies
+  // it. @page is the driver's page constant, not the host's.
+
+  // Bytes the dma-buf must hold for the driver to import an image of
+  // @image_bytes.
+  [[nodiscard]] static constexpr VkDeviceSize ImportFootprint(
+      VkDeviceSize image_bytes,
+      VkDeviceSize padding,
+      VkDeviceSize page = 4096) {
+    if (padding == 0) {
+      return image_bytes;
+    }
+    return ((image_bytes + padding + page - 1) / page) * page;
+  }
+
+  // The allocationSize to retry a refused import with, or 0 when no retry can
+  // succeed. Asking @padding short brings the footprint down to the image's
+  // own size rounded to a page, which a dma-buf holding @held bytes may
+  // already cover; see Import for why that is out of spec.
+  [[nodiscard]] static constexpr VkDeviceSize ShortImportSize(
+      VkDeviceSize image_bytes,
+      VkDeviceSize held,
+      VkDeviceSize padding,
+      VkDeviceSize page = 4096) {
+    if (padding == 0 || image_bytes <= padding) {
+      return 0;
+    }
+    const VkDeviceSize ask = image_bytes - padding;
+    return held >= ImportFootprint(ask, padding, page) ? ask : 0;
+  }
+
  private:
   VkInstance instance_{VK_NULL_HANDLE};
   VkPhysicalDevice physical_device_{VK_NULL_HANDLE};

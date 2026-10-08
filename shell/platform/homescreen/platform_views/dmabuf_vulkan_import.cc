@@ -20,6 +20,7 @@
 
 #include <array>
 #include <cstdint>
+#include <mutex>
 
 #include "logging/logging.h"
 
@@ -169,7 +170,10 @@ bool DmabufVulkanImporter::Init(VkInstance instance,
   // (V3D_TFU_READAHEAD_SIZE, 64 bytes) and rounds up to a page before
   // checking the dma-buf is that large. A dma-buf sized exactly to its image
   // -- what the v3d GL driver hands a client -- is then a page short and the
-  // import fails with VK_ERROR_INVALID_EXTERNAL_HANDLE (#691). Mesa 25.0.7;
+  // import fails with VK_ERROR_INVALID_EXTERNAL_HANDLE (#691). The image size
+  // alone decides whether a frame hits it -- one leaving 64 bytes spare in its
+  // last page imports, one leaving fewer does not -- which is why the same
+  // producer's toplevel buffers imported while its popup did not. Mesa 25.0.7;
   // main still leaves such a dma-buf 64 bytes short.
   if (auto get_properties2 =
           reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2>(
@@ -485,31 +489,52 @@ bool DmabufVulkanImporter::Import(const IhsFrame& frame,
   // On success Vulkan owns the imported fd; on failure ownership stays with the
   // caller, so leave it untouched here.
   VkResult alloc_rc = allocate_memory_(device_, &mai, nullptr, &memory);
-  if (alloc_rc == VK_ERROR_INVALID_EXTERNAL_HANDLE && import_padding_ != 0 &&
-      req.size > import_padding_) {
-    // v3dv (see Init): ask the padding short, so the size it checks the
-    // dma-buf against is the image's own. Only a dma-buf at least that large
-    // gets here; a short one fails below as it would anyway.
+  if (alloc_rc == VK_ERROR_INVALID_EXTERNAL_HANDLE && import_padding_ != 0) {
     const off_t held = ::lseek(frame.plane_fd[0], 0, SEEK_END);
     ::lseek(frame.plane_fd[0], 0, SEEK_SET);
-    if (held >= 0 && static_cast<VkDeviceSize>(held) >= req.size) {
-      mai.allocationSize = req.size - import_padding_;
+    const VkDeviceSize ask =
+        held < 0 ? 0
+                 : ShortImportSize(req.size, static_cast<VkDeviceSize>(held),
+                                   import_padding_);
+    if (ask != 0) {
+      // Out of spec, deliberately. VUID-vkBindImageMemory-size-01049 and
+      // VUID-VkMemoryDedicatedAllocateInfo-image-02964 both want
+      // allocationSize == req.size, and at that size v3dv requires a dma-buf a
+      // page larger than the one v3d's own GBM allocator hands a client for
+      // the same image, so such a frame cannot be imported in spec at all
+      // (#723). The bo v3dv ends up with is still align(req.size, 4096): the
+      // short ask drops only the read-ahead slack the GL driver never had
+      // either, and the image stays fully backed. Validation flags both VUIDs
+      // on every frame that takes this path.
+      static std::once_flag warned;
+      std::call_once(warned, [padding = import_padding_] {
+        ihs::log::warn(
+            "[ihs_pv] dma-buf import: v3dv refuses a dma-buf sized to its own "
+            "image, so importing it {} bytes short of the requirement -- out "
+            "of spec, and reported by validation as "
+            "VUID-vkBindImageMemory-size-01049 and "
+            "VUID-VkMemoryDedicatedAllocateInfo-image-02964 on every such "
+            "frame (#723)",
+            padding);
+      });
+      mai.allocationSize = ask;
       alloc_rc = allocate_memory_(device_, &mai, nullptr, &memory);
     }
   }
   if (alloc_rc != VK_SUCCESS) {
-    // The two numbers that explain this failure, and the reason it was
-    // unreadable without them: a driver refuses the import when the image needs
-    // more memory than the producer's dma-buf holds, and it can need more than
-    // req.size -- a tiled layout is padded past the frame geometry, and the
-    // producer has no way to compute that padding. Equal sizes here mean the
-    // driver wants padding neither side accounted for; a short dma-buf means
-    // the producer under-allocated outright.
+    // The three numbers that explain this failure, and the reason it was
+    // unreadable without them: the image's own requirement, what the driver
+    // demands of the dma-buf for it (more, where the driver pads an import),
+    // and what the dma-buf holds. A short dma-buf means the producer
+    // under-allocated; one that covers the image but not the driver's demand
+    // is #723.
     const off_t dmabuf_size = ::lseek(frame.plane_fd[0], 0, SEEK_END);
     ihs::log::warn(
         "[ihs_pv] dma-buf import: vkAllocateMemory (import) failed ({}); image "
-        "wants {} bytes, dma-buf holds {} ({}x{} stride {} modifier {:#x})",
+        "wants {} bytes, the driver requires {}, dma-buf holds {} ({}x{} "
+        "stride {} modifier {:#x})",
         static_cast<int>(alloc_rc), req.size,
+        ImportFootprint(req.size, import_padding_),
         static_cast<long long>(dmabuf_size), frame.width, frame.height,
         frame.plane_stride[0], frame.format.modifier);
     destroy_image_(device_, image, nullptr);

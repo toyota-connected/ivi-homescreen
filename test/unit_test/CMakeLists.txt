@@ -208,6 +208,12 @@ endif ()
 if (BUILD_BACKEND_WAYLAND_VULKAN OR BUILD_BACKEND_DRM_KMS_VULKAN)
     add_subdirectory(queue_interposer-test)
 endif ()
+# The Vulkan dma-buf importer's short-allocation arithmetic (#723). Header-only
+# logic, but gated with the importer it belongs to -- same reasoning as
+# egl_import_modifiers-test below.
+if (BUILD_COMPOSITOR AND (BUILD_BACKEND_WAYLAND_VULKAN OR BUILD_BACKEND_DRM_KMS_VULKAN))
+    add_subdirectory(vk_import_slack-test)
+endif ()
 add_subdirectory(deferred_retire_set-test)
 # The SOFTWARE_SHM grant's buffers and release relay live in the platform-view
 # host, which only a compositor build has.
