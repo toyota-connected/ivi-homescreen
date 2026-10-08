@@ -1653,6 +1653,13 @@ constexpr uint64_t kImportRetireMargin = 8;
 
 IhsPluginView::~IhsPluginView() {
   Teardown();
+  // The backend has let go of the view, so it holds none of its frames: fire
+  // every release it never handed back. A producer that keeps its buffers past
+  // the view waits on these.
+  const std::lock_guard<std::mutex> lock(mutex);
+  while (!release_efds.empty()) {
+    SignalRelease(release_efds.begin()->first);
+  }
 }
 
 void IhsPluginView::Teardown() {
@@ -1671,14 +1678,9 @@ void IhsPluginView::Teardown() {
   }
   // Extra layers first: dropping one signals its slot through release_efds.
   ClearExtraLayersLocked();
-  // The producer has been stopped (DisposePlugin above), so just retire any
-  // release eventfds it never got to wait on; it owns and closes its own dups.
-  for (const auto& [buffer_id, fd] : release_efds) {
-    if (fd >= 0) {
-      close(fd);
-    }
-  }
-  release_efds.clear();
+  // The release eventfds stay. A frame the compositor still holds is handed
+  // back through this view when the compositor lets go of it, and the
+  // destructor fires whatever is left.
 #if IVI_HAVE_VULKAN
   // With explicit-sync acquire the compositor's read of these imports is gated
   // on the producer's fence, so a re-create can dispose this view while a

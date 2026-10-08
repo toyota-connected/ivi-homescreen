@@ -1809,6 +1809,45 @@ class PvHostVkmsPlanes : public PvHostVkms {
     return rc;
   }
 
+  // SubmitSeq, keeping the release fence in *@p release.
+  int SubmitKeepingRelease(const GbmSolidBuffer& buffer,
+                           const uint32_t buffer_id,
+                           const uint64_t seq,
+                           int* release) const {
+    IhsFrame f = FrameOf(buffer, buffer_id);
+    IhsLayer layer = LayerOf(&f, 1);
+    return ihs_pv_submit_layers(producer_.view, &layer, 1, seq, release);
+  }
+
+  // A frame the compositor still holds when its view is disposed is released
+  // once the compositor lets go of it. Its release fence used to be closed at
+  // dispose without firing, so a producer that keeps its buffers past the
+  // view waited on it forever.
+  void ExpectAHeldFrameReleasedAfterDispose() {
+    const int fd = display_->SharedDevice()->fd();
+    GbmSolidBuffer a;
+    GbmSolidBuffer b;
+    ASSERT_TRUE(a.Create(fd, kViewW, kViewH, 0xFF1E7A46u));
+    ASSERT_TRUE(b.Create(fd, kViewW, kViewH, 0xFF7A1E46u));
+    ASSERT_EQ(SubmitSeq(a, 0, 1), IHS_PV_OK);
+    ASSERT_EQ(PresentUntilReported(1).size(), 1U);
+
+    int release = -1;
+    ASSERT_EQ(SubmitKeepingRelease(b, 1, 2, &release), IHS_PV_OK);
+    ASSERT_GE(release, 0) << "no release fence for the frame";
+    ASSERT_TRUE(Present());
+    ASSERT_TRUE(state_.platform_view_registry->Dispose(1, false));
+    producer_.view = nullptr;
+
+    bool fired = Readable(release);
+    for (int i = 0; i < 10 && !fired; ++i) {
+      Present();
+      fired = Readable(release);
+    }
+    ::close(release);
+    EXPECT_TRUE(fired) << "the frame held at dispose was never released";
+  }
+
   // Present until the producer has been told about @p want frames, or give up.
   std::vector<FakeProducer::Presented> PresentUntilReported(size_t want,
                                                             int max = 10) {
@@ -2230,6 +2269,10 @@ TEST_F(PvHostVkmsGl, ACompositedFrameIsReportedPresented) {
                               IHS_PV_PRESENTED_HW_COMPLETION)
       << "composited, so not zero-copy";
   EXPECT_NE(got[0].msc, 0U);
+}
+
+TEST_F(PvHostVkmsGl, AFrameHeldAtDisposeIsStillReleased) {
+  ExpectAHeldFrameReleasedAfterDispose();
 }
 
 // A view disposed while a release is still queued for it, and a new view in
