@@ -1819,6 +1819,57 @@ class PvHostVkmsPlanes : public PvHostVkms {
     return ihs_pv_submit_layers(producer_.view, &layer, 1, seq, release);
   }
 
+  // A frame on a plane when its view leaves the scene is released once the
+  // scene retires the view's layer, whether the view is disposed before the
+  // frames without it are presented or after. The release rides the scene's
+  // later commits, which present the UI alone.
+  void ExpectAFrameOnAPlaneReleasedOnceTheViewLeaves(const bool dispose_first) {
+    const int fd = display_->SharedDevice()->fd();
+    GbmSolidBuffer a;
+    GbmSolidBuffer b;
+    ASSERT_TRUE(a.Create(fd, kViewW, kViewH, 0xFF1E7A46u));
+    ASSERT_TRUE(b.Create(fd, kViewW, kViewH, 0xFF7A1E46u));
+    ASSERT_EQ(SubmitSeq(a, 0, 1), IHS_PV_OK);
+    ASSERT_EQ(PresentUntilReported(1).size(), 1U);
+
+    int release = -1;
+    ASSERT_EQ(SubmitKeepingRelease(b, 1, 2, &release), IHS_PV_OK);
+    ASSERT_GE(release, 0) << "no release fence for the frame";
+    ASSERT_TRUE(Present());
+    ASSERT_TRUE(Present());
+    ASSERT_FALSE(Readable(release)) << "released while still on screen";
+
+    FlutterBackingStoreConfig cfg{};
+    cfg.struct_size = sizeof(FlutterBackingStoreConfig);
+    cfg.size = FlutterSize{static_cast<double>(card_.mode_w),
+                           static_cast<double>(card_.mode_h)};
+    FlutterBackingStore bs{};
+    ASSERT_TRUE(comp_->CreateBackingStore(&cfg, &bs));
+    FlutterLayer ui{};
+    ui.struct_size = sizeof(FlutterLayer);
+    ui.type = kFlutterLayerContentTypeBackingStore;
+    ui.backing_store = &bs;
+    ui.size = cfg.size;
+    const FlutterLayer* layers[] = {&ui};
+
+    if (dispose_first) {
+      ASSERT_TRUE(state_.platform_view_registry->Dispose(1, false));
+      producer_.view = nullptr;
+    }
+    bool fired = false;
+    for (int i = 0; i < 10 && !fired; ++i) {
+      ASSERT_TRUE(comp_->PresentLayers(layers, 1)) << "present " << i;
+      fired = Readable(release);
+      if (i == 0 && !dispose_first) {
+        ASSERT_TRUE(state_.platform_view_registry->Dispose(1, false));
+        producer_.view = nullptr;
+      }
+    }
+    ::close(release);
+    EXPECT_TRUE(fired) << "the frame on the plane was never released";
+    comp_->CollectBackingStore(&bs);
+  }
+
   // A frame the compositor still holds when its view is disposed is released
   // once the compositor lets go of it. Its release fence used to be closed at
   // dispose without firing, so a producer that keeps its buffers past the
@@ -2269,6 +2320,14 @@ TEST_F(PvHostVkmsGl, ACompositedFrameIsReportedPresented) {
                               IHS_PV_PRESENTED_HW_COMPLETION)
       << "composited, so not zero-copy";
   EXPECT_NE(got[0].msc, 0U);
+}
+
+TEST_F(PvHostVkmsPlanes, AFrameOnAPlaneIsReleasedWhenTheViewLeavesFirst) {
+  ExpectAFrameOnAPlaneReleasedOnceTheViewLeaves(/*dispose_first=*/false);
+}
+
+TEST_F(PvHostVkmsPlanes, AFrameOnAPlaneIsReleasedWhenTheViewIsDisposedFirst) {
+  ExpectAFrameOnAPlaneReleasedOnceTheViewLeaves(/*dispose_first=*/true);
 }
 
 TEST_F(PvHostVkmsGl, AFrameHeldAtDisposeIsStillReleased) {
