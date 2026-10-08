@@ -166,15 +166,18 @@ bool DmabufVulkanImporter::Init(VkInstance instance,
     return false;
   }
 
-  // v3dv pads every allocation, imports included, by its TFU read-ahead
-  // (V3D_TFU_READAHEAD_SIZE, 64 bytes) and rounds up to a page before
-  // checking the dma-buf is that large. A dma-buf sized exactly to its image
-  // -- what the v3d GL driver hands a client -- is then a page short and the
-  // import fails with VK_ERROR_INVALID_EXTERNAL_HANDLE (#691). The image size
-  // alone decides whether a frame hits it -- one leaving 64 bytes spare in its
-  // last page imports, one leaving fewer does not -- which is why the same
-  // producer's toplevel buffers imported while its popup did not. Mesa 25.0.7;
-  // main still leaves such a dma-buf 64 bytes short.
+  // v3dv charges an imported dma-buf for its TFU read-ahead
+  // (V3D_TFU_READAHEAD_SIZE, 64 bytes) and then rounds to a page, so a dma-buf
+  // sized exactly to its image -- what the v3d GL allocator hands a client --
+  // is a page short and the import fails with
+  // VK_ERROR_INVALID_EXTERNAL_HANDLE (#691, mesa/mesa#16524). Where the 64
+  // bytes are added moved between versions: Mesa 25.0.7 adds them in
+  // v3dv_AllocateMemory, main reports them inside
+  // VkMemoryRequirements::size and rounds that alone. Either way the image
+  // size alone decides whether a frame hits it -- one leaving 64 bytes spare
+  // in its last page imports, one leaving fewer does not -- which is why the
+  // same producer's toplevel buffers imported while its popup did not, and
+  // either way subtracting the read-ahead is what cancels it out.
   if (auto get_properties2 =
           reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2>(
               instance_fn("vkGetPhysicalDeviceProperties2"))) {
@@ -502,10 +505,10 @@ bool DmabufVulkanImporter::Import(const IhsFrame& frame,
       // allocationSize == req.size, and at that size v3dv requires a dma-buf a
       // page larger than the one v3d's own GBM allocator hands a client for
       // the same image, so such a frame cannot be imported in spec at all
-      // (#723). The bo v3dv ends up with is still align(req.size, 4096): the
-      // short ask drops only the read-ahead slack the GL driver never had
-      // either, and the image stays fully backed. Validation flags both VUIDs
-      // on every frame that takes this path.
+      // (#723, mesa/mesa#16524). The bo v3dv ends up with is still
+      // align(req.size, 4096): the short ask drops only the read-ahead slack
+      // the GL driver never had either, and the image stays fully backed.
+      // Validation flags both VUIDs on every frame that takes this path.
       static std::once_flag warned;
       std::call_once(warned, [padding = import_padding_] {
         ihs::log::warn(
@@ -531,7 +534,7 @@ bool DmabufVulkanImporter::Import(const IhsFrame& frame,
     const off_t dmabuf_size = ::lseek(frame.plane_fd[0], 0, SEEK_END);
     ihs::log::warn(
         "[ihs_pv] dma-buf import: vkAllocateMemory (import) failed ({}); image "
-        "wants {} bytes, the driver requires {}, dma-buf holds {} ({}x{} "
+        "wants {} bytes, the driver requires up to {}, dma-buf holds {} ({}x{} "
         "stride {} modifier {:#x})",
         static_cast<int>(alloc_rc), req.size,
         ImportFootprint(req.size, import_padding_),

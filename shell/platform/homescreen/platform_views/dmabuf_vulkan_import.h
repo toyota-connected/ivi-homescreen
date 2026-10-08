@@ -94,16 +94,18 @@ class DmabufVulkanImporter {
   void Destroy(ImportedImage* image) const;
 
   // A driver can require more of an imported dma-buf than the image it backs.
-  // v3dv allocates align(allocationSize + V3D_TFU_READAHEAD_SIZE, page) and
-  // refuses an fd smaller than that (Mesa 25.0.7, v3dv_AllocateMemory ->
-  // device_import_bo), while v3d's own GBM allocator adds no such slack -- so
-  // an image whose size leaves fewer than @padding spare bytes in its last
-  // page cannot be imported at req.size, the only allocationSize a dedicated
-  // allocation may use (#723). These two state that arithmetic; Import applies
+  // v3dv charges the import for its TFU read-ahead and rounds to a page, while
+  // v3d's own GBM allocator adds no such slack -- so an image whose size
+  // leaves fewer than @padding spare bytes in its last page cannot be imported
+  // at req.size, the only allocationSize a dedicated allocation may use
+  // (#723, mesa/mesa#16524). These two state that arithmetic; Import applies
   // it. @page is the driver's page constant, not the host's.
 
   // Bytes the dma-buf must hold for the driver to import an image of
-  // @image_bytes.
+  // @image_bytes, where it adds @padding to the allocation before checking.
+  // Mesa 25.0.7's v3dv does, in v3dv_AllocateMemory; a driver that adds
+  // nothing needs only the allocation itself. The refusal log reports this as
+  // an upper bound, because a main-style v3dv (see below) demands a page less.
   [[nodiscard]] static constexpr VkDeviceSize ImportFootprint(
       VkDeviceSize image_bytes,
       VkDeviceSize padding,
@@ -118,6 +120,21 @@ class DmabufVulkanImporter {
   // succeed. Asking @padding short brings the footprint down to the image's
   // own size rounded to a page, which a dma-buf holding @held bytes may
   // already cover; see Import for why that is out of spec.
+  //
+  // The condition is also what keeps this from papering over a producer that
+  // under-allocated: a dma-buf is page-rounded, so requiring it to cover
+  // align(@image_bytes, @page) is requiring it to hold the image. Offering a
+  // retry merely because the shorter ask would be backed would hand the
+  // driver an image whose last bytes are outside the buffer.
+  //
+  // Where Mesa main will need more than this: it reports the read-ahead inside
+  // VkMemoryRequirements::size instead of adding it at allocation time, so
+  // @image_bytes arrives 64 bytes past the modifier's layout and this declines
+  // the retry -- correctly, on what it can see, since nothing here can tell
+  // scratch padding from image. Deciding it needs the image's real extent from
+  // vkGetImageSubresourceLayout (offset + size over the memory planes) in
+  // place of req.size. Not done while the hardware we run is on 25.0.7, where
+  // the two are equal.
   [[nodiscard]] static constexpr VkDeviceSize ShortImportSize(
       VkDeviceSize image_bytes,
       VkDeviceSize held,
