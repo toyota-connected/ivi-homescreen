@@ -65,6 +65,7 @@
 #include "display/output.h"          // homescreen::BackendFamily
 #include "display/output_manager.h"  // homescreen::OutputManager
 #if BUILD_COMPOSITOR
+#include "platform/homescreen/platform_views/platform_view_host.h"
 #include "platform/homescreen/platform_views/platform_view_registry.h"
 #endif
 #include "engine.h"
@@ -396,6 +397,11 @@ FlutterView::~FlutterView() {
   if (m_flutter_engine) {
     m_flutter_engine->Shutdown();
   }
+#if BUILD_COMPOSITOR
+  // Imports kept for reuse belong to the backend's device, which outlives
+  // this body; free them while it is alive. No frame binds them.
+  ReleasePlatformViewImports();
+#endif
 
   // 3. Now that no engine thread is alive, release the backend's GL contexts
   //    and render surfaces, while m_wayland_window (wl_surface) and m_display

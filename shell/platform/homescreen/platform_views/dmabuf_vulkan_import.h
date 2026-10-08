@@ -16,7 +16,13 @@
 
 #pragma once
 
+#include <sys/types.h>
+
+#include <array>
 #include <cstdint>
+#include <list>
+#include <mutex>
+#include <unordered_map>
 #include <vector>
 
 #include <vulkan/vulkan.h>
@@ -32,8 +38,8 @@
 //
 // All Vulkan entry points are resolved through the backend's interposed
 // get_instance_proc_addr, so submissions are serialized on the shared queue the
-// same way the engine's are. The importer owns nothing beyond the resolved
-// function pointers; the caller owns the ImportedImage lifetimes.
+// same way the engine's are. The caller owns the ImportedImage lifetimes; the
+// importer keeps only the pool of freed imports described at Destroy.
 class DmabufVulkanImporter {
  public:
   struct ImportedImage {
@@ -77,6 +83,9 @@ class DmabufVulkanImporter {
   // must be sampled through a VkSamplerYcbcrConversion of ImportedImage::format
   // -- created in the compositor, since the conversion is baked into the
   // sampler and descriptor layout there, not here.
+  //
+  // A frame whose dma-buf is in the pool (see Destroy), with the same layout,
+  // gets that import back, and its fd is closed.
   bool Import(const IhsFrame& frame, ImportedImage* out) const;
 
   // Modifiers this device will actually import and sample for @p drm_fourcc,
@@ -91,7 +100,28 @@ class DmabufVulkanImporter {
   [[nodiscard]] std::vector<uint64_t> ImportableModifiers(
       uint32_t drm_fourcc) const;
 
+  // Free @image, or keep it for reuse. A producer that pools its buffers
+  // submits the same dma-bufs to its next view, and every import costs more
+  // than the wrappers: on some drivers each import and free leaves an fd open
+  // for good. So the last kPooledImports freed imports are kept, keyed by the
+  // dma-buf they hold, and the oldest is freed past that. A pooled import
+  // holds its dma-buf, so the key cannot come back as another buffer.
+  //
+  // Call only once no frame binds @image: the caller's deferred free has run.
   void Destroy(ImportedImage* image) const;
+
+  // Free the pool, and stop pooling until the next Init. Call before the
+  // device goes; frees after this are immediate.
+  void DrainPool() const;
+
+  static constexpr size_t kPooledImports = 16;
+
+#if defined(UNIT_TEST)
+  [[nodiscard]] size_t PooledForTest() const {
+    const std::lock_guard<std::mutex> lock(pool_mu_);
+    return pool_.size();
+  }
+#endif
 
   // A driver can require more of an imported dma-buf than the image it backs.
   // v3dv charges the import for its TFU read-ahead and rounds to a page, while
@@ -171,4 +201,34 @@ class DmabufVulkanImporter {
   // Import a LINEAR frame into a LINEAR-tiled image rather than a
   // DRM_FORMAT_MODIFIER one; see Init. VeriSilicon only.
   bool linear_tiling_for_linear_{false};
+
+  // What an import was made from: the dma-buf and the layout read from it.
+  struct PoolKey {
+    dev_t dev{0};
+    ino_t ino{0};
+    uint32_t width{0};
+    uint32_t height{0};
+    uint32_t fourcc{0};
+    uint64_t modifier{0};
+    uint32_t plane_count{0};
+    std::array<uint32_t, 2> offset{};
+    std::array<uint32_t, 2> stride{};
+    bool operator==(const PoolKey& o) const {
+      return dev == o.dev && ino == o.ino && width == o.width &&
+             height == o.height && fourcc == o.fourcc &&
+             modifier == o.modifier && plane_count == o.plane_count &&
+             offset == o.offset && stride == o.stride;
+    }
+  };
+  static bool KeyOf(const IhsFrame& frame, PoolKey* out);
+
+  bool ImportNew(const IhsFrame& frame, ImportedImage* out) const;
+  void Free(ImportedImage* image) const;
+
+  mutable std::mutex pool_mu_;
+  // Every live import made from a dma-buf that could be keyed, by image.
+  mutable std::unordered_map<VkImage, PoolKey> keys_;
+  // Freed imports, newest first.
+  mutable std::list<std::pair<PoolKey, ImportedImage>> pool_;
+  mutable bool draining_{false};
 };
