@@ -3728,8 +3728,16 @@ void InstallPlatformViewHost(FlutterDesktopEngineState* engine_state) {
 #endif
 }
 
+void ReleasePlatformViewImports() {
+#if IVI_HAVE_VULKAN
+  g_importer.DrainPool();
+#endif
+}
+
 #else  // !BUILD_COMPOSITOR
 
 void InstallPlatformViewHost(FlutterDesktopEngineState* /*engine_state*/) {}
+
+void ReleasePlatformViewImports() {}
 
 #endif  // BUILD_COMPOSITOR

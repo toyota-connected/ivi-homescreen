@@ -16,6 +16,7 @@
 
 #include "dmabuf_vulkan_import.h"
 
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <array>
@@ -201,6 +202,10 @@ bool DmabufVulkanImporter::Init(VkInstance instance,
   instance_ = instance;
   physical_device_ = physical_device;
   device_ = device;
+  {
+    const std::lock_guard<std::mutex> lock(pool_mu_);
+    draining_ = false;
+  }
   return true;
 }
 
@@ -291,11 +296,59 @@ std::vector<uint64_t> DmabufVulkanImporter::ImportableModifiers(
   return out;
 }
 
+bool DmabufVulkanImporter::KeyOf(const IhsFrame& frame, PoolKey* out) {
+  struct stat st{};
+  if (frame.plane_fd[0] < 0 || ::fstat(frame.plane_fd[0], &st) != 0) {
+    return false;
+  }
+  out->dev = st.st_dev;
+  out->ino = st.st_ino;
+  out->width = frame.width;
+  out->height = frame.height;
+  out->fourcc = frame.format.fourcc;
+  out->modifier = frame.format.modifier;
+  out->plane_count = frame.plane_count;
+  for (uint32_t p = 0; p < frame.plane_count && p < 2; ++p) {
+    out->offset[p] = frame.plane_offset[p];
+    out->stride[p] = frame.plane_stride[p];
+  }
+  return true;
+}
+
 bool DmabufVulkanImporter::Import(const IhsFrame& frame,
                                   ImportedImage* out) const {
   if (!ready() || out == nullptr) {
     return false;
   }
+  PoolKey key;
+  const bool keyed = KeyOf(frame, &key);
+  if (keyed) {
+    std::unique_lock<std::mutex> lock(pool_mu_);
+    for (auto it = pool_.begin(); it != pool_.end(); ++it) {
+      if (it->first == key) {
+        *out = it->second;
+        pool_.erase(it);
+        lock.unlock();
+        ::close(frame.plane_fd[0]);  // the pooled import holds its own
+        if (out->yuv) {
+          ResolveYcbcr(frame, &out->ycbcr_model, &out->ycbcr_range);
+        }
+        return true;
+      }
+    }
+  }
+  if (!ImportNew(frame, out)) {
+    return false;
+  }
+  if (keyed) {
+    const std::lock_guard<std::mutex> lock(pool_mu_);
+    keys_[out->image] = key;
+  }
+  return true;
+}
+
+bool DmabufVulkanImporter::ImportNew(const IhsFrame& frame,
+                                     ImportedImage* out) const {
   bool is_yuv = false;
   const VkFormat format = VkFormatFromFourcc(frame.format.fourcc, &is_yuv);
   if (format == VK_FORMAT_UNDEFINED) {
@@ -568,6 +621,47 @@ void DmabufVulkanImporter::Destroy(ImportedImage* image) const {
   if (image == nullptr || !ready()) {
     return;
   }
+  ImportedImage evicted;
+  {
+    const std::lock_guard<std::mutex> lock(pool_mu_);
+    const auto it = keys_.find(image->image);
+    if (it != keys_.end()) {
+      if (draining_) {
+        keys_.erase(it);
+      } else {
+        pool_.emplace_front(it->second, *image);
+        *image = ImportedImage{};
+        if (pool_.size() > kPooledImports) {
+          evicted = pool_.back().second;
+          pool_.pop_back();
+          keys_.erase(evicted.image);
+        }
+      }
+    }
+  }
+  Free(&evicted);
+  Free(image);
+}
+
+void DmabufVulkanImporter::DrainPool() const {
+  std::list<std::pair<PoolKey, ImportedImage>> pool;
+  {
+    const std::lock_guard<std::mutex> lock(pool_mu_);
+    draining_ = true;
+    pool.swap(pool_);
+    for (const auto& [key, image] : pool) {
+      keys_.erase(image.image);
+    }
+  }
+  if (!ready()) {
+    return;
+  }
+  for (auto& [key, image] : pool) {
+    Free(&image);
+  }
+}
+
+void DmabufVulkanImporter::Free(ImportedImage* image) const {
   if (image->image != VK_NULL_HANDLE) {
     destroy_image_(device_, image->image, nullptr);
     image->image = VK_NULL_HANDLE;

@@ -26,3 +26,8 @@ struct FlutterDesktopEngineState;
 // and backend exist; a no-op without BUILD_COMPOSITOR. Safe to call again to
 // re-point the process-global host at a different engine (last wins).
 void InstallPlatformViewHost(FlutterDesktopEngineState* engine_state);
+
+// Frees the imports the host keeps for reuse across views, and stops keeping
+// them. Call once no engine thread runs and before the backend's device goes;
+// a view torn down after this frees its imports outright.
+void ReleasePlatformViewImports();

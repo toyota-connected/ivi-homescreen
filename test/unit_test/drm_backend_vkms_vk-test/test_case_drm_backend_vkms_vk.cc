@@ -39,10 +39,15 @@
 
 #include "backend/drm_kms_vulkan/vulkan_drm_backend.h"
 #include "logging/logger.hpp"
+#include "platform/homescreen/platform_views/dmabuf_vulkan_import.h"
 #include "task_runner.h"
 
 extern "C" {
+#include <dirent.h>
+#include <drm_fourcc.h>
 #include <fcntl.h>
+#include <gbm.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
@@ -507,6 +512,165 @@ TEST_F(VulkanDrmVkms, AnUnreapedDeferredFreeRunsAtTeardown) {
   EXPECT_EQ(runs.load(), 0);
   backend_.reset();
   EXPECT_EQ(runs.load(), 1);
+}
+#endif
+
+#if BUILD_COMPOSITOR
+namespace {
+
+// Fds this process has open on the dma-buf @ino.
+int FdsOn(const ino_t ino) {
+  int n = 0;
+  DIR* d = opendir("/proc/self/fd");
+  while (dirent* e = d != nullptr ? readdir(d) : nullptr) {
+    struct stat st{};
+    const std::string path = std::string("/proc/self/fd/") + e->d_name;
+    if (stat(path.c_str(), &st) == 0 && st.st_ino == ino) {
+      ++n;
+    }
+  }
+  if (d != nullptr) {
+    closedir(d);
+  }
+  return n;
+}
+
+// A LINEAR XRGB8888 buffer on the card, submitted the way a producer that pools
+// its buffers submits it to each view: a fresh fd every time.
+class PooledBuffer {
+ public:
+  bool Create(const int drm_fd, const uint32_t w, const uint32_t h) {
+    gbm_ = gbm_create_device(drm_fd);
+    if (gbm_ == nullptr) {
+      return false;
+    }
+    bo_ = gbm_bo_create(gbm_, w, h, GBM_FORMAT_XRGB8888,
+                        GBM_BO_USE_LINEAR | GBM_BO_USE_RENDERING);
+    if (bo_ == nullptr) {
+      return false;
+    }
+    const int fd = gbm_bo_get_fd(bo_);
+    struct stat st{};
+    if (fd < 0 || fstat(fd, &st) != 0) {
+      return false;
+    }
+    ino_ = st.st_ino;
+    close(fd);
+    return true;
+  }
+  ~PooledBuffer() {
+    if (bo_ != nullptr) {
+      gbm_bo_destroy(bo_);
+    }
+    if (gbm_ != nullptr) {
+      gbm_device_destroy(gbm_);
+    }
+  }
+  [[nodiscard]] IhsFrame Frame() const {
+    IhsFrame f{};
+    f.struct_size = sizeof(f);
+    f.format.fourcc = DRM_FORMAT_XRGB8888;
+    f.format.modifier = DRM_FORMAT_MOD_LINEAR;
+    f.width = gbm_bo_get_width(bo_);
+    f.height = gbm_bo_get_height(bo_);
+    f.plane_count = 1;
+    f.plane_fd[0] = gbm_bo_get_fd(bo_);
+    f.plane_stride[0] = gbm_bo_get_stride(bo_);
+    return f;
+  }
+  [[nodiscard]] ino_t ino() const { return ino_; }
+
+ private:
+  gbm_device* gbm_{nullptr};
+  gbm_bo* bo_{nullptr};
+  ino_t ino_{0};
+};
+
+}  // namespace
+
+// A producer that pools its buffers submits the same dma-bufs to its next
+// view. The import a closed view freed comes back rather than being made
+// again, and draining the pool frees it.
+TEST_F(VulkanDrmVkms, AFreedImportIsReusedForTheSameDmabuf) {
+  BackendVulkanContext vk{};
+  ASSERT_TRUE(backend_->GetVulkanContext(&vk));
+  DmabufVulkanImporter importer;
+  ASSERT_TRUE(importer.Init(static_cast<VkInstance>(vk.instance),
+                            static_cast<VkPhysicalDevice>(vk.physical_device),
+                            static_cast<VkDevice>(vk.device),
+                            vk.get_instance_proc_addr));
+  PooledBuffer buffer;
+  ASSERT_TRUE(buffer.Create(backend_->DrmFdForTest(), 64, 64));
+  const int base = FdsOn(buffer.ino());
+
+  DmabufVulkanImporter::ImportedImage first;
+  IhsFrame frame = buffer.Frame();
+  if (!importer.Import(frame, &first)) {
+    close(frame.plane_fd[0]);
+    GTEST_SKIP() << "this device does not import a LINEAR dma-buf";
+  }
+  const VkImage image = first.image;
+  importer.Destroy(&first);
+  EXPECT_EQ(importer.PooledForTest(), 1u);
+
+  DmabufVulkanImporter::ImportedImage second;
+  ASSERT_TRUE(importer.Import(buffer.Frame(), &second));
+  EXPECT_EQ(second.image, image) << "imported again rather than reused";
+  EXPECT_EQ(importer.PooledForTest(), 0u);
+  EXPECT_LE(FdsOn(buffer.ino()), base + 1)
+      << "the submitted fd was kept beside the pooled import";
+
+  importer.Destroy(&second);
+  importer.DrainPool();
+  EXPECT_EQ(importer.PooledForTest(), 0u);
+  EXPECT_EQ(FdsOn(buffer.ino()), base) << "the drained import kept its fd";
+
+  // Drained: a free is a free until the next Init.
+  DmabufVulkanImporter::ImportedImage third;
+  ASSERT_TRUE(importer.Import(buffer.Frame(), &third));
+  importer.Destroy(&third);
+  EXPECT_EQ(importer.PooledForTest(), 0u);
+  EXPECT_EQ(FdsOn(buffer.ino()), base);
+}
+
+// Another layout of the same dma-buf is another image, and the pool is bounded.
+TEST_F(VulkanDrmVkms, ThePoolMatchesTheLayoutAndStaysBounded) {
+  BackendVulkanContext vk{};
+  ASSERT_TRUE(backend_->GetVulkanContext(&vk));
+  DmabufVulkanImporter importer;
+  ASSERT_TRUE(importer.Init(static_cast<VkInstance>(vk.instance),
+                            static_cast<VkPhysicalDevice>(vk.physical_device),
+                            static_cast<VkDevice>(vk.device),
+                            vk.get_instance_proc_addr));
+  PooledBuffer buffer;
+  ASSERT_TRUE(buffer.Create(backend_->DrmFdForTest(), 64, 64));
+
+  DmabufVulkanImporter::ImportedImage full;
+  IhsFrame frame = buffer.Frame();
+  if (!importer.Import(frame, &full)) {
+    close(frame.plane_fd[0]);
+    GTEST_SKIP() << "this device does not import a LINEAR dma-buf";
+  }
+  importer.Destroy(&full);
+  IhsFrame cropped = buffer.Frame();
+  cropped.width = 32;
+  DmabufVulkanImporter::ImportedImage part;
+  ASSERT_TRUE(importer.Import(cropped, &part));
+  EXPECT_EQ(part.width, 32u) << "handed back the 64-wide import";
+  EXPECT_EQ(importer.PooledForTest(), 1u);
+  importer.Destroy(&part);
+
+  std::vector<std::unique_ptr<PooledBuffer>> more;
+  for (size_t i = 0; i < DmabufVulkanImporter::kPooledImports + 4; ++i) {
+    more.push_back(std::make_unique<PooledBuffer>());
+    ASSERT_TRUE(more.back()->Create(backend_->DrmFdForTest(), 16, 16));
+    DmabufVulkanImporter::ImportedImage img;
+    ASSERT_TRUE(importer.Import(more.back()->Frame(), &img));
+    importer.Destroy(&img);
+  }
+  EXPECT_EQ(importer.PooledForTest(), DmabufVulkanImporter::kPooledImports);
+  EXPECT_EQ(FdsOn(buffer.ino()), 0) << "the oldest import was never freed";
+  importer.DrainPool();
 }
 #endif
 
