@@ -252,9 +252,10 @@ jobs:
       # which a non-privileged container can't run (no loop devices). Keep the
       # fallback rootless so a cache miss re-extracts instead of dying.
       - name: Ensure rootless sysroot-extract tools
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends fdisk e2fsprogs
+        uses: ./ivi-homescreen/.github/actions/apt-packages
+        with:
+          packages: fdisk e2fsprogs
+          options: --no-install-recommends
 
       # oras pulls the resolved store entries (sysroot base + toolchain) from the
       # OCI cache in the Build step (EMB_CACHE_REGISTRY), so the resolve is a

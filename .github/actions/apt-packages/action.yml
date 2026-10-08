@@ -26,6 +26,13 @@ inputs:
       Packages to install, separated by whitespace. A YAML folded scalar is
       fine: newlines collapse to spaces before this sees them.
     required: true
+  options:
+    description: >-
+      Extra apt-get options for the install, separated by whitespace, e.g.
+      --no-install-recommends. Kept separate from the package list so neither
+      can be mistaken for the other.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -37,6 +44,7 @@ runs:
       # reached the script body would be shell rather than data.
       env:
         IHS_APT_PACKAGES: ${{ inputs.packages }}
+        IHS_APT_OPTIONS: ${{ inputs.options }}
       run: |
         set -euo pipefail
 
@@ -47,6 +55,8 @@ runs:
         set -f
         # shellcheck disable=SC2206
         packages=(${IHS_APT_PACKAGES})
+        # shellcheck disable=SC2206
+        options=(${IHS_APT_OPTIONS})
         set +f
 
         if [ "${#packages[@]}" -eq 0 ]; then
@@ -78,10 +88,64 @@ runs:
           done
         }
 
+        # The retry above fires on a non-zero exit, and a mirror that accepts
+        # the connection and then goes silent never produces one: apt-get
+        # blocks, the loop never comes round again, and the job holds its runner
+        # until the six-hour job limit kills it. That cost 90 runner-hours
+        # across 15 jobs on 2026-10-07, and took two legs of the v3.0 drm-kms
+        # run with it. So every wait apt can sit in is given a bound.
+        #
+        # apt's own timeouts come first because they end a stalled transfer in
+        # seconds, and cleanly -- where the outer `timeout` below has to kill a
+        # download part-way. DPkg::Lock::Timeout covers the other indefinite
+        # wait, which is not a transfer at all: the lock the image's own
+        # unattended-upgrade still holds early in a runner's life.
+        apt_opts=(
+          -o Acquire::http::Timeout=30
+          -o Acquire::https::Timeout=30
+          -o Acquire::Retries=3
+          -o DPkg::Lock::Timeout=120
+        )
+
+        # The backstop, for a hang the options above do not describe. `timeout`
+        # runs under sudo rather than around it, so the signal reaches apt-get
+        # instead of relying on sudo to forward it. Generous enough that it
+        # fires on a stall and not on a slow mirror still making progress:
+        # these installs normally finish inside a minute.
+        bounded() {
+          local limit="$1"
+          shift
+          ${sudo} timeout --kill-after=30s "${limit}" "$@"
+        }
+
+        # Set when a bounded install was killed, which is the only way this
+        # script can leave dpkg half-configured.
+        apt_interrupted=0
+
+        apt_install() {
+          # apt refuses to proceed over an interrupted dpkg, so a killed attempt
+          # has to be cleared before the next one. Conditional because every
+          # call site pays for this function: on the common path there is
+          # nothing to clear, and asking costs a lock this script need not take.
+          if [ "${apt_interrupted}" -eq 1 ]; then
+            bounded 2m dpkg --configure -a || true
+          fi
+
+          local rc=0
+          bounded 10m apt-get "${apt_opts[@]}" install -y \
+            "${options[@]}" "${packages[@]}" || rc=$?
+          # 124 is timeout giving up, 137 a child that needed the SIGKILL.
+          # Either can land in the middle of unpacking.
+          if [ "${rc}" -eq 124 ] || [ "${rc}" -eq 137 ]; then
+            apt_interrupted=1
+          fi
+          return "${rc}"
+        }
+
         # The index is refreshed here, every time, and that is load-bearing.
         # The runner image ships a stale one, and once Ubuntu supersedes a
         # revision the old .deb leaves the mirror -- so installing against the
         # shipped index fetches a version that is no longer there and 404s.
         export DEBIAN_FRONTEND=noninteractive
-        retry ${sudo} apt-get update
-        retry ${sudo} apt-get install -y "${packages[@]}"
+        retry bounded 3m apt-get "${apt_opts[@]}" update
+        retry apt_install
