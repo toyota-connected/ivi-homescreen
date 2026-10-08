@@ -342,6 +342,15 @@ class VulkanDrmBackend final : public Backend {
   bool PresentLayersForTest(const FlutterLayer** layers, const size_t count) {
     return PresentLayersImpl(layers, count);
   }
+  /// The root-surface entry points, as the engine calls them without a
+  /// compositor: take the next image, then present it.
+  static FlutterVulkanImage GetNextImageForTest(
+      const FlutterFrameInfo* frame_info) {
+    return GetNextImageCb(nullptr, frame_info);
+  }
+  static bool PresentImageForTest(const FlutterVulkanImage* image) {
+    return PresentImageCb(nullptr, image);
+  }
   /// Frames this backend has committed, so a test can prove it presented
   /// rather than passing on a return value alone. Defined out of line:
   /// CompositorState is only complete inside the implementation.
