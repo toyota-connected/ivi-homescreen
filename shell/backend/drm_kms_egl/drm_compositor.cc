@@ -2487,6 +2487,10 @@ bool DrmCompositor::PresentView(const int64_t /*view_id*/,
 
 bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
                                   const size_t layer_count) {
+  // A disposed platform view's GL imports, freed with this present's context
+  // current. Freed on the platform thread instead, with no context, the
+  // textures stayed, and the driver kept each one's dma-buf open.
+  backend_->RunDeferredDestroys();
   // Session-pause gate. While inactive, any atomic commit returns
   // EACCES and any flip event never fires. Ack the frame to Flutter
   // (return true) without touching the kernel. The vsync baton stays

@@ -433,6 +433,12 @@ DrmBackend::~DrmBackend() {
   compositor_.reset();
 #endif
 
+  // Platform-view frees no present ran, while the context is current.
+  if (egl_display_ != EGL_NO_DISPLAY && egl_context_ != EGL_NO_CONTEXT) {
+    eglMakeCurrent(egl_display_, egl_surface_, egl_surface_, egl_context_);
+    RunDeferredDestroys();
+  }
+
   if (egl_display_ != EGL_NO_DISPLAY) {
     eglMakeCurrent(egl_display_, EGL_NO_SURFACE, EGL_NO_SURFACE,
                    EGL_NO_CONTEXT);
@@ -1797,7 +1803,29 @@ void DrmBackend::LogPresentedFrame() {
   }
 }
 
+void DrmBackend::ScheduleDeferredDestroy(std::function<void()> fn) {
+  if (!fn) {
+    return;
+  }
+  const std::lock_guard<std::mutex> lock(deferred_destroy_mu_);
+  deferred_destroys_.push_back(std::move(fn));
+}
+
+void DrmBackend::RunDeferredDestroys() {
+  std::vector<std::function<void()>> ready;
+  {
+    const std::lock_guard<std::mutex> lock(deferred_destroy_mu_);
+    ready.swap(deferred_destroys_);
+  }
+  for (auto& fn : ready) {
+    fn();
+  }
+}
+
 bool DrmBackend::Present() {
+  // Before the gates below: the frees need only the context, which a present
+  // has current whether or not it reaches the display.
+  RunDeferredDestroys();
   last_present_serial_ = 0;
   last_present_immediate_ = false;
   // Session-pause gate (mirrors DrmCompositor::PresentLayers). While the VT is

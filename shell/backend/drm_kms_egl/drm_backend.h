@@ -292,6 +292,13 @@ class DrmBackend : public Backend, public IFlipSink {
                                int32_t height) override;
 #endif
 
+  // A platform view's GL frees, queued from any thread: they need this
+  // backend's context, which only the raster thread holds. Run at the top of
+  // the next present, or at teardown.
+  void ScheduleDeferredDestroy(std::function<void()> fn) override;
+  // Runs what ScheduleDeferredDestroy queued. Raster thread, context current.
+  void RunDeferredDestroys();
+
   bool MakeCurrent() const;
   bool ClearCurrent() const;
   bool MakeResourceCurrent() const;
@@ -560,6 +567,9 @@ class DrmBackend : public Backend, public IFlipSink {
   // flip-complete handler on the platform thread, so both sides take the
   // mutex. Null when nothing is queued, which is the only state depth 1 ever
   // sees.
+  std::mutex deferred_destroy_mu_;
+  std::vector<std::function<void()>> deferred_destroys_;
+
   std::mutex queued_flip_mutex_;
   gbm_bo* queued_bo_ = nullptr;
   uint32_t queued_fb_ = 0;
