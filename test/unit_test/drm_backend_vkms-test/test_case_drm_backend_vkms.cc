@@ -2300,6 +2300,30 @@ class PvHostVkmsGl : public PvHostVkmsPlanes {
   [[nodiscard]] const char* CompositorMode() const override { return "gl"; }
 };
 
+// A platform view frees its GL imports when it is disposed, on the platform
+// thread, which has no GL context: glDeleteTextures there did nothing, the
+// textures stayed, and some drivers kept each one's dma-buf open for good. The
+// backend queues the free and runs it at the next present, on the raster
+// thread with its context current.
+TEST_F(PvHostVkmsGl, AFreeQueuedOffTheRasterThreadRunsAtTheNextPresent) {
+  auto* drm = dynamic_cast<DrmBackend*>(view_->GetBackend());
+  ASSERT_NE(drm, nullptr);
+  bool ran = false;
+  EGLContext context = EGL_NO_CONTEXT;
+  std::thread platform([&] {
+    drm->ScheduleDeferredDestroy([&] {
+      ran = true;
+      context = eglGetCurrentContext();
+    });
+  });
+  platform.join();
+  EXPECT_FALSE(ran) << "freed on the thread that queued it";
+
+  ASSERT_TRUE(Present());
+  EXPECT_TRUE(ran) << "the next present did not run the free";
+  EXPECT_NE(context, EGL_NO_CONTEXT) << "freed with no GL context current";
+}
+
 TEST_F(PvHostVkmsGl, ACompositedFrameIsReportedPresented) {
   const int fd = display_->SharedDevice()->fd();
   GbmSolidBuffer a;
