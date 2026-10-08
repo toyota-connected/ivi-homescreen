@@ -362,6 +362,12 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
 
   ~IhsPluginView() override;
 
+  // Dispose the plugin and free everything the view holds, leaving it empty:
+  // a release the backend still had queued for an earlier frame finds nothing
+  // to release. Runs on the platform thread at dispose, and again from the
+  // destructor, where it finds nothing left to do.
+  void Teardown();
+
   IhsPluginView(const IhsPluginView&) = delete;
   IhsPluginView& operator=(const IhsPluginView&) = delete;
 
@@ -1646,6 +1652,17 @@ void IhsPluginView::PublishGlReleaseFence() {
 constexpr uint64_t kImportRetireMargin = 8;
 
 IhsPluginView::~IhsPluginView() {
+  Teardown();
+  // The backend has let go of the view, so it holds none of its frames: fire
+  // every release it never handed back. A producer that keeps its buffers past
+  // the view waits on these.
+  const std::lock_guard<std::mutex> lock(mutex);
+  while (!release_efds.empty()) {
+    SignalRelease(release_efds.begin()->first);
+  }
+}
+
+void IhsPluginView::Teardown() {
   // Stop any producer thread that still holds this view BEFORE freeing the
   // imports it submits into — run outside the lock, since the dispose join may
   // let that thread take the lock (GetVulkanImage/submit) on its way out.
@@ -1661,14 +1678,9 @@ IhsPluginView::~IhsPluginView() {
   }
   // Extra layers first: dropping one signals its slot through release_efds.
   ClearExtraLayersLocked();
-  // The producer has been stopped (DisposePlugin above), so just retire any
-  // release eventfds it never got to wait on; it owns and closes its own dups.
-  for (const auto& [buffer_id, fd] : release_efds) {
-    if (fd >= 0) {
-      close(fd);
-    }
-  }
-  release_efds.clear();
+  // The release eventfds stay. A frame the compositor still holds is handed
+  // back through this view when the compositor lets go of it, and the
+  // destructor fires whatever is left.
 #if IVI_HAVE_VULKAN
   // With explicit-sync acquire the compositor's read of these imports is gated
   // on the producer's fence, so a re-create can dispose this view while a
@@ -2206,6 +2218,33 @@ const platform_view_listener kListener = {
     /* renegotiate */ ListenerRenegotiate,
 };
 
+// The registry's instance for a plugin view. Dispose tears the view down here,
+// on the platform thread; its memory lasts until the backend drops it too.
+class IhsPluginViewOwner final : public PlatformView {
+ public:
+  IhsPluginViewOwner(const PlatformViewRegistry::CreateRequest& request,
+                     std::shared_ptr<IhsPluginView> view)
+      : PlatformView(request.id,
+                     request.view_type,
+                     request.direction,
+                     request.left,
+                     request.top,
+                     request.width,
+                     request.height),
+        view_(std::move(view)) {}
+  ~IhsPluginViewOwner() override {
+    if (view_ != nullptr) {
+      view_->Teardown();
+    }
+  }
+
+  IhsPluginViewOwner(const IhsPluginViewOwner&) = delete;
+  IhsPluginViewOwner& operator=(const IhsPluginViewOwner&) = delete;
+
+ private:
+  std::shared_ptr<IhsPluginView> view_;
+};
+
 // --- IhsPvHost implementation -----------------------------------------------
 
 int HostRegisterFactory(void* user_data,
@@ -2223,7 +2262,7 @@ int HostRegisterFactory(void* user_data,
           PlatformViewRegistry& registry,
           const PlatformViewRegistry::CreateRequest& request)
           -> std::unique_ptr<PlatformView> {
-        auto view = std::make_unique<IhsPluginView>(request);
+        auto view = std::make_shared<IhsPluginView>(request);
         view->backend_ = BackendOf(state);
 
         IhsPvCreateInfo info{};
@@ -2251,17 +2290,17 @@ int HostRegisterFactory(void* user_data,
         view->presentation_sink->Open(view->callbacks, view->plugin_user_data);
 
         // Drive lifecycle through the registry's listener table, and register
-        // the compositor surface so the backend pulls frames. The surface's
-        // lifetime is the registry-owned instance; the compositor holds a
-        // non-owning alias dropped on UnregisterCompositorSurface at dispose.
+        // the compositor surface so the backend pulls frames. The backend
+        // shares ownership: a release it queued against an earlier frame can
+        // run after dispose, and must find the view, emptied, not its memory
+        // reused by the next one.
         registry.RegisterListener(request.id, &kListener, view.get());
         if (state->view_controller != nullptr &&
             state->view_controller->view != nullptr) {
-          state->view_controller->view->RegisterCompositorSurface(
-              request.id, std::shared_ptr<ICompositorSurface>(
-                              view.get(), [](ICompositorSurface*) {}));
+          state->view_controller->view->RegisterCompositorSurface(request.id,
+                                                                  view);
         }
-        return view;
+        return std::make_unique<IhsPluginViewOwner>(request, std::move(view));
       });
   return IHS_PV_OK;
 }
