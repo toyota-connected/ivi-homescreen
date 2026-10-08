@@ -191,6 +191,10 @@ class VulkanDrmBackend final : public Backend {
   void ResizeCompositorSurface(FlutterPlatformViewIdentifier id,
                                int32_t width,
                                int32_t height) override;
+  // Frees a platform view's imports at the top of a later present, never on
+  // the caller's thread: the raster thread may be recording a frame that
+  // binds them.
+  void ScheduleDeferredDestroy(std::function<void()> fn) override;
 #endif
 
   // Vsync: drive Flutter's frame scheduling from the real page-flip event
@@ -608,6 +612,15 @@ class VulkanDrmBackend final : public Backend {
   std::unordered_map<FlutterPlatformViewIdentifier,
                      std::shared_ptr<ICompositorSurface>>
       compositor_surfaces_;
+
+  // Run the deferred frees whose margin of presents has elapsed. Called at
+  // the top of each present, on the raster thread, before anything records.
+  void ReapDeferredDestroys();
+  // Run every deferred free, margin or not. Only once the device is idle.
+  void RunAllDeferredDestroys();
+  std::mutex deferred_destroy_mu_;
+  uint64_t deferred_epoch_{0};  // presents; guarded by deferred_destroy_mu_
+  std::vector<std::pair<uint64_t, std::function<void()>>> deferred_destroys_;
 
   // src-over blend of the platform views (and any Flutter overlay stores) on
   // top of the base backing store. Built lazily on first use because it is

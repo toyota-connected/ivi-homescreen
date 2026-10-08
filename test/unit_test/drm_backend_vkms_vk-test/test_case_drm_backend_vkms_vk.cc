@@ -481,6 +481,35 @@ TEST_F(VulkanDrmVkms, TheVulkanContextReportsTheUsableVersion) {
   }
 }
 
+#if BUILD_COMPOSITOR
+// A platform view's imports are freed on the raster thread between frames,
+// never on the thread that asks: the raster thread may be recording a frame
+// that binds them (it crashed in vkCreateImageView when the free ran at once).
+TEST_F(VulkanDrmVkms, ADeferredFreeWaitsForLaterPresents) {
+  ASSERT_TRUE(PresentOneFrame()) << "the first present is the blocking modeset";
+  std::atomic<int> runs{0};
+  backend_->ScheduleDeferredDestroy([&] { runs.fetch_add(1); });
+  EXPECT_EQ(runs.load(), 0) << "the free ran on the caller's thread at once";
+  int presents = 0;
+  while (runs.load() == 0 && presents < 12) {
+    ASSERT_TRUE(PresentOneFrame());
+    ++presents;
+  }
+  EXPECT_EQ(runs.load(), 1);
+  EXPECT_GE(presents, 2) << "freed at the very next present: no margin for a "
+                            "frame still in flight";
+}
+
+// One a present never reaped still runs, once the device is idle.
+TEST_F(VulkanDrmVkms, AnUnreapedDeferredFreeRunsAtTeardown) {
+  std::atomic<int> runs{0};
+  backend_->ScheduleDeferredDestroy([&] { runs.fetch_add(1); });
+  EXPECT_EQ(runs.load(), 0);
+  backend_.reset();
+  EXPECT_EQ(runs.load(), 1);
+}
+#endif
+
 int main(int argc, char** argv) {
   IHS_LOGGING_START("TEST", "drm_kms_vulkan vkms test");
   ::testing::InitGoogleTest(&argc, argv);
