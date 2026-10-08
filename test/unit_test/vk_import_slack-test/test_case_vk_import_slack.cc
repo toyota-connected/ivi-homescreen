@@ -103,6 +103,17 @@ TEST(VkImportSlack, ShortDmabufGetsNoRetry) {
             0u);
 }
 
+// A retry is declined when the dma-buf cannot hold the image, even though the
+// shorter ask on its own would be backed. Offering one would import an image
+// whose last bytes sit outside the buffer -- a different and worse bug than
+// the one being worked around.
+TEST(VkImportSlack, RetryDeclinedWhenTheImageItselfDoesNotFit) {
+  constexpr VkDeviceSize kBo = 4096 * 1800;
+  EXPECT_EQ(Importer::ShortImportSize(kBo + 1, kBo, kReadahead), 0u);
+  EXPECT_LE(Importer::ImportFootprint(kBo + 1 - kReadahead, 0), kBo)
+      << "the ask alone would have been backed";
+}
+
 // An image smaller than the padding cannot be asked for short at all.
 TEST(VkImportSlack, TinyImageGetsNoRetry) {
   EXPECT_EQ(Importer::ShortImportSize(kReadahead, kPage, kReadahead), 0u);
