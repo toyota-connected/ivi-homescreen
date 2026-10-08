@@ -142,6 +142,9 @@ bool DmabufVulkanImporter::Init(VkInstance instance,
       reinterpret_cast<PFN_vkBindImageMemory>(device_fn("vkBindImageMemory"));
   get_memory_fd_properties_ = reinterpret_cast<PFN_vkGetMemoryFdPropertiesKHR>(
       device_fn("vkGetMemoryFdPropertiesKHR"));
+  get_image_subresource_layout_ =
+      reinterpret_cast<PFN_vkGetImageSubresourceLayout>(
+          device_fn("vkGetImageSubresourceLayout"));
   // Optional: only ImportableModifiers uses these, and it degrades to "ask
   // nothing, offer what we always did" without them.
   get_format_properties2_ =
@@ -154,7 +157,8 @@ bool DmabufVulkanImporter::Init(VkInstance instance,
   if (get_memory_properties_ == nullptr || create_image_ == nullptr ||
       destroy_image_ == nullptr || get_image_memory_requirements_ == nullptr ||
       allocate_memory_ == nullptr || free_memory_ == nullptr ||
-      bind_image_memory_ == nullptr || get_memory_fd_properties_ == nullptr) {
+      bind_image_memory_ == nullptr || get_memory_fd_properties_ == nullptr ||
+      get_image_subresource_layout_ == nullptr) {
     ihs::log::warn(
         "[ihs_pv] dma-buf import unavailable: the backend's Vulkan device is "
         "missing an external-memory-fd entry point");
@@ -179,6 +183,12 @@ bool DmabufVulkanImporter::Init(VkInstance instance,
     if (driver.driverID == VK_DRIVER_ID_MESA_V3DV) {
       import_padding_ = kV3dvTfuReadahead;
     }
+    // VeriSilicon (by vendor: the driver reports another driver's ID) binds a
+    // LINEAR dma-buf to a DRM_FORMAT_MODIFIER image without error, ignores the
+    // explicit row pitch, and reads it as its own tiled layout: every frame
+    // samples as noise. A LINEAR-tiled image over the same import reads
+    // correctly. Measured on an i.MX8MP, XRGB8888, 3x3 through 4096x2160.
+    linear_tiling_for_linear_ = props.properties.vendorID == VK_VENDOR_ID_VSI;
   }
 
   instance_ = instance;
@@ -394,6 +404,15 @@ bool DmabufVulkanImporter::Import(const IhsFrame& frame,
   ic.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
   ic.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
   ic.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  // See Init. The driver picks a LINEAR image's layout itself, so it is used
+  // only when that layout is the frame's; checked once the image exists.
+  const bool linear_tiling = linear_tiling_for_linear_ && !is_yuv &&
+                             frame.format.modifier == 0 &&
+                             frame.plane_offset[0] == 0;
+  if (linear_tiling) {
+    ext.pNext = nullptr;
+    ic.tiling = VK_IMAGE_TILING_LINEAR;
+  }
 
   VkImage image = VK_NULL_HANDLE;
   const VkResult image_rc = create_image_(device_, &ic, nullptr, &image);
@@ -404,6 +423,21 @@ bool DmabufVulkanImporter::Import(const IhsFrame& frame,
         static_cast<int>(image_rc), frame.width, frame.height,
         frame.format.fourcc, frame.format.modifier);
     return false;
+  }
+  if (linear_tiling) {
+    VkImageSubresource sub{};
+    sub.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    VkSubresourceLayout layout{};
+    get_image_subresource_layout_(device_, image, &sub, &layout);
+    if (layout.offset != 0 || layout.rowPitch != frame.plane_stride[0]) {
+      ihs::log::warn(
+          "[ihs_pv] dma-buf import: a {}x{} LINEAR image here has row pitch "
+          "{} at offset {}; the frame has stride {}",
+          frame.width, frame.height, layout.rowPitch, layout.offset,
+          frame.plane_stride[0]);
+      destroy_image_(device_, image, nullptr);
+      return false;
+    }
   }
 
   VkMemoryRequirements req{};
@@ -431,18 +465,19 @@ bool DmabufVulkanImporter::Import(const IhsFrame& frame,
   }
 
   // Dedicated allocation is required for a dma-buf-backed image on many
-  // drivers.
-  VkMemoryDedicatedAllocateInfo dedicated{};
-  dedicated.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO;
-  dedicated.image = image;
+  // drivers. It comes first in the chain: VeriSilicon sees it only there, and
+  // otherwise imports without error into memory that is not the dma-buf's.
   VkImportMemoryFdInfoKHR import_fd{};
   import_fd.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR;
-  import_fd.pNext = &dedicated;
   import_fd.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
   import_fd.fd = frame.plane_fd[0];
+  VkMemoryDedicatedAllocateInfo dedicated{};
+  dedicated.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO;
+  dedicated.pNext = &import_fd;
+  dedicated.image = image;
   VkMemoryAllocateInfo mai{};
   mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  mai.pNext = &import_fd;
+  mai.pNext = &dedicated;
   mai.allocationSize = req.size;
   mai.memoryTypeIndex = mt;
 

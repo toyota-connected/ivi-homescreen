@@ -106,6 +106,7 @@ class DmabufVulkanImporter {
   PFN_vkFreeMemory free_memory_{nullptr};
   PFN_vkBindImageMemory bind_image_memory_{nullptr};
   PFN_vkGetMemoryFdPropertiesKHR get_memory_fd_properties_{nullptr};
+  PFN_vkGetImageSubresourceLayout get_image_subresource_layout_{nullptr};
   PFN_vkGetPhysicalDeviceFormatProperties2 get_format_properties2_{nullptr};
   PFN_vkGetPhysicalDeviceImageFormatProperties2 get_image_format_properties2_{
       nullptr};
@@ -113,4 +114,7 @@ class DmabufVulkanImporter {
   // Bytes the driver adds to an import's allocationSize before checking it
   // against the dma-buf; see Import. Nonzero on v3dv only.
   VkDeviceSize import_padding_{0};
+  // Import a LINEAR frame into a LINEAR-tiled image rather than a
+  // DRM_FORMAT_MODIFIER one; see Init. VeriSilicon only.
+  bool linear_tiling_for_linear_{false};
 };
