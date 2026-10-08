@@ -2232,6 +2232,44 @@ TEST_F(PvHostVkmsGl, ACompositedFrameIsReportedPresented) {
   EXPECT_NE(got[0].msc, 0U);
 }
 
+// A view disposed while a release is still queued for it, and a new view in
+// its place: the release must not reach the new view. It used to run against
+// the disposed view's freed memory, which the new view most often reuses, and
+// retire the new view's frame before it was shown. That view never reached the
+// screen, and its producer ran out of buffers.
+TEST_F(PvHostVkmsGl, AReleaseQueuedForADisposedViewMissesItsSuccessor) {
+  const int fd = display_->SharedDevice()->fd();
+  GbmSolidBuffer a;
+  GbmSolidBuffer b;
+  GbmSolidBuffer c;
+  ASSERT_TRUE(a.Create(fd, kViewW, kViewH, 0xFF1E7A46u));
+  ASSERT_TRUE(b.Create(fd, kViewW, kViewH, 0xFF7A1E46u));
+  ASSERT_TRUE(c.Create(fd, kViewW, kViewH, 0xFF461E7Au));
+  ASSERT_EQ(SubmitSeq(a, 0, 1), IHS_PV_OK);
+  ASSERT_EQ(PresentUntilReported(1).size(), 1U);
+
+  // b displaces a, whose release waits on this flip; the view goes first.
+  ASSERT_EQ(SubmitSeq(b, 1, 2), IHS_PV_OK);
+  ASSERT_TRUE(Present());
+  ASSERT_TRUE(state_.platform_view_registry->Dispose(1, false));
+  producer_.view = nullptr;
+  producer_.TakePresented();
+
+  PlatformViewRegistry::CreateRequest req{};
+  req.id = 1;
+  req.view_type = kViewType;
+  req.width = kViewW;
+  req.height = kViewH;
+  ASSERT_TRUE(state_.platform_view_registry->CreateViaFactory(req));
+  ASSERT_NE(producer_.view, nullptr);
+
+  // The new view's first frame, under the buffer id a's release names.
+  ASSERT_EQ(SubmitSeq(c, 0, 3), IHS_PV_OK);
+  const auto got = PresentUntilReported(1);
+  ASSERT_EQ(got.size(), 1U) << "the new view's first frame was never shown";
+  EXPECT_EQ(got[0].seq, 3U);
+}
+
 // An early flip completion must not leave the latch armed.
 //
 // The legacy present path publishes its flip state and raises flip_pending_
