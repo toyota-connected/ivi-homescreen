@@ -204,6 +204,10 @@ endif ()
 if (BUILD_BACKEND_WAYLAND_VULKAN)
     add_subdirectory(vk_store_dmabuf-test)
 endif ()
+# The shared-queue interposer behind both Vulkan backends.
+if (BUILD_BACKEND_WAYLAND_VULKAN OR BUILD_BACKEND_DRM_KMS_VULKAN)
+    add_subdirectory(queue_interposer-test)
+endif ()
 add_subdirectory(deferred_retire_set-test)
 # The SOFTWARE_SHM grant's buffers and release relay live in the platform-view
 # host, which only a compositor build has.

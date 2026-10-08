@@ -16,22 +16,29 @@
 
 #include "backend/vulkan/queue_interposer.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstring>
 #include <unordered_map>
+#include <vector>
 
 namespace ihs::vulkan {
 
 namespace {
 
-// Queue -> guarding mutex. Mutated only at device create/destroy; read on
-// every interposed queue call. The map's own lock is uncontended in
-// steady state (registration is done before the engine runs) and, when it
-// is contended, the callers were about to serialize on the queue mutex
-// anyway.
+// Queue -> owning device and guarding mutex. Mutated only at device
+// create/destroy; read on every interposed queue call. The map's own lock is
+// uncontended in steady state (registration is done before the engine runs)
+// and, when it is contended, the callers were about to serialize on the queue
+// mutex anyway.
+struct QueueEntry {
+  VkDevice device;
+  std::mutex* mutex;
+};
+
 std::mutex g_registry_mutex;
-std::unordered_map<VkQueue, std::mutex*>& Registry() {
-  static auto* registry = new std::unordered_map<VkQueue, std::mutex*>();
+std::unordered_map<VkQueue, QueueEntry>& Registry() {
+  static auto* registry = new std::unordered_map<VkQueue, QueueEntry>();
   return *registry;
 }
 
@@ -39,7 +46,24 @@ std::mutex* LookupQueueMutex(VkQueue queue) {
   const std::lock_guard<std::mutex> lock(g_registry_mutex);
   const auto& registry = Registry();
   const auto it = registry.find(queue);
-  return it != registry.end() ? it->second : nullptr;
+  return it != registry.end() ? it->second.mutex : nullptr;
+}
+
+// Every distinct mutex registered for @p device, in address order so two
+// device idles cannot lock them in opposite orders.
+std::vector<std::mutex*> LookupDeviceMutexes(VkDevice device) {
+  std::vector<std::mutex*> mutexes;
+  {
+    const std::lock_guard<std::mutex> lock(g_registry_mutex);
+    for (const auto& [queue, entry] : Registry()) {
+      if (entry.device == device) {
+        mutexes.push_back(entry.mutex);
+      }
+    }
+  }
+  std::sort(mutexes.begin(), mutexes.end());
+  mutexes.erase(std::unique(mutexes.begin(), mutexes.end()), mutexes.end());
+  return mutexes;
 }
 
 // RAII guard that locks the registered mutex for a queue, or nothing if the
@@ -81,6 +105,7 @@ struct RealProcs {
       nullptr};
   std::atomic<PFN_vkQueueInsertDebugUtilsLabelEXT>
       QueueInsertDebugUtilsLabelEXT{nullptr};
+  std::atomic<PFN_vkDeviceWaitIdle> DeviceWaitIdle{nullptr};
   std::atomic<PFN_vkGetDeviceProcAddr> GetDeviceProcAddr{nullptr};
 };
 
@@ -164,6 +189,11 @@ VKAPI_ATTR void VKAPI_CALL InterposedQueueInsertDebugUtilsLabelEXT(
       queue, pLabelInfo);
 }
 
+VKAPI_ATTR VkResult VKAPI_CALL InterposedDeviceWaitIdle(VkDevice device) {
+  return QueueInterposer::DeviceWaitIdle(
+      device, g_real.DeviceWaitIdle.load(std::memory_order_relaxed));
+}
+
 //------------------------------------------------------------------------
 // Name -> trampoline dispatch, shared by the instance-level hook and the
 // vkGetDeviceProcAddr shim. `resolve` produces the real proc for `name`
@@ -238,6 +268,19 @@ bool IsQueueProcName(const char* name) {
   return std::strncmp(name, "vkQueue", 7) == 0;
 }
 
+// vkDeviceWaitIdle needs every queue on the device, not one: same resolver
+// contract as InterposeQueueProc.
+template <typename Resolver>
+PFN_vkVoidFunction InterposeDeviceWaitIdle(const Resolver& resolve) {
+  const auto real = resolve("vkDeviceWaitIdle");
+  if (real == nullptr) {
+    return nullptr;
+  }
+  g_real.DeviceWaitIdle.store(reinterpret_cast<PFN_vkDeviceWaitIdle>(real),
+                              std::memory_order_relaxed);
+  return reinterpret_cast<PFN_vkVoidFunction>(InterposedDeviceWaitIdle);
+}
+
 // Shim handed to the engine in place of vkGetDeviceProcAddr. The Skia
 // embedder path (vulkan::VulkanProcTable) resolves all device-level procs
 // through vkGetDeviceProcAddr, which it in turn obtained from the
@@ -247,6 +290,10 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
 InterposedGetDeviceProcAddr(VkDevice device, const char* pName) {
   const auto real_gdpa =
       g_real.GetDeviceProcAddr.load(std::memory_order_relaxed);
+  if (pName != nullptr && std::strcmp(pName, "vkDeviceWaitIdle") == 0) {
+    return InterposeDeviceWaitIdle(
+        [&](const char* n) { return real_gdpa(device, n); });
+  }
   if (pName != nullptr && IsQueueProcName(pName)) {
     if (auto* proc = InterposeQueueProc(
             pName, [&](const char* n) { return real_gdpa(device, n); })) {
@@ -258,14 +305,29 @@ InterposedGetDeviceProcAddr(VkDevice device, const char* pName) {
 
 }  // namespace
 
-void QueueInterposer::RegisterQueue(VkQueue queue, std::mutex* mutex) {
+void QueueInterposer::RegisterQueue(VkDevice device,
+                                    VkQueue queue,
+                                    std::mutex* mutex) {
   const std::lock_guard<std::mutex> lock(g_registry_mutex);
-  Registry()[queue] = mutex;
+  Registry()[queue] = QueueEntry{device, mutex};
 }
 
 void QueueInterposer::UnregisterQueue(VkQueue queue) {
   const std::lock_guard<std::mutex> lock(g_registry_mutex);
   Registry().erase(queue);
+}
+
+VkResult QueueInterposer::DeviceWaitIdle(VkDevice device,
+                                         PFN_vkDeviceWaitIdle real) {
+  const auto mutexes = LookupDeviceMutexes(device);
+  for (auto* mutex : mutexes) {
+    mutex->lock();
+  }
+  const VkResult result = real(device);
+  for (auto it = mutexes.rbegin(); it != mutexes.rend(); ++it) {
+    (*it)->unlock();
+  }
+  return result;
 }
 
 PFN_vkVoidFunction QueueInterposer::Interpose(VkInstance instance,
@@ -277,6 +339,10 @@ PFN_vkVoidFunction QueueInterposer::Interpose(VkInstance instance,
   // Impeller initializes its vulkan.hpp dispatcher from the instance-level
   // callback and resolves device functions through it as loader
   // trampolines, so queue entry points arrive here directly.
+  if (std::strcmp(procname, "vkDeviceWaitIdle") == 0) {
+    return InterposeDeviceWaitIdle(
+        [&](const char* n) { return gipa(instance, n); });
+  }
   if (IsQueueProcName(procname)) {
     return InterposeQueueProc(procname,
                               [&](const char* n) { return gipa(instance, n); });

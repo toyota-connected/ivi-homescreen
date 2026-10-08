@@ -262,8 +262,9 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
     // the swapchain (and the WSI's wl_buffer proxies bound to its images) can
     // still be in use, which both the validation layers and Mesa's Wayland WSI
     // flag ("wl_buffer still attached" / "queue destroyed while proxies still
-    // attached") and which can fault during vkDestroyDevice.
-    d().vkDeviceWaitIdle(device_);
+    // attached") and which can fault during vkDestroyDevice. Under the queue
+    // lock: a plugin producer may still be submitting.
+    ihs::vulkan::QueueInterposer::DeviceWaitIdle(device_, d().vkDeviceWaitIdle);
 #if BUILD_HUD
     // Tear the HUD down while device_ is still valid: ~VulkanHud runs
     // ImGui_ImplVulkan_Shutdown, which frees Vulkan buffers/memory. Left to the
@@ -862,7 +863,7 @@ void WaylandVulkanBackend::createLogicalDevice() {
   // entry points handed out by GetInstanceProcAddressCallback serialize the
   // engine's submissions on the same queue_mutex_ the backend already
   // takes. See issue #208.
-  ihs::vulkan::QueueInterposer::RegisterQueue(queue_, &queue_mutex_);
+  ihs::vulkan::QueueInterposer::RegisterQueue(device_, queue_, &queue_mutex_);
 
 #if BUILD_COMPOSITOR
   // Decided once per device, not once per store: whether a backing store can
@@ -3455,8 +3456,10 @@ void WaylandVulkanBackend::CompositorPipeliningCleanup() {
   }
   // Make sure no slot's resources are still in flight before tearing them
   // down. Cheap: only fires at swapchain recreation or backend shutdown.
+  // Under the queue lock: on recreation the raster thread gets here while
+  // platform-view producers are still submitting.
   if (!m_compositor_slots_.empty()) {
-    d().vkDeviceWaitIdle(device_);
+    ihs::vulkan::QueueInterposer::DeviceWaitIdle(device_, d().vkDeviceWaitIdle);
   }
   for (auto& s : m_compositor_slots_) {
     if (s.image_available) {

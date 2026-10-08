@@ -493,9 +493,10 @@ VulkanDrmBackend::~VulkanDrmBackend() {
   // Anything holding Vulkan objects has to be freed while the device is still
   // alive, because Teardown() destroys it and members outlive this body. Wait
   // for the GPU first: the last frame's command buffer may still reference the
-  // render pass and descriptors being freed just below.
+  // render pass and descriptors being freed just below. Under the queue lock:
+  // a plugin producer may still be submitting.
   if (device_ != VK_NULL_HANDLE) {
-    d().vkDeviceWaitIdle(device_);
+    ihs::vulkan::QueueInterposer::DeviceWaitIdle(device_, d().vkDeviceWaitIdle);
   }
 #if BUILD_HUD
   // ~VulkanHud runs ImGui_ImplVulkan_Shutdown, which frees device memory.
@@ -737,7 +738,8 @@ struct VulkanDrmBackend::CompositorState {
       WaitForFlip(device.fd(), evctx);
     }
     if (vk_device != VK_NULL_HANDLE) {
-      d().vkDeviceWaitIdle(vk_device);
+      ihs::vulkan::QueueInterposer::DeviceWaitIdle(vk_device,
+                                                   d().vkDeviceWaitIdle);
     }
     // Order matters: drop the scene (and the ring source's framebuffers) before
     // freeing the images/dma-bufs the framebuffers reference.
@@ -4061,7 +4063,8 @@ bool VulkanDrmBackend::CreateLogicalDevice(std::string& refusal_reason) {
   d().vkGetDeviceQueue(device_, graphics_queue_family_, 0, &graphics_queue_);
   // Before anything can submit. The trampolines look the mutex up by queue, so
   // an unregistered queue passes through unlocked and serializes nothing.
-  ihs::vulkan::QueueInterposer::RegisterQueue(graphics_queue_, &queue_mutex_);
+  ihs::vulkan::QueueInterposer::RegisterQueue(device_, graphics_queue_,
+                                              &queue_mutex_);
   return true;
 }
 
