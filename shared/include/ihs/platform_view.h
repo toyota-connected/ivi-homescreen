@@ -817,9 +817,9 @@ IHS_EXPORT size_t ihs_pv_grant_shm_slots(IhsPlatformView* view,
  * A plugin cannot compute that padding, and an allocator may report a tiled
  * modifier for a buffer it sized as if linear -- so allocate with headroom
  * (rounding the height up to a tile and adding one more is enough in practice)
- * rather than to the exact frame geometry. An import refused for this reason
- * fails with no indication of the size it wanted; the registry logs what the
- * image needed against what the dma-buf held.
+ * rather than to the exact frame geometry. The registry logs all three numbers
+ * when an import is refused: what the image needs, what the driver demands of
+ * the dma-buf for it, and what the dma-buf holds.
  *
  * @buffer_id names WHICH buffer of the plugin's ring this frame is (0..N-1,
  * stable for that buffer's lifetime). The registry imports each distinct
