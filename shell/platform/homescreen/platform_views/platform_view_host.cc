@@ -609,6 +609,10 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   // GetGlTextureBufferId. The GL path has no scanout retire to key a release
   // off, so the compositor tells one bound frame from the next by this.
   mutable uint32_t current_egl_buffer_id{0};
+  // Row order of the frame current_egl was imported from: true when the
+  // producer set IHS_PV_FRAME_BOTTOM_UP, so the compositor samples it flipped
+  // rather than the producer blitting it (#718).
+  mutable bool current_egl_bottom_up{false};
   // The stash_seq of the frame current_egl was imported from: its
   // presentation token.
   mutable uint64_t current_egl_frame{0};
@@ -671,6 +675,7 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     PendingEglFrame pending;
     EglDmabufImporter::ImportedTexture* current_egl{nullptr};
     uint32_t current_egl_buffer_id{0};
+    bool current_egl_bottom_up{false};
     uint64_t current_egl_frame{0};
 #endif
   };
@@ -810,9 +815,14 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     return current_egl != nullptr ? static_cast<int32_t>(current_egl->height)
                                   : 0;
   }
-  // Imported dma-bufs are top-first (row 0 is the top), so the EGL compositor
-  // must V-flip when sampling into its bottom-first framebuffer.
-  [[nodiscard]] bool TextureIsTopFirst() const override { return true; }
+  // An imported dma-buf is top-first (row 0 is the top) unless its producer
+  // said otherwise, so the EGL compositor must V-flip when sampling into its
+  // bottom-first framebuffer. Describes layer 0, which is the layer this
+  // per-surface accessor is about; the per-layer path reads the same field.
+  [[nodiscard]] bool TextureIsTopFirst() const override {
+    const std::lock_guard<std::mutex> lock(mutex);
+    return !current_egl_bottom_up;
+  }
 
 #endif  // IVI_HAVE_EGL
 
@@ -899,6 +909,8 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     EglDmabufImporter::ImportedTexture** current{nullptr};
     uint32_t* current_id{nullptr};
     uint64_t* current_frame{nullptr};
+    // Row order of the frame now current, from its IHS_PV_FRAME_BOTTOM_UP bit.
+    bool* current_bottom_up{nullptr};
     ICompositorSurface::LayerGeometry* geom{nullptr};
   };
   // Import the frame a layer has waiting, if any, and make it the layer's
@@ -1970,6 +1982,7 @@ void IhsPluginView::ImportPendingEglLocked(std::unique_lock<std::mutex>& lock,
     CloseFrameFds(&f);  // redundant handle to the cached import
     *slot.current = &it->second;
     *slot.current_id = f.buffer_id;
+    *slot.current_bottom_up = (f.flags & IHS_PV_FRAME_BOTTOM_UP) != 0;
     *slot.current_frame = slot.pending->stash_seq;
   } else {
     if (it != buffers_egl.end()) {
@@ -1987,6 +2000,7 @@ void IhsPluginView::ImportPendingEglLocked(std::unique_lock<std::mutex>& lock,
       auto pos = buffers_egl.emplace(f.buffer_id, imported).first;
       *slot.current = &pos->second;
       *slot.current_id = f.buffer_id;
+      *slot.current_bottom_up = (f.flags & IHS_PV_FRAME_BOTTOM_UP) != 0;
       *slot.current_frame = slot.pending->stash_seq;
       // Synthesised ids never repeat, so every earlier entry is dead. Retire
       // them (the reap margin covers a compositor present still binding one)
@@ -2031,6 +2045,7 @@ uint32_t IhsPluginView::GetGlTextureName() const {
     s->pending = &pending_egl;
     s->current = &current_egl;
     s->current_id = &current_egl_buffer_id;
+    s->current_bottom_up = &current_egl_bottom_up;
     s->current_frame = &current_egl_frame;
     s->geom = &geom0;
     return true;
@@ -2054,7 +2069,7 @@ ICompositorSurface::GlLayerTexture IhsPluginView::GetLayerGlTexture(
     out.width = static_cast<int32_t>(current_egl->width);
     out.height = static_cast<int32_t>(current_egl->height);
     out.external = current_egl->external;
-    out.top_first = true;  // imported dma-bufs are top-first
+    out.top_first = !current_egl_bottom_up;
     out.buffer_id = current_egl_buffer_id;
     out.geometry = geom0;
     out.frame = current_egl_frame;
@@ -2078,6 +2093,7 @@ ICompositorSurface::GlLayerTexture IhsPluginView::GetLayerGlTexture(
     s->pending = &it->second.pending;
     s->current = &it->second.current_egl;
     s->current_id = &it->second.current_egl_buffer_id;
+    s->current_bottom_up = &it->second.current_egl_bottom_up;
     s->current_frame = &it->second.current_egl_frame;
     s->geom = &it->second.geom;
     return true;
@@ -2091,7 +2107,7 @@ ICompositorSurface::GlLayerTexture IhsPluginView::GetLayerGlTexture(
   out.width = static_cast<int32_t>(x.current_egl->width);
   out.height = static_cast<int32_t>(x.current_egl->height);
   out.external = x.current_egl->external;
-  out.top_first = true;
+  out.top_first = !x.current_egl_bottom_up;
   out.buffer_id = x.current_egl_buffer_id;
   out.geometry = x.geom;
   out.frame = x.current_egl_frame;

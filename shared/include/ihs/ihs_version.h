@@ -31,10 +31,12 @@
  * A minor also marks a relaxed rule a plugin may want to rely on: 1.11 allows
  * a retired buffer id to be submitted again (see ihs_pv_retire_buffer). 1.17
  * lets a requirement name a preferred kind instead of inferring one from the
- * mask (see IhsPvRequirements::preferred_kind).
+ * mask (see IhsPvRequirements::preferred_kind). 1.20 honors
+ * IHS_PV_FRAME_BOTTOM_UP, so a GL producer can submit its rows bottom-up
+ * instead of blitting them (see IhsFrameFlags).
  */
 #define IHS_SHARED_ABI_MAJOR 1u
-#define IHS_SHARED_ABI_MINOR 19u
+#define IHS_SHARED_ABI_MINOR 20u
 #define IHS_SHARED_ABI_VERSION \
   ((IHS_SHARED_ABI_MAJOR << 16) | IHS_SHARED_ABI_MINOR)
 

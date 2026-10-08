@@ -216,6 +216,10 @@ TEST_F(LayerDrawGl, EveryTransformDrawsTheImageUpright) {
 }
 
 // A source crop shows only the cropped pixels, scaled to the destination.
+// A producer that renders bottom-up (#718) says so on the frame, and the
+// compositor samples the texture flipped rather than the producer blitting it
+// upside down into its ring every frame. The same texture drawn both ways must
+// come out mirrored, which is the whole of what the flag buys.
 TEST_F(LayerDrawGl, CropSelectsTheSourceRegion) {
   // A 2x-wide buffer: the image sits in its right half.
   std::vector<uint8_t> buffer(static_cast<size_t>(2) * kW * kH * 4, 0);
@@ -373,4 +377,39 @@ TEST_F(LayerDrawGl, SurfaceLayersStackClipAndOrientOnEitherTarget) {
   }
   glDeleteTextures(1, &bg_tex);
   glDeleteTextures(1, &strip_tex);
+}
+
+TEST_F(LayerDrawGl, ABottomUpSourceIsSampledFlipped) {
+  std::vector<uint8_t> img(Px(0, kH, kW));
+  for (int y = 0; y < kH; ++y) {
+    for (int x = 0; x < kW; ++x) {
+      std::memcpy(&img[Px(x, y, kW)], ColorOf(y * kW + x).data(), 4);
+    }
+  }
+  const GLuint tex = MakeTexture(kW, kH, img);
+
+  auto draw = [&](const bool top_first) {
+    LayeredSurface surface;
+    ICompositorSurface::GlLayerTexture layer;
+    layer.name = tex;
+    layer.width = kW;
+    layer.height = kH;
+    layer.top_first = top_first;
+    surface.layers = {layer};
+    return DrawSurface(*compositor_, surface, /*target_top_first=*/true);
+  };
+  const auto top_down = draw(true);
+  const auto bottom_up = draw(false);
+  ASSERT_EQ(top_down.size(), bottom_up.size());
+
+  // Rows differ, so a mirror is observable rather than vacuously true.
+  ASSERT_NE(std::memcmp(top_down.data(), bottom_up.data(), top_down.size()), 0)
+      << "the two orientations drew the same pixels; the flag did nothing";
+  for (int y = 0; y < kH; ++y) {
+    EXPECT_EQ(std::memcmp(&bottom_up[Px(0, y, kW)],
+                          &top_down[Px(0, kH - 1 - y, kW)], Px(kW, 0, 0)),
+              0)
+        << "row " << y << " of the bottom-up draw is not row " << (kH - 1 - y)
+        << " of the top-first one";
+  }
 }
