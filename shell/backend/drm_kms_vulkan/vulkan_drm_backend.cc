@@ -2063,22 +2063,26 @@ int VulkanDrmBackend::SubmitSyncRing(CompositorState& c, const size_t i) {
   si.pWaitDstStageMask = waits.empty() ? nullptr : wait_stages.data();
   si.signalSemaphoreCount = 1;
   si.pSignalSemaphores = &c.sync_sem[i];
+  int fd = -1;
   {
     const std::lock_guard<std::mutex> queue_lock(queue_mutex_);
     if (d().vkQueueSubmit(graphics_queue_, 1, &si, c.sync_fence[i]) !=
         VK_SUCCESS) {
       return -1;
     }
-  }
-  // Export the just-signaled semaphore as a sync_file. SYNC_FD export transfers
-  // the payload out, resetting the semaphore for its next turn in the ring.
-  VkSemaphoreGetFdInfoKHR gfi{};
-  gfi.sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR;
-  gfi.semaphore = c.sync_sem[i];
-  gfi.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT;
-  int fd = -1;
-  if (d().vkGetSemaphoreFdKHR(device_, &gfi, &fd) != VK_SUCCESS) {
-    return -1;
+    // Export the just-signaled semaphore as a sync_file. SYNC_FD export
+    // transfers the payload out, resetting the semaphore for its next turn in
+    // the ring. Done before the lock lets another submit onto the queue: on a
+    // shared queue, some validation layers lose the export's implicit wait
+    // when one lands in between, and report the ring's next signal of this
+    // semaphore as a second signal without a wait.
+    VkSemaphoreGetFdInfoKHR gfi{};
+    gfi.sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR;
+    gfi.semaphore = c.sync_sem[i];
+    gfi.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT;
+    if (d().vkGetSemaphoreFdKHR(device_, &gfi, &fd) != VK_SUCCESS) {
+      return -1;
+    }
   }
 #if BUILD_COMPOSITOR
   // The submit just recorded is the one that samples the platform views, so

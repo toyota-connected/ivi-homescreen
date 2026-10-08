@@ -531,10 +531,16 @@ class WaylandVulkanBackend final : public Backend {
   /// Destroy imported acquire semaphores whose frame has completed.
   void ReapAcquireWaits();
 
-  /// After the frame submit that signaled release_sem_, export a release fence
-  /// (sync_file) and hand each platform view composited this frame its own dup,
-  /// so the producer/host can wait it before reusing or freeing the buffer.
-  void PublishReleaseFences();
+  /// After the frame submit that signaled release_sem_, export it as a release
+  /// fence (sync_file); -1 on failure. Called under queue_mutex_, before
+  /// another submit can reach the queue: on a shared queue, some validation
+  /// layers lose the export's implicit wait when one lands in between, and
+  /// report the next frame's signal as a second signal without a wait.
+  int ExportReleaseFence();
+  /// Hand each platform view composited this frame its own dup of release_fd
+  /// (-1 if none), so the producer/host can wait it before reusing or freeing
+  /// the buffer. Takes ownership of release_fd.
+  void PublishReleaseFences(int release_fd);
 
   // Acquire semaphores imported for the frame currently being recorded; the
   // queue submit waits on them, then they move to acquire_wait_retire_.
