@@ -26,7 +26,14 @@
 #               scroll_bench integration app (required)
 #   VKMS_CARD   /dev/dri/cardN for vkms (auto-detected if unset)
 #   BACKENDS    space-separated list (default: "drm-kms-egl software")
-#   CENSUS_SECS steady-state capture seconds per backend (default 8)
+#   CENSUS_SECS steady-state capture seconds per backend (default 8), counted
+#               from the backend's first present window, not from launch
+#   STARTUP_SECS
+#               seconds a backend may take to present its first window
+#               (default 30). Startup is not steady state: on a shared runner
+#               drm-kms-egl has taken 7 to 14 s to present its first window,
+#               and counting that against CENSUS_SECS failed the frames floor
+#               on runs that then presented at a steady 60 Hz.
 #   COUNT_FDS   1 to also fail a backend whose open-fd count grows over its
 #               steady-state window (default 0). Rides along because this
 #               already holds a live shell for CENSUS_SECS; see
@@ -60,6 +67,7 @@ BUNDLE="${BUNDLE:-}"
 VKMS_CARD="${VKMS_CARD:-}"
 BACKENDS="${BACKENDS:-drm-kms-egl software}"
 CENSUS_SECS="${CENSUS_SECS:-8}"
+STARTUP_SECS="${STARTUP_SECS:-30}"
 BASELINE="${BASELINE:-}"
 # Read under set -u, so it needs a default here rather than at the use site.
 KEEP_LOG="${KEEP_LOG:-0}"
@@ -265,6 +273,21 @@ census_backend() {  # census_backend <backend>
         "$HOMESCREEN" --backend "$backend" -b "$BUNDLE" \
         --drm-device "$VKMS_CARD" >"$hs_log" 2>&1 &
     local pid=$!
+    # Start the steady-state clock at the first present window. A launch that
+    # never presents still runs the full window below and fails or skips there.
+    local label; label="$(present_label "$backend")"
+    local t0="$SECONDS" started=0
+    while (( SECONDS - t0 < STARTUP_SECS )) && kill -0 "$pid" 2>/dev/null; do
+        if grep -q "\[${label}\] profile (n=" "$hs_log" 2>/dev/null; then
+            started=1; break
+        fi
+        sleep 0.2
+    done
+    if (( started )); then
+        log "$backend first present window $(( SECONDS - t0 ))s after launch"
+    else
+        log "$backend no present window $(( SECONDS - t0 ))s after launch"
+    fi
     # Optional fd-growth check (COUNT_FDS=1). Split the steady-state sleep so
     # the baseline is taken once the run has settled rather than at launch, when
     # the engine and EGL are still opening lazily. Falls back to one sleep when
@@ -276,7 +299,7 @@ census_backend() {  # census_backend <backend>
         # Frames first, then flatness. Waiting for a steady present window is
         # what tells startup from a stalled launch; settle_fds then rides out the
         # jitter once the shell is actually working.
-        if await_windows "$hs_log" "$(present_label "$backend")" 2 \
+        if await_windows "$hs_log" "$label" 2 \
                          "$(( CENSUS_SECS - 2 ))"; then
             fd_base="$(settle_fds "$pid" "$FD_SETTLE_STEP" "$FD_SETTLE_TRIES" \
                                   "$FD_SETTLE_DELTA")" || fd_base=""
@@ -313,7 +336,6 @@ census_backend() {  # census_backend <backend>
     fi
     kill -TERM "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; reap_homescreen
 
-    local label; label="$(present_label "$backend")"
     local fold; fold="$(fold_present "$hs_log" "$label")"
     if [[ -z "$fold" ]]; then
         record "$backend" skip "no [$label] present census emitted (backend did not render)"; return
