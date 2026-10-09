@@ -31,6 +31,11 @@ bool PopulateExternalGlTextureFrame(
   }
   auto& desc = it->second;
 
+  // VkImage textures are resolved by the Vulkan callback only.
+  if (desc->vk_image) {
+    return false;
+  }
+
   // GPU-surface path: the plugin owns the GL texture.
   if (!desc->pixel_buffer_callback) {
     texture_out->target = desc->target;

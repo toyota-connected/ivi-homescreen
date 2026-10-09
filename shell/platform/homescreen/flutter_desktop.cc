@@ -349,6 +349,39 @@ bool FlutterDesktopPluginRegistrarGetEglContext(
   return true;
 }
 
+namespace {
+
+// Ids for textures the embedder mints (pixel-buffer, VkImage) live in a range
+// disjoint from GL GPU-surface ids, which reuse the plugin-owned GLuint name
+// (at most 32 bits), so they can never collide in the registry.
+std::atomic<int64_t> g_next_embedder_texture_id{1LL << 48};
+
+// The backend of the view this registrar's engine drives, or null while the
+// view is not (or no longer) attached.
+Backend* RegistrarBackend(const FlutterDesktopTextureRegistrar* registrar) {
+  if (!registrar || !registrar->engine || !registrar->engine->view_controller ||
+      !registrar->engine->view_controller->view) {
+    return nullptr;
+  }
+  return registrar->engine->view_controller->view->GetBackend();
+}
+
+}  // namespace
+
+bool ExternalVulkanTextureFrameCallback(
+    void* user_data,
+    int64_t texture_id,
+    size_t width,
+    size_t height,
+    FlutterVulkanExternalTexture* texture_out) {
+  const auto* state = static_cast<FlutterDesktopEngineState*>(user_data);
+  if (!state) {
+    return false;
+  }
+  return PopulateExternalVulkanTextureFrame(
+      state->texture_registrar.get(), texture_id, width, height, texture_out);
+}
+
 int64_t FlutterDesktopTextureRegistrarRegisterExternalTexture(
     FlutterDesktopTextureRegistrarRef texture_registrar,
     const FlutterDesktopTextureInfo* texture_info) {
@@ -363,11 +396,7 @@ int64_t FlutterDesktopTextureRegistrarRegisterExternalTexture(
       return result;
     }
 
-    // Pixel-buffer texture ids live in a disjoint range from GPU-surface
-    // ids (which reuse the plugin-owned GLuint name, at most 32 bits), so
-    // they can never collide in the registry.
-    static std::atomic<int64_t> next_pixel_buffer_id{1LL << 48};
-    const int64_t id = next_pixel_buffer_id.fetch_add(1);
+    const int64_t id = g_next_embedder_texture_id.fetch_add(1);
 
     auto desc = std::make_unique<GL_TEXTURE_2D_DESC>();
     desc->target = 0;
@@ -394,10 +423,56 @@ int64_t FlutterDesktopTextureRegistrarRegisterExternalTexture(
     }
   } else if (texture_info->type == kFlutterDesktopGpuSurfaceTexture) {
     const auto& gpu_surface_config = texture_info->gpu_surface_config;
+    if (gpu_surface_config.type == kFlutterDesktopGpuSurfaceTypeVkImage) {
+      if (!gpu_surface_config.callback) {
+        ihs::log::error(
+            "RegisterExternalTexture: gpu_surface_config.callback is null");
+        return result;
+      }
+      if (texture_registrar->shutting_down.load(std::memory_order_acquire)) {
+        return result;
+      }
+      // The engine samples the image on its own VkDevice, so only a Vulkan
+      // backend can resolve it.
+      BackendVulkanContext vk{};
+      Backend* backend = RegistrarBackend(texture_registrar);
+      if (!backend || !backend->GetVulkanContext(&vk)) {
+        ihs::log::error(
+            "RegisterExternalTexture: kFlutterDesktopGpuSurfaceTypeVkImage "
+            "requires a Vulkan backend");
+        return result;
+      }
+
+      // Unlike the GL path, the callback is not invoked here: it runs on
+      // every engine resolve and names the image current at that time.
+      auto texture = std::make_shared<VkImageTexture>();
+      texture->callback = gpu_surface_config.callback;
+      texture->user_data = gpu_surface_config.user_data;
+      texture->allow_ycbcr = vk.sampler_ycbcr_conversion;
+      texture->max_image_dimension = QueryMaxImageDimension2D(
+          vk.get_instance_proc_addr, vk.instance, vk.physical_device);
+
+      const int64_t id = g_next_embedder_texture_id.fetch_add(1);
+      auto desc = std::make_unique<GL_TEXTURE_2D_DESC>();
+      desc->vk_image = std::move(texture);
+      texture_registrar->texture_registry[id] = std::move(desc);
+
+      IHS_TRACE("RegisterExternalTexture (VkImage): {}, {}",
+                fmt::ptr(texture_registrar->engine->flutter_engine), id);
+      if (kSuccess == LibFlutterEngine->RegisterExternalTexture(
+                          texture_registrar->engine->flutter_engine, id)) {
+        result = id;
+      } else {
+        texture_registrar->texture_registry.erase(id);
+        ihs::log::error("Failed to Register Texture");
+      }
+      return result;
+    }
     if (gpu_surface_config.type != kFlutterDesktopGpuSurfaceTypeGlTexture2D) {
       ihs::log::error(
-          "RegisterExternalTexture: kFlutterDesktopGpuSurfaceTypeGlTexture2D "
-          "is only supported at this time");
+          "RegisterExternalTexture: only "
+          "kFlutterDesktopGpuSurfaceTypeGlTexture2D "
+          "and kFlutterDesktopGpuSurfaceTypeVkImage are supported");
       return result;
     }
 
@@ -469,6 +544,20 @@ void FlutterDesktopTextureRegistrarUnregisterExternalTexture(
       removed = std::move(it->second);
       texture_registrar->texture_registry.erase(it);
     }
+  }
+
+  if (removed && removed->vk_image) {
+    // The engine may still be sampling this texture's last frame; complete
+    // the unregistration once it has released every frame, so the plugin
+    // does not free an image (or its release context) still in use.
+    if (!RetireVkImageTexture(removed->vk_image, callback, user_data)) {
+      ihs::log::warn(
+          "UnregisterExternalTexture: VkImage texture {} unregistered without "
+          "a completion callback while the engine still holds its frames; "
+          "their release callbacks will run after this call returns",
+          texture_id);
+    }
+    return;
   }
 
   if (removed) {

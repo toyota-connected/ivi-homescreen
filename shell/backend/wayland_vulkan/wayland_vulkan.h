@@ -229,6 +229,9 @@ class WaylandVulkanBackend final : public Backend {
   VkDevice device_{};
   uint32_t queue_family_index_{};
   VkQueue queue_{};
+  // samplerYcbcrConversion was enabled on device_ (reported to plugins and
+  // used to gate YCbCr external textures).
+  bool sampler_ycbcr_conversion_{false};
   // VkQueue access (vkQueueSubmit / vkQueuePresentKHR / vkQueueWaitIdle) must
   // be externally synchronized per the Vulkan spec. The present/get-next-image
   // callbacks run on the Flutter raster thread while init, swapchain

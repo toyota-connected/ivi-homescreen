@@ -3,6 +3,7 @@ add_library(platform_homescreen STATIC
         flutter_desktop.cc
         flutter_desktop_messenger.cc
         flutter_desktop_texture_registrar.cc
+        flutter_desktop_vk_texture.cc
         key_event_handler.cc
         key_mapping.cc
         logging_handler.cc
@@ -50,6 +51,7 @@ target_include_directories(platform_homescreen PRIVATE
 
 target_link_libraries(platform_homescreen PUBLIC
         asio
+        vulkan_headers
         flutter
         rapidjson
         fmt

@@ -49,6 +49,7 @@ VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 #include "libflutter_engine.h"
 #include "logging/logging.h"
 #include "shell/platform/homescreen/flutter_desktop_engine_state.h"
+#include "shell/platform/homescreen/flutter_desktop_texture_registrar.h"
 #include "task_runner.h"
 
 // DRM fourcc / modifier constants for the dmabuf export path. Defined locally
@@ -1438,6 +1439,8 @@ FlutterRendererConfig HeadlessVulkanBackend::GetRenderConfig() {
       GetInstanceProcAddressCallback;
   config.vulkan.get_next_image_callback = GetNextImageCallback;
   config.vulkan.present_image_callback = PresentCallback;
+  config.vulkan.external_texture_frame_callback =
+      ExternalVulkanTextureFrameCallback;
   return config;
 }
 
@@ -1464,6 +1467,8 @@ bool HeadlessVulkanBackend::GetVulkanContext(BackendVulkanContext* out) const {
   out->api_version = UsableApiVersion(physical_device_);
   out->instance_extensions = enabled_instance_extensions_.data();
   out->instance_extension_count = enabled_instance_extensions_.size();
+  // samplerYcbcrConversion is not requested at device creation here.
+  out->sampler_ycbcr_conversion = false;
   return true;
 }
 

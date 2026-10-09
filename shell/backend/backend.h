@@ -81,6 +81,9 @@ struct BackendVulkanContext {
   // @device_extensions; null/0 when not reported.
   const char* const* instance_extensions;
   size_t instance_extension_count;
+  // True when @device was created with the samplerYcbcrConversion feature,
+  // which sampling a multi-planar YCbCr image (e.g. NV12) requires.
+  bool sampler_ycbcr_conversion;
 };
 
 // The unified display-target interface: a Backend owns surface lifecycle, the
