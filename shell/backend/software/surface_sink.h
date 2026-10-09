@@ -78,6 +78,12 @@ class ISurfaceSink {
     return std::nullopt;
   }
 
+  // The sink's scanout period in nanoseconds, when it drives a real display,
+  // so SoftwareBackend can report the mode's refresh rate rather than a
+  // hardcoded 60 (#732). 0 for sinks with no vblank of their own
+  // (file / memory / none), which is what the view treats as unknown.
+  [[nodiscard]] virtual uint32_t RefreshPeriodNs() const { return 0; }
+
   // True, when the sink has a real vblank source, it can drive Flutter's
   // vsync_callback from. SoftwareBackend's GetVsyncCallback() returns
   // a trampoline iff this is true.

@@ -135,6 +135,14 @@ class DrmDumbSink final : public ISurfaceSink {
 
   // The picked connector mode's extent — the SoftwareBackend adopts this as
   // the engine viewport so Flutter renders at the panel's native resolution.
+  // |ISurfaceSink| From the mode, latched in InitFromFd; 0 when the mode
+  // reports no vrefresh. Not refresh_period_ns_, which defaults to 60Hz and
+  // so cannot distinguish that (#732).
+  [[nodiscard]] uint32_t RefreshPeriodNs() const override {
+    const uint32_t vr = mode_vrefresh_;
+    return vr > 0 ? static_cast<uint32_t>(1'000'000'000ULL / vr) : 0;
+  }
+
   [[nodiscard]] std::optional<std::pair<uint32_t, uint32_t>> NativeSize()
       const override {
     return std::make_pair(mode_width_, mode_height_);
@@ -249,6 +257,8 @@ class DrmDumbSink final : public ISurfaceSink {
   profiling::MotionToPhoton* m2p_{nullptr};
   // Refresh period as nanoseconds; computed once from the picked mode.
   std::atomic<uint64_t> refresh_period_ns_{16'666'667};
+  // The mode's vrefresh in Hz as the kernel reported it, 0 included.
+  uint32_t mode_vrefresh_{0};
 
   // Software cursor composited onto each frame (XRGB8888 path); shared with the
   // seat, which updates its position. Null when the cursor is disabled.

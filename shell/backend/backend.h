@@ -262,6 +262,32 @@ class Backend {
   virtual VsyncCallback GetVsyncCallback() const { return nullptr; }
 
   /**
+   * @brief The scanout refresh period this backend paces frames to, in
+   * nanoseconds, or 0 when it drives no display of its own.
+   *
+   * A backend that owns a display already has to be right about this number --
+   * it is what the vsync source hands the engine as frame_target_time -- so the
+   * refresh rate reported to Flutter is derived from it rather than tracked
+   * separately. The two disagreeing is #732: the engine was paced at the
+   * connector's real rate while PlatformDispatcher.displays[] said 60.
+   *
+   * Backends that drive no vsync source of their own (Wayland, headless)
+   * inherit 0 and the view falls back to the display's own figure.
+   */
+  [[nodiscard]] virtual uint32_t RefreshPeriodNs() const { return 0; }
+
+  /**
+   * @brief RefreshPeriodNs() as a rate in Hz, or 0.0 when it is unknown.
+   *
+   * Not virtual: one conversion, so no backend can report a rate that
+   * disagrees with the period it paces to.
+   */
+  [[nodiscard]] double RefreshRateHz() const {
+    const uint32_t period_ns = RefreshPeriodNs();
+    return period_ns > 0 ? 1e9 / static_cast<double>(period_ns) : 0.0;
+  }
+
+  /**
    * @brief The output this backend is presenting on, when it knows.
    *
    * The name a view is bound to and the name its config asked for are not the

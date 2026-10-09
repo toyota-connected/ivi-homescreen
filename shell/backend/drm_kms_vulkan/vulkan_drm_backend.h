@@ -246,6 +246,12 @@ class VulkanDrmBackend final : public Backend {
  public:
   [[nodiscard]] uint32_t width() const { return width_; }
   [[nodiscard]] uint32_t height() const { return height_; }
+  // |Backend| From the selected mode; 0 before one is set. See the note on
+  // DrmBackend::RefreshPeriodNs for why not the vsync provider (#732).
+  [[nodiscard]] uint32_t RefreshPeriodNs() const override {
+    const uint32_t vr = mode_vrefresh_;
+    return vr > 0 ? static_cast<uint32_t>(1'000'000'000ULL / vr) : 0;
+  }
   // Scanout rotation in degrees (0|90|180|270). FlutterView forwards it to the
   // seat so the HW cursor sprite is transformed from render space (where the
   // pointer lives) into panel space (where the cursor plane lives).
@@ -421,6 +427,9 @@ class VulkanDrmBackend final : public Backend {
 
   // Scanout mode selector ("<W>x<H>[@<R>]"); empty = connector preferred mode.
   std::string mode_spec_;
+  // The selected mode's vrefresh in Hz, latched by SetupCompositor; 0 until
+  // a mode is set. Reported to the engine via RefreshPeriodNs (#732).
+  uint32_t mode_vrefresh_{0};
   // --drm-connector / view.backend.drm.connector. Empty = first connected
   // connector with a mode. Unused on the leased tier, which pins by id.
   std::string connector_name_;

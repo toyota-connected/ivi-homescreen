@@ -157,6 +157,9 @@ std::shared_ptr<IDisplay> MakeDrmDisplay(
     // point there is nothing else to keep alive.
     return nullptr;
   }
+  // 60.0 is a fallback, not the reported rate: no mode is selected yet here,
+  // and FlutterView takes the rate from the backend's vsync period once the
+  // backend has picked one (#732).
   return std::make_shared<DrmDisplay>(static_cast<int32_t>(w),
                                       static_cast<int32_t>(h), 60.0,
                                       std::move(*device), no_seat);

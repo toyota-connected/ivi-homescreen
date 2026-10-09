@@ -1328,6 +1328,7 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   // Flutter targets the real refresh, and start the async page-flip reader that
   // returns each frame's baton on vblank.
   const uint32_t vr = target.mode.vrefresh;
+  mode_vrefresh_ = vr;  // for RefreshPeriodNs; 0 stays "no mode" (#732)
   const uint32_t period_ns =
       vr > 0 ? static_cast<uint32_t>(1'000'000'000ULL / vr) : 16'666'667U;
   compositor_->period_ns = period_ns;

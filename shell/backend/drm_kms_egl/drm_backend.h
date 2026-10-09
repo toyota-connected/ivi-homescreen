@@ -411,6 +411,13 @@ class DrmBackend : public Backend, public IFlipSink {
   [[nodiscard]] uint32_t mode_height() const { return mode_.vdisplay; }
   [[nodiscard]] uint32_t vrefresh() const { return mode_.vrefresh; }
   [[nodiscard]] const drmModeModeInfo& mode() const { return mode_; }
+  // |Backend| From the selected mode, not from the vsync provider: the
+  // provider's period_ns_ defaults to 60Hz and so cannot say "no mode yet",
+  // which is the distinction #732 turns on.
+  [[nodiscard]] uint32_t RefreshPeriodNs() const override {
+    const uint32_t vr = vrefresh();
+    return vr > 0 ? static_cast<uint32_t>(1'000'000'000ULL / vr) : 0;
+  }
   [[nodiscard]] EGLDisplay egl_display() const { return egl_display_; }
   [[nodiscard]] gbm_device* gbm() const { return gbm_device_; }
 
