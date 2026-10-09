@@ -26,6 +26,7 @@
 #include "display/idisplay.h"
 #include "flutter/fml/macros.h"
 #include "flutter_desktop_view_controller_state.h"
+#include "view/display_metadata.h"
 #include "view/platform_view_scene.h"
 #if BUILD_ACCESSIBILITY
 #include "shell/accessibility/accessibility_tree.h"
@@ -146,9 +147,10 @@ class FlutterView {
    */
   [[nodiscard]] Backend* GetBackend() const { return m_backend.get(); }
 
-  // Re-send FlutterEngineDisplay metadata (physical px + effective pixel
-  // ratio) to a running engine. Called by WaylandWindow::ApplyScale when the
-  // surface scale changes; safe no-op before the engine runs.
+  // Re-send FlutterEngineDisplay metadata (extent, refresh rate, effective
+  // pixel ratio) to a running engine. Called by WaylandWindow::ApplyScale when
+  // the surface scale changes, and by App when an output transition moves a
+  // view or gives it an output back (#760); safe no-op before the engine runs.
   void UpdateDisplayMetadata() const;
 
   /**
@@ -285,6 +287,14 @@ class FlutterView {
   // The one place the parked state changes: parks/unparks frame production and
   // then tells the plugins. Public entry points are Suspend()/Resume().
   void SetSuspended(bool suspended);
+
+  // The extent and surface scale this view reports right now, from whichever
+  // backend is active at RUNTIME -- DRM and software adopt the panel's mode,
+  // Wayland the window -- falling back to the configured dimensions when no
+  // backend answers. Shared by the start-up notify and every re-notify after
+  // it, so an output change cannot report a differently shaped display than
+  // start-up did (#760).
+  [[nodiscard]] homescreen::ViewExtent ResolveViewExtent() const;
 
  public:
   [[nodiscard]] bool IsSuspended() const { return m_suspended; }
