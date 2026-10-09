@@ -135,17 +135,18 @@ class DrmDumbSink final : public ISurfaceSink {
 
   // The picked connector mode's extent — the SoftwareBackend adopts this as
   // the engine viewport so Flutter renders at the panel's native resolution.
-  // |ISurfaceSink| From the mode, latched in InitFromFd; 0 when the mode
-  // reports no vrefresh. Not refresh_period_ns_, which defaults to 60Hz and
-  // so cannot distinguish that (#732).
-  [[nodiscard]] uint32_t RefreshPeriodNs() const override {
-    const uint32_t vr = mode_vrefresh_;
-    return vr > 0 ? static_cast<uint32_t>(1'000'000'000ULL / vr) : 0;
-  }
-
   [[nodiscard]] std::optional<std::pair<uint32_t, uint32_t>> NativeSize()
       const override {
     return std::make_pair(mode_width_, mode_height_);
+  }
+
+  // |ISurfaceSink| From the mode, latched in InitFromFd; 0 when the mode
+  // reports no vrefresh. Not refresh_period_ns_, which defaults to 60Hz and
+  // so cannot distinguish that (#732). Integer vrefresh, so a 59.94Hz mode
+  // reports 60 (#762).
+  [[nodiscard]] uint32_t RefreshPeriodNs() const override {
+    const uint32_t vr = mode_vrefresh_;
+    return vr > 0 ? static_cast<uint32_t>(1'000'000'000ULL / vr) : 0;
   }
 
  private:

@@ -271,8 +271,12 @@ class Backend {
    * separately. The two disagreeing is #732: the engine was paced at the
    * connector's real rate while PlatformDispatcher.displays[] said 60.
    *
-   * Backends that drive no vsync source of their own (Wayland, headless)
-   * inherit 0 and the view falls back to the display's own figure.
+   * Wayland and headless inherit 0, and the view falls back to the display's
+   * own figure. On Wayland that fallback is the right answer rather than a
+   * gap: it is the wl_output refresh the compositor advertises, per output.
+   * It is deliberately not WaylandVsyncProvider::RefreshPeriodNs(), which
+   * those backends do own but which reads 0 until the first presented event.
+   * Headless drives no scanout and keeps the synthetic 60.
    */
   [[nodiscard]] virtual uint32_t RefreshPeriodNs() const { return 0; }
 

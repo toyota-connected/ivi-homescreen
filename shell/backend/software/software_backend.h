@@ -62,13 +62,13 @@ class SoftwareBackend final : public Backend {
   // mode / fbdev virtual size) when the sink drives a fixed-size display, else
   // the config view size. FlutterView reads these to drive the engine viewport
   // + seat coordinate space, mirroring the DRM backends' width()/height().
+  [[nodiscard]] uint32_t width() const { return width_; }
+  [[nodiscard]] uint32_t height() const { return height_; }
+
   // |Backend| Whatever the active sink knows; 0 for the headless sinks.
   [[nodiscard]] uint32_t RefreshPeriodNs() const override {
     return sink_ ? sink_->RefreshPeriodNs() : 0;
   }
-
-  [[nodiscard]] uint32_t width() const { return width_; }
-  [[nodiscard]] uint32_t height() const { return height_; }
 
   // Forward the shared software cursor to the sink (the dumb sink composites
   // it). Called by FlutterView with the SoftwareDisplay-owned cursor. No-op for
