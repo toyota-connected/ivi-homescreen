@@ -601,6 +601,17 @@ void App::OnDisplayOutputsChanged(IDisplay* display,
                    output_name, EventName(event), view->GetIndex(), what,
                    current.value_or("-"), wanted.bound() ? wanted.name : "-");
 
+    // The engine was last told this view's display metadata for the output it
+    // started on, so re-send it where the transition changes which output that
+    // is (#760). Wayland's figures move with the surface; the DRM backends
+    // re-send the mode they picked at bring-up until #765 makes them
+    // re-resolve it. Not kLost -- there is nothing to describe while the view
+    // is parked -- and not a same-connector reconfigure, which is #765.
+    if (transition == homescreen::OutputTransition::kMoved ||
+        transition == homescreen::OutputTransition::kAppeared) {
+      view->UpdateDisplayMetadata();
+    }
+
     // Tell the plugins their grant is stale. Parking a view whose output went
     // away is handled above, by ApplyOnDisconnect; what is still missing is
     // moving a view onto a different output, which needs a rebind path.

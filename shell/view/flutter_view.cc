@@ -20,7 +20,6 @@
 #include "logging/logging.h"
 
 #include <cassert>
-#include <cmath>
 #include <memory>
 #include <utility>
 
@@ -640,83 +639,19 @@ bool FlutterView::Initialize() {
     m_backend->SetPlatformTaskRunner(m_flutter_engine->GetPlatformTaskRunner());
   }
 
-  // notify display update
-  FlutterEngineDisplay display{};
-  display.struct_size = sizeof(FlutterEngineDisplay);
-  display.display_id = 1;
-  display.single_display = true;
-  // The backend that owns the connector knows the mode's rate; the display's
-  // own figure is a fallback for the backends that drive no scanout (#732).
-  const double backend_rate = m_backend ? m_backend->RefreshRateHz() : 0.0;
-  display.refresh_rate =
-      backend_rate > 0.0
-          ? backend_rate
-          : m_display->GetRefreshRate(static_cast<uint32_t>(m_index));
-  // Resolve the engine's render extent from whichever backend is active at
-  // RUNTIME. Each compiled backend gets a chance to report its resolved size
-  // (DRM/software adopt the panel's native mode so fullscreen gets mode dims;
-  // Wayland uses the window size); fall back to the configured dims. Runtime
-  // dispatch so any combination of backends compiled into one binary works.
-  int32_t width = 0;
-  int32_t height = 0;
-  bool size_resolved = false;
-#if BUILD_BACKEND_DRM_KMS_EGL
-  if (auto* drm = dynamic_cast<DrmBackend*>(m_backend.get())) {
-    width = static_cast<int32_t>(drm->width());
-    height = static_cast<int32_t>(drm->height());
-    size_resolved = true;
-  }
-#endif
-#if BUILD_BACKEND_DRM_KMS_VULKAN
-  if (!size_resolved) {
-    if (auto* drm = dynamic_cast<VulkanDrmBackend*>(m_backend.get())) {
-      width = static_cast<int32_t>(drm->width());
-      height = static_cast<int32_t>(drm->height());
-      size_resolved = true;
-    }
-  }
-#endif
-#if BUILD_BACKEND_SOFTWARE
-  if (!size_resolved) {
-    if (auto* sw_backend = dynamic_cast<SoftwareBackend*>(m_backend.get())) {
-      width = static_cast<int32_t>(sw_backend->width());
-      height = static_cast<int32_t>(sw_backend->height());
-      size_resolved = true;
-    }
-  }
-#endif
-#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
-  if (!size_resolved && m_wayland_window) {
-    const auto sz = m_wayland_window->GetSize();
-    width = static_cast<int32_t>(sz.first);
-    height = static_cast<int32_t>(sz.second);
-    size_resolved = true;
-  }
-#endif
-  if (!size_resolved) {
-    width =
-        static_cast<int32_t>(m_config.view.width.value_or(kDefaultViewWidth));
-    height =
-        static_cast<int32_t>(m_config.view.height.value_or(kDefaultViewHeight));
-  }
-  // DRM/software report native mode dims (already physical, scale 1); a
-  // Wayland window reports logical dims — convert with its surface scale so
-  // Flutter sees the display in physical pixels (issue #150).
-  double scale = 1.0;
-#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
-  if (m_wayland_window) {
-    scale = m_wayland_window->GetScale();
-  }
-#endif
-  display.width = static_cast<size_t>(std::lround(width * scale));
-  display.height = static_cast<size_t>(std::lround(height * scale));
-  display.device_pixel_ratio =
-      m_config.view.pixel_ratio.value_or(kDefaultPixelRatio) * scale;
+  // notify display update. The extent, the rate precedence and the scale all
+  // come from the shared resolver, so the re-notify in UpdateDisplayMetadata
+  // reports the same shape this did (#760).
+  const homescreen::ViewExtent extent = ResolveViewExtent();
+  const FlutterEngineDisplay display = homescreen::MakeDisplayMetadata(
+      m_backend ? m_backend->RefreshRateHz() : 0.0,
+      m_display->GetRefreshRate(static_cast<uint32_t>(m_index)), extent,
+      m_config.view.pixel_ratio.value_or(kDefaultPixelRatio));
   LibFlutterEngine->NotifyDisplayUpdate(m_flutter_engine->GetFlutterEngine(),
                                         kFlutterEngineDisplaysUpdateTypeStartup,
                                         &display, 1);
   ihs::log::info("Display metadata: {}x{} logical -> {}x{} px, pixel_ratio={}",
-                 width, height, display.width, display.height,
+                 extent.width, extent.height, display.width, display.height,
                  display.device_pixel_ratio);
 
   // Update for Binary Messenger
@@ -751,15 +686,15 @@ bool FlutterView::Initialize() {
 #endif
   if (!handled_by_wayland) {
     const auto result = m_flutter_engine->SetWindowSize(
-        static_cast<size_t>(height), static_cast<size_t>(width));
-    ihs::log::info("[FlutterView] SendWindowMetrics {}x{} result={}", width,
-                   height, static_cast<int>(result));
+        static_cast<size_t>(extent.height), static_cast<size_t>(extent.width));
+    ihs::log::info("[FlutterView] SendWindowMetrics {}x{} result={}",
+                   extent.width, extent.height, static_cast<int>(result));
 #if BUILD_BACKEND_SOFTWARE
     // Match the seat's pointer-clamp viewport to the rendered size so the
     // pointer (and the software cursor) share the framebuffer coordinate space,
     // and hand the display's cursor to the sink (which composites it).
     if (auto* sw_display = dynamic_cast<SoftwareDisplay*>(m_display.get())) {
-      sw_display->SetViewportSize(width, height);
+      sw_display->SetViewportSize(extent.width, extent.height);
       if (auto* sw_backend = dynamic_cast<SoftwareBackend*>(m_backend.get())) {
         sw_backend->SetCursor(sw_display->cursor());
       }
@@ -788,40 +723,91 @@ bool FlutterView::Initialize() {
   return true;
 }
 
-void FlutterView::UpdateDisplayMetadata() const {
-  // Only the Wayland path has a runtime scale source; DRM/software report
-  // native mode dimensions once at startup and never rescale.
+homescreen::ViewExtent FlutterView::ResolveViewExtent() const {
+  // Resolve the engine's render extent from whichever backend is active at
+  // RUNTIME. Each compiled backend gets a chance to report its resolved size
+  // (DRM/software adopt the panel's native mode so fullscreen gets mode dims;
+  // Wayland uses the window size); fall back to the configured dims. Runtime
+  // dispatch so any combination of backends compiled into one binary works.
+  homescreen::ViewExtent extent{};
+  bool size_resolved = false;
+#if BUILD_BACKEND_DRM_KMS_EGL
+  if (auto* drm = dynamic_cast<DrmBackend*>(m_backend.get())) {
+    extent.width = static_cast<int32_t>(drm->width());
+    extent.height = static_cast<int32_t>(drm->height());
+    size_resolved = true;
+  }
+#endif
+#if BUILD_BACKEND_DRM_KMS_VULKAN
+  if (!size_resolved) {
+    if (auto* drm = dynamic_cast<VulkanDrmBackend*>(m_backend.get())) {
+      extent.width = static_cast<int32_t>(drm->width());
+      extent.height = static_cast<int32_t>(drm->height());
+      size_resolved = true;
+    }
+  }
+#endif
+#if BUILD_BACKEND_SOFTWARE
+  if (!size_resolved) {
+    if (auto* sw_backend = dynamic_cast<SoftwareBackend*>(m_backend.get())) {
+      extent.width = static_cast<int32_t>(sw_backend->width());
+      extent.height = static_cast<int32_t>(sw_backend->height());
+      size_resolved = true;
+    }
+  }
+#endif
 #if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
-  if (!m_wayland_window || !m_flutter_engine ||
-      !m_flutter_engine->IsRunning()) {
+  if (!size_resolved && m_wayland_window) {
+    const auto sz = m_wayland_window->GetSize();
+    extent.width = static_cast<int32_t>(sz.first);
+    extent.height = static_cast<int32_t>(sz.second);
+    size_resolved = true;
+  }
+#endif
+  if (!size_resolved) {
+    extent.width =
+        static_cast<int32_t>(m_config.view.width.value_or(kDefaultViewWidth));
+    extent.height =
+        static_cast<int32_t>(m_config.view.height.value_or(kDefaultViewHeight));
+  }
+  // DRM/software report native mode dims (already physical, scale 1); a
+  // Wayland window reports logical dims — convert with its surface scale so
+  // Flutter sees the display in physical pixels (issue #150).
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
+  if (m_wayland_window) {
+    extent.scale = m_wayland_window->GetScale();
+  }
+#endif
+  return extent;
+}
+
+void FlutterView::UpdateDisplayMetadata() const {
+  if (!m_flutter_engine || !m_flutter_engine->IsRunning()) {
     return;
   }
-  const auto [width, height] = m_wayland_window->GetSize();
-  const double scale = m_wayland_window->GetScale();
-
-  FlutterEngineDisplay display{};
-  display.struct_size = sizeof(FlutterEngineDisplay);
-  display.display_id = 1;
-  display.single_display = true;
-  // Same precedence as the startup path, though a Wayland backend drives no
-  // scanout of its own and so reports 0 here today.
-  const double backend_rate = m_backend ? m_backend->RefreshRateHz() : 0.0;
-  display.refresh_rate =
-      backend_rate > 0.0
-          ? backend_rate
-          : m_display->GetRefreshRate(m_wayland_window->GetOutputIndex());
-  display.width = static_cast<size_t>(std::lround(width * scale));
-  display.height = static_cast<size_t>(std::lround(height * scale));
-  display.device_pixel_ratio =
-      m_config.view.pixel_ratio.value_or(kDefaultPixelRatio) * scale;
-
+  // The display's own rate is per output on Wayland, so ask about the output
+  // the surface is on rather than this view's index. DRM and software ignore
+  // the index, and it is only a fallback for them anyway (#732).
+  auto output_index = static_cast<uint32_t>(m_index);
+#if BUILD_BACKEND_WAYLAND_EGL || BUILD_BACKEND_WAYLAND_VULKAN
+  if (m_wayland_window) {
+    output_index = m_wayland_window->GetOutputIndex();
+  }
+#endif
+  const homescreen::ViewExtent extent = ResolveViewExtent();
+  const FlutterEngineDisplay display = homescreen::MakeDisplayMetadata(
+      m_backend ? m_backend->RefreshRateHz() : 0.0,
+      m_display->GetRefreshRate(output_index), extent,
+      m_config.view.pixel_ratio.value_or(kDefaultPixelRatio));
+  // kFlutterEngineDisplaysUpdateTypeStartup is the only value the embedder
+  // enum defines (embedder.h): the type names which displays are being
+  // described, not whether this is the first time they are.
   LibFlutterEngine->NotifyDisplayUpdate(m_flutter_engine->GetFlutterEngine(),
                                         kFlutterEngineDisplaysUpdateTypeStartup,
                                         &display, 1);
   ihs::log::debug("Display metadata: {}x{} logical -> {}x{} px, pixel_ratio={}",
-                  width, height, display.width, display.height,
+                  extent.width, extent.height, display.width, display.height,
                   display.device_pixel_ratio);
-#endif
 }
 
 void FlutterView::RunTasks() {
