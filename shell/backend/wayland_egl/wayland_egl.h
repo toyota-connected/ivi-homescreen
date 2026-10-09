@@ -20,6 +20,7 @@
 #include <atomic>
 #include <cstdint>
 #include <ctime>
+#include <functional>
 #include <list>
 #include <memory>
 #include <mutex>
@@ -122,6 +123,13 @@ class WaylandEglBackend : public Egl, public Backend {
   bool TextureClearCurrent() override;
 
   bool GetEglContext(BackendEglContext* out) const override;
+
+  // A platform view's GL frees, queued from any thread: they need this
+  // backend's context, which only the raster thread holds. Run at the top of
+  // the next present, or at teardown.
+  void ScheduleDeferredDestroy(std::function<void()> fn) override;
+  // Runs what ScheduleDeferredDestroy queued. Raster thread, context current.
+  void RunDeferredDestroys();
 
   /**
    * @brief Get FlutterRendererConfig
@@ -277,6 +285,9 @@ class WaylandEglBackend : public Egl, public Backend {
    */
   static void JoinFlutterRect(FlutterRect* rect,
                               const FlutterRect& additional_rect);
+
+  std::mutex m_deferred_destroy_mu;
+  std::vector<std::function<void()>> m_deferred_destroys;
 
 #if BUILD_COMPOSITOR
   GlCaps m_gl_caps;

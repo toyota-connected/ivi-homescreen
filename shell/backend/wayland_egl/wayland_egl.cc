@@ -102,6 +102,14 @@ WaylandEglBackend::~WaylandEglBackend() {
   if (vsync_ != nullptr) {
     vsync_->SetPresentationTracker(nullptr);
   }
+  // Platform-view frees no present ran, while the context is current.
+  {
+    const std::lock_guard<std::mutex> lock(m_deferred_destroy_mu);
+    if (!m_deferred_destroys.empty()) {
+      MakeCurrent();
+    }
+  }
+  RunDeferredDestroys();
 #if BUILD_HUD
   // Tear the HUD down with the GL context current so imgui's glDelete* land on
   // a live context (the Egl base — destroyed after this — still owns it).
@@ -347,6 +355,7 @@ FlutterRendererConfig WaylandEglBackend::GetRenderConfig() {
     const auto state = static_cast<FlutterDesktopEngineState*>(userdata);
     auto* b = reinterpret_cast<WaylandEglBackend*>(
         state->view_controller->engine->GetBackend());
+    b->RunDeferredDestroys();
 
     // Request wp_presentation feedback before the swap so it binds to
     // THIS commit. No-op when wp_presentation isn't usable.
@@ -804,6 +813,25 @@ void WaylandEglBackend::UnregisterExternalTexture(
 
 #endif  // TODO
 
+void WaylandEglBackend::ScheduleDeferredDestroy(std::function<void()> fn) {
+  if (!fn) {
+    return;
+  }
+  const std::lock_guard<std::mutex> lock(m_deferred_destroy_mu);
+  m_deferred_destroys.push_back(std::move(fn));
+}
+
+void WaylandEglBackend::RunDeferredDestroys() {
+  std::vector<std::function<void()>> ready;
+  {
+    const std::lock_guard<std::mutex> lock(m_deferred_destroy_mu);
+    ready.swap(m_deferred_destroys);
+  }
+  for (auto& fn : ready) {
+    fn();
+  }
+}
+
 bool WaylandEglBackend::TextureMakeCurrent() {
   return MakeTextureCurrent();
 }
@@ -1028,6 +1056,10 @@ bool WaylandEglBackend::BlitBackingStoreToWindow(
 
 bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
                                       size_t count) {
+  // A disposed platform view's GL imports, freed with this present's context
+  // current. Freed on the platform thread instead, with no context, the
+  // textures stayed, and the driver kept each one's dma-buf open.
+  RunDeferredDestroys();
   // Request wp_presentation feedback before the swap so it binds to THIS
   // commit. Both the fast path (BlitBackingStoreToWindow) and the general
   // path below end in eglSwapBuffers, and both want feedback — do it once
