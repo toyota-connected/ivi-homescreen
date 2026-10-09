@@ -40,12 +40,16 @@
 #include "backend/backend_registry.h"
 #include "backend/drm_kms_vulkan/vulkan_drm_backend.h"
 #include "backend/register_backends.h"
+#include "config/common.h"
 #include "configuration/configuration.h"
 #include "display/drm_display.h"
 #include "logging/logger.hpp"
 #include "platform/homescreen/flutter_desktop_engine_state.h"
 #include "platform/homescreen/flutter_desktop_view_controller_state.h"
 #include "platform/homescreen/platform_views/dmabuf_vulkan_import.h"
+#if IVI_HAVE_EGL
+#include "platform/homescreen/platform_views/egl_dmabuf_import.h"
+#endif
 #include "platform/homescreen/platform_views/platform_view_host.h"
 #include "platform/homescreen/platform_views/platform_view_registry.h"
 #include "platform/homescreen/text_input_plugin.h"
@@ -61,6 +65,12 @@ extern "C" {
 #include <fcntl.h>
 #include <gbm.h>
 #include <poll.h>
+#include <sys/mman.h>
+#if IVI_HAVE_EGL
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+#include <GLES2/gl2.h>
+#endif
 #include <sys/stat.h>
 #include <unistd.h>
 #include <xf86drm.h>
@@ -1089,6 +1099,175 @@ TEST_F(PvHostVkmsVk, AVkImageLayerIsSampledAndHandedBackWhenDone) {
   EXPECT_EQ(released.calls.load(), 1) << "never handed back after dispose";
   EXPECT_EQ(released.image, vi.image);
   EXPECT_EQ(released.buffer_id, 7U);
+}
+#endif
+
+#if IVI_HAVE_EGL
+namespace {
+
+// A dma-buf of device-local memory on the backend's Vulkan device, which the
+// CPU may not be able to map. -1 when the device has no such memory or will
+// not export it.
+int ExportDeviceLocal(const BackendVulkanContext& vk, const VkDeviceSize size) {
+  const auto gipa =
+      reinterpret_cast<PFN_vkGetInstanceProcAddr>(vk.get_instance_proc_addr);
+  const auto instance = static_cast<VkInstance>(vk.instance);
+  const auto device = static_cast<VkDevice>(vk.device);
+  const auto gdpa = reinterpret_cast<PFN_vkGetDeviceProcAddr>(
+      gipa(instance, "vkGetDeviceProcAddr"));
+  const auto mem_props =
+      reinterpret_cast<PFN_vkGetPhysicalDeviceMemoryProperties>(
+          gipa(instance, "vkGetPhysicalDeviceMemoryProperties"));
+  const auto allocate =
+      reinterpret_cast<PFN_vkAllocateMemory>(gdpa(device, "vkAllocateMemory"));
+  const auto free_memory =
+      reinterpret_cast<PFN_vkFreeMemory>(gdpa(device, "vkFreeMemory"));
+  const auto get_fd =
+      reinterpret_cast<PFN_vkGetMemoryFdKHR>(gdpa(device, "vkGetMemoryFdKHR"));
+  if (get_fd == nullptr) {
+    return -1;
+  }
+  VkPhysicalDeviceMemoryProperties props{};
+  mem_props(static_cast<VkPhysicalDevice>(vk.physical_device), &props);
+  uint32_t type = UINT32_MAX;
+  for (uint32_t i = 0; i < props.memoryTypeCount; ++i) {
+    const VkMemoryPropertyFlags f = props.memoryTypes[i].propertyFlags;
+    if ((f & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0U &&
+        (f & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) == 0U) {
+      type = i;
+      break;
+    }
+  }
+  if (type == UINT32_MAX) {
+    return -1;
+  }
+  VkExportMemoryAllocateInfo export_info{};
+  export_info.sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO;
+  export_info.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
+  VkMemoryAllocateInfo mai{};
+  mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+  mai.pNext = &export_info;
+  mai.allocationSize = size;
+  mai.memoryTypeIndex = type;
+  VkDeviceMemory memory = VK_NULL_HANDLE;
+  if (allocate(device, &mai, nullptr, &memory) != VK_SUCCESS) {
+    return -1;
+  }
+  VkMemoryGetFdInfoKHR gfi{};
+  gfi.sType = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR;
+  gfi.memory = memory;
+  gfi.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
+  int fd = -1;
+  if (get_fd(device, &gfi, &fd) != VK_SUCCESS) {
+    fd = -1;
+  }
+  free_memory(device, memory, nullptr);  // the dma-buf keeps it alive
+  return fd;
+}
+
+// A GLES context on the card's GBM device, current, with no surface. On vkms
+// that is the CPU renderer.
+class CardGlContext {
+ public:
+  ~CardGlContext() {
+    if (display_ != EGL_NO_DISPLAY) {
+      eglMakeCurrent(display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+      if (context_ != EGL_NO_CONTEXT) {
+        eglDestroyContext(display_, context_);
+      }
+      eglTerminate(display_);
+    }
+    if (gbm_ != nullptr) {
+      gbm_device_destroy(gbm_);
+    }
+  }
+
+  bool Create(const int card_fd) {
+    gbm_ = gbm_create_device(card_fd);
+    const auto get_display = reinterpret_cast<PFNEGLGETPLATFORMDISPLAYEXTPROC>(
+        eglGetProcAddress("eglGetPlatformDisplayEXT"));
+    if (gbm_ == nullptr || get_display == nullptr) {
+      return false;
+    }
+    display_ = get_display(EGL_PLATFORM_GBM_KHR, gbm_, nullptr);
+    if (display_ == EGL_NO_DISPLAY ||
+        eglInitialize(display_, nullptr, nullptr) != EGL_TRUE ||
+        eglBindAPI(EGL_OPENGL_ES_API) != EGL_TRUE) {
+      return false;
+    }
+    const EGLint config_attribs[] = {EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+                                     EGL_NONE};
+    EGLConfig config = nullptr;
+    EGLint n = 0;
+    const EGLint context_attribs[] = {EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE};
+    if (eglChooseConfig(display_, config_attribs, &config, 1, &n) != EGL_TRUE ||
+        n != 1) {
+      return false;
+    }
+    context_ =
+        eglCreateContext(display_, config, EGL_NO_CONTEXT, context_attribs);
+    return context_ != EGL_NO_CONTEXT &&
+           eglMakeCurrent(display_, EGL_NO_SURFACE, EGL_NO_SURFACE, context_) ==
+               EGL_TRUE;
+  }
+
+  [[nodiscard]] EGLDisplay display() const { return display_; }
+
+ private:
+  gbm_device* gbm_{nullptr};
+  EGLDisplay display_{EGL_NO_DISPLAY};
+  EGLContext context_{EGL_NO_CONTEXT};
+};
+
+}  // namespace
+
+// A CPU renderer reads a dma-buf through a CPU mapping. Given one in memory
+// the CPU cannot reach, it used to create the image and the texture without
+// complaint and crash in the first draw that sampled it. The import is refused
+// instead, and leaves the fd with the caller as any failed import does.
+TEST_F(VulkanDrmVkms, ACpuRendererRefusesADmabufItCannotMap) {
+  constexpr uint32_t kW = 64;
+  constexpr uint32_t kH = 64;
+  BackendVulkanContext vk{};
+  ASSERT_TRUE(backend_->GetVulkanContext(&vk));
+  const int fd = ExportDeviceLocal(vk, VkDeviceSize{kW} * kH * 4);
+  if (fd < 0) {
+    GTEST_SKIP() << "this device exports no device-local memory";
+  }
+  if (void* map = mmap(nullptr, 4096, PROT_READ, MAP_SHARED, fd, 0);
+      map != MAP_FAILED) {
+    munmap(map, 4096);
+    close(fd);
+    GTEST_SKIP() << "this device's device-local memory is CPU-mappable";
+  }
+  CardGlContext gl;
+  ASSERT_TRUE(gl.Create(backend_->DrmFdForTest()));
+  const std::string renderer =
+      reinterpret_cast<const char*>(glGetString(GL_RENDERER));
+  if (renderer.find("llvmpipe") == std::string::npos) {
+    close(fd);
+    GTEST_SKIP() << "the card's GL renderer is " << renderer;
+  }
+  EglDmabufImporter importer;
+  ASSERT_TRUE(importer.Init(gl.display()));
+
+  IhsFrame frame{};
+  frame.struct_size = sizeof(frame);
+  frame.format.fourcc = DRM_FORMAT_XRGB8888;
+  frame.format.modifier = DRM_FORMAT_MOD_LINEAR;
+  frame.width = kW;
+  frame.height = kH;
+  frame.plane_count = 1;
+  frame.plane_fd[0] = fd;
+  frame.plane_stride[0] = kW * 4;
+  EglDmabufImporter::ImportedTexture texture;
+  EXPECT_FALSE(importer.Import(frame, &texture))
+      << "imported a dma-buf the renderer cannot read";
+  EXPECT_NE(fcntl(fd, F_GETFD), -1) << "a failed import closed the fd";
+  if (texture.texture != 0) {
+    importer.Destroy(&texture);
+  }
+  close(fd);
 }
 #endif
 

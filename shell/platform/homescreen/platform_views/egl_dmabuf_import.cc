@@ -16,6 +16,7 @@
 
 #include "egl_dmabuf_import.h"
 
+#include <sys/mman.h>
 #include <unistd.h>
 
 #include <array>
@@ -95,6 +96,8 @@ bool EglDmabufImporter::Init(void* egl_display) {
     return false;
   }
   egl_display_ = egl_display;
+  cpu_renderer_.store(-1,
+                      std::memory_order_relaxed);  // asked again for this one
   create_image_ =
       reinterpret_cast<void*>(eglGetProcAddress("eglCreateImageKHR"));
   destroy_image_ =
@@ -174,6 +177,35 @@ bool EglDmabufImporter::Init(void* egl_display) {
   return true;
 }
 
+namespace {
+
+// Whether the current context renders on the CPU. Needs a context current.
+bool CurrentRendererIsCpu() {
+  const auto* renderer =
+      reinterpret_cast<const char*>(glGetString(GL_RENDERER));
+  return renderer != nullptr && (std::strstr(renderer, "llvmpipe") != nullptr ||
+                                 std::strstr(renderer, "softpipe") != nullptr);
+}
+
+// Whether the CPU can map every plane's dma-buf. A CPU renderer reads the
+// buffer through such a mapping, and a dma-buf in memory the CPU cannot reach
+// (device-local memory another GPU exported) refuses it. One page per fd is
+// enough: the refusal comes from the exporter at mmap time.
+bool PlanesCpuMappable(const IhsFrame& frame, const uint32_t planes) {
+  const auto page = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+  for (uint32_t p = 0; p < planes; ++p) {
+    void* map =
+        mmap(nullptr, page, PROT_READ, MAP_SHARED, frame.plane_fd[p], 0);
+    if (map == MAP_FAILED) {
+      return false;
+    }
+    munmap(map, page);
+  }
+  return true;
+}
+
+}  // namespace
+
 bool EglDmabufImporter::Import(const IhsFrame& frame,
                                ImportedTexture* out) const {
   if (!ready() || out == nullptr) {
@@ -182,6 +214,26 @@ bool EglDmabufImporter::Import(const IhsFrame& frame,
   const uint32_t planes = frame.plane_count == 0 ? 1 : frame.plane_count;
   if (planes > kPlaneAttribs.size()) {
     ihs::log::error("[EglDmabufImporter] plane_count {} > 4", planes);
+    return false;
+  }
+  // A CPU renderer accepts a dma-buf it cannot map: the image and the texture
+  // are created without error, and the first draw that samples it reads
+  // through a null mapping and crashes. Refuse it here instead, which leaves
+  // the view uncomposited rather than taking the shell down.
+  if (cpu_renderer_.load(std::memory_order_relaxed) < 0) {
+    cpu_renderer_.store(CurrentRendererIsCpu() ? 1 : 0,
+                        std::memory_order_relaxed);
+  }
+  if (cpu_renderer_.load(std::memory_order_relaxed) == 1 &&
+      !PlanesCpuMappable(frame, planes)) {
+    static std::atomic<bool> logged{false};
+    if (!logged.exchange(true)) {
+      ihs::log::error(
+          "[EglDmabufImporter] a dma-buf (fourcc=0x{:x}, {}x{}) cannot be "
+          "mapped by the CPU, which this software renderer samples through; "
+          "the view is not composited. Allocate it in CPU-visible memory.",
+          frame.format.fourcc, frame.width, frame.height);
+    }
     return false;
   }
 

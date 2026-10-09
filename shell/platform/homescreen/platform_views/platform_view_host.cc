@@ -2038,6 +2038,9 @@ void IhsPluginView::ImportPendingEglLocked(std::unique_lock<std::mutex>& lock,
       }
     } else {
       CloseFrameFds(&f);  // import left the fds untouched on failure
+      // Nothing will sample a frame that was not imported, so nothing else
+      // releases it: without this the producer waits on the buffer for good.
+      SignalRelease(f.buffer_id);
     }
   }
   *slot.geom = slot.pending->geom;

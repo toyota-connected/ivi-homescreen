@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <vector>
 
@@ -173,4 +174,7 @@ class EglDmabufImporter {
   // Optional: null without EGL_EXT_image_dma_buf_import_modifiers, which
   // leaves ImportableModifiers empty.
   void* query_modifiers_{nullptr};  // PFNEGLQUERYDMABUFMODIFIERSEXTPROC
+  // Whether the context renders on the CPU (llvmpipe, softpipe), which reads a
+  // dma-buf through a CPU mapping: -1 until the first Import asks GL.
+  mutable std::atomic<int> cpu_renderer_{-1};
 };

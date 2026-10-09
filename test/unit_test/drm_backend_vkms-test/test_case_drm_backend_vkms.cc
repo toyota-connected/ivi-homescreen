@@ -2324,6 +2324,26 @@ TEST_F(PvHostVkmsGl, AFreeQueuedOffTheRasterThreadRunsAtTheNextPresent) {
   EXPECT_NE(context, EGL_NO_CONTEXT) << "freed with no GL context current";
 }
 
+// A frame the shell cannot import is never drawn, so nothing else releases
+// it. It used to be dropped with its release still out, and a producer waited
+// on that buffer for good.
+TEST_F(PvHostVkmsGl, AFrameThatFailsToImportIsReleased) {
+  const int fd = display_->SharedDevice()->fd();
+  GbmSolidBuffer a;
+  ASSERT_TRUE(a.Create(fd, kViewW, kViewH, 0xFF1E7A46u));
+  IhsFrame f = FrameOf(a, 0);
+  // A tiling this device does not have: the import is refused.
+  f.format.modifier = I915_FORMAT_MOD_X_TILED;
+  IhsLayer layer = LayerOf(&f, 1);
+  int release = -1;
+  ASSERT_EQ(ihs_pv_submit_layers(producer_.view, &layer, 1, 1, &release),
+            IHS_PV_OK);
+  ASSERT_GE(release, 0) << "no release fence for the frame";
+  ASSERT_TRUE(Present());
+  EXPECT_TRUE(Readable(release)) << "a frame that failed to import was held";
+  ::close(release);
+}
+
 TEST_F(PvHostVkmsGl, ACompositedFrameIsReportedPresented) {
   const int fd = display_->SharedDevice()->fd();
   GbmSolidBuffer a;
