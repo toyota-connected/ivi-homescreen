@@ -665,6 +665,47 @@ void DrmCompositor::DrainDeferredScanoutReleases() {
   FireDeferredScanoutReleases(TakeDeferredScanoutReleases());
 }
 
+void DrmCompositor::ReleaseSceneHold() {
+  scene_hold_pending_ = false;
+  scene_holds_pv_ = false;
+  if (!scene_) {
+    return;
+  }
+  // What this present queued waits for its own flip; set it aside so only the
+  // scene's buffers fire now.
+  std::vector<DeferredScanoutRelease> queued = TakeDeferredScanoutReleases();
+
+  // A live layer never gives up the buffer it shows; a removed one does. The
+  // view's next frame on the plane path starts a fresh pool.
+  for (void* tag : scene_pv_tags_) {
+    if (auto* layer = scene_->find_by_identity_tag(tag)) {
+      scene_->remove_layer(layer->handle());
+    }
+  }
+  scene_pv_tags_.clear();
+  pv_layer_tags_.Clear();
+
+  // Rebinding to the same output drains every buffer the scene holds, removed
+  // layers' included, and keeps its other layers.
+  if (auto r = scene_->rebind(out_.crtc_id(), out_.connector_id(), out_.mode());
+      !r) {
+    ihs::log::warn(
+        "[DrmCompositor] LayerScene::rebind: {}; latching GL fallback for "
+        "remaining session",
+        r.error().message());
+    fallback_latched_ = true;
+  }
+  scene_rebound_ = true;
+  FireDeferredScanoutReleases(TakeDeferredScanoutReleases());
+
+  if (!queued.empty()) {
+    const std::scoped_lock lock(deferred_releases_mu_);
+    deferred_releases_.insert(deferred_releases_.begin(),
+                              std::make_move_iterator(queued.begin()),
+                              std::make_move_iterator(queued.end()));
+  }
+}
+
 // ─── Init helpers ────────────────────────────────────────────────────────
 
 bool DrmCompositor::InitEglExtensions() {
@@ -1728,6 +1769,7 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
     }
     if (primary != 0) {
       backend_->ResetPlanesOnNextFlip(primary, std::move(overlays));
+      scene_hold_pending_ = scene_holds_pv_;
     }
     scene_owns_crtc_ = false;
     scene_stale_ = true;
@@ -1807,6 +1849,12 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
 
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   const bool presented = backend_->Present();
+  // Once the flip that turned the overlays off has landed, nothing the scene
+  // holds is on screen.
+  if (scene_hold_pending_ && backend_->PlanesHandedBack() &&
+      backend_->WaitForPendingFlip()) {
+    ReleaseSceneHold();
+  }
   // Hand this frame's platform views to the flip that shows it, or report
   // them now for a frame shown with no flip to follow.
   bool immediate = false;
@@ -3888,7 +3936,8 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   // the PV plane's presence matters here; backing-store FB swaps on an
   // already-live plane stay on the fast NONBLOCK path.
   const bool plane_topology_changed = (pv_new != 0 || pv_pruned != 0);
-  const bool blocking_modeset = was_first_commit_pre || plane_topology_changed;
+  const bool blocking_modeset =
+      was_first_commit_pre || plane_topology_changed || scene_rebound_;
 
   // Two-phase flags, mirroring the legacy direct-scanout path: a modeset commit
   // is a blocking ALLOW_MODESET with NO PAGE_FLIP_EVENT. The kernel doesn't
@@ -3990,6 +4039,12 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   scene_ebusy_streak_ = 0;  // a clean commit clears the transient-EBUSY streak
   scene_backoff_.Accepted();
   scene_owns_crtc_ = true;
+  scene_rebound_ = false;
+  // Back on the plane path, the scene returns what it holds as it commits.
+  scene_hold_pending_ = false;
+  if (pv_new != 0 || pv_reused != 0 || pv_pruned != 0) {
+    scene_holds_pv_ = true;
+  }
   if (scene_stale_) {
     scene_->set_force_full_property_writes(false);
     scene_stale_ = false;

@@ -881,6 +881,22 @@ class DrmCompositor : public IFlipSink {
   // The planes were changed behind the scene's back: its next commit writes
   // every property rather than its diff. Raster thread.
   bool scene_stale_{false};
+  // A scene commit since the last ReleaseSceneHold put a platform view's buffer
+  // on a plane, or retired one, so the scene may still hold a producer's
+  // buffer. Raster thread.
+  bool scene_holds_pv_{false};
+  // GL took the CRTC from a scene that holds platform-view buffers; they go
+  // back once the flip that turns the overlays off has landed. Raster thread.
+  bool scene_hold_pending_{false};
+  // The scene was rebound to return its buffers, so its next commit modesets
+  // and must block. Raster thread.
+  bool scene_rebound_{false};
+
+  // Return every platform-view buffer the scene holds to its producer, once GL
+  // owns the CRTC and none of them can be on screen. The scene commits only on
+  // the plane path, so without this a buffer it held stays held for as long as
+  // GL keeps the CRTC -- for good once the fallback latches.
+  void ReleaseSceneHold();
 
   // Consecutive scene-commit EBUSY count. EBUSY is transient -- a new plane
   // (e.g. a platform view appearing) committed NONBLOCK against a still-pending

@@ -2098,6 +2098,7 @@ void DrmBackend::ResetPlanesOnNextFlip(const uint32_t primary,
                                        std::vector<uint32_t> overlays) {
   reset_primary_ = primary;
   reset_overlays_ = std::move(overlays);
+  planes_handed_back_ = false;
 }
 
 int DrmBackend::FlipResettingPlanes(const uint32_t fb) {
@@ -2112,6 +2113,7 @@ int DrmBackend::FlipResettingPlanes(const uint32_t fb) {
         "(primary {} at ROTATE_0, {} overlay(s) off)",
         primary, overlays.size());
   }
+  planes_handed_back_ = rc == 0;
   return rc;
 }
 
