@@ -255,11 +255,20 @@ if (BUILD_BACKEND_HEADLESS_EGL)
     if (NOT TARGET PkgConfig::GBM)
         pkg_check_modules(GBM REQUIRED IMPORTED_TARGET gbm)
     endif ()
+    # drm_fourcc.h only, but with no DRM backend on, nothing else puts libdrm's
+    # include dir on the path. GLOBAL for the unit tests, as for
+    # wayland-leased-drm above.
+    if (NOT TARGET PkgConfig::DRM)
+        pkg_check_modules(DRM REQUIRED IMPORTED_TARGET GLOBAL libdrm)
+    endif ()
     target_sources(${PROJECT_NAME} PRIVATE
             backend/headless_egl/headless_egl.cc
             backend/software/nv12_gl_packer.cc
             backend/software/nv12_consumer.cc
             backend/gl_process_resolver.cc
+            # SoftwareDisplay calls into the cursor whether or not the software
+            # backend is built.
+            backend/software/software_cursor.cc
             display/software_display.cc
             "${V4L2WC_DIR}/src/v4l2_m2m_encoder.cc"
             "${V4L2WC_DIR}/src/log.cc"
@@ -267,6 +276,7 @@ if (BUILD_BACKEND_HEADLESS_EGL)
     target_include_directories(${PROJECT_NAME} PRIVATE "${V4L2WC_DIR}")
     target_link_libraries(${PROJECT_NAME} PRIVATE
             PkgConfig::GBM
+            PkgConfig::DRM
             # See the drm-kms-egl note: keep EGL/GLESv2 DT_NEEDED ahead of the
             # platform lib that references gl* so --as-needed can't drop them.
             -Wl,--no-as-needed
@@ -299,6 +309,9 @@ if (BUILD_BACKEND_HEADLESS_VULKAN)
             # Env-gated loader (IVI_VK_BRIDGE_SO) that dlopen's an in-process
             # bridge plugin and drives its create/start/stop/destroy lifecycle.
             vk_export_bridge_loader.cc
+            # SoftwareDisplay calls into the cursor whether or not the software
+            # backend is built.
+            backend/software/software_cursor.cc
             display/software_display.cc
     )
     target_link_libraries(${PROJECT_NAME} PRIVATE vulkan_headers ${CMAKE_DL_LIBS})
