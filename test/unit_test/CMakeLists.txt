@@ -4,7 +4,10 @@
 # TYPICAL_TEST_LINK_LIBS    : link libraries of typical test
 get_target_property(TYPICAL_TEST_SOURCES ${PROJECT_NAME} SOURCES)
 list(FILTER TYPICAL_TEST_SOURCES EXCLUDE REGEX ".*main\.cc")
-list(TRANSFORM TYPICAL_TEST_SOURCES PREPEND ${PROJECT_SOURCE_DIR}/shell/)
+# Relative to shell/; a source outside the tree (V4L2WC_DIR) is already
+# absolute.
+list(TRANSFORM TYPICAL_TEST_SOURCES PREPEND ${PROJECT_SOURCE_DIR}/shell/
+        REGEX "^[^/]")
 list(APPEND TYPICAL_TEST_SOURCES ${PROJECT_SOURCE_DIR}/test/unit_test/unit_test_utils/unit_test_utils.cc)
 
 # If TYPICAL_TEST_DEFINITIONS is set to the same as the homescreen build, it will change depending on the cmake arguments.
