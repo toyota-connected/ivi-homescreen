@@ -539,9 +539,9 @@ class WaylandVulkanBackend final : public Backend {
   /// another submit can reach the queue: on a shared queue, some validation
   /// layers lose the export's implicit wait when one lands in between, and
   /// report the next frame's signal as a second signal without a wait.
-  /// Validation workaround only; exporting after the unlock is valid. Seen
-  /// with VVL 1.4.328, gone on VVL main
-  /// (KhronosGroup/Vulkan-ValidationLayers#13394).
+  /// Validation workaround only; exporting after the unlock is valid. VVL bug
+  /// KhronosGroup/Vulkan-ValidationLayers#11493, fixed by #11552 there
+  /// (2026-01, after 1.4.328).
   int ExportReleaseFence();
   /// Hand each platform view composited this frame its own dup of release_fd
   /// (-1 if none), so the producer/host can wait it before reusing or freeing
