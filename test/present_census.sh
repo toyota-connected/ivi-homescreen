@@ -25,6 +25,21 @@
 #   BUNDLE      Flutter bundle to run; use a deterministic workload such as the
 #               scroll_bench integration app (required)
 #   VKMS_CARD   /dev/dri/cardN for vkms (auto-detected if unset)
+#   CENSUS_CARD /dev/dri/cardN of a real display to census instead of vkms.
+#               Setting it drops the vkms requirement and skips detection: the
+#               module check exists to make auto-detection meaningful, and an
+#               explicitly named card needs neither. Board captures are the only
+#               admissible source for the timing figures this harness records
+#               but does not gate, so this is how those get produced in the same
+#               census format as the vkms counts.
+#   CENSUS_CONNECTOR
+#               connector to pin (--drm-connector), e.g. DP-4. Unset lets the
+#               backend pick. A board with several heads wired needs this or the
+#               census may measure whichever one the backend chose that boot.
+#   SOFTWARE_GL 1 = force llvmpipe (LIBGL_ALWAYS_SOFTWARE=1), the default,
+#               because vkms has no render node behind it. Set 0 to census a
+#               real GPU: left at 1 on a board it measures software GL and the
+#               numbers say nothing about the hardware present path.
 #   BACKENDS    space-separated list (default: "drm-kms-egl software")
 #   CENSUS_SECS steady-state capture seconds per backend (default 8), counted
 #               from the backend's first present window, not from launch
@@ -65,6 +80,10 @@ set -u
 HOMESCREEN="${HOMESCREEN:-}"
 BUNDLE="${BUNDLE:-}"
 VKMS_CARD="${VKMS_CARD:-}"
+CENSUS_CARD="${CENSUS_CARD:-}"
+CARD=""              # the node actually censused: CENSUS_CARD, else vkms
+CENSUS_CONNECTOR="${CENSUS_CONNECTOR:-}"
+SOFTWARE_GL="${SOFTWARE_GL:-1}"
 BACKENDS="${BACKENDS:-drm-kms-egl software}"
 CENSUS_SECS="${CENSUS_SECS:-8}"
 STARTUP_SECS="${STARTUP_SECS:-30}"
@@ -128,11 +147,12 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --write)  MODE="write"; BASELINE="${2:-}"; shift 2 || die "--write needs a path" ;;
         --check)  MODE="check"; [[ -n "${2:-}" && "$2" != -* ]] && { BASELINE="$2"; shift; }; shift ;;
-        # The range ends at the last header line, so it moves whenever the block
-        # above grows -- adding KEEP_LOG to it truncated --help mid-sentence and
-        # dropped the Exit: line. No rm here: the EXIT trap is already armed and
-        # owns cleanup, and removing TMPDIR here would defeat KEEP_LOG.
-        -h|--help) sed -n '2,38p' "${BASH_SOURCE[0]}"; exit 0 ;;
+        # Derived, not a hardcoded range: the header block grows, and a fixed
+        # last line silently truncated --help mid-sentence and dropped the
+        # Exit: line once already. No rm here: the EXIT trap is already armed
+        # and owns cleanup, and removing TMPDIR here would defeat KEEP_LOG.
+        -h|--help) awk 'NR==1 { next } /^#/ { print; next } { exit }' \
+                       "${BASH_SOURCE[0]}"; exit 0 ;;
         *) die "unknown argument '$1'" ;;
     esac
 done
@@ -146,7 +166,7 @@ done
 # a CI runner: Hyper-V's synthetic display uses that connector name too, so the
 # search could return the VM's own display instead of vkms. That is not just a
 # mislabeled log line -- VKMS_CARD is interpolated into
-# IVI_SW_SINK="drm-dumb:${VKMS_CARD}" below, so a wrong card points the software
+# IVI_SW_SINK="drm-dumb:${CARD}" below, so a wrong card points the software
 # backend's dumb-buffer sink at the wrong DRM node and the census measures it.
 # shellcheck source=test/lib/drm_card.sh
 source "${ROOT_DIR}/test/lib/drm_card.sh"
@@ -156,12 +176,24 @@ source "${ROOT_DIR}/test/lib/drm_card.sh"
 source "${ROOT_DIR}/test/lib/fd_count.sh"
 
 check_prereqs() {
-    [[ -d /sys/module/vkms ]] || die "vkms not loaded (sudo modprobe vkms)"
-    [[ -z "$VKMS_CARD" ]] && VKMS_CARD="$(ihs_find_vkms_card)"
-    [[ -n "$VKMS_CARD" && -e "$VKMS_CARD" ]] || die "no vkms /dev/dri/cardN found"
+    # CENSUS_CARD names a real display: no vkms module, no detection. The module
+    # check below is there to make ihs_find_vkms_card's answer meaningful, and a
+    # card given by name needs neither it nor the search.
+    if [[ -n "$CENSUS_CARD" ]]; then
+        CARD="$CENSUS_CARD"
+        [[ -e "$CARD" ]] || die "CENSUS_CARD does not exist: $CARD"
+    else
+        [[ -d /sys/module/vkms ]] || die "vkms not loaded (sudo modprobe vkms)"
+        [[ -z "$VKMS_CARD" ]] && VKMS_CARD="$(ihs_find_vkms_card)"
+        [[ -n "$VKMS_CARD" && -e "$VKMS_CARD" ]] || die "no vkms /dev/dri/cardN found"
+        CARD="$VKMS_CARD"
+    fi
     [[ -n "$HOMESCREEN" && -x "$HOMESCREEN" ]] || die "HOMESCREEN must be an executable binary"
     [[ -n "$BUNDLE" && -d "$BUNDLE" ]] || die "BUNDLE must be a bundle directory"
-    log "vkms card: $VKMS_CARD ; backends: $BACKENDS ; ${CENSUS_SECS}s/backend"
+    local conn="any connector"
+    [[ -n "$CENSUS_CONNECTOR" ]] && conn="connector $CENSUS_CONNECTOR"
+    log "card: $CARD ($conn) ; backends: $BACKENDS ; ${CENSUS_SECS}s/backend ;" \
+        "software GL: $SOFTWARE_GL"
 }
 
 # ─── Process control (shared with input_event_driven.sh conventions) ─────────
@@ -178,11 +210,25 @@ reap_homescreen() {
 }
 
 # The present-census label differs per backend (the stream that measures frames
-# actually presented, not the vsync-delivery pacing beside it).
+# actually presented, not the vsync-delivery pacing beside it). Named one by
+# one rather than defaulted: the default used to answer "DrmVsync" for every
+# non-software backend, which is the EGL backend's label alone. On
+# drm-kms-vulkan the present stream is "VulkanDrmBackend" and "DrmVkVsync" is
+# the cadence beside it, so the fold matched nothing and the backend reported
+# "did not render" while it was presenting. A backend with no stream in this
+# format is a setup error, not a silent empty census -- wayland-egl posts
+# "swap profile", which the fold does not match.
+#
+# One present path is still uncounted: drm-kms-vulkan's plane path
+# (PresentLayersViaPlanes) commits without recording, so a frame stream that
+# places on planes censuses as zero frames rather than as itself.
 present_label() {
     case "$1" in
-        software) echo "SoftwareBackend" ;;
-        *)        echo "DrmVsync" ;;  # egl + vulkan DRM backends present via the vsync provider
+        software)        echo "SoftwareBackend" ;;
+        drm-kms-egl)     echo "DrmVsync" ;;
+        drm-kms-vulkan)  echo "VulkanDrmBackend" ;;
+        wayland-vulkan)  echo "WaylandVulkanBackend" ;;
+        *)               return 1 ;;
     esac
 }
 
@@ -264,18 +310,31 @@ record() {  # record <backend> <pass|fail|skip> <detail>
 # Run one backend, fold its census, self-check invariants, append to CENSUS_OUT.
 census_backend() {  # census_backend <backend>
     local backend="$1"
+    # Before the launch: a backend whose present stream this harness cannot
+    # name is a setup error, and launching it would only produce an empty fold.
+    local label
+    if ! label="$(present_label "$backend")"; then
+        record "$backend" skip "no present-census label known for this backend"
+        return
+    fi
     reap_homescreen
     local hs_log="${TMPDIR}/hs_${backend}.log"
-    local extra_sink=()
-    [[ "$backend" == software ]] && extra_sink=(IVI_SW_SINK="drm-dumb:${VKMS_CARD}")
-    env -u WAYLAND_DISPLAY -u WAYLAND_SOCKET LIBGL_ALWAYS_SOFTWARE=1 IVI_PROFILE=1 \
-        "${extra_sink[@]}" \
+    local extra_env=()
+    [[ "$backend" == software ]] && extra_env+=(IVI_SW_SINK="drm-dumb:${CARD}")
+    # vkms has no render node, so the default forces llvmpipe. On a real GPU
+    # that would be what the census measured, hence the opt-out.
+    [[ "$SOFTWARE_GL" == "1" ]] && extra_env+=(LIBGL_ALWAYS_SOFTWARE=1)
+    local pin=()
+    [[ -n "$CENSUS_CONNECTOR" ]] && pin=(--drm-connector "$CENSUS_CONNECTOR")
+    # ${arr[@]+...}: expanding an empty array is an unbound-variable error under
+    # set -u on bash before 4.4, and a board can be on 3.2.
+    env -u WAYLAND_DISPLAY -u WAYLAND_SOCKET IVI_PROFILE=1 \
+        ${extra_env[@]+"${extra_env[@]}"} \
         "$HOMESCREEN" --backend "$backend" -b "$BUNDLE" \
-        --drm-device "$VKMS_CARD" >"$hs_log" 2>&1 &
+        --drm-device "$CARD" ${pin[@]+"${pin[@]}"} >"$hs_log" 2>&1 &
     local pid=$!
     # Start the steady-state clock at the first present window. A launch that
     # never presents still runs the full window below and fails or skips there.
-    local label; label="$(present_label "$backend")"
     local t0="$SECONDS" started=0
     while (( SECONDS - t0 < STARTUP_SECS )) && kill -0 "$pid" 2>/dev/null; do
         if grep -q "\[${label}\] profile (n=" "$hs_log" 2>/dev/null; then
@@ -424,7 +483,7 @@ esac
 
 echo
 log "──── summary ────"
-for r in "${RESULTS[@]}"; do echo "  $r"; done
+for r in ${RESULTS[@]+"${RESULTS[@]}"}; do echo "  $r"; done
 log "backends: ${#RESULTS[@]}  PASS=$PASS  FAIL=$FAIL"
 
 # Fail on a broken invariant or (in --check) a gated regression.
