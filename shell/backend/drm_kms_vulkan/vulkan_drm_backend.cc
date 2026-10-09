@@ -2077,7 +2077,9 @@ int VulkanDrmBackend::SubmitSyncRing(CompositorState& c, const size_t i) {
     // the ring. Done before the lock lets another submit onto the queue: on a
     // shared queue, some validation layers lose the export's implicit wait
     // when one lands in between, and report the ring's next signal of this
-    // semaphore as a second signal without a wait.
+    // semaphore as a second signal without a wait. Validation workaround
+    // only; exporting after the unlock is valid. Seen with VVL 1.4.328, gone
+    // on VVL main (KhronosGroup/Vulkan-ValidationLayers#13394).
     VkSemaphoreGetFdInfoKHR gfi{};
     gfi.sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR;
     gfi.semaphore = c.sync_sem[i];
