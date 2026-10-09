@@ -2674,6 +2674,74 @@ TEST_F(DrmBackendVkms, APausedSessionIsNotReportedAsAStall) {
   compositor_->UnregisterSurface(33);
 }
 
+// #732: the refresh rate the engine is told must come from the selected mode,
+// not the 60.0 the display is constructed with.
+//
+// This needs a mode whose vrefresh is not 60, or it passes against the old
+// hardcoded value and proves nothing. A default vkms offers 800x600@56
+// alongside its 60Hz modes, which is what this pins; it skips rather than
+// lies if the card on this host has no such mode.
+class DrmBackendVkmsRefreshRate : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    card_ = FindVkms();
+    if (card_.path.empty()) {
+      GTEST_SKIP() << "no vkms card on this host (sudo modprobe vkms)";
+    }
+    if (!card_.ok()) {
+      GTEST_SKIP() << card_.path << " is vkms but exposes no connected "
+                   << "connector with modes";
+    }
+    display_ = std::make_unique<DrmDisplay>(0, 0, 60.0, card_.path,
+                                            /*no_seat=*/true);
+    if (display_->SharedDevice() == nullptr) {
+      GTEST_SKIP() << "no DRM master on " << card_.path;
+    }
+  }
+
+  std::unique_ptr<DrmBackend> BackendWithMode(const std::string& spec) {
+    DrmConfig cfg{card_.path, std::nullopt, std::nullopt,
+                  /*debug_backend=*/false};
+    cfg.no_seat = true;
+    cfg.disable_cursor = true;
+    cfg.mode_spec = spec;
+    return DrmBackend::Create(cfg, display_->session(),
+                              display_->SharedDevice(), display_.get());
+  }
+
+  VkmsCard card_;
+  std::unique_ptr<DrmDisplay> display_;
+};
+
+TEST_F(DrmBackendVkmsRefreshRate, ReportsTheSelectedModesRateNot60) {
+  auto backend = BackendWithMode("800x600@56");
+  if (backend == nullptr) {
+    GTEST_SKIP() << "this vkms has no 800x600@56 mode; nothing non-60 to pin";
+  }
+
+  // The selected mode really is the one asked for, so the rate below is its.
+  EXPECT_EQ(backend->vrefresh(), 56u);
+
+  // What FlutterView reports as FlutterEngineDisplay::refresh_rate.
+  EXPECT_NEAR(backend->RefreshRateHz(), 56.0, 0.5);
+  EXPECT_GT(backend->RefreshRateHz(), 0.0);
+  EXPECT_LT(backend->RefreshRateHz(), 59.0) << "the hardcoded 60 is back";
+
+  // Derived from the period, so the two cannot disagree.
+  EXPECT_GT(backend->RefreshPeriodNs(), 0u);
+  EXPECT_NEAR(backend->RefreshRateHz(),
+              1e9 / static_cast<double>(backend->RefreshPeriodNs()), 1e-6);
+}
+
+TEST_F(DrmBackendVkmsRefreshRate, A60HzModeStillReports60) {
+  auto backend = BackendWithMode("1024x768@60");
+  if (backend == nullptr) {
+    GTEST_SKIP() << "this vkms has no 1024x768@60 mode";
+  }
+  EXPECT_EQ(backend->vrefresh(), 60u);
+  EXPECT_NEAR(backend->RefreshRateHz(), 60.0, 0.5);
+}
+
 }  // namespace
 
 // Own main rather than gtest_main: the shell's logging has to be started

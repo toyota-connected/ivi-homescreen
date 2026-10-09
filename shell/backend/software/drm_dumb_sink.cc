@@ -320,6 +320,7 @@ bool DrmDumbSink::InitFromFd(uint32_t want_connector_id) {
   const drmModeModeInfo mode = connector->modes[chosen_idx];
   mode_width_ = mode.hdisplay;
   mode_height_ = mode.vdisplay;
+  mode_vrefresh_ = mode.vrefresh;  // 0 preserved; see RefreshPeriodNs (#732)
   refresh_rate_hz_ =
       mode.vrefresh > 0 ? static_cast<double>(mode.vrefresh) : 60.0;
   refresh_period_ns_.store(static_cast<uint64_t>(1e9 / refresh_rate_hz_),

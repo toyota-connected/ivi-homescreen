@@ -632,6 +632,14 @@ class DrmBackend : public Backend, public IFlipSink {
 
   /// The provider whose baton the latch gates, so a test can submit one and
   /// see whether it came back.
+  // |Backend| From the selected mode, not from the vsync provider: the
+  // provider's period_ns_ defaults to 60Hz and so cannot say "no mode yet",
+  // which is the distinction #732 turns on.
+  [[nodiscard]] uint32_t RefreshPeriodNs() const override {
+    const uint32_t vr = vrefresh();
+    return vr > 0 ? static_cast<uint32_t>(1'000'000'000ULL / vr) : 0;
+  }
+
   [[nodiscard]] ivi::IVsyncProvider& VsyncForTest() { return vsync_; }
 
   /// True while a legacy flip is in flight, i.e. the latch this series is

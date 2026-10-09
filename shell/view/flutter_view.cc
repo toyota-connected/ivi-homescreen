@@ -645,8 +645,13 @@ bool FlutterView::Initialize() {
   display.struct_size = sizeof(FlutterEngineDisplay);
   display.display_id = 1;
   display.single_display = true;
+  // The backend that owns the connector knows the mode's rate; the display's
+  // own figure is a fallback for the backends that drive no scanout (#732).
+  const double backend_rate = m_backend ? m_backend->RefreshRateHz() : 0.0;
   display.refresh_rate =
-      m_display->GetRefreshRate(static_cast<uint32_t>(m_index));
+      backend_rate > 0.0
+          ? backend_rate
+          : m_display->GetRefreshRate(static_cast<uint32_t>(m_index));
   // Resolve the engine's render extent from whichever backend is active at
   // RUNTIME. Each compiled backend gets a chance to report its resolved size
   // (DRM/software adopt the panel's native mode so fullscreen gets mode dims;
@@ -798,8 +803,13 @@ void FlutterView::UpdateDisplayMetadata() const {
   display.struct_size = sizeof(FlutterEngineDisplay);
   display.display_id = 1;
   display.single_display = true;
+  // Same precedence as the startup path, though a Wayland backend drives no
+  // scanout of its own and so reports 0 here today.
+  const double backend_rate = m_backend ? m_backend->RefreshRateHz() : 0.0;
   display.refresh_rate =
-      m_display->GetRefreshRate(m_wayland_window->GetOutputIndex());
+      backend_rate > 0.0
+          ? backend_rate
+          : m_display->GetRefreshRate(m_wayland_window->GetOutputIndex());
   display.width = static_cast<size_t>(std::lround(width * scale));
   display.height = static_cast<size_t>(std::lround(height * scale));
   display.device_pixel_ratio =

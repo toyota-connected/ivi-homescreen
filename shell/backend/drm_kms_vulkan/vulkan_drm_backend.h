@@ -390,6 +390,13 @@ class VulkanDrmBackend final : public Backend {
   [[nodiscard]] uint64_t FlipsHandledForTest() const { return stall_->flips(); }
   /// The provider whose baton both latches gate, so a case can submit one and
   /// see whether it comes back.
+  // |Backend| From the selected mode; 0 before one is set. See the note on
+  // DrmBackend::RefreshPeriodNs for why not the vsync provider (#732).
+  [[nodiscard]] uint32_t RefreshPeriodNs() const override {
+    const uint32_t vr = mode_vrefresh_;
+    return vr > 0 ? static_cast<uint32_t>(1'000'000'000ULL / vr) : 0;
+  }
+
   [[nodiscard]] ivi::IVsyncProvider& VsyncForTest() { return vsync_; }
 
  private:
@@ -421,6 +428,9 @@ class VulkanDrmBackend final : public Backend {
 
   // Scanout mode selector ("<W>x<H>[@<R>]"); empty = connector preferred mode.
   std::string mode_spec_;
+  // The selected mode's vrefresh in Hz, latched by SetupCompositor; 0 until
+  // a mode is set. Reported to the engine via RefreshPeriodNs (#732).
+  uint32_t mode_vrefresh_{0};
   // --drm-connector / view.backend.drm.connector. Empty = first connected
   // connector with a mode. Unused on the leased tier, which pins by id.
   std::string connector_name_;
