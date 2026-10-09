@@ -31,7 +31,11 @@
 #               explicitly named card needs neither. Board captures are the only
 #               admissible source for the timing figures this harness records
 #               but does not gate, so this is how those get produced in the same
-#               census format as the vkms counts.
+#               census format as the vkms counts. KEEPUP_MIN below still
+#               encodes a 60 Hz vkms head, so a board capture of a workload
+#               that cannot reach 30 Hz fails that invariant by construction --
+#               set KEEPUP_MIN to what the panel and workload can actually do,
+#               or read the census and ignore the exit status.
 #   CENSUS_CONNECTOR
 #               connector to pin (--drm-connector), e.g. DP-4. Unset lets the
 #               backend pick. A board with several heads wired needs this or the
