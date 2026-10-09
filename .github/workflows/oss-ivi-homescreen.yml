@@ -563,6 +563,15 @@ jobs:
       - name: Setup libdisplay-info
         uses: ./.github/actions/setup-libdisplay-info
 
+      # The diagnostic harnesses in tools/ are not part of any product build
+      # and nothing links them, so nothing else would notice them rotting. A
+      # harness that no longer compiles is not evidence of anything, which is
+      # the only reason they are kept in the tree rather than archived.
+      # Compile without linking: this needs the gbm and libdrm headers already
+      # installed above, and no Vulkan loader, driver or GPU on the runner.
+      - name: Build the diagnostic harnesses
+        run: make -C tools/diag compile-only
+
       - name: Configure (coverage)
         run: |
           cmake -GNinja \
