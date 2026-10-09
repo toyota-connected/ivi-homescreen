@@ -246,6 +246,12 @@ class VulkanDrmBackend final : public Backend {
  public:
   [[nodiscard]] uint32_t width() const { return width_; }
   [[nodiscard]] uint32_t height() const { return height_; }
+  // |Backend| From the selected mode; 0 before one is set. See the note on
+  // DrmBackend::RefreshPeriodNs for why not the vsync provider (#732).
+  [[nodiscard]] uint32_t RefreshPeriodNs() const override {
+    const uint32_t vr = mode_vrefresh_;
+    return vr > 0 ? static_cast<uint32_t>(1'000'000'000ULL / vr) : 0;
+  }
   // Scanout rotation in degrees (0|90|180|270). FlutterView forwards it to the
   // seat so the HW cursor sprite is transformed from render space (where the
   // pointer lives) into panel space (where the cursor plane lives).
@@ -390,13 +396,6 @@ class VulkanDrmBackend final : public Backend {
   [[nodiscard]] uint64_t FlipsHandledForTest() const { return stall_->flips(); }
   /// The provider whose baton both latches gate, so a case can submit one and
   /// see whether it comes back.
-  // |Backend| From the selected mode; 0 before one is set. See the note on
-  // DrmBackend::RefreshPeriodNs for why not the vsync provider (#732).
-  [[nodiscard]] uint32_t RefreshPeriodNs() const override {
-    const uint32_t vr = mode_vrefresh_;
-    return vr > 0 ? static_cast<uint32_t>(1'000'000'000ULL / vr) : 0;
-  }
-
   [[nodiscard]] ivi::IVsyncProvider& VsyncForTest() { return vsync_; }
 
  private:
