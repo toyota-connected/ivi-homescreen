@@ -2479,12 +2479,16 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
       !frame_pv_surfaces_.empty() && release_sem_ != VK_NULL_HANDLE;
   submit.signalSemaphoreCount = signal_release ? 2 : 1;
   submit.pSignalSemaphores = signal_sems.data();
+  int release_fd = -1;
   {
     std::lock_guard<std::mutex> queue_lock(queue_mutex_);
-    d().vkQueueSubmit(queue_, 1, &submit, slot.in_flight);
+    if (d().vkQueueSubmit(queue_, 1, &submit, slot.in_flight) == VK_SUCCESS &&
+        signal_release) {
+      release_fd = ExportReleaseFence();
+    }
   }
-  // Export the release fence to each platform view composited this frame.
-  PublishReleaseFences();
+  // Hand the release fence to each platform view composited this frame.
+  PublishReleaseFences(release_fd);
   // The imported acquire semaphores are now owned by this submit; retire them
   // after a margin so they are destroyed once its fence has signaled.
   for (VkSemaphore s : frame_acquire_waits_) {
@@ -2722,22 +2726,26 @@ void WaylandVulkanBackend::ReapDeferredDestroys() {
   }
 }
 
-void WaylandVulkanBackend::PublishReleaseFences() {
-  if (frame_pv_surfaces_.empty()) {
-    return;
-  }
+int WaylandVulkanBackend::ExportReleaseFence() {
   // release_sem_ was signaled by the frame submit; export a sync_file that
-  // fires when the frame retires and give each composited view its own dup.
+  // fires when the frame retires. SYNC_FD export resets the semaphore for the
+  // next frame.
+  VkSemaphoreGetFdInfoKHR gfi{};
+  gfi.sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR;
+  gfi.semaphore = release_sem_;
+  gfi.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT;
   int release_fd = -1;
-  if (release_sem_ != VK_NULL_HANDLE) {
-    VkSemaphoreGetFdInfoKHR gfi{};
-    gfi.sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR;
-    gfi.semaphore = release_sem_;
-    gfi.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT;
-    if (d().vkGetSemaphoreFdKHR(device_, &gfi, &release_fd) != VK_SUCCESS) {
-      release_fd = -1;
-    }
+  if (d().vkGetSemaphoreFdKHR(device_, &gfi, &release_fd) != VK_SUCCESS) {
+    return -1;
   }
+  return release_fd;
+}
+
+void WaylandVulkanBackend::PublishReleaseFences(const int release_fd) {
+  if (frame_pv_surfaces_.empty()) {
+    return;  // nothing was sampled, so no release_sem_ signal and no fd
+  }
+  // Give each composited view its own dup.
   for (auto* s : frame_pv_surfaces_) {
     s->SetReleaseFenceFd(release_fd >= 0 ? dup(release_fd) : -1);
   }
@@ -3327,11 +3335,15 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
       submit.pNext = &tl;
     }
   }
+  int release_fd = -1;
   {
     std::lock_guard<std::mutex> queue_lock(queue_mutex_);
-    d().vkQueueSubmit(queue_, 1, &submit, slot.fence);
+    if (d().vkQueueSubmit(queue_, 1, &submit, slot.fence) == VK_SUCCESS &&
+        signal_release) {
+      release_fd = ExportReleaseFence();
+    }
   }
-  PublishReleaseFences();
+  PublishReleaseFences(release_fd);
   if (!explicit_sync_) {
     // CPU fence: block until the blit completes so the dma-buf holds a full
     // frame before the compositor samples it. Explicit sync replaces this stall
