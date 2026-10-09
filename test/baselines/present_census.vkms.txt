@@ -11,6 +11,8 @@
 #   The software backend emits no DrmCompositor scene profile, so its *_us are 0.
 #
 # Fields: <backend> frames= discarded= stalls= b60= b30= b20= bslow= bidle=
-#         keepup_pm= mean_us= max_us= wait_us= compose_us= commit_us= total_us=
+#         keepup_pm= mean_us= max_us= then that backend's own stage fields --
+#         wait/compose/commit/total for the EGL compositor (and software, which
+#         posts none of them), barrier/wait/commit/total for drm-kms-vulkan.
 drm-kms-egl frames=360 discarded=0 stalls=0 b60=360 b30=0 b20=0 bslow=0 bidle=0 keepup_pm=1000 mean_us=16948 max_us=16666 wait_us=15436 compose_us=307 commit_us=223 total_us=15966
 software frames=360 discarded=0 stalls=0 b60=314 b30=46 b20=0 bslow=0 bidle=0 keepup_pm=1000 mean_us=16948 max_us=17206 wait_us=0 compose_us=0 commit_us=0 total_us=0

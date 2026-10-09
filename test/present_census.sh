@@ -286,16 +286,34 @@ fold_present() {  # fold_present <log> <label>
     ' "$1"
 }
 
-# Mean of a scene-profile stage in microseconds (board-only, informational).
-scene_stage_us() {  # scene_stage_us <log> <stage>
-    awk -v stage="$1" '
-        index($0, "scene profile (n=") == 0 { next }
+# Mean of one stage of the per-frame breakdown, in microseconds (board-only,
+# informational). The marker says which stream to read, because the stages and
+# the line that carries them are the backend's, not this harness's.
+stage_us() {  # stage_us <stage> <marker> <log>
+    awk -v stage="$1" -v marker="$2" '
+        index($0, marker) == 0 { next }
         match($0, stage "=[0-9.]+ms") {
             v = substr($0, RSTART+length(stage)+1, RLENGTH-length(stage)-3) + 0;
             sum += v; n++;
         }
         END { if (n > 0) printf "%.0f", (sum / n) * 1000; else printf "0"; }
-    ' "$2"
+    ' "$3"
+}
+
+# Which stage line a backend posts, and the stages in it: "<marker>|<stages>".
+#
+# Per backend for the same reason present_label is: the EGL compositor posts
+# "[DrmCompositor] scene profile" with wait/compose/commit, and the Vulkan
+# backend posts "[VulkanDrmBackend] stage profile" with barrier/wait/commit.
+# Reading the EGL stages out of a Vulkan run printed four zeroes and read as a
+# present path that cost nothing, which is the one thing a stage breakdown is
+# there to rule out.
+stage_source() {  # stage_source <backend>
+    case "$1" in
+        drm-kms-egl|software) echo "scene profile (n=|wait compose commit total" ;;
+        drm-kms-vulkan)       echo "stage profile (n=|barrier wait commit total" ;;
+        *)                    echo "|" ;;
+    esac
 }
 
 record() {  # record <backend> <pass|fail|skip> <detail>
@@ -401,19 +419,23 @@ census_backend() {  # census_backend <backend>
     fi
     read -r frames disc stall c60 c30 c20 cslow cidle mean_us max_us <<<"$fold"
 
-    local wait_us compose_us commit_us total_us
-    wait_us="$(scene_stage_us wait "$hs_log")"
-    compose_us="$(scene_stage_us compose "$hs_log")"
-    commit_us="$(scene_stage_us commit "$hs_log")"
-    total_us="$(scene_stage_us total "$hs_log")"
+    local src marker stages stage_str="" st
+    src="$(stage_source "$backend")"
+    marker="${src%%|*}"
+    stages="${src##*|}"
+    if [[ -n "$marker" ]]; then
+        for st in $stages; do
+            stage_str="${stage_str} ${st}_us=$(stage_us "$st" "$marker" "$hs_log")"
+        done
+    fi
 
     # keep-up ratio in integer per-mille to stay shell-arithmetic-safe
     local keepup_pm=0
     [[ "$frames" -gt 0 ]] && keepup_pm=$(( (c60 + c30) * 1000 / frames ))
 
-    printf '%s frames=%d discarded=%d stalls=%d b60=%d b30=%d b20=%d bslow=%d bidle=%d keepup_pm=%d mean_us=%d max_us=%d wait_us=%s compose_us=%s commit_us=%s total_us=%s\n' \
+    printf '%s frames=%d discarded=%d stalls=%d b60=%d b30=%d b20=%d bslow=%d bidle=%d keepup_pm=%d mean_us=%d max_us=%d%s\n' \
         "$backend" "$frames" "$disc" "$stall" "$c60" "$c30" "$c20" "$cslow" "$cidle" \
-        "$keepup_pm" "$mean_us" "$max_us" "$wait_us" "$compose_us" "$commit_us" "$total_us" \
+        "$keepup_pm" "$mean_us" "$max_us" "$stage_str" \
         >>"$CENSUS_OUT"
 
     # Invariants (counts/ratios — admissible on vkms).
@@ -426,7 +448,7 @@ census_backend() {  # census_backend <backend>
     if [[ -n "$why" ]]; then
         record "$backend" fail "invariant:${why} [b=${c60}/${c30}/${c20}/${cslow}/${cidle}]"
     else
-        record "$backend" pass "frames=$frames discarded=0 stalls=0 keepup=${keepup_pm}‰ buckets=${c60}/${c30}/${c20}/${cslow}/${cidle} scene(us) wait=$wait_us compose=$compose_us commit=$commit_us total=$total_us"
+        record "$backend" pass "frames=$frames discarded=0 stalls=0 keepup=${keepup_pm}‰ buckets=${c60}/${c30}/${c20}/${cslow}/${cidle} stages(us)${stage_str}"
     fi
 }
 
