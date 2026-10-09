@@ -165,6 +165,8 @@ endif ()
 #add_subdirectory(template-test-case)
 add_subdirectory(utils-test)
 add_subdirectory(cache_dir-test)
+# VkImage external textures (flutter/flutter#188855); no GPU needed.
+add_subdirectory(vk_external_texture-test)
 # wl_touch frame batching; no compositor needed (see that dir's CMakeLists).
 add_subdirectory(touch_frame-test)
 # Watchdog shutdown latency (the systemctl stop hang).

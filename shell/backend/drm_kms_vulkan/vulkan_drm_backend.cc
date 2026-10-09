@@ -72,6 +72,7 @@
 #include "engine_switches.h"
 #include "logging.h"
 #include "shell/platform/homescreen/flutter_desktop_engine_state.h"
+#include "shell/platform/homescreen/flutter_desktop_texture_registrar.h"
 #include "task_runner.h"
 #include "view/layer_scanout.h"
 
@@ -4225,6 +4226,8 @@ bool VulkanDrmBackend::GetVulkanContext(BackendVulkanContext* out) const {
   out->api_version = UsableApiVersion(physical_device_);
   out->instance_extensions = enabled_instance_extensions_.data();
   out->instance_extension_count = enabled_instance_extensions_.size();
+  // samplerYcbcrConversion is not requested at device creation here.
+  out->sampler_ycbcr_conversion = false;
   return true;
 }
 
@@ -4249,6 +4252,8 @@ FlutterRendererConfig VulkanDrmBackend::GetRenderConfig() {
       GetInstanceProcAddressCallback;
   config.vulkan.get_next_image_callback = GetNextImageCb;
   config.vulkan.present_image_callback = PresentImageCb;
+  config.vulkan.external_texture_frame_callback =
+      ExternalVulkanTextureFrameCallback;
   return config;
 }
 

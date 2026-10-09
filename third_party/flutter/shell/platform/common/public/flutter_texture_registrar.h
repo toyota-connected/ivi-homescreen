@@ -38,8 +38,70 @@ typedef enum {
   kFlutterDesktopGpuSurfaceTypeDxgiSharedHandle,
   // A |ID3D11Texture2D| (Windows only).
   kFlutterDesktopGpuSurfaceTypeD3d11Texture2D,
-  kFlutterDesktopGpuSurfaceTypeGlTexture2D
+  // A GL texture name (ivi-homescreen EGL backends).
+  kFlutterDesktopGpuSurfaceTypeGlTexture2D,
+  // A |VkImage| (ivi-homescreen Vulkan backends). |handle| points to a
+  // |FlutterDesktopVulkanImage|. See that type for the sampling contract.
+  kFlutterDesktopGpuSurfaceTypeVkImage
 } FlutterDesktopGpuSurfaceType;
+
+// The image a |kFlutterDesktopGpuSurfaceTypeVkImage| texture hands to the
+// engine. |FlutterDesktopGpuSurfaceDescriptor::handle| points to one of these.
+// The descriptor and this struct are read after the GPU-surface callback
+// returns, so keep both unchanged until the next callback invocation (or
+// until the texture is unregistered).
+//
+// Unlike |kFlutterDesktopGpuSurfaceTypeGlTexture2D|, whose descriptor is read
+// once at registration, the GPU-surface callback of a VkImage texture runs on
+// the raster thread each time the engine resolves the texture, i.e. once after
+// each |FlutterDesktopTextureRegistrarMarkExternalTextureFrameAvailable|. A
+// producer cycling through several images returns the current one each time.
+// No registrar lock is held during the callback.
+//
+// Contract, per the Flutter embedder API (FlutterVulkanExternalTexture):
+//  - |image| must be created on the VkDevice the engine renders with (see
+//    ihs_pv_vulkan_context in <ihs/platform_view.h>), with
+//    VK_IMAGE_USAGE_SAMPLED_BIT, and owned by the queue family reported there.
+//  - It must be in VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL when the callback
+//    returns.
+//  - All writes to it must have completed before the callback returns; the
+//    engine samples it with no further synchronization. The callback blocks
+//    the raster thread, so wait the producer's fence before calling
+//    MarkExternalTextureFrameAvailable and keep the callback itself cheap.
+//  - It must stay alive and unmodified until the descriptor's
+//    |release_callback| runs. The engine keeps the current image until the
+//    next frame is marked available and the GPU work sampling it has retired,
+//    so a producer needs at least two images. |release_callback| runs once
+//    per frame, on an engine thread; when the embedder rejects a descriptor
+//    (see below) it runs right away, on the raster thread.
+//  - |FlutterDesktopGpuSurfaceDescriptor::width|/|height| give the image's
+//    physical size, at most maxImageDimension2D; 0 lets the engine use the
+//    size it requested.
+//  - |format| must be one the engine samples on both of its renderers:
+//    R8G8B8A8_UNORM, R8G8B8A8_SRGB, B8G8R8A8_UNORM, R16G16B16A16_SFLOAT,
+//    R32G32B32A32_SFLOAT, R8_UNORM or R8G8_UNORM; or a multi-planar YCbCr
+//    format (e.g. G8_B8R8_2PLANE_420_UNORM for NV12) when the backend enabled
+//    samplerYcbcrConversion on the device. Other formats are rejected.
+//
+// Unregistering is asynchronous: the completion callback passed to
+// |FlutterDesktopTextureRegistrarUnregisterExternalTexture| runs once the
+// engine has released every frame of the texture, possibly later and on an
+// engine thread. Keep the images and the release context alive until then.
+// Always pass a completion callback for a VkImage texture (with the C++
+// wrapper, TextureRegistrar::UnregisterTexture(id, callback)): without one
+// there is no point at which freeing them is safe.
+//
+// Requires a Flutter engine that includes the Vulkan external texture API
+// (flutter/flutter#188855). On an older engine, registration succeeds but the
+// texture never resolves.
+typedef struct {
+  // The size of this struct. Must be sizeof(FlutterDesktopVulkanImage).
+  size_t struct_size;
+  // The VkImage handle.
+  uint64_t image;
+  // The VkFormat of |image| (e.g. VK_FORMAT_R8G8B8A8_UNORM).
+  uint32_t format;
+} FlutterDesktopVulkanImage;
 
 // Supported pixel formats.
 typedef enum {

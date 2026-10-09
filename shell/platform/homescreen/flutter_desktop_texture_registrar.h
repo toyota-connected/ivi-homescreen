@@ -8,6 +8,7 @@
 
 #include <flutter_texture_registrar.h>
 #include <shell/platform/embedder/embedder.h>
+#include "flutter_desktop_vk_texture.h"
 
 struct FlutterDesktopEngineState;
 
@@ -33,6 +34,10 @@ struct GL_TEXTURE_2D_DESC {
   // and this pair stays null.
   FlutterDesktopPixelBufferTextureCallback pixel_buffer_callback;
   void* pixel_buffer_user_data;
+
+  // VkImage mode (|kFlutterDesktopGpuSurfaceTypeVkImage|). When set, the
+  // GL fields above are unused and the embedder owns no GPU resource.
+  std::shared_ptr<VkImageTexture> vk_image;
 };
 
 // State associated with the texture registrar.
@@ -67,3 +72,25 @@ bool PopulateExternalGlTextureFrame(
     size_t width,
     size_t height,
     FlutterOpenGLTexture* texture_out);
+
+// Resolve a registered VkImage external texture for the Flutter engine's
+// |FlutterVulkanRendererConfig::external_texture_frame_callback|. Looks the
+// texture up under the registrar mutex, then resolves it with no registrar
+// lock held (see ResolveVkImageTexture). Returns false if |texture_id| is not
+// a registered VkImage texture or the plugin produced no usable frame.
+bool PopulateExternalVulkanTextureFrame(
+    FlutterDesktopTextureRegistrar* texture_registrar,
+    int64_t texture_id,
+    size_t width,
+    size_t height,
+    FlutterVulkanExternalTexture* texture_out);
+
+// |FlutterVulkanTextureFrameCallback| shared by the Vulkan backends.
+// |user_data| is the |FlutterDesktopEngineState| passed to
+// FlutterEngineInitialize.
+bool ExternalVulkanTextureFrameCallback(
+    void* user_data,
+    int64_t texture_id,
+    size_t width,
+    size_t height,
+    FlutterVulkanExternalTexture* texture_out);

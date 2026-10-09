@@ -34,6 +34,7 @@
 #include "logging.h"
 #include "profiling/frame_profile.h"
 #include "profiling/pv_latency.h"
+#include "shell/platform/homescreen/flutter_desktop_texture_registrar.h"
 #include "task_runner.h"
 #include "wayland/display.h"
 
@@ -120,7 +121,7 @@ FlutterRendererConfig WaylandVulkanBackend::GetRenderConfig() {
   return {
       .type = kVulkan,
       .vulkan{
-          .struct_size = sizeof(FlutterRendererConfig),
+          .struct_size = sizeof(FlutterVulkanRendererConfig),
           .version = VK_MAKE_VERSION(1, 1, 0),
           .instance = instance_,
           .physical_device = physical_device_,
@@ -135,6 +136,7 @@ FlutterRendererConfig WaylandVulkanBackend::GetRenderConfig() {
           .get_instance_proc_address_callback = GetInstanceProcAddressCallback,
           .get_next_image_callback = GetNextImageCallback,
           .present_image_callback = PresentCallback,
+          .external_texture_frame_callback = ExternalVulkanTextureFrameCallback,
       }};
 }
 
@@ -162,6 +164,7 @@ bool WaylandVulkanBackend::GetVulkanContext(BackendVulkanContext* out) const {
   out->api_version = UsableApiVersion(physical_device_);
   out->instance_extensions = enabled_instance_extensions_.data();
   out->instance_extension_count = enabled_instance_extensions_.size();
+  out->sampler_ycbcr_conversion = sampler_ycbcr_conversion_;
   return true;
 }
 
@@ -847,6 +850,7 @@ void WaylandVulkanBackend::createLogicalDevice() {
     d().vkGetPhysicalDeviceFeatures2(physical_device_, &features2);
     if (ycbcr_supported.samplerYcbcrConversion == VK_TRUE) {
       ycbcr_feature.samplerYcbcrConversion = VK_TRUE;
+      sampler_ycbcr_conversion_ = true;
       ycbcr_feature.pNext = const_cast<void*>(device_info.pNext);
       device_info.pNext = &ycbcr_feature;
     }
