@@ -446,6 +446,9 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   std::map<uint32_t, DmabufVulkanImporter::ImportedImage> buffers;
   DmabufVulkanImporter::ImportedImage* current{nullptr};
   uint32_t current_layout{VK_IMAGE_LAYOUT_UNDEFINED};
+  // The layout a vk_image layer 0 was handed over in (IhsVkImage::layout); 0
+  // for an imported dma-buf.
+  uint32_t current_handoff_layout{0};
 
   // The producer's dma-buf kept alive beside the import, so a frame can reach
   // a KMS plane as well as be sampled. The importer consumes the submitted fds
@@ -675,6 +678,7 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     uint32_t current_buffer_id{0};
     uint64_t current_frame{0};
     uint32_t layout{VK_IMAGE_LAYOUT_UNDEFINED};
+    uint32_t handoff_layout{0};  // as current_handoff_layout
     int acquire_fd{-1};  // taken by the compositor, like pending_acquire_fd
 #endif
 #if IVI_HAVE_EGL
@@ -850,6 +854,7 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
       img = current;
       out.geometry = geom0;
       out.frame = current_frame;
+      out.handoff_layout = current_handoff_layout;
       if (img != nullptr) {
         ShmSampledLocked(current_buffer_id);
       }
@@ -857,6 +862,7 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
       img = x->current;
       out.geometry = x->geom;
       out.frame = x->current_frame;
+      out.handoff_layout = x->handoff_layout;
     }
     if (img == nullptr || img->image == VK_NULL_HANDLE) {
       return out;
@@ -2491,6 +2497,7 @@ uint64_t VulkanRenderDevice(const BackendVulkanContext& vk) {
 #endif
 
 bool SamplesImageLayers();
+bool SamplesVkImageLayers();
 
 int HostQueryCapabilities(void* user_data, IhsPvCapabilities* out) {
   out->backend_key = "";
@@ -2505,6 +2512,11 @@ int HostQueryCapabilities(void* user_data, IhsPvCapabilities* out) {
 #if IVI_HAVE_VULKAN
       render_device = VulkanRenderDevice(vk);
 #endif
+      // vk_image layers (1.21): a producer's image on this device, sampled as
+      // it is.
+      if (SamplesVkImageLayers()) {
+        out->kinds |= IHS_PV_KIND_TEXTURE_VK_IMAGE;
+      }
       // Explicit-sync acquire is available when the shared device can import a
       // producer's sync_file as a semaphore — the compositor's platform-view
       // wait path (TakeAcquireFenceFd -> vkImportSemaphoreFdKHR) needs
@@ -2838,11 +2850,14 @@ size_t HostGrantShmSlots(void* /*user_data*/,
 // rides the callback / native protocol), and a submit is implicit exactly when
 // it carries no acquire fence. Also leaves it at -1 when there is no fence yet
 // or the dup fails -- the producer then throttles conservatively rather than
-// racing the compositor. Caller holds v->mutex (release_fence_fd is read here).
+// racing the compositor. A vk_image layer (@p vk_image) gets one either way:
+// rendered on the shell's queue, it needs no acquire fence, and has no other
+// release. Caller holds v->mutex (release_fence_fd is read here).
 void HandBackReleaseFence(const IhsPluginView* v,
                           int acquire_fence_fd,
-                          int* out_release_fence_fd) {
-  if (out_release_fence_fd == nullptr || acquire_fence_fd < 0 ||
+                          int* out_release_fence_fd,
+                          const bool vk_image = false) {
+  if (out_release_fence_fd == nullptr || (acquire_fence_fd < 0 && !vk_image) ||
       v->release_fence_fd < 0) {
     return;
   }
@@ -2873,6 +2888,9 @@ struct ExtraSubmit {
   // An image layer's EGLImage (frame then has no planes); EGL only.
   void* image{nullptr};
   bool image_external{false};
+  // A vk_image layer's VkImage (frame then has no planes); Vulkan only.
+  IhsVkImage vk_image{};
+  bool has_vk_image{false};
 };
 struct LayerListUpdate {
   std::vector<ExtraSubmit> extras;
@@ -2916,8 +2934,8 @@ DmabufVulkanImporter::ImportedImage* ImportOrReuseVulkanLocked(
     IhsPluginView* v,
     const IhsFrame& frame) {
   const auto it = v->buffers.find(frame.buffer_id);
-  if (it != v->buffers.end() && it->second.width == frame.width &&
-      it->second.height == frame.height) {
+  if (it != v->buffers.end() && it->second.owns_image &&
+      it->second.width == frame.width && it->second.height == frame.height) {
     CloseFrameFds(&frame);  // a redundant handle to the cached import
     return &it->second;
   }
@@ -2941,6 +2959,30 @@ DmabufVulkanImporter::ImportedImage* ImportOrReuseVulkanLocked(
     v->scanout.erase(sit);
   }
   return &v->buffers.emplace(frame.buffer_id, imported).first->second;
+}
+
+// The producer's own image for a vk_image layer, or the entry already kept
+// for it under its buffer_id. Nothing is imported, so there is nothing a
+// plane could be given: no scanout dup is kept. Null when the importer refuses
+// it. Caller holds v->mutex.
+DmabufVulkanImporter::ImportedImage* AdoptOrReuseVulkanLocked(
+    IhsPluginView* v,
+    const IhsVkImage& vk) {
+  const auto it = v->buffers.find(vk.buffer_id);
+  if (it != v->buffers.end() && !it->second.owns_image &&
+      it->second.image == reinterpret_cast<VkImage>(vk.image)) {
+    // The same image again. Never retired and re-adopted: that would release
+    // it to the producer while this entry still shows it.
+    return &it->second;
+  }
+  if (it != v->buffers.end()) {
+    RetireVulkanImportLocked(v, vk.buffer_id);  // another image under the id
+  }
+  DmabufVulkanImporter::ImportedImage adopted;
+  if (!g_importer.Adopt(vk, &adopted)) {
+    return nullptr;
+  }
+  return &v->buffers.emplace(vk.buffer_id, adopted).first->second;
 }
 #endif
 
@@ -2969,7 +3011,7 @@ void ApplyLayerListLocked(IhsPluginView* v,
   for (ExtraSubmit& es : update->extras) {
     IhsPluginView::ExtraLayer& x = v->extra_layers[es.layer_id];
     order.push_back(es.layer_id);
-    HandBackReleaseFence(v, es.acquire_fd, es.out_release_fd);
+    HandBackReleaseFence(v, es.acquire_fd, es.out_release_fd, es.has_vk_image);
 #if IVI_HAVE_VULKAN
     if (vulkan) {
       if (x.acquire_fd >= 0) {
@@ -2979,11 +3021,14 @@ void ApplyLayerListLocked(IhsPluginView* v,
       if (v->deferred_retire.Resubmitted(es.frame.buffer_id)) {
         RetireVulkanImportLocked(v, es.frame.buffer_id);
       }
-      if (auto* img = ImportOrReuseVulkanLocked(v, es.frame); img != nullptr) {
+      auto* img = es.has_vk_image ? AdoptOrReuseVulkanLocked(v, es.vk_image)
+                                  : ImportOrReuseVulkanLocked(v, es.frame);
+      if (img != nullptr) {
         x.current = img;
         x.current_buffer_id = es.frame.buffer_id;
         x.current_frame = v->submit_seq;
         x.layout = VK_IMAGE_LAYOUT_GENERAL;
+        x.handoff_layout = es.has_vk_image ? es.vk_image.layout : 0;
         x.geom = es.geom;
       }
       continue;
@@ -3069,7 +3114,9 @@ int SubmitFrame0(void* user_data,
                  const ICompositorSurface::LayerGeometry& geom,
                  LayerListUpdate* update,
                  void* image0 = nullptr,
-                 bool image0_external = false) {
+                 bool image0_external = false,
+                 const IhsVkImage* vk_image0 = nullptr) {
+  (void)vk_image0;
 #if IVI_HAVE_VULKAN
   const bool vulkan_ready = g_importer.ready();
 #else
@@ -3164,7 +3211,8 @@ int SubmitFrame0(void* user_data,
   std::unique_lock<std::mutex> lock(v->mutex);
   ++v->submit_seq;
   v->presentation_sink->Submitted(v->submit_seq, seq);
-  HandBackReleaseFence(v, acquire_fence_fd, out_release_fence_fd);
+  HandBackReleaseFence(v, acquire_fence_fd, out_release_fence_fd,
+                       vk_image0 != nullptr);
   // A SOFTWARE_SHM submit always gets a release fence: its own eventfd, which
   // fires once a later frame replaced it and the composites that sampled it
   // are done (ShmSwitchedLocked).
@@ -3210,8 +3258,19 @@ int SubmitFrame0(void* user_data,
     RetireVulkanImportLocked(v, frame->buffer_id);
   }
   const auto it = v->buffers.find(frame->buffer_id);
-  if (it != v->buffers.end() && it->second.width == frame->width &&
-      it->second.height == frame->height) {
+  if (vk_image0 != nullptr) {
+    // The producer's own image: nothing to import and no fds to close.
+    auto* img = AdoptOrReuseVulkanLocked(v, *vk_image0);
+    if (img == nullptr) {
+      return IHS_PV_ERR_INVALID;
+    }
+    v->current = img;
+    v->current_buffer_id = frame->buffer_id;
+    v->current_frame = v->submit_seq;
+    v->current_buffer_valid = false;  // no dma-buf, so never on a plane
+  } else if (it != v->buffers.end() && it->second.owns_image &&
+             it->second.width == frame->width &&
+             it->second.height == frame->height) {
     // Known ring buffer, unchanged size: the submitted fd is a redundant handle
     // to the same memory. Close it and reuse the existing import -- and the
     // scanout dup taken when this id was first imported, which aliases the
@@ -3303,6 +3362,7 @@ int SubmitFrame0(void* user_data,
   // transitions from GENERAL to read it. A spec-correct foreign-queue-family
   // acquire from the producer is the explicit-sync increment.
   v->current_layout = VK_IMAGE_LAYOUT_GENERAL;
+  v->current_handoff_layout = vk_image0 != nullptr ? vk_image0->layout : 0;
   v->geom0 = geom;
   v->layer0_id = layer_id;
   ApplyLayerListLocked(v, update, /*vulkan=*/true);
@@ -3417,6 +3477,25 @@ const IhsImage* LayerImage(const IhsLayer& layer) {
              : nullptr;
 }
 
+// The layer's vk_image (1.21), or null for any other layer or one built
+// without the field.
+const IhsVkImage* LayerVkImage(const IhsLayer& layer) {
+  return layer.struct_size >=
+                 offsetof(IhsLayer, vk_image) + sizeof(const IhsVkImage*)
+             ? layer.vk_image
+             : nullptr;
+}
+
+// Whether the active backend samples vk_image layers: a Vulkan one, whose
+// device the producer's image was made on.
+bool SamplesVkImageLayers() {
+#if IVI_HAVE_VULKAN
+  return g_importer.ready();
+#else
+  return false;
+#endif
+}
+
 // Whether the active backend binds image layers: an EGL one.
 bool SamplesImageLayers() {
 #if IVI_HAVE_EGL
@@ -3491,6 +3570,18 @@ int HostSubmitLayers(void* user_data,
     close_from(0);
     return IHS_PV_ERR_UNSUPPORTED;
   }
+  // vk_image layers (1.21) only on a Vulkan backend.
+  bool any_vk_image = false;
+  for (size_t i = 0; i < layer_count; ++i) {
+    any_vk_image = any_vk_image || LayerVkImage(layers[i]) != nullptr;
+  }
+  if (any_vk_image && !SamplesVkImageLayers()) {
+    ihs::log::warn(
+        "[ihs_pv] submit_layers rejected: vk_image layers need a Vulkan "
+        "backend");
+    close_from(0);
+    return IHS_PV_ERR_UNSUPPORTED;
+  }
   // Every frame here carries a buffer_id (libihs_shared checked), so none is
   // synthesised, and the synthesised-id pruning -- which would retire other
   // layers' imports -- stops applying to this view.
@@ -3500,14 +3591,17 @@ int HostSubmitLayers(void* user_data,
   IhsFrame frame0{};
   for (size_t i = 0; i < layer_count; ++i) {
     IhsFrame* dst = i == 0 ? &frame0 : &update.extras[i - 1].frame;
-    if (const IhsImage* image = LayerImage(layers[i]); image != nullptr) {
+    const IhsImage* image = LayerImage(layers[i]);
+    const IhsVkImage* vk_image = LayerVkImage(layers[i]);
+    if (image != nullptr || vk_image != nullptr) {
       // No planes: the frame names the buffer and its size, and the image is
       // what gets bound.
       *dst = IhsFrame{};
       dst->struct_size = sizeof(IhsFrame);
-      dst->width = image->width;
-      dst->height = image->height;
-      dst->buffer_id = image->buffer_id;
+      dst->width = image != nullptr ? image->width : vk_image->width;
+      dst->height = image != nullptr ? image->height : vk_image->height;
+      dst->buffer_id =
+          image != nullptr ? image->buffer_id : vk_image->buffer_id;
       for (int& fd : dst->plane_fd) {
         fd = -1;
       }
@@ -3529,6 +3623,12 @@ int HostSubmitLayers(void* user_data,
       es.image = image->egl_image;
       es.image_external = image->external_oes != 0;
     }
+    if (const IhsVkImage* vk_image = LayerVkImage(layers[i]);
+        vk_image != nullptr) {
+      es.vk_image = *vk_image;
+      es.vk_image.struct_size = sizeof(IhsVkImage);
+      es.has_vk_image = true;
+    }
   }
   const IhsImage* image0 = LayerImage(layers[0]);
   const int rc = SubmitFrame0(
@@ -3536,7 +3636,7 @@ int HostSubmitLayers(void* user_data,
       out_release_fence_fds != nullptr ? &out_release_fence_fds[0] : nullptr,
       layers[0].layer_id, seq, GeometryOf(layers[0]), &update,
       image0 != nullptr ? image0->egl_image : nullptr,
-      image0 != nullptr && image0->external_oes != 0);
+      image0 != nullptr && image0->external_oes != 0, LayerVkImage(layers[0]));
   if (!update.applied) {
     close_from(1);  // layer 0 failed; the rest were never taken
   }

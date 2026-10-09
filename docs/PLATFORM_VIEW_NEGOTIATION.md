@@ -17,8 +17,15 @@ of the current implementation rather than a guarantee of the ABI, it says so.
 | `IHS_PV_KIND_SOFTWARE_SHM` | `1u << 2` | CPU-written pixels in buffers the host allocates (see [SOFTWARE_SHM buffers](#software_shm-buffers)) |
 | `IHS_PV_KIND_TEXTURE_DMABUF_IMPORT` | `1u << 0` | a dma-buf the shell imports as a texture |
 | `IHS_PV_KIND_DRM_PLANE` | `1u << 1` | a dma-buf scanned out directly on a KMS overlay plane |
+| `IHS_PV_KIND_TEXTURE_EGL_IMAGE` | `1u << 3` | an EGLImage on the backend's display, in an `IhsLayer`'s `image` (ABI 1.16) |
+| `IHS_PV_KIND_TEXTURE_VK_IMAGE` | `1u << 4` | a VkImage on the backend's device, in an `IhsLayer`'s `vk_image` (ABI 1.21) |
 
 `IHS_PV_KIND_NONE` is `0` and is never granted.
+
+The two image kinds are not negotiated. A backend that samples them reports the
+bit in `IhsPvCapabilities::kinds`, and any view on it may then submit image
+layers through `ihs_pv_submit_layers`. They are always composited, never put
+on a plane.
 
 ## The kind matrix
 
@@ -33,6 +40,8 @@ identity table:
 | `GetVulkanContext()` succeeds | `TEXTURE_DMABUF_IMPORT` |
 | `GetEglContext()` succeeds (`IVI_HAVE_EGL` builds) | `TEXTURE_DMABUF_IMPORT` |
 | `GetEglContext()` succeeds **and** `egl.gbm_device != nullptr` | `DRM_PLANE` |
+| `GetEglContext()` succeeds on a backend that is not also Vulkan | `TEXTURE_EGL_IMAGE` |
+| `GetVulkanContext()` succeeds | `TEXTURE_VK_IMAGE` |
 
 Consequences worth stating plainly, because they are what a plugin plans
 against:

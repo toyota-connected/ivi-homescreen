@@ -661,7 +661,36 @@ void DmabufVulkanImporter::DrainPool() const {
   }
 }
 
+bool DmabufVulkanImporter::Adopt(const IhsVkImage& vk,
+                                 ImportedImage* out) const {
+  if (!ready() || out == nullptr || vk.image == nullptr ||
+      vk.release == nullptr || vk.width == 0 || vk.height == 0) {
+    return false;
+  }
+  *out = ImportedImage{};
+  out->image = reinterpret_cast<VkImage>(vk.image);
+  out->width = vk.width;
+  out->height = vk.height;
+  out->format = vk.format != VK_FORMAT_UNDEFINED
+                    ? static_cast<VkFormat>(vk.format)
+                    : VK_FORMAT_B8G8R8A8_UNORM;
+  out->owns_image = false;
+  out->release = vk.release;
+  out->release_user_data = vk.release_user_data;
+  out->buffer_id = vk.buffer_id;
+  return true;
+}
+
 void DmabufVulkanImporter::Free(ImportedImage* image) const {
+  if (!image->owns_image) {
+    // The producer's: hand it back rather than destroy it.
+    if (image->release != nullptr && image->image != VK_NULL_HANDLE) {
+      image->release(image->release_user_data,
+                     reinterpret_cast<void*>(image->image), image->buffer_id);
+    }
+    *image = ImportedImage{};
+    return;
+  }
   if (image->image != VK_NULL_HANDLE) {
     destroy_image_(device_, image->image, nullptr);
     image->image = VK_NULL_HANDLE;

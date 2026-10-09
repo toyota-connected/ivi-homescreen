@@ -2936,6 +2936,10 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
   // Images already moved to SHADER_READ_ONLY this frame, so a buffer shown by
   // two layers is not given a second barrier from a layout it has left.
   std::vector<VkImage> transitioned;
+  // A producer's own images (vk_image layers) and the layout each was handed
+  // over in, to move back to after the draws: it rewrites them on this queue
+  // and expects them as it left them.
+  std::vector<std::pair<VkImage, VkImageLayout>> handoffs;
   draws.reserve(count);
 
   const auto barrier =
@@ -3096,11 +3100,25 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
         const VkFormat src_format = img.format != 0
                                         ? static_cast<VkFormat>(img.format)
                                         : VK_FORMAT_B8G8R8A8_UNORM;
-        const auto cur =
-            static_cast<VkImageLayout>(surface->GetLayerVulkanImageLayout(li));
-        if (cur != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL &&
-            std::find(transitioned.begin(), transitioned.end(), src) ==
-                transitioned.end()) {
+        const bool seen = std::find(transitioned.begin(), transitioned.end(),
+                                    src) != transitioned.end();
+        if (img.handoff_layout != 0) {
+          // Rewritten by the producer on this queue every frame, in whatever
+          // layout it handed over: depend on all prior work on the queue,
+          // which its render is part of.
+          if (!seen) {
+            const auto from = static_cast<VkImageLayout>(img.handoff_layout);
+            barrier(src, from, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    VK_ACCESS_MEMORY_WRITE_BIT,
+                    VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                    VK_ACCESS_SHADER_READ_BIT,
+                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+            transitioned.push_back(src);
+            handoffs.emplace_back(src, from);
+          }
+        } else if (const auto cur = static_cast<VkImageLayout>(
+                       surface->GetLayerVulkanImageLayout(li));
+                   cur != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL && !seen) {
           const bool from_preinit = cur == VK_IMAGE_LAYOUT_PREINITIALIZED;
           barrier(src, cur, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                   from_preinit ? VK_ACCESS_HOST_WRITE_BIT : 0,
@@ -3110,8 +3128,10 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
                   VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
           transitioned.push_back(src);
         }
-        surface->SetLayerVulkanImageLayout(
-            li, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        if (img.handoff_layout == 0) {
+          surface->SetLayerVulkanImageLayout(
+              li, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        }
         draws.push_back(
             {src, src_format, place.dst.x, place.dst.y, place.dst.w,
              place.dst.h, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED,
@@ -3135,6 +3155,15 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
   if (draws.empty()) {
     return false;
   }
+  // Back to the layout each producer handed its image over in, once the draws
+  // that read it are done. On every way out past phase 1.
+  const auto restore_handoffs = [&] {
+    for (const auto& [image, layout] : handoffs) {
+      barrier(image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, layout,
+              VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+              0, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+    }
+  };
 
   // Built here rather than at init: the pipeline is keyed to the slot format,
   // and a failure must not be retried every frame.
@@ -3152,6 +3181,7 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
     }
   }
   if (!layer_compositor_) {
+    restore_handoffs();
     return false;
   }
 
@@ -3185,6 +3215,7 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
             VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
   }
+  restore_handoffs();
   return opened;
 }
 #endif  // BUILD_COMPOSITOR

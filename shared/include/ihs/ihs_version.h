@@ -36,7 +36,7 @@
  * instead of blitting them (see IhsFrameFlags).
  */
 #define IHS_SHARED_ABI_MAJOR 1u
-#define IHS_SHARED_ABI_MINOR 20u
+#define IHS_SHARED_ABI_MINOR 21u
 #define IHS_SHARED_ABI_VERSION \
   ((IHS_SHARED_ABI_MAJOR << 16) | IHS_SHARED_ABI_MINOR)
 
