@@ -247,7 +247,8 @@ class VulkanDrmBackend final : public Backend {
   [[nodiscard]] uint32_t width() const { return width_; }
   [[nodiscard]] uint32_t height() const { return height_; }
   // |Backend| From the selected mode; 0 before one is set. See the note on
-  // DrmBackend::RefreshPeriodNs for why not the vsync provider (#732).
+  // DrmBackend::RefreshPeriodNs for why not the vsync provider (#732), and
+  // #762 for the integer vrefresh a 59.94Hz mode rounds to 60.
   [[nodiscard]] uint32_t RefreshPeriodNs() const override {
     const uint32_t vr = mode_vrefresh_;
     return vr > 0 ? static_cast<uint32_t>(1'000'000'000ULL / vr) : 0;
