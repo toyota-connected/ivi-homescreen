@@ -309,6 +309,9 @@ class DrmBackend : public Backend, public IFlipSink {
   // A legacy page flip touches neither, so a GL frame after scene commits would
   // scan out through the scene's REFLECT_Y and under its overlays. One shot.
   void ResetPlanesOnNextFlip(uint32_t primary, std::vector<uint32_t> overlays);
+  // True once a flip has carried that request: the overlays are off when it
+  // lands. False again at the next request, or if the flip failed.
+  [[nodiscard]] bool PlanesHandedBack() const { return planes_handed_back_; }
 
   // Park the engine's vsync baton (from VsyncTrampoline) into the shared
   // provider, which returns it when the next page flip completes or — for an
@@ -530,6 +533,7 @@ class DrmBackend : public Backend, public IFlipSink {
   // ResetPlanesOnNextFlip's request; raster thread.
   uint32_t reset_primary_ = 0;
   std::vector<uint32_t> reset_overlays_;
+  bool planes_handed_back_ = false;
   // The flip that carries it: an atomic commit in place of drmModePageFlip,
   // with the same flip event. 0 or an errno, like drmModePageFlip.
   int FlipResettingPlanes(uint32_t fb);

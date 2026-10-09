@@ -1041,6 +1041,69 @@ TEST_F(DrmBackendVkmsScene, MoreLayersThanPlanesSkipsThePlanePath) {
   compositor_->UnregisterSurface(25);
 }
 
+// A frame on a plane when GL takes the CRTC back is released, though the scene
+// that holds it does not commit again. Its view stays, but every frame after
+// needs more planes than the CRTC has.
+TEST_F(DrmBackendVkmsScene, AFrameOnAPlaneIsReleasedWhenGlTakesTheCrtc) {
+  GbmSolidBuffer first;
+  GbmSolidBuffer second;
+  ASSERT_TRUE(first.Create(backend_->device().fd(), content_w_, content_h_,
+                           0xFF1E7A46u));
+  ASSERT_TRUE(second.Create(backend_->device().fd(), content_w_, content_h_,
+                            0xFF7A1E46u));
+  auto view = std::make_shared<FakeDmabufPlatformView>(28, first, 0);
+  layer_w_ = content_w_;
+  layer_h_ = content_h_;
+  compositor_->RegisterSurface(28, view);
+
+  ASSERT_TRUE(PresentPlatformView(28));
+  ASSERT_NE(view->planes().back(), 0U) << "the first frame is on no plane";
+  ASSERT_TRUE(view->released().empty());
+
+  view->set_layer_count(64);  // more than any vkms has planes
+  view->Submit(&second, 1);
+  EXPECT_TRUE(PumpUntil(28, [&] {
+    const auto r = view->released();
+    return std::find(r.begin(), r.end(), 0U) != r.end();
+  })) << "the frame the scene held was never released";
+
+  // Its next frame that fits goes back on a plane.
+  view->set_layer_count(1);
+  view->Submit(&first, 0);
+  EXPECT_TRUE(PumpUntil(28, [&] { return view->planes().back() != 0U; }))
+      << "the plane path never took the view back";
+
+  compositor_->UnregisterSurface(28);
+}
+
+// The same when the view leaves: no later frame fits the planes, so the scene
+// never commits again to retire the view's layer.
+TEST_F(DrmBackendVkmsScene, AFrameOnAPlaneIsReleasedWhenItsViewLeavesForGl) {
+  GbmSolidBuffer first;
+  GbmSolidBuffer other;
+  ASSERT_TRUE(first.Create(backend_->device().fd(), content_w_, content_h_,
+                           0xFF1E7A46u));
+  ASSERT_TRUE(other.Create(backend_->device().fd(), content_w_, content_h_,
+                           0xFF7A1E46u));
+  auto leaving = std::make_shared<FakeDmabufPlatformView>(29, first, 0);
+  auto staying = std::make_shared<FakeDmabufPlatformView>(30, other, 0);
+  staying->set_layer_count(64);
+  layer_w_ = content_w_;
+  layer_h_ = content_h_;
+  compositor_->RegisterSurface(29, leaving);
+  compositor_->RegisterSurface(30, staying);
+
+  ASSERT_TRUE(PresentPlatformView(29));
+  ASSERT_NE(leaving->planes().back(), 0U) << "the frame is on no plane";
+  ASSERT_TRUE(leaving->released().empty());
+
+  EXPECT_TRUE(PumpUntil(30, [&] { return !leaving->released().empty(); }))
+      << "the frame of the view that left was never released";
+
+  compositor_->UnregisterSurface(30);
+  compositor_->UnregisterSurface(29);
+}
+
 // A frame the allocator turns down is not asked about again on every present:
 // the same shape goes straight to composition until the retry interval, so a
 // producer's new frames stop being imported only to be refused.
