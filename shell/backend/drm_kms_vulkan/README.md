@@ -383,6 +383,27 @@ a follow-on once the negotiated modifier drives allocation in the unrotated path
 | NanoPC-T6 (rk3588) | Mali-G610 (blob, Vulkan 1.3) → `rockchip-drm` (vop2) | **Refuses** — vop2 planes want AFBC (on their Cluster/overlay planes); the Mali-blob Vulkan exports only `LINEAR`, so no common modifier |
 | BeaglePlay (AM625) | PowerVR AXE-1-16M (Mesa `pvr`, Vulkan 1.2) → `tidss` display | **Refuses** — Mesa `pvr` does not implement `VK_EXT_image_drm_format_modifier` (nor `synchronization2`), so there is no modifier image to export for scanout |
 
+### Driver versions that matter
+
+Some defects on this backend are not ours to fix and go away on a driver
+update. Recorded here so the next person reading a bug report checks the
+version before reading the code, and so "it works on my board" has a cause.
+
+| Defect | Broken on | Fixed by | Workaround while older |
+| --- | --- | --- | --- |
+| v3dv refuses to import a dma-buf that v3d's own GBM allocated for the same image, whenever the image leaves under 64 bytes spare in its last page (#691, #598, #723; mesa/mesa#16524) | Mesa <= 26.1 on V3D | **Mesa 26.2.2** — v3d leaves four pages of headroom on what it exports, so the import is never short | `DmabufVulkanImporter` retries the import 64 bytes short. Out of spec (`VUID-vkBindImageMemory-size-01049`, `VUID-VkMemoryDedicatedAllocateInfo-image-02964`), so validation flags every imported frame; **inert** on 26.2.2, since it only runs after a refusal |
+
+The fix above is on the *exporter* side, which is worth knowing because the
+v3dv side also changed and looks like the fix but is not: 26.1 narrowed v3dv's
+padding to images declaring `TRANSFER_SRC`, which this importer asks for, so
+`VkMemoryRequirements::size` is still 64 bytes larger than the layout. The
+headroom is what makes it import.
+
+`tools/diag/dmabuf_import_probe` answers the question on any board without the
+shell: it allocates through GBM, exports, and imports at `req.size`, sweeping a
+height range because on a tiled modifier the failure covers a band of extents
+rather than one. Non-zero exit if any extent was refused.
+
 ### Unified-memory GPUs (render device == scanout device)
 
 On GPUs where one device both renders and scans out (e.g. **amdgpu**), the
