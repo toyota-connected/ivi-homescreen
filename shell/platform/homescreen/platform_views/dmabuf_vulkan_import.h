@@ -60,6 +60,13 @@ class DmabufVulkanImporter {
     VkSamplerYcbcrModelConversion ycbcr_model{
         VK_SAMPLER_YCBCR_MODEL_CONVERSION_RGB_IDENTITY};
     VkSamplerYcbcrRange ycbcr_range{VK_SAMPLER_YCBCR_RANGE_ITU_NARROW};
+    // False for an image the producer made on this device and keeps (Adopt):
+    // no memory here, and Destroy hands the image back through @release
+    // rather than destroying it.
+    bool owns_image{true};
+    void (*release)(void* user_data, void* image, uint32_t buffer_id){nullptr};
+    void* release_user_data{nullptr};
+    uint32_t buffer_id{0};
   };
 
   DmabufVulkanImporter() = default;
@@ -87,6 +94,13 @@ class DmabufVulkanImporter {
   // A frame whose dma-buf is in the pool (see Destroy), with the same layout,
   // gets that import back, and its fd is closed.
   bool Import(const IhsFrame& frame, ImportedImage* out) const;
+
+  // Describe the producer's @p vk image, created on this importer's device, in
+  // @out, without importing anything: the image stays the producer's, so
+  // Destroy neither frees nor pools it but calls its release instead. Call
+  // Destroy only once no frame binds it, as for an import. Single-plane color
+  // formats only; VK_FORMAT_UNDEFINED means VK_FORMAT_B8G8R8A8_UNORM.
+  bool Adopt(const IhsVkImage& vk, ImportedImage* out) const;
 
   // Modifiers this device will actually import and sample for @p drm_fourcc,
   // asked with the same usage Import creates the image with. Best first: the

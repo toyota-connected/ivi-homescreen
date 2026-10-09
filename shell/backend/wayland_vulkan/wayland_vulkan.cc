@@ -2781,6 +2781,10 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
   // Images already moved to SHADER_READ_ONLY this frame, so a buffer shown by
   // two layers is not given a second barrier from a layout it has left.
   std::vector<VkImage> transitioned;
+  // A producer's own images (vk_image layers) and the layout each was handed
+  // over in, to move back to after the draws: it rewrites them on this queue
+  // and expects them as it left them.
+  std::vector<std::pair<VkImage, VkImageLayout>> handoffs;
 
   const auto barrier =
       [&](VkImage image, VkImageLayout old_layout, VkImageLayout new_layout,
@@ -2871,22 +2875,38 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
                                         : VK_FORMAT_B8G8R8A8_UNORM;
         // Wait the producer's acquire fence (if any) in this frame's submit.
         CollectAcquireWait(surface.get(), li);
-        const auto cur =
-            static_cast<VkImageLayout>(surface->GetLayerVulkanImageLayout(li));
-        if (cur != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL &&
-            std::find(transitioned.begin(), transitioned.end(), src) ==
-                transitioned.end()) {
-          const bool from_preinit = cur == VK_IMAGE_LAYOUT_PREINITIALIZED;
-          barrier(src, cur, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                  from_preinit ? VK_ACCESS_HOST_WRITE_BIT : 0,
-                  from_preinit ? VK_PIPELINE_STAGE_HOST_BIT
-                               : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                  VK_ACCESS_SHADER_READ_BIT,
-                  VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
-          transitioned.push_back(src);
+        const bool seen = std::find(transitioned.begin(), transitioned.end(),
+                                    src) != transitioned.end();
+        if (img.handoff_layout != 0) {
+          // Rewritten by the producer on this queue every frame, in whatever
+          // layout it handed over: depend on all prior work on the queue,
+          // which its render is part of.
+          if (!seen) {
+            const auto from = static_cast<VkImageLayout>(img.handoff_layout);
+            barrier(src, from, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    VK_ACCESS_MEMORY_WRITE_BIT,
+                    VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                    VK_ACCESS_SHADER_READ_BIT,
+                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+            transitioned.push_back(src);
+            handoffs.emplace_back(src, from);
+          }
+        } else {
+          const auto cur = static_cast<VkImageLayout>(
+              surface->GetLayerVulkanImageLayout(li));
+          if (cur != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL && !seen) {
+            const bool from_preinit = cur == VK_IMAGE_LAYOUT_PREINITIALIZED;
+            barrier(src, cur, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    from_preinit ? VK_ACCESS_HOST_WRITE_BIT : 0,
+                    from_preinit ? VK_PIPELINE_STAGE_HOST_BIT
+                                 : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                    VK_ACCESS_SHADER_READ_BIT,
+                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+            transitioned.push_back(src);
+          }
+          surface->SetLayerVulkanImageLayout(
+              li, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
-        surface->SetLayerVulkanImageLayout(
-            li, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         draws.push_back(
             {src, src_format, place.dst.x, place.dst.y, place.dst.w,
              place.dst.h, nullptr,
@@ -2931,6 +2951,12 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
               VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
       dr.store->SetLayout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     }
+  }
+  // Producers' images back to the layout each was handed over in.
+  for (const auto& [image, layout] : handoffs) {
+    barrier(image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, layout,
+            VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0,
+            VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
   }
   // The render pass leaves target_view's image in GENERAL (its finalLayout);
   // the caller transitions from there (present or dma-buf hand-off).
@@ -2999,9 +3025,28 @@ void WaylandVulkanBackend::BlitPlatformViewVulkan(VkCommandBuffer cmd,
     auto src = reinterpret_cast<VkImage>(img.image);
     // Wait the producer's acquire fence (if any) in this frame's submit.
     CollectAcquireWait(surface.get(), li);
-    const bool external = surface->NeedsExternalQueueAcquire();
+    const auto handoff = static_cast<VkImageLayout>(img.handoff_layout);
+    const bool external =
+        img.handoff_layout == 0 && surface->NeedsExternalQueueAcquire();
 
-    if (external) {
+    if (handoff != 0) {
+      // A producer's own image, rewritten on this queue every frame: depend on
+      // all prior work on the queue, which its render is part of. Handed back
+      // in its layout after the blit below.
+      VkImageMemoryBarrier to_src{};
+      to_src.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+      to_src.oldLayout = handoff;
+      to_src.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+      to_src.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      to_src.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      to_src.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+      to_src.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+      to_src.image = src;
+      to_src.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+      d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                               VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                               nullptr, 1, &to_src);
+    } else if (external) {
       // An imported dma-buf the producer rewrites every frame through an
       // aliased image. Acquire ownership from VK_QUEUE_FAMILY_EXTERNAL and move
       // it to a transfer source each frame (the producer released it to
@@ -3069,7 +3114,21 @@ void WaylandVulkanBackend::BlitPlatformViewVulkan(VkCommandBuffer cmd,
                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region,
                        VK_FILTER_LINEAR);
 
-    if (external) {
+    if (handoff != 0) {
+      VkImageMemoryBarrier back{};
+      back.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+      back.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+      back.newLayout = handoff;
+      back.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      back.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      back.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+      back.dstAccessMask = 0;
+      back.image = src;
+      back.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+      d().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                               VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0,
+                               nullptr, 0, nullptr, 1, &back);
+    } else if (external) {
       // Release ownership back to VK_QUEUE_FAMILY_EXTERNAL so the producer can
       // rewrite the buffer for the next frame.
       VkImageMemoryBarrier rel{};

@@ -197,6 +197,13 @@ typedef struct IhsHdrMetadata {
  *                          EGL_WL_bind_wayland_display with compression
  *                          metadata kept outside the dma-buf. EGL backends
  *                          only. Added in 1.16.
+ *   TEXTURE_VK_IMAGE       a VkImage on the backend's own VkDevice (see
+ *                          ihs_pv_vulkan_context), sampled as it is: carried
+ *                          by an IhsLayer's @vk_image. Not negotiated, and not
+ *                          gated by the grant, as TEXTURE_EGL_IMAGE. For a
+ *                          producer that renders on the shell's device, which
+ *                          then exports and imports nothing. Vulkan backends
+ *                          only. Added in 1.21.
  * A well-formed requirement that includes SOFTWARE_SHM never hard-fails while
  * the host can allocate its buffers (see ihs_pv_grant_shm_slots).
  *
@@ -226,7 +233,8 @@ typedef enum IhsPvKind {
   IHS_PV_KIND_TEXTURE_DMABUF_IMPORT = 1u << 0,
   IHS_PV_KIND_DRM_PLANE = 1u << 1,
   IHS_PV_KIND_SOFTWARE_SHM = 1u << 2,
-  IHS_PV_KIND_TEXTURE_EGL_IMAGE = 1u << 3
+  IHS_PV_KIND_TEXTURE_EGL_IMAGE = 1u << 3,
+  IHS_PV_KIND_TEXTURE_VK_IMAGE = 1u << 4
 } IhsPvKind;
 
 /* Synchronization the plugin needs / the grant honors. Explicit sync uses an
@@ -1013,6 +1021,66 @@ typedef struct IhsImage {
 } IhsImage;
 
 /*
+ * A VkImage a layer shows instead of a dma-buf (IHS_PV_KIND_TEXTURE_VK_IMAGE).
+ * struct_size-first; fields are only ever appended.
+ *
+ * @image is a VkImage created on the VkDevice ihs_pv_vulkan_context reports,
+ * 2D, one mip level, one array layer, single-sampled, with
+ * VK_IMAGE_USAGE_SAMPLED_BIT and VK_IMAGE_USAGE_TRANSFER_SRC_BIT, and
+ * VK_SHARING_MODE_EXCLUSIVE. The producer keeps it and its memory, and the
+ * shell never destroys it. Vulkan, unlike GL, does not keep an image alive
+ * while a submitted command buffer reads it, so the shell says when it is done
+ * instead: @release is called once the shell will never read the image again
+ * -- after the producer retires @buffer_id, after a different image is
+ * submitted under it, or after the view is disposed -- and only once no frame
+ * that read it is still running. Destroy or reuse the image from then on, not
+ * before; the view's dispose callback is not that point. @release is required.
+ * It is called once for each buffer_id an image was taken under, on any
+ * thread, possibly after
+ * the view's dispose callback has returned, so @release_user_data must stay
+ * valid until the last call. It must not block, and must not call back into
+ * ihs_pv for the view.
+ *
+ * A vk_image layer's release fence (ihs_pv_submit_layers'
+ * out_release_fence_fds) is handed back whether or not the layer carried an
+ * acquire fence. It fires when the shell's read of the previous frames is done,
+ * as for any layer: wait it before rendering into an image the shell may still
+ * be reading.
+ *
+ * The rendering must be ordered before the shell's read. Submitted on the
+ * context's queue before ihs_pv_submit_layers is called, it is: same-queue
+ * submission order is the dependency, and the layer's acquire_fence_fd is -1.
+ * Rendered on another queue, signal a sync_file and pass it as the layer's
+ * acquire_fence_fd.
+ *
+ * @layout is the VkImageLayout the image is in when submitted. The shell moves
+ * it to whatever layout it reads in, and back to @layout before the release
+ * fence fires, so the producer finds it as it left it. Not
+ * VK_IMAGE_LAYOUT_UNDEFINED or VK_IMAGE_LAYOUT_PREINITIALIZED.
+ *
+ * @format is the image's VkFormat: a single-plane color format the device can
+ * sample. 0 (VK_FORMAT_UNDEFINED) means VK_FORMAT_B8G8R8A8_UNORM.
+ *
+ * @buffer_id names the image as IhsImage::buffer_id names an EGLImage: stable
+ * per image, reused across frames, given to ihs_pv_retire_buffer when it goes.
+ * A VkImage handle is not a safe id: drivers reuse handles once one is
+ * destroyed.
+ *
+ * @width/@height are the image's size in pixels.
+ */
+typedef struct IhsVkImage {
+  size_t struct_size;
+  void* image; /* VkImage */
+  uint32_t width;
+  uint32_t height;
+  uint32_t buffer_id;
+  uint32_t format; /* VkFormat */
+  uint32_t layout; /* VkImageLayout */
+  void (*release)(void* release_user_data, void* image, uint32_t buffer_id);
+  void* release_user_data;
+} IhsVkImage;
+
+/*
  * One layer of a view: a buffer, the part of it shown, where in the view it
  * lands, and how it is oriented. struct_size-first; fields are only ever
  * appended.
@@ -1044,6 +1112,10 @@ typedef struct IhsImage {
  * IHS_PV_KIND_TEXTURE_EGL_IMAGE. Its src is in the image's pixels, as a frame's
  * is in the buffer's. An image layer is composited, never put on a plane.
  * Added in 1.16.
+ *
+ * @vk_image, when not NULL, is the same for a VkImage (IhsVkImage), for a
+ * backend reporting IHS_PV_KIND_TEXTURE_VK_IMAGE: @frame and @image must then
+ * be NULL. Composited, never put on a plane. Added in 1.21.
  */
 typedef struct IhsLayer {
   size_t struct_size;
@@ -1058,11 +1130,12 @@ typedef struct IhsLayer {
   int32_t dst_y;
   uint32_t dst_w;
   uint32_t dst_h;
-  uint32_t transform;    /* IhsTransform */
-  uint8_t opaque;        /* 0 or 1 */
-  uint8_t content_type;  /* IhsContentType */
-  uint8_t reserved[2];   /* must be 0 */
-  const IhsImage* image; /* instead of @frame; see above. 1.16 */
+  uint32_t transform;         /* IhsTransform */
+  uint8_t opaque;             /* 0 or 1 */
+  uint8_t content_type;       /* IhsContentType */
+  uint8_t reserved[2];        /* must be 0 */
+  const IhsImage* image;      /* instead of @frame; see above. 1.16 */
+  const IhsVkImage* vk_image; /* instead of @frame; see above. 1.21 */
 } IhsLayer;
 
 /*
@@ -1089,18 +1162,21 @@ typedef struct IhsLayer {
  * FD OWNERSHIP is ihs_pv_submit's, per layer: every plane fd and acquire fence
  * is consumed whatever this returns, except when the list is rejected as
  * malformed (NULL @view, NULL @layers with a non-zero count, a count above
- * IHS_PV_MAX_LAYERS, a layer with a bad struct_size, with neither or both of a
- * frame and an image, a frame whose struct_size does not reach buffer_id, or
- * an image with a bad struct_size or no egl_image), which closes nothing.
+ * IHS_PV_MAX_LAYERS, a layer with a bad struct_size, with other than exactly
+ * one of a frame, an image and a vk_image, a frame whose struct_size does not
+ * reach buffer_id, an image with a bad struct_size or no egl_image, or a
+ * vk_image with a bad struct_size, no image, no release, a zero size or an
+ * UNDEFINED or PREINITIALIZED layout), which closes nothing.
  *
  * A list with an image layer on a backend that does not report
- * IHS_PV_KIND_TEXTURE_EGL_IMAGE is refused with IHS_PV_ERR_UNSUPPORTED, its
- * fds consumed.
+ * IHS_PV_KIND_TEXTURE_EGL_IMAGE, or a vk_image layer on one that does not
+ * report IHS_PV_KIND_TEXTURE_VK_IMAGE, is refused with IHS_PV_ERR_UNSUPPORTED,
+ * its fds consumed.
  *
  * Callable from any thread, under the same dispose rule as ihs_pv_submit.
  * Returns IHS_PV_OK, IHS_PV_ERR_INVALID, IHS_PV_ERR_UNSUPPORTED for an image
- * layer the backend cannot sample, IHS_PV_ERR_NO_REGISTRY with no host, or
- * IHS_PV_ERR_NO_BACKEND when the host predates this call.
+ * or vk_image layer the backend cannot sample, IHS_PV_ERR_NO_REGISTRY with no
+ * host, or IHS_PV_ERR_NO_BACKEND when the host predates this call.
  *
  * Added after 1.0; IHS_WEAK_IMPORT, so test the symbol before calling it.
  */

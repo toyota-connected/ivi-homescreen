@@ -606,6 +606,13 @@ class ICompositorSurface {
     uint32_t ycbcr_range{0};
     LayerGeometry geometry;
     uint64_t frame{0};  // presentation token (see GetPresentationSink)
+    // VkImageLayout of a producer's own image on the compositor's device
+    // (IHS_PV_KIND_TEXTURE_VK_IMAGE), rewritten every frame: the compositor
+    // moves it from this layout to the one it reads in, with a dependency on
+    // all prior work on the queue, and back to it after the read, every frame.
+    // The layout tracked by Get/SetLayerVulkanImageLayout is not consulted.
+    // 0 for an imported dma-buf.
+    uint32_t handoff_layout{0};
   };
 
   // A layer's GL texture, for the GL composite paths, with its geometry.

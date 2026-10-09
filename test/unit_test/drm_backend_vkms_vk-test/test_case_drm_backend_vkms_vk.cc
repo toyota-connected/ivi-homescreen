@@ -37,16 +37,30 @@
 
 #include <gtest/gtest.h>
 
+#include "backend/backend_registry.h"
 #include "backend/drm_kms_vulkan/vulkan_drm_backend.h"
+#include "backend/register_backends.h"
+#include "configuration/configuration.h"
+#include "display/drm_display.h"
 #include "logging/logger.hpp"
+#include "platform/homescreen/flutter_desktop_engine_state.h"
+#include "platform/homescreen/flutter_desktop_view_controller_state.h"
 #include "platform/homescreen/platform_views/dmabuf_vulkan_import.h"
+#include "platform/homescreen/platform_views/platform_view_host.h"
+#include "platform/homescreen/platform_views/platform_view_registry.h"
+#include "platform/homescreen/text_input_plugin.h"
 #include "task_runner.h"
+#include "view/flutter_view.h"
+
+#include "ihs/platform_view.h"
+#include "ihs/platform_view_host.h"
 
 extern "C" {
 #include <dirent.h>
 #include <drm_fourcc.h>
 #include <fcntl.h>
 #include <gbm.h>
+#include <poll.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <xf86drm.h>
@@ -696,6 +710,385 @@ TEST_F(VulkanDrmVkms, ThePoolMatchesTheLayoutAndStaysBounded) {
   EXPECT_EQ(importer.PooledForTest(), DmabufVulkanImporter::kPooledImports);
   EXPECT_EQ(FdsOn(buffer.ino()), 0) << "the oldest import was never freed";
   importer.DrainPool();
+}
+
+namespace {
+
+// A producer's own image on the shell's device, made and filled through the
+// context ihs_pv_vulkan_context hands a plugin, and left in
+// SHADER_READ_ONLY_OPTIMAL as a vk_image layer hands it over.
+class ProducerImage {
+ public:
+  ~ProducerImage() { Destroy(); }
+
+  bool Create(const IhsVulkanContext& vk, uint32_t width, uint32_t height) {
+    vk_ = vk;
+    const auto gipa =
+        reinterpret_cast<PFN_vkGetInstanceProcAddr>(vk.get_instance_proc_addr);
+    const auto instance = static_cast<VkInstance>(vk.instance);
+    device_ = static_cast<VkDevice>(vk.device);
+    const auto gdpa = reinterpret_cast<PFN_vkGetDeviceProcAddr>(
+        gipa(instance, "vkGetDeviceProcAddr"));
+    const auto dfn = [&](const char* name) { return gdpa(device_, name); };
+    create_image_ = reinterpret_cast<PFN_vkCreateImage>(dfn("vkCreateImage"));
+    destroy_image_ =
+        reinterpret_cast<PFN_vkDestroyImage>(dfn("vkDestroyImage"));
+    free_memory_ = reinterpret_cast<PFN_vkFreeMemory>(dfn("vkFreeMemory"));
+    const auto mem_props =
+        reinterpret_cast<PFN_vkGetPhysicalDeviceMemoryProperties>(
+            gipa(instance, "vkGetPhysicalDeviceMemoryProperties"));
+    const auto requirements =
+        reinterpret_cast<PFN_vkGetImageMemoryRequirements>(
+            dfn("vkGetImageMemoryRequirements"));
+    const auto allocate =
+        reinterpret_cast<PFN_vkAllocateMemory>(dfn("vkAllocateMemory"));
+    const auto bind =
+        reinterpret_cast<PFN_vkBindImageMemory>(dfn("vkBindImageMemory"));
+
+    VkImageCreateInfo ici{};
+    ici.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    ici.imageType = VK_IMAGE_TYPE_2D;
+    ici.format = VK_FORMAT_B8G8R8A8_UNORM;
+    ici.extent = {width, height, 1};
+    ici.mipLevels = 1;
+    ici.arrayLayers = 1;
+    ici.samples = VK_SAMPLE_COUNT_1_BIT;
+    ici.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ici.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    ici.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    if (create_image_(device_, &ici, nullptr, &image_) != VK_SUCCESS) {
+      return false;
+    }
+    VkMemoryRequirements req{};
+    requirements(device_, image_, &req);
+    VkPhysicalDeviceMemoryProperties props{};
+    mem_props(static_cast<VkPhysicalDevice>(vk.physical_device), &props);
+    uint32_t type = UINT32_MAX;
+    for (uint32_t i = 0; i < props.memoryTypeCount; ++i) {
+      if ((req.memoryTypeBits & (1U << i)) != 0U &&
+          (props.memoryTypes[i].propertyFlags &
+           VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0U) {
+        type = i;
+        break;
+      }
+    }
+    if (type == UINT32_MAX) {
+      return false;
+    }
+    VkMemoryAllocateInfo mai{};
+    mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    mai.allocationSize = req.size;
+    mai.memoryTypeIndex = type;
+    return allocate(device_, &mai, nullptr, &memory_) == VK_SUCCESS &&
+           bind(device_, image_, memory_, 0) == VK_SUCCESS && Fill(gdpa);
+  }
+
+  void Destroy() {
+    if (image_ != VK_NULL_HANDLE) {
+      destroy_image_(device_, image_, nullptr);
+      image_ = VK_NULL_HANDLE;
+    }
+    if (memory_ != VK_NULL_HANDLE) {
+      free_memory_(device_, memory_, nullptr);
+      memory_ = VK_NULL_HANDLE;
+    }
+  }
+
+  [[nodiscard]] VkImage image() const { return image_; }
+
+ private:
+  // Clear the image on the shell's queue and leave it in
+  // SHADER_READ_ONLY_OPTIMAL, waiting for the queue to drain so the test owns
+  // no work in flight.
+  bool Fill(PFN_vkGetDeviceProcAddr gdpa) {
+    const auto dfn = [&](const char* name) { return gdpa(device_, name); };
+    const auto create_pool =
+        reinterpret_cast<PFN_vkCreateCommandPool>(dfn("vkCreateCommandPool"));
+    const auto destroy_pool =
+        reinterpret_cast<PFN_vkDestroyCommandPool>(dfn("vkDestroyCommandPool"));
+    const auto alloc_cb = reinterpret_cast<PFN_vkAllocateCommandBuffers>(
+        dfn("vkAllocateCommandBuffers"));
+    const auto begin =
+        reinterpret_cast<PFN_vkBeginCommandBuffer>(dfn("vkBeginCommandBuffer"));
+    const auto end =
+        reinterpret_cast<PFN_vkEndCommandBuffer>(dfn("vkEndCommandBuffer"));
+    const auto barrier =
+        reinterpret_cast<PFN_vkCmdPipelineBarrier>(dfn("vkCmdPipelineBarrier"));
+    const auto clear =
+        reinterpret_cast<PFN_vkCmdClearColorImage>(dfn("vkCmdClearColorImage"));
+    const auto submit =
+        reinterpret_cast<PFN_vkQueueSubmit>(dfn("vkQueueSubmit"));
+    const auto wait_idle =
+        reinterpret_cast<PFN_vkQueueWaitIdle>(dfn("vkQueueWaitIdle"));
+
+    VkCommandPoolCreateInfo pci{};
+    pci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    pci.queueFamilyIndex = vk_.queue_family_index;
+    VkCommandPool pool = VK_NULL_HANDLE;
+    if (create_pool(device_, &pci, nullptr, &pool) != VK_SUCCESS) {
+      return false;
+    }
+    VkCommandBufferAllocateInfo cai{};
+    cai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cai.commandPool = pool;
+    cai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cai.commandBufferCount = 1;
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    bool ok = alloc_cb(device_, &cai, &cmd) == VK_SUCCESS;
+    if (ok) {
+      VkCommandBufferBeginInfo bi{};
+      bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+      begin(cmd, &bi);
+      VkImageMemoryBarrier b{};
+      b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+      b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+      b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+      b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      b.image = image_;
+      b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+      b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+      barrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+              VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &b);
+      const VkClearColorValue color{{0.2F, 0.5F, 0.3F, 1.0F}};
+      clear(cmd, image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &color, 1,
+            &b.subresourceRange);
+      b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+      b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+      b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+      b.dstAccessMask = 0;
+      barrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+              VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr,
+              1, &b);
+      end(cmd);
+      VkSubmitInfo si{};
+      si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      si.commandBufferCount = 1;
+      si.pCommandBuffers = &cmd;
+      const auto queue = static_cast<VkQueue>(vk_.queue);
+      ok = submit(queue, 1, &si, VK_NULL_HANDLE) == VK_SUCCESS &&
+           wait_idle(queue) == VK_SUCCESS;
+    }
+    destroy_pool(device_, pool, nullptr);
+    return ok;
+  }
+
+  IhsVulkanContext vk_{};
+  VkDevice device_{VK_NULL_HANDLE};
+  VkImage image_{VK_NULL_HANDLE};
+  VkDeviceMemory memory_{VK_NULL_HANDLE};
+  PFN_vkCreateImage create_image_{nullptr};
+  PFN_vkDestroyImage destroy_image_{nullptr};
+  PFN_vkFreeMemory free_memory_{nullptr};
+};
+
+// What IhsVkImage::release reported.
+struct Released {
+  std::atomic<int> calls{0};
+  void* image{nullptr};
+  uint32_t buffer_id{0};
+};
+
+void RecordRelease(void* user_data, void* image, const uint32_t buffer_id) {
+  auto* r = static_cast<Released*>(user_data);
+  r->image = image;
+  r->buffer_id = buffer_id;
+  r->calls.fetch_add(1);
+}
+
+int NoopFactory(const IhsPvCreateInfo* /*info*/,
+                void* factory_user_data,
+                IhsPlatformView* view,
+                IhsPvCallbacks* out_callbacks,
+                void** out_user_data) {
+  *static_cast<IhsPlatformView**>(factory_user_data) = view;
+  out_callbacks->struct_size = sizeof(*out_callbacks);
+  out_callbacks->dispose = [](void* /*u*/) {};
+  *out_user_data = nullptr;
+  return IHS_PV_OK;
+}
+
+bool Readable(const int fd, const int timeout_ms) {
+  pollfd pfd{fd, POLLIN, 0};
+  return ::poll(&pfd, 1, timeout_ms) == 1 && (pfd.revents & POLLIN) != 0;
+}
+
+// A platform view on drm-kms-vulkan, through the host a plugin reaches: a
+// FlutterView on vkms, its registry, and one view of a factory's type.
+class PvHostVkmsVk : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    card_ = FindVkms();
+    if (!card_.ok()) {
+      GTEST_SKIP() << "no connected vkms card (sudo modprobe vkms)";
+    }
+    if (const char* prev = std::getenv(kAllowSoftware); prev != nullptr) {
+      saved_allow_ = prev;
+    }
+    ::setenv(kAllowSoftware, "1", 1);
+    display_ = std::make_shared<DrmDisplay>(0, 0, 0.0, card_.path,
+                                            /*no_seat=*/true);
+    if (display_->SharedDevice() == nullptr) {
+      GTEST_SKIP() << "no DRM master on " << card_.path;
+    }
+    RegisterCompiledBackends(backend::BackendRegistry::Instance());
+    Configuration::Config cfg{};
+    cfg.view.backend = "drm-kms-vulkan";
+    cfg.view.drm_device = card_.path;
+    cfg.view.width = card_.mode_w;
+    cfg.view.height = card_.mode_h;
+    cfg.view.drm_no_seat = true;
+    view_ = std::make_unique<FlutterView>(cfg, 0, "pv-vk-test", display_);
+    backend_ = dynamic_cast<VulkanDrmBackend*>(view_->GetBackend());
+    if (backend_ == nullptr) {
+      GTEST_SKIP() << "no drm-kms-vulkan backend on " << card_.path;
+    }
+    controller_.view = view_.get();
+    state_.view_controller = &controller_;
+    state_.platform_view_registry =
+        std::make_unique<PlatformViewRegistry>(&state_);
+    InstallPlatformViewHost(&state_);
+    installed_ = true;
+    ASSERT_EQ(ihs_pv_register_factory(kViewType, &NoopFactory, &pv_),
+              IHS_PV_OK);
+    PlatformViewRegistry::CreateRequest req{};
+    req.id = 1;
+    req.view_type = kViewType;
+    req.width = kViewW;
+    req.height = kViewH;
+    ASSERT_TRUE(state_.platform_view_registry->CreateViaFactory(req));
+    ASSERT_NE(pv_, nullptr) << "the factory was never invoked";
+  }
+
+  void TearDown() override {
+    DisposeView();
+    if (installed_) {
+      ihs_pv_unregister_factory(kViewType);
+      ihs_pv_set_host(nullptr);
+      installed_ = false;
+    }
+    state_.platform_view_registry.reset();
+    view_.reset();
+    display_.reset();
+    if (saved_allow_) {
+      ::setenv(kAllowSoftware, saved_allow_->c_str(), 1);
+    } else {
+      ::unsetenv(kAllowSoftware);
+    }
+  }
+
+  void DisposeView() {
+    if (pv_ != nullptr) {
+      state_.platform_view_registry->Dispose(1, false);
+      pv_ = nullptr;
+    }
+  }
+
+  // One frame of the UI with the view composited over it; the view alone
+  // once it is disposed.
+  bool Present() {
+    FlutterBackingStoreConfig cfg{};
+    cfg.struct_size = sizeof(FlutterBackingStoreConfig);
+    cfg.size = FlutterSize{static_cast<double>(card_.mode_w),
+                           static_cast<double>(card_.mode_h)};
+    FlutterBackingStore bs{};
+    if (!backend_->CreateBackingStoreForTest(&cfg, &bs)) {
+      return false;
+    }
+    FlutterLayer ui{};
+    ui.struct_size = sizeof(FlutterLayer);
+    ui.type = kFlutterLayerContentTypeBackingStore;
+    ui.backing_store = &bs;
+    ui.size = cfg.size;
+    FlutterPlatformView pv{};
+    pv.struct_size = sizeof(FlutterPlatformView);
+    pv.identifier = 1;
+    FlutterLayer view{};
+    view.struct_size = sizeof(FlutterLayer);
+    view.type = kFlutterLayerContentTypePlatformView;
+    view.platform_view = &pv;
+    view.size =
+        FlutterSize{static_cast<double>(kViewW), static_cast<double>(kViewH)};
+    const FlutterLayer* layers[] = {&ui, &view};
+    const bool ok = backend_->PresentLayersForTest(layers, 2);
+    backend_->CollectBackingStoreForTest(&bs);
+    return ok;
+  }
+
+  static constexpr const char* kViewType = "views/vk-image";
+  static constexpr uint32_t kViewW = 128;
+  static constexpr uint32_t kViewH = 128;
+  VkmsCard card_;
+  std::shared_ptr<DrmDisplay> display_;
+  std::unique_ptr<FlutterView> view_;
+  VulkanDrmBackend* backend_{nullptr};
+  FlutterDesktopViewControllerState controller_{};
+  FlutterDesktopEngineState state_{};
+  IhsPlatformView* pv_{nullptr};
+  bool installed_{false};
+
+ private:
+  std::optional<std::string> saved_allow_;
+};
+
+}  // namespace
+
+// A producer that renders on the shell's device hands the image over as it
+// is: no export, no import. It is sampled, the layer gets a release fence
+// without an acquire fence, and the image comes back through release only
+// once the shell is done with it.
+TEST_F(PvHostVkmsVk, AVkImageLayerIsSampledAndHandedBackWhenDone) {
+  IhsPvCapabilities caps{};
+  caps.struct_size = sizeof(caps);
+  ASSERT_EQ(ihs_pv_query_capabilities(&caps), IHS_PV_OK);
+  ASSERT_NE(caps.kinds & IHS_PV_KIND_TEXTURE_VK_IMAGE, 0U)
+      << "a Vulkan backend does not offer vk_image layers";
+  IhsVulkanContext vk{};
+  vk.struct_size = sizeof(vk);
+  ASSERT_EQ(ihs_pv_vulkan_context(&vk), IHS_PV_OK);
+  ProducerImage image;
+  ASSERT_TRUE(image.Create(vk, kViewW, kViewH));
+
+  Released released;
+  IhsVkImage vi{};
+  vi.struct_size = sizeof(vi);
+  vi.image = reinterpret_cast<void*>(image.image());
+  vi.width = kViewW;
+  vi.height = kViewH;
+  vi.buffer_id = 7;
+  vi.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  vi.release = RecordRelease;
+  vi.release_user_data = &released;
+  IhsLayer layer{};
+  layer.struct_size = sizeof(layer);
+  layer.acquire_fence_fd = -1;
+  layer.layer_id = 1;
+  layer.vk_image = &vi;
+
+  int release_fd = -1;
+  ASSERT_EQ(ihs_pv_submit_layers(pv_, &layer, 1, 1, &release_fd), IHS_PV_OK);
+  if (release_fd >= 0) {
+    ::close(release_fd);  // nothing composited yet; may be none
+  }
+  ASSERT_TRUE(Present());
+  release_fd = -1;
+  ASSERT_EQ(ihs_pv_submit_layers(pv_, &layer, 1, 2, &release_fd), IHS_PV_OK);
+  ASSERT_GE(release_fd, 0) << "no release fence without an acquire fence";
+  EXPECT_TRUE(Readable(release_fd, 2000)) << "the composite never finished";
+  ::close(release_fd);
+  ASSERT_TRUE(Present());
+  EXPECT_EQ(released.calls.load(), 0) << "handed back while still shown";
+
+  DisposeView();
+  for (int i = 0; i < 12 && released.calls.load() == 0; ++i) {
+    ASSERT_TRUE(Present()) << "present " << i;
+  }
+  EXPECT_EQ(released.calls.load(), 1) << "never handed back after dispose";
+  EXPECT_EQ(released.image, vi.image);
+  EXPECT_EQ(released.buffer_id, 7U);
 }
 #endif
 

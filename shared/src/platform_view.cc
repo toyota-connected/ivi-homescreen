@@ -303,6 +303,21 @@ static const IhsImage* layer_image(const IhsLayer& layer) {
              : nullptr;
 }
 
+// The layer's vk_image (1.21), or null for one built without the field.
+static const IhsVkImage* layer_vk_image(const IhsLayer& layer) {
+  return layer.struct_size >=
+                 offsetof(IhsLayer, vk_image) + sizeof(const IhsVkImage*)
+             ? layer.vk_image
+             : nullptr;
+}
+
+// VkImageLayout values a vk_image may not arrive in, spelled out so this file
+// stays free of Vulkan headers: UNDEFINED has no contents to read, and
+// PREINITIALIZED is a linear host-written image's starting layout, not one a
+// render leaves.
+constexpr uint32_t kVkImageLayoutUndefined = 0;
+constexpr uint32_t kVkImageLayoutPreinitialized = 8;
+
 extern "C" int ihs_pv_submit_layers(IhsPlatformView* view,
                                     const IhsLayer* layers,
                                     size_t layer_count,
@@ -319,10 +334,24 @@ extern "C" int ihs_pv_submit_layers(IhsPlatformView* view,
     if (layers[i].struct_size < kIhsLayerMinSize) {
       return IHS_PV_ERR_INVALID;
     }
-    // A layer shows a frame or, from 1.16, an image: exactly one.
+    // A layer shows a frame or, from 1.16, an image or, from 1.21, a vk_image:
+    // exactly one.
     const IhsImage* image = layer_image(layers[i]);
-    if ((layers[i].frame == nullptr) == (image == nullptr)) {
+    const IhsVkImage* vk_image = layer_vk_image(layers[i]);
+    if ((layers[i].frame != nullptr) + (image != nullptr) +
+            (vk_image != nullptr) !=
+        1) {
       return IHS_PV_ERR_INVALID;
+    }
+    if (vk_image != nullptr) {
+      if (vk_image->struct_size < sizeof(IhsVkImage) ||
+          vk_image->image == nullptr || vk_image->release == nullptr ||
+          vk_image->width == 0 || vk_image->height == 0 ||
+          vk_image->layout == kVkImageLayoutUndefined ||
+          vk_image->layout == kVkImageLayoutPreinitialized) {
+        return IHS_PV_ERR_INVALID;
+      }
+      continue;
     }
     if (image != nullptr) {
       if (image->struct_size < sizeof(IhsImage) ||

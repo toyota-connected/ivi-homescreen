@@ -1220,6 +1220,128 @@ TEST(IhsPvSurface, SubmitLayersIgnoresImageBeyondAnOlderLayer) {
   detach_host();
 }
 
+namespace {
+
+void NoRelease(void* /*user_data*/, void* /*image*/, uint32_t /*buffer_id*/) {}
+
+// A well-formed vk_image (1.21): stands in for a VkImage the registry never
+// touches.
+IhsVkImage MakeVkImage(int* token) {
+  IhsVkImage vk{};
+  vk.struct_size = sizeof(vk);
+  vk.image = token;
+  vk.width = 16;
+  vk.height = 16;
+  vk.buffer_id = 3;
+  vk.layout = 5;  // VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+  vk.release = NoRelease;
+  return vk;
+}
+
+}  // namespace
+
+// A vk_image layer (1.21) shows a VkImage instead of a frame; a list may mix
+// the two.
+TEST(IhsPvSurface, SubmitLayersForwardsVkImageLayers) {
+  LayersRecorder rec;
+  IhsPvHost host{};
+  host.struct_size = sizeof(host);
+  host.user_data = &rec;
+  host.submit_layers = mock_submit_layers;
+  ihs_pv_set_host(&host);
+
+  int token = 0;
+  const IhsVkImage vk = MakeVkImage(&token);
+  IhsLayer vk_layer = MakeLayer(nullptr, 4);
+  vk_layer.vk_image = &vk;
+  const IhsFrame f = LayerFrame(-1);
+  const IhsLayer layers[2] = {vk_layer, MakeLayer(&f, 5)};
+  EXPECT_EQ(ihs_pv_submit_layers(fake_view(), layers, 2, 1, nullptr),
+            IHS_PV_OK);
+  EXPECT_EQ(rec.calls, 1);
+  EXPECT_EQ(rec.count, 2u);
+  EXPECT_EQ(rec.first_layer_id, 4u);
+  detach_host();
+}
+
+// A layer carries exactly one of a frame, an image and a vk_image, and a
+// vk_image must be a whole one.
+TEST(IhsPvSurface, SubmitLayersRejectsMalformedVkImageLayersAndClosesNothing) {
+  LayersRecorder rec;
+  IhsPvHost host{};
+  host.struct_size = sizeof(host);
+  host.user_data = &rec;
+  host.submit_layers = mock_submit_layers;
+  ihs_pv_set_host(&host);
+
+  const int fd = OpenFd();
+  const IhsFrame f = LayerFrame(fd);
+  int token = 0;
+  const IhsVkImage vk = MakeVkImage(&token);
+  const auto rejects = [&](const IhsLayer& layer) {
+    return ihs_pv_submit_layers(fake_view(), &layer, 1, 0, nullptr) ==
+           IHS_PV_ERR_INVALID;
+  };
+
+  IhsLayer with_frame = MakeLayer(&f, 1);
+  with_frame.vk_image = &vk;
+  EXPECT_TRUE(rejects(with_frame));
+  IhsImage image{};
+  image.struct_size = sizeof(image);
+  image.egl_image = &token;
+  IhsLayer with_image = MakeLayer(nullptr, 1);
+  with_image.image = &image;
+  with_image.vk_image = &vk;
+  EXPECT_TRUE(rejects(with_image));
+
+  IhsLayer bad = MakeLayer(nullptr, 1);
+  IhsVkImage v = vk;
+  v.struct_size = offsetof(IhsVkImage, release);
+  bad.vk_image = &v;
+  EXPECT_TRUE(rejects(bad)) << "short struct";
+  v = vk;
+  v.image = nullptr;
+  EXPECT_TRUE(rejects(bad)) << "no image";
+  v = vk;
+  v.release = nullptr;
+  EXPECT_TRUE(rejects(bad)) << "no release";
+  v = vk;
+  v.width = 0;
+  EXPECT_TRUE(rejects(bad)) << "no size";
+  v = vk;
+  v.layout = 0;  // VK_IMAGE_LAYOUT_UNDEFINED
+  EXPECT_TRUE(rejects(bad)) << "undefined layout";
+  v = vk;
+  v.layout = 8;  // VK_IMAGE_LAYOUT_PREINITIALIZED
+  EXPECT_TRUE(rejects(bad)) << "preinitialized layout";
+
+  EXPECT_EQ(rec.calls, 0);
+  EXPECT_TRUE(IsOpen(fd));
+  close(fd);
+  detach_host();
+}
+
+// A layer from a header before 1.21 ends before @vk_image: whatever follows it
+// in memory is not read as one.
+TEST(IhsPvSurface, SubmitLayersIgnoresVkImageBeyondAnOlderLayer) {
+  LayersRecorder rec;
+  IhsPvHost host{};
+  host.struct_size = sizeof(host);
+  host.user_data = &rec;
+  host.submit_layers = mock_submit_layers;
+  ihs_pv_set_host(&host);
+
+  const IhsFrame f = LayerFrame(-1);
+  IhsLayer old = MakeLayer(&f, 1);
+  old.struct_size = offsetof(IhsLayer, vk_image);
+  int token = 0;
+  const IhsVkImage vk = MakeVkImage(&token);
+  old.vk_image = &vk;  // past its struct_size: must be ignored
+  EXPECT_EQ(ihs_pv_submit_layers(fake_view(), &old, 1, 0, nullptr), IHS_PV_OK);
+  EXPECT_EQ(rec.calls, 1);
+  detach_host();
+}
+
 // With nowhere to send the list, its fds are still consumed.
 TEST(IhsPvSurface, SubmitLayersConsumesFdsWithNoHost) {
   detach_host();
