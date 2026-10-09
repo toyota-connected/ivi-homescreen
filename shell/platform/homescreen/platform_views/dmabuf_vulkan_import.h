@@ -124,18 +124,23 @@ class DmabufVulkanImporter {
   // Call only once no frame binds @image: the caller's deferred free has run.
   void Destroy(ImportedImage* image) const;
 
+  // The dma-buf @dev/@ino will not be submitted again: free its pooled
+  // imports now, and free rather than pool its live ones when they are
+  // destroyed. For a buffer whose owner is letting it go, which a pooled
+  // import would otherwise keep alive with nothing left to reuse it.
+  void Forget(dev_t dev, ino_t ino) const;
+
   // Free the pool, and stop pooling until the next Init. Call before the
   // device goes; frees after this are immediate.
   void DrainPool() const;
 
   static constexpr size_t kPooledImports = 16;
 
-#if defined(UNIT_TEST)
-  [[nodiscard]] size_t PooledForTest() const {
+  // How many freed imports the pool holds.
+  [[nodiscard]] size_t Pooled() const {
     const std::lock_guard<std::mutex> lock(pool_mu_);
     return pool_.size();
   }
-#endif
 
   // A driver can require more of an imported dma-buf than the image it backs.
   // v3dv charges the import for its TFU read-ahead and rounds to a page, while

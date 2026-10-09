@@ -63,6 +63,10 @@ class ShmSlots {
   [[nodiscard]] uint32_t height() const { return height_; }
   [[nodiscard]] uint32_t fourcc() const { return fourcc_; }
 
+  // Slot @index's dma-buf as fstat names it.
+  [[nodiscard]] dev_t dev(uint32_t index) const { return slots_[index].dev; }
+  [[nodiscard]] ino_t ino(uint32_t index) const { return slots_[index].ino; }
+
   // Whether @fd is a handle to slot @index's buffer: the same dma-buf, not
   // merely a dma-buf.
   [[nodiscard]] bool Matches(uint32_t index, int fd) const;

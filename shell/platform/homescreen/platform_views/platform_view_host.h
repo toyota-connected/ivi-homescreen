@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <cstddef>
+
 struct FlutterDesktopEngineState;
 
 // Installs the shell's ihs_shared platform-view host (ihs/platform_view_host.h)
@@ -31,3 +33,6 @@ void InstallPlatformViewHost(FlutterDesktopEngineState* engine_state);
 // them. Call once no engine thread runs and before the backend's device goes;
 // a view torn down after this frees its imports outright.
 void ReleasePlatformViewImports();
+
+// How many imports the host keeps for reuse; 0 without Vulkan.
+size_t PooledPlatformViewImports();

@@ -660,25 +660,25 @@ TEST_F(VulkanDrmVkms, AFreedImportIsReusedForTheSameDmabuf) {
   }
   const VkImage image = first.image;
   importer.Destroy(&first);
-  EXPECT_EQ(importer.PooledForTest(), 1u);
+  EXPECT_EQ(importer.Pooled(), 1u);
 
   DmabufVulkanImporter::ImportedImage second;
   ASSERT_TRUE(importer.Import(buffer.Frame(), &second));
   EXPECT_EQ(second.image, image) << "imported again rather than reused";
-  EXPECT_EQ(importer.PooledForTest(), 0u);
+  EXPECT_EQ(importer.Pooled(), 0u);
   EXPECT_LE(FdsOn(buffer.ino()), base + 1)
       << "the submitted fd was kept beside the pooled import";
 
   importer.Destroy(&second);
   importer.DrainPool();
-  EXPECT_EQ(importer.PooledForTest(), 0u);
+  EXPECT_EQ(importer.Pooled(), 0u);
   EXPECT_EQ(FdsOn(buffer.ino()), base) << "the drained import kept its fd";
 
   // Drained: a free is a free until the next Init.
   DmabufVulkanImporter::ImportedImage third;
   ASSERT_TRUE(importer.Import(buffer.Frame(), &third));
   importer.Destroy(&third);
-  EXPECT_EQ(importer.PooledForTest(), 0u);
+  EXPECT_EQ(importer.Pooled(), 0u);
   EXPECT_EQ(FdsOn(buffer.ino()), base);
 }
 
@@ -706,7 +706,7 @@ TEST_F(VulkanDrmVkms, ThePoolMatchesTheLayoutAndStaysBounded) {
   DmabufVulkanImporter::ImportedImage part;
   ASSERT_TRUE(importer.Import(cropped, &part));
   EXPECT_EQ(part.width, 32u) << "handed back the 64-wide import";
-  EXPECT_EQ(importer.PooledForTest(), 1u);
+  EXPECT_EQ(importer.Pooled(), 1u);
   importer.Destroy(&part);
 
   std::vector<std::unique_ptr<PooledBuffer>> more;
@@ -717,8 +717,65 @@ TEST_F(VulkanDrmVkms, ThePoolMatchesTheLayoutAndStaysBounded) {
     ASSERT_TRUE(importer.Import(more.back()->Frame(), &img));
     importer.Destroy(&img);
   }
-  EXPECT_EQ(importer.PooledForTest(), DmabufVulkanImporter::kPooledImports);
+  EXPECT_EQ(importer.Pooled(), DmabufVulkanImporter::kPooledImports);
   EXPECT_EQ(FdsOn(buffer.ino()), 0) << "the oldest import was never freed";
+  importer.DrainPool();
+}
+
+// A buffer its owner is letting go of is not pooled: what the pool holds of it
+// is freed at once, and an import still in use is freed, not pooled, when it
+// is destroyed.
+TEST_F(VulkanDrmVkms, AForgottenDmabufIsNotPooled) {
+  BackendVulkanContext vk{};
+  ASSERT_TRUE(backend_->GetVulkanContext(&vk));
+  DmabufVulkanImporter importer;
+  ASSERT_TRUE(importer.Init(static_cast<VkInstance>(vk.instance),
+                            static_cast<VkPhysicalDevice>(vk.physical_device),
+                            static_cast<VkDevice>(vk.device),
+                            vk.get_instance_proc_addr));
+  PooledBuffer pooled;
+  PooledBuffer live;
+  PooledBuffer other;
+  ASSERT_TRUE(pooled.Create(backend_->DrmFdForTest(), 64, 64));
+  ASSERT_TRUE(live.Create(backend_->DrmFdForTest(), 64, 64));
+  ASSERT_TRUE(other.Create(backend_->DrmFdForTest(), 64, 64));
+  const int pooled_base = FdsOn(pooled.ino());
+  const int live_base = FdsOn(live.ino());
+
+  DmabufVulkanImporter::ImportedImage a;
+  IhsFrame frame = pooled.Frame();
+  if (!importer.Import(frame, &a)) {
+    close(frame.plane_fd[0]);
+    GTEST_SKIP() << "this device does not import a LINEAR dma-buf";
+  }
+  importer.Destroy(&a);
+  DmabufVulkanImporter::ImportedImage b;
+  ASSERT_TRUE(importer.Import(live.Frame(), &b));
+  DmabufVulkanImporter::ImportedImage c;
+  ASSERT_TRUE(importer.Import(other.Frame(), &c));
+  importer.Destroy(&c);
+  ASSERT_EQ(importer.Pooled(), 2u);
+
+  struct stat st{};
+  const int probe = pooled.Frame().plane_fd[0];
+  ASSERT_EQ(::fstat(probe, &st), 0);
+  ::close(probe);
+  importer.Forget(st.st_dev, pooled.ino());
+  EXPECT_EQ(importer.Pooled(), 1u) << "the forgotten import is pooled";
+  EXPECT_EQ(FdsOn(pooled.ino()), pooled_base)
+      << "the forgotten import still holds its dma-buf";
+
+  importer.Forget(st.st_dev, live.ino());
+  importer.Destroy(&b);
+  EXPECT_EQ(importer.Pooled(), 1u)
+      << "an import in use when it was forgotten was pooled once destroyed";
+  EXPECT_EQ(FdsOn(live.ino()), live_base);
+
+  // The rest of the pool is untouched.
+  DmabufVulkanImporter::ImportedImage d;
+  ASSERT_TRUE(importer.Import(other.Frame(), &d));
+  EXPECT_EQ(importer.Pooled(), 0u) << "the other buffer was not reused";
+  importer.Destroy(&d);
   importer.DrainPool();
 }
 
@@ -1099,6 +1156,118 @@ TEST_F(PvHostVkmsVk, AVkImageLayerIsSampledAndHandedBackWhenDone) {
   EXPECT_EQ(released.calls.load(), 1) << "never handed back after dispose";
   EXPECT_EQ(released.image, vi.image);
   EXPECT_EQ(released.buffer_id, 7U);
+}
+
+namespace {
+
+// The view's SOFTWARE_SHM slots: dups of the grant's borrowed fds, which
+// outlive it, and their inodes.
+struct ShmGrantSlots {
+  size_t count{0};
+  size_t stride{0};
+  int fd[2]{-1, -1};
+  ino_t ino[2]{0, 0};
+  ~ShmGrantSlots() {
+    for (int f : fd) {
+      if (f >= 0) {
+        ::close(f);
+      }
+    }
+  }
+};
+
+bool GrantShm(IhsPlatformView* view, IhsPvGrant* grant, ShmGrantSlots* out) {
+  IhsPvRequirements reqs{};
+  reqs.struct_size = sizeof(reqs);
+  reqs.kinds = IHS_PV_KIND_SOFTWARE_SHM;
+  reqs.sync = IHS_PV_SYNC_IMPLICIT;
+  grant->struct_size = sizeof(*grant);
+  if (ihs_pv_negotiate(view, &reqs, grant) != IHS_PV_OK ||
+      grant->granted_kind != IHS_PV_KIND_SOFTWARE_SHM) {
+    return false;
+  }
+  int borrowed[2] = {-1, -1};
+  out->count = ihs_pv_grant_shm_slots(view, borrowed, 2, &out->stride);
+  for (size_t i = 0; i < out->count && i < 2; ++i) {
+    out->fd[i] = ::dup(borrowed[i]);
+    struct stat st{};
+    if (out->fd[i] < 0 || ::fstat(out->fd[i], &st) != 0) {
+      return false;
+    }
+    out->ino[i] = st.st_ino;
+  }
+  return out->count == 2;
+}
+
+// Submits slot @id of @slots, untouched: what it shows does not matter here.
+bool SubmitSlot(IhsPlatformView* view,
+                const IhsPvGrant& grant,
+                const ShmGrantSlots& slots,
+                const uint32_t id,
+                const uint32_t w,
+                const uint32_t h) {
+  IhsFrame f{};
+  f.struct_size = sizeof(f);
+  f.format = grant.format;
+  f.format.modifier = 0;
+  f.width = w;
+  f.height = h;
+  f.plane_count = 1;
+  f.plane_fd[0] = ::dup(slots.fd[id]);
+  f.plane_stride[0] = static_cast<uint32_t>(slots.stride);
+  f.buffer_id = id;
+  int release = -1;
+  const int rc = ihs_pv_submit(view, &f, -1, &release);
+  if (release >= 0) {
+    ::close(release);
+  }
+  return rc == IHS_PV_OK;
+}
+
+}  // namespace
+
+// A SOFTWARE_SHM grant's buffers are new on every grant, so the imports of an
+// ended grant can never be reused. Once the grant ends, and the frames that
+// sampled them are done, nothing in the shell keeps them open.
+TEST_F(PvHostVkmsVk, AnEndedShmGrantKeepsNoneOfItsBuffers) {
+  const size_t pooled = PooledPlatformViewImports();
+  IhsPvGrant grant{};
+  ShmGrantSlots first;
+  if (!GrantShm(pv_, &grant, &first)) {
+    GTEST_SKIP() << "no SOFTWARE_SHM slots on this device";
+  }
+  for (uint32_t id = 0; id < 2; ++id) {
+    ASSERT_TRUE(SubmitSlot(pv_, grant, first, id, kViewW, kViewH));
+    ASSERT_TRUE(Present());
+  }
+
+  // A new grant ends the first.
+  ShmGrantSlots second;
+  ASSERT_TRUE(GrantShm(pv_, &grant, &second));
+  // The host frees an ended grant's imports some submits later, once no
+  // frame in flight can bind them.
+  for (uint32_t i = 0; i < 20; ++i) {
+    ASSERT_TRUE(SubmitSlot(pv_, grant, second, i % 2, kViewW, kViewH));
+    ASSERT_TRUE(Present()) << "present " << i;
+  }
+  // A driver may keep an imported dma-buf's fd for as long as the import
+  // lives, and another holds no fd for it at all; the pool says either way.
+  for (uint32_t id = 0; id < 2; ++id) {
+    EXPECT_EQ(FdsOn(first.ino[id]), 1)
+        << "slot " << id << " of the ended grant is still held";
+  }
+  EXPECT_EQ(PooledPlatformViewImports(), pooled)
+      << "the ended grant's imports were kept for reuse";
+
+  // So does the view going away.
+  DisposeView();
+  for (int i = 0; i < 12; ++i) {
+    ASSERT_TRUE(Present()) << "present " << i;
+  }
+  EXPECT_EQ(FdsOn(second.ino[0]), 1)
+      << "the disposed view's slot is still held";
+  EXPECT_EQ(PooledPlatformViewImports(), pooled)
+      << "the disposed view's imports were kept for reuse";
 }
 #endif
 
