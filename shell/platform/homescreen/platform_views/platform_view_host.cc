@@ -19,6 +19,7 @@
 #include "config/common.h"  // BUILD_COMPOSITOR
 #include "flutter_desktop_engine_state.h"
 #include "logging/logging.h"
+#include "profiling/frame_profile.h"  // the IVI_PROFILE gate
 
 #include "ihs/platform_view.h"
 #include "ihs/platform_view_host.h"
@@ -116,6 +117,53 @@ bool SeparateSandPlanes(const uint64_t modifier,
   return false;
 }
 
+// Submits seen and nudges actually posted, windowed.
+//
+// A producer's rate and the shell's present rate are different numbers, and on
+// a backend that composites a platform view inside PresentLayers nothing
+// counted the submits in between: the present census counts frames that
+// reached scanout and a producer's own trace counts frames it rendered, so a
+// rate that will not rise could be either side and neither number said which.
+// Measured on an SA8155P, a producer called 17 times a second rendered 4.4,
+// submitted 4.3 and the panel showed 4.0 -- a nudge for every submit, which is
+// what ruled the shell out and sent the search into the producer, where a
+// 200 ms GPU frame was waiting. Counted at the submit entry points rather than
+// at the nudge, because a submit the host rejects never reaches the nudge and
+// that difference is the thing being measured.
+//
+// nudges trails submits by one in a healthy run: the count is incremented
+// inside the task posted to the platform thread, so the newest submit's nudge
+// has usually not run when the line is written. A real loss shows up as
+// dropped, which names the early return that took it.
+//
+// The first three are at info, on DrmBackend::LogPresentedFrame's terms: they
+// confirm the seam is live and then stop. The windowed line is behind
+// IVI_PROFILE, because a heartbeat is a heartbeat -- at 60 Hz this window is
+// half a second, which in the field is tens of thousands of lines a day in a
+// log an operator is meant to read. FrameProfile::Enabled is the gate the rest
+// of the shell's measurement uses, so IVI_PROFILE=1 turns this on with it.
+constexpr uint64_t kSubmitWindow = 30;
+std::atomic<uint64_t> g_pv_submits{0};
+std::atomic<uint64_t> g_pv_nudges{0};
+std::atomic<uint64_t> g_pv_nudges_dropped{0};
+
+void ReportSubmitWindow() {
+  // Read once: this is on the submit path, which runs per producer frame.
+  static const bool profile_enabled = profiling::FrameProfile::Enabled();
+  const uint64_t n = g_pv_submits.fetch_add(1, std::memory_order_relaxed) + 1;
+  const uint64_t nudges = g_pv_nudges.load(std::memory_order_relaxed);
+  const uint64_t dropped = g_pv_nudges_dropped.load(std::memory_order_relaxed);
+  if (n <= 3) {
+    ihs::log::info("[ihs_pv] submit {} (nudges={} dropped={})", n, nudges,
+                   dropped);
+  } else if (profile_enabled && n % kSubmitWindow == 0) {
+    ihs::log::debug(
+        "[ihs_pv] submits={} nudges={} dropped={} (a dropped nudge is a submit "
+        "the engine was never asked to present)",
+        n, nudges, dropped);
+  }
+}
+
 // Ask the engine for a frame after a producer submits.
 //
 // A producer renders and submits on its own thread, out of band with Flutter's
@@ -139,10 +187,12 @@ bool SeparateSandPlanes(const uint64_t modifier,
 void ScheduleEngineFrame(void* user_data) {
   auto* state = static_cast<FlutterDesktopEngineState*>(user_data);
   if (state == nullptr || state->flutter_engine == nullptr) {
+    g_pv_nudges_dropped.fetch_add(1, std::memory_order_relaxed);
     return;  // submit before the engine is running: nothing to nudge
   }
   if (state->texture_registrar == nullptr ||
       state->texture_registrar->shutting_down.load(std::memory_order_acquire)) {
+    g_pv_nudges_dropped.fetch_add(1, std::memory_order_relaxed);
     return;  // tearing down: the engine handle is no longer safe to call
   }
   // Marshal onto the platform thread (#623). ihs_pv_submit is any-thread by
@@ -160,6 +210,7 @@ void ScheduleEngineFrame(void* user_data) {
   // nudge that lands a beat late, or twice, costs nothing.
   TaskRunner* runner = state->platform_task_runner;
   if (runner == nullptr || runner->GetStrandContext() == nullptr) {
+    g_pv_nudges_dropped.fetch_add(1, std::memory_order_relaxed);
     return;  // no runner yet; the next submit nudges
   }
   asio::post(*runner->GetStrandContext(), [state]() {
@@ -171,6 +222,7 @@ void ScheduleEngineFrame(void* user_data) {
             std::memory_order_acquire)) {
       return;
     }
+    g_pv_nudges.fetch_add(1, std::memory_order_relaxed);
     LibFlutterEngine->ScheduleFrame(state->flutter_engine);
   });
 }
@@ -3422,6 +3474,7 @@ int HostSubmit(void* user_data,
                const IhsFrame* frame,
                int acquire_fence_fd,
                int* out_release_fence_fd) {
+  ReportSubmitWindow();
   // Release fence (compositor -> producer, #338): -1 by default, replaced under
   // v->mutex in each backend path with a dup of this view's latest fence (see
   // HandBackReleaseFence). -1 stands until the first composite has run, or if
@@ -3521,6 +3574,7 @@ int HostSubmitLayers(void* user_data,
                      const size_t layer_count,
                      const uint64_t seq,
                      int* out_release_fence_fds) {
+  ReportSubmitWindow();
   auto* v = reinterpret_cast<IhsPluginView*>(view);
   const auto close_from = [&](size_t first) {
     for (size_t i = first; i < layer_count; ++i) {
