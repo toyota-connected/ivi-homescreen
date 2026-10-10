@@ -1622,6 +1622,22 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
 DmabufVulkanImporter g_importer;
 #endif
 
+// A grant's buffers are never submitted again once it ends: each resize
+// allocates new ones. Keep the importer from pooling their imports, which
+// would hold every revoked buffer with nothing left to reuse it.
+void ForgetShmImports(const ShmSlots* slots) {
+#if IVI_HAVE_VULKAN
+  if (slots == nullptr) {
+    return;
+  }
+  for (uint32_t i = 0; i < ShmSlots::kCount; ++i) {
+    g_importer.Forget(slots->dev(i), slots->ino(i));
+  }
+#else
+  (void)slots;
+#endif
+}
+
 #if IVI_HAVE_EGL
 // EGL/GL counterpart of g_importer, initialized from the backend's EGL context
 // at host install when the active backend is EGL (and Vulkan is absent). Stays
@@ -1659,6 +1675,7 @@ constexpr uint64_t kImportRetireMargin = 8;
 
 IhsPluginView::~IhsPluginView() {
   Teardown();
+  ForgetShmImports(shm.get());
   // The backend has let go of the view, so it holds none of its frames: fire
   // every release it never handed back. A producer that keeps its buffers past
   // the view waits on these.
@@ -2691,6 +2708,7 @@ void DropShmGrant(IhsPluginView* v) {
     }
     v->shm_superseded.clear();
     v->shm_last_sampled.clear();
+    ForgetShmImports(v->shm.get());
     v->shm.reset();
     v->shm_granted = false;
   }
@@ -3837,10 +3855,22 @@ void ReleasePlatformViewImports() {
 #endif
 }
 
+size_t PooledPlatformViewImports() {
+#if IVI_HAVE_VULKAN
+  return g_importer.Pooled();
+#else
+  return 0;
+#endif
+}
+
 #else  // !BUILD_COMPOSITOR
 
 void InstallPlatformViewHost(FlutterDesktopEngineState* /*engine_state*/) {}
 
 void ReleasePlatformViewImports() {}
+
+size_t PooledPlatformViewImports() {
+  return 0;
+}
 
 #endif  // BUILD_COMPOSITOR

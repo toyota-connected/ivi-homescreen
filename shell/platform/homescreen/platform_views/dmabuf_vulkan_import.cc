@@ -643,6 +643,35 @@ void DmabufVulkanImporter::Destroy(ImportedImage* image) const {
   Free(image);
 }
 
+void DmabufVulkanImporter::Forget(const dev_t dev, const ino_t ino) const {
+  std::vector<ImportedImage> freed;
+  {
+    const std::lock_guard<std::mutex> lock(pool_mu_);
+    for (auto it = pool_.begin(); it != pool_.end();) {
+      if (it->first.dev == dev && it->first.ino == ino) {
+        freed.push_back(it->second);
+        keys_.erase(it->second.image);
+        it = pool_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+    for (auto it = keys_.begin(); it != keys_.end();) {
+      if (it->second.dev == dev && it->second.ino == ino) {
+        it = keys_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+  if (!ready()) {
+    return;
+  }
+  for (auto& image : freed) {
+    Free(&image);
+  }
+}
+
 void DmabufVulkanImporter::DrainPool() const {
   std::list<std::pair<PoolKey, ImportedImage>> pool;
   {
