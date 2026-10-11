@@ -2867,6 +2867,9 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
                         static_cast<uint32_t>(img.height), view, &place)) {
           continue;  // entirely outside the view
         }
+        if (!img.top_first) {
+          place.uv = FlipRows(place.uv);
+        }
         presentation_->Note(surface->GetPresentationSink(), img.frame,
                             /*zero_copy=*/false);
         auto src = reinterpret_cast<VkImage>(img.image);
@@ -3019,13 +3022,22 @@ void WaylandVulkanBackend::BlitPlatformViewVulkan(VkCommandBuffer cmd,
     presentation_->Note(surface->GetPresentationSink(), img.frame,
                         /*zero_copy=*/false);
     const auto sx0 = static_cast<int32_t>(std::lround(crop.x));
-    const auto sy0 = static_cast<int32_t>(std::lround(crop.y));
+    // The crop is in the image's displayed orientation. A bottom-up buffer
+    // holds those rows the other way up: take them from the mirrored band and
+    // blit them mirrored.
+    auto sy0 = static_cast<int32_t>(std::lround(crop.y));
     const auto sx1 = static_cast<int32_t>(std::lround(crop.x + crop.w));
-    const auto sy1 = static_cast<int32_t>(std::lround(crop.y + crop.h));
+    auto sy1 = static_cast<int32_t>(std::lround(crop.y + crop.h));
     const bool mirror_x = g.transform == BufferTransform::kFlipped ||
                           g.transform == BufferTransform::k180;
-    const bool mirror_y = g.transform == BufferTransform::kFlipped180 ||
-                          g.transform == BufferTransform::k180;
+    bool mirror_y = g.transform == BufferTransform::kFlipped180 ||
+                    g.transform == BufferTransform::k180;
+    if (!img.top_first) {
+      const int32_t top = img.height - sy1;
+      sy1 = img.height - sy0;
+      sy0 = top;
+      mirror_y = !mirror_y;
+    }
     auto src = reinterpret_cast<VkImage>(img.image);
     // Wait the producer's acquire fence (if any) in this frame's submit.
     CollectAcquireWait(surface.get(), li);

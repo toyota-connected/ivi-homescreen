@@ -231,6 +231,10 @@ class ICompositorSurface {
     // COLOR_ENCODING / COLOR_RANGE CSC. DEFAULT (0) leaves the scene's default.
     uint8_t color_space{0};
     uint8_t color_range{0};
+    // Row 0 is the bottom row (IHS_PV_FRAME_BOTTOM_UP). A display controller
+    // cannot flip a plane on every target, so such a frame is composited,
+    // never scanned out.
+    bool bottom_up{false};
     // HDR static metadata for an HDR (PQ/HLG) video, mirrored from the
     // producer's IhsHdrMetadata. Not carried per-frame on the Dmabuf — the DRM
     // scene path reads the view's persisted value via @c GetHdrMetadata (steady
@@ -613,6 +617,9 @@ class ICompositorSurface {
     // The layout tracked by Get/SetLayerVulkanImageLayout is not consulted.
     // 0 for an imported dma-buf.
     uint32_t handoff_layout{0};
+    // False when row 0 is the bottom row (IHS_PV_FRAME_BOTTOM_UP): the
+    // compositor flips it as it samples.
+    bool top_first{true};
   };
 
   // A layer's GL texture, for the GL composite paths, with its geometry.

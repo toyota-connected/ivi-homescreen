@@ -1269,6 +1269,130 @@ TEST_F(PvHostVkmsVk, AnEndedShmGrantKeepsNoneOfItsBuffers) {
   EXPECT_EQ(PooledPlatformViewImports(), pooled)
       << "the disposed view's imports were kept for reuse";
 }
+
+namespace {
+
+// Whether a plane on @p path is showing a @p w x @p h rect, read back from KMS
+// rather than from what the backend believes it committed.
+bool APlaneShows(const std::string& path, const uint64_t w, const uint64_t h) {
+  const int fd = ::open(path.c_str(), O_RDWR | O_CLOEXEC);
+  if (fd < 0) {
+    return false;
+  }
+  // FB_ID and CRTC_* are atomic properties, listed only to a client that has
+  // asked for atomic.
+  drmSetClientCap(fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
+  drmSetClientCap(fd, DRM_CLIENT_CAP_ATOMIC, 1);
+  bool found = false;
+  if (drmModePlaneRes* pres = drmModeGetPlaneResources(fd); pres != nullptr) {
+    for (uint32_t i = 0; i < pres->count_planes && !found; ++i) {
+      drmModeObjectProperties* props = drmModeObjectGetProperties(
+          fd, pres->planes[i], DRM_MODE_OBJECT_PLANE);
+      if (props == nullptr) {
+        continue;
+      }
+      uint64_t fb = 0;
+      uint64_t cw = 0;
+      uint64_t ch = 0;
+      for (uint32_t p = 0; p < props->count_props; ++p) {
+        drmModePropertyRes* prop = drmModeGetProperty(fd, props->props[p]);
+        if (prop == nullptr) {
+          continue;
+        }
+        const std::string name = prop->name;
+        if (name == "FB_ID") {
+          fb = props->prop_values[p];
+        } else if (name == "CRTC_W") {
+          cw = props->prop_values[p];
+        } else if (name == "CRTC_H") {
+          ch = props->prop_values[p];
+        }
+        drmModeFreeProperty(prop);
+      }
+      drmModeFreeObjectProperties(props);
+      found = fb != 0 && cw == w && ch == h;
+    }
+    drmModeFreePlaneResources(pres);
+  }
+  ::close(fd);
+  return found;
+}
+
+constexpr const char* kPlaneLayers = "IVI_DRMVK_PLANE_LAYERS";
+
+// PvHostVkmsVk with each layer on a plane of its own.
+class PvHostVkmsVkPlanes : public PvHostVkmsVk {
+ protected:
+  void SetUp() override {
+    if (const char* prev = std::getenv(kPlaneLayers); prev != nullptr) {
+      saved_planes_ = prev;
+    }
+    ::setenv(kPlaneLayers, "1", 1);
+    PvHostVkmsVk::SetUp();
+  }
+
+  void TearDown() override {
+    PvHostVkmsVk::TearDown();
+    if (saved_planes_) {
+      ::setenv(kPlaneLayers, saved_planes_->c_str(), 1);
+    } else {
+      ::unsetenv(kPlaneLayers);
+    }
+  }
+
+  // Submit @p buffer whole as one layer, with @p flags, under @p seq.
+  [[nodiscard]] int Submit(const PooledBuffer& buffer,
+                           const uint32_t buffer_id,
+                           const uint8_t flags,
+                           const uint64_t seq) const {
+    IhsFrame f = buffer.Frame();
+    f.buffer_id = buffer_id;
+    f.flags = flags;
+    IhsLayer layer{};
+    layer.struct_size = sizeof(layer);
+    layer.frame = &f;
+    layer.acquire_fence_fd = -1;
+    layer.layer_id = 1;
+    int release = -1;
+    const int rc = ihs_pv_submit_layers(pv_, &layer, 1, seq, &release);
+    if (release >= 0) {
+      ::close(release);
+    }
+    return rc;
+  }
+
+ private:
+  std::optional<std::string> saved_planes_;
+};
+
+}  // namespace
+
+// A bottom-up frame is never scanned out, even one that fits a plane: a plane
+// would show it upside down, so the blend samples it flipped instead. The
+// same buffer top-first goes to a plane, which is what makes the first half
+// mean anything.
+TEST_F(PvHostVkmsVkPlanes, ABottomUpFrameIsBlendedNotScannedOut) {
+  PooledBuffer a;
+  PooledBuffer b;
+  ASSERT_TRUE(a.Create(display_->SharedDevice()->fd(), kViewW, kViewH));
+  ASSERT_TRUE(b.Create(display_->SharedDevice()->fd(), kViewW, kViewH));
+
+  ASSERT_EQ(Submit(a, 0, 0, 1), IHS_PV_OK);
+  for (int i = 0; i < 4; ++i) {
+    ASSERT_TRUE(Present()) << "present " << i;
+  }
+  if (!APlaneShows(card_.path, kViewW, kViewH)) {
+    GTEST_SKIP() << "the plane path put no top-first frame on a plane here, "
+                    "so there is nothing for a bottom-up one to be kept off";
+  }
+
+  ASSERT_EQ(Submit(b, 1, IHS_PV_FRAME_BOTTOM_UP, 2), IHS_PV_OK);
+  for (int i = 0; i < 4; ++i) {
+    ASSERT_TRUE(Present()) << "present " << i;
+  }
+  EXPECT_FALSE(APlaneShows(card_.path, kViewW, kViewH))
+      << "a bottom-up frame is on a plane";
+}
 #endif
 
 #if IVI_HAVE_EGL

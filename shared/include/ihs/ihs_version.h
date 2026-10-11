@@ -33,10 +33,11 @@
  * lets a requirement name a preferred kind instead of inferring one from the
  * mask (see IhsPvRequirements::preferred_kind). 1.20 honors
  * IHS_PV_FRAME_BOTTOM_UP, so a GL producer can submit its rows bottom-up
- * instead of blitting them (see IhsFrameFlags).
+ * instead of blitting them (see IhsFrameFlags). 1.22 honors it on every
+ * backend and never scans such a frame out.
  */
 #define IHS_SHARED_ABI_MAJOR 1u
-#define IHS_SHARED_ABI_MINOR 21u
+#define IHS_SHARED_ABI_MINOR 22u
 #define IHS_SHARED_ABI_VERSION \
   ((IHS_SHARED_ABI_MAJOR << 16) | IHS_SHARED_ABI_MINOR)
 
