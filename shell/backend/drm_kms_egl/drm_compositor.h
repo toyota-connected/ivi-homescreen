@@ -599,6 +599,25 @@ class DrmCompositor : public IFlipSink {
 
   std::unique_ptr<drm::scene::LayerScene> scene_;
 
+  // Serializes scene_ between the threads that use it: the raster thread
+  // (presents, collecting a store), the platform thread (pause, resume, the
+  // cursor reservation), and the flip reader, which only ever try-locks so a
+  // flip is never held up behind a present.
+  std::mutex scene_mu_;
+  // CommitReport::commit_seq of the scene's last real commit (scene_mu_).
+  uint64_t scene_commit_seq_{0};
+  // A flip landed while scene_mu_ was taken: whoever holds it next hands
+  // back what that flip took off screen.
+  std::atomic<bool> displaced_pending_{false};
+  // With scene_mu_ held: when no commit is in flight, release what the last
+  // commit's flip took off screen (LayerScene::release_displaced) and send
+  // those releases. False when there was nothing to do.
+  bool ReleaseDisplacedLocked();
+  // After letting go of scene_mu_: do what a flip left for the holder.
+  void AfterSceneUnlock();
+  // PresentLayers with scene_mu_ held.
+  bool PresentLayersLocked(const FlutterLayer** layers, size_t layer_count);
+
   // Embedder-side mirror of the scene's live layer set, keyed by
   // baton pointer (the same pointer set as LayerDesc::identity_tag).
   // Walked each frame to prune layers whose baton didn't appear in

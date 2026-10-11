@@ -666,6 +666,31 @@ void DrmCompositor::RetireScanoutKeys(ICompositorSurface& surface) {
   }
 }
 
+bool DrmCompositor::ReleaseDisplacedLocked() {
+  displaced_pending_.store(false, std::memory_order_relaxed);
+  if (!scene_ || !scene_owns_crtc_ || scene_commit_seq_ == 0 ||
+      flip_pending_.load(std::memory_order_acquire)) {
+    return false;
+  }
+  // The last commit's flip has landed: the buffers it displaced are off
+  // screen. The scene would hand them back at its next commit, which a
+  // producer waiting for one of them never asks for.
+  scene_->release_displaced(scene_commit_seq_);
+  FireDeferredScanoutReleases(TakeDeferredScanoutReleases());
+  return true;
+}
+
+void DrmCompositor::AfterSceneUnlock() {
+  if (!displaced_pending_.load(std::memory_order_acquire)) {
+    return;
+  }
+  // Taken by someone else again: they see the flag when they let go.
+  const std::unique_lock<std::mutex> lock(scene_mu_, std::try_to_lock);
+  if (lock.owns_lock()) {
+    (void)ReleaseDisplacedLocked();
+  }
+}
+
 void DrmCompositor::DrainDeferredScanoutReleases() {
   // Take the batch under the lock, then fire the callbacks without it: they run
   // producer code (an eventfd signal) and must not re-enter under our mutex.
@@ -1421,6 +1446,12 @@ void DrmCompositor::OnFlipEvent(const unsigned int sequence,
       TakeDeferredScanoutReleases();
   OnFlipComplete();
   FireDeferredScanoutReleases(off_screen);
+  // And what the scene still holds of the frames this flip took off screen.
+  // Never waits: a present holding the scene sees the flag when it lets go.
+  if (scene_) {
+    displaced_pending_.store(true, std::memory_order_release);
+    AfterSceneUnlock();
+  }
   if (!off_screen.empty()) {
     const std::scoped_lock lock(deferred_releases_mu_);
     for (auto& r : off_screen) {
@@ -2569,6 +2600,17 @@ bool DrmCompositor::PresentView(const int64_t /*view_id*/,
 
 bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
                                   const size_t layer_count) {
+  bool presented = false;
+  {
+    const std::lock_guard<std::mutex> lock(scene_mu_);
+    presented = PresentLayersLocked(layers, layer_count);
+  }
+  AfterSceneUnlock();
+  return presented;
+}
+
+bool DrmCompositor::PresentLayersLocked(const FlutterLayer** layers,
+                                        const size_t layer_count) {
   // A disposed platform view's GL imports, freed with this present's context
   // current. Freed on the platform thread instead, with no context, the
   // textures stayed, and the driver kept each one's dma-buf open.
@@ -3241,6 +3283,11 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   // their producers here, one present after drm-cxx signaled the release. See
   // deferred_releases_.
   DrainDeferredScanoutReleases();
+  // A flip that landed while this present held the scene left its displaced
+  // buffers for whoever held it.
+  if (displaced_pending_.load(std::memory_order_acquire)) {
+    (void)ReleaseDisplacedLocked();
+  }
 
   // Whether this frame can go on planes at all, decided before any frame is
   // taken from a producer or imported. A frame with more layers than the CRTC
@@ -4129,11 +4176,13 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
     scene_stale_ = false;
   }
   pres.Commit();
+  scene_commit_seq_ = report->commit_seq;
   // The scene queues what it hands back after its ioctl returns. A flip that
   // completed before then found nothing to send (see OnFlipEvent), and none
-  // may follow, so send it now.
+  // may follow, so send it now, with what that flip displaced.
   if (!flip_pending_.load(std::memory_order_acquire)) {
     DrainDeferredScanoutReleases();
+    (void)ReleaseDisplacedLocked();
   }
 
   // Report each platform view's scanout plane back through its surface (feeds
@@ -4848,10 +4897,12 @@ bool DrmCompositor::CollectBackingStore(const FlutterBackingStore* store) {
   // disappears so the scene doesn't leave a stale layer referring to
   // memory we're about to free.
   if (scene_) {
+    const std::lock_guard<std::mutex> lock(scene_mu_);
     if (auto* layer = scene_->find_by_identity_tag(baton)) {
       scene_->remove_layer(layer->handle());
     }
   }
+  AfterSceneUnlock();
   if (const auto it = stores_.find(baton); it != stores_.end()) {
     // Return the store to the pool instead of destroying it. Keeps the
     // GBM BO + EGLImage + GL FBO/tex/RB and (if already imported) the
@@ -4899,10 +4950,14 @@ bool DrmCompositor::ReconcileScanoutModifier(const uint32_t fourcc,
 // ─── Session pause / resume ──────────────────────────────────────────────
 
 void DrmCompositor::ReserveCursorPlane(const uint32_t plane_id) {
-  cursor_reserved_plane_ = plane_id;
-  // Apply immediately in case the scene already exists (cursor wired
-  // after the first present); otherwise the scene-build path applies it.
-  ApplyCursorReservation();
+  {
+    const std::lock_guard<std::mutex> lock(scene_mu_);
+    cursor_reserved_plane_ = plane_id;
+    // Apply immediately in case the scene already exists (cursor wired
+    // after the first present); otherwise the scene-build path applies it.
+    ApplyCursorReservation();
+  }
+  AfterSceneUnlock();
 }
 
 void DrmCompositor::ApplyCursorReservation() {
@@ -4924,6 +4979,9 @@ void DrmCompositor::SetPaused(const bool paused) {
   // and infallible per the LayerBufferSource::on_session_paused
   // contract.
   if (paused && scene_) {
+    // paused_ is published first: a present waiting on a flip that will not
+    // come sees it and lets the scene go.
+    const std::lock_guard<std::mutex> lock(scene_mu_);
     scene_->on_session_paused();
   }
   ihs::log::info("[DrmCompositor] session {}", paused ? "paused" : "resumed");
@@ -4946,6 +5004,7 @@ void DrmCompositor::OnResume() {
   // fd that the seat originally handed us — the LayerScene's
   // implementation skips fd-substitution and just re-enumerates.
   if (scene_) {
+    const std::lock_guard<std::mutex> lock(scene_mu_);
     auto& dev = const_cast<drm::Device&>(backend_->device());
     if (auto r = scene_->on_session_resumed(dev); !r) {
       ihs::log::error("[DrmCompositor] LayerScene::on_session_resumed: {}",

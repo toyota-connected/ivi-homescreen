@@ -2737,6 +2737,33 @@ TEST_F(PvHostVkmsPlanes, EveryBufferOfRingsSubmittedConcurrentlyComesBack) {
   }
 }
 
+// The same for a ring of two: the first buffer comes back once the second is
+// on screen, with no present after that. The scene used to hold a displaced
+// buffer until its next commit, so a producer with two buffers that waits for
+// one before rendering waited for good.
+TEST_F(PvHostVkmsPlanes, ARingOfTwoGetsItsFirstBackWithoutAnotherPresent) {
+  const int fd = display_->SharedDevice()->fd();
+  GbmSolidBuffer ring[2];
+  int release[2] = {-1, -1};
+  for (int i = 0; i < 2; ++i) {
+    ASSERT_TRUE(ring[i].Create(fd, kViewW, kViewH, 0xFF1E7A46u + i));
+  }
+  for (int i = 0; i < 2; ++i) {
+    ASSERT_EQ(SubmitKeepingRelease(ring[i], i, i + 1, &release[i]), IHS_PV_OK);
+    ASSERT_GE(release[i], 0) << "no release fence for slot " << i;
+    ASSERT_TRUE(Present());
+  }
+  // Nothing presents from here on.
+  pollfd pfd{release[0], POLLIN, 0};
+  EXPECT_EQ(::poll(&pfd, 1, 500), 1)
+      << "slot 0 waits for a commit that a producer out of buffers never "
+         "asks for";
+  EXPECT_FALSE(Readable(release[1])) << "the buffer on screen was released";
+  for (int r : release) {
+    ::close(r);
+  }
+}
+
 // A producer with a ring of three gets its first buffer back once its third
 // is on screen, with no present after that. Each submit asks for one present
 // and no more, so a producer out of free buffers asks for none: a release
