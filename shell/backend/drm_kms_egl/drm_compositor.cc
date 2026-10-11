@@ -3249,8 +3249,17 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   // shaped like a frame the allocator just turned down. Both go straight to
   // composition rather than paying for imports and a TEST_ONLY commit to be
   // told so again.
-  const auto [needed_planes, frame_shape] =
-      FramePlaneDemand(layers, layer_count);
+  auto [needed_planes, frame_shape] = FramePlaneDemand(layers, layer_count);
+  // A frame whose bottom layer is a platform view also takes the primary for
+  // the background (scene_bg_baton_).
+  const FlutterLayer* bottom = nullptr;
+  for (size_t i = 0; i < layer_count && bottom == nullptr; ++i) {
+    bottom = layers[i];
+  }
+  if (bottom != nullptr &&
+      bottom->type == kFlutterLayerContentTypePlatformView) {
+    ++needed_planes;
+  }
   const size_t plane_budget = PlaneBudget();
   if (needed_planes > plane_budget) {
     if (!plane_budget_exceeded_) {
@@ -3502,6 +3511,37 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
         frame_pv_tags.push_back(tag);
       }
     }
+  }
+
+  // No backing store under the platform views: the background goes under
+  // them, on the primary, as the frame's bottom (UI) layer.
+  if (!frame_layers.empty() && frame_layers.front().pv_tag != nullptr) {
+    if (!EnsureBgStore(out_.resolved().primary_format, "scene")) {
+      return PresentViaGlFallback(layers, layer_count);
+    }
+    if (!scene_bg_baton_.scene_source &&
+        scene_->find_by_identity_tag(&scene_bg_baton_) == nullptr) {
+      // Made again after a frame with a backing store pruned the last one.
+      scene_bg_baton_.scene_source =
+          std::make_unique<GbmBackingStoreLayerSource>(
+              &bg_store_,
+              [this](GbmBackingStore& s) { return EnsureDrmFbId(s); });
+    }
+    scene_bg_layer_.struct_size = sizeof(FlutterLayer);
+    scene_bg_layer_.type = kFlutterLayerContentTypeBackingStore;
+    scene_bg_layer_.offset = FlutterPoint{0.0, 0.0};
+    scene_bg_layer_.size = FlutterSize{static_cast<double>(out_.mode_width()),
+                                       static_cast<double>(out_.mode_height())};
+    frame_layers.insert(frame_layers.begin(), {&scene_bg_layer_,
+                                               &scene_bg_baton_,
+                                               &bg_store_,
+                                               nullptr,
+                                               {},
+                                               nullptr,
+                                               0,
+                                               {},
+                                               0});
+    frame_batons.push_back(&scene_bg_baton_);
   }
 
   // Prune scene layers whose tag is not in this frame's set. The scene
@@ -4413,23 +4453,8 @@ bool DrmCompositor::InitDirectOverlay() {
   // context is current here (InitPlaneAllocator runs inside
   // EnsureGlCapsProbed), so the clear is safe. ProbePrimaryReflectY
   // creates this same store as its TEST FB, so reuse it when valid.
-  if (!bg_store_valid_) {
-    if (!CreateGbmStore(bg_store_, out_.mode_width(), out_.mode_height(),
-                        bg_format, /*pool_size=*/1,
-                        /*force_scanout=*/true) ||
-        !EnsureDrmFbId(bg_store_)) {
-      ihs::log::error(
-          "[DrmCompositor] direct-overlay BG GBM store create failed");
-      return false;
-    }
-    glBindFramebuffer(GL_FRAMEBUFFER, bg_store_.fbo);
-    glDisable(GL_SCISSOR_TEST);
-    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-    glFinish();  // commit BG pixels before the first atomic scanout binds it
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    bg_store_valid_ = true;
+  if (!EnsureBgStore(bg_format, "direct-overlay")) {
+    return false;
   }
 
   ihs::log::info(
@@ -4437,6 +4462,28 @@ bool DrmCompositor::InitDirectOverlay() {
       "(zpos={}), CRTC {}x{}",
       framed_primary_id_, direct_overlay_id_, direct_overlay_zpos_,
       out_.mode_width(), out_.mode_height());
+  return true;
+}
+
+bool DrmCompositor::EnsureBgStore(const uint32_t format, const char* what) {
+  if (bg_store_valid_) {
+    return true;
+  }
+  if (!CreateGbmStore(bg_store_, out_.mode_width(), out_.mode_height(), format,
+                      /*pool_size=*/1,
+                      /*force_scanout=*/true) ||
+      !EnsureDrmFbId(bg_store_)) {
+    ihs::log::error("[DrmCompositor] {} BG GBM store create failed", what);
+    return false;
+  }
+  glBindFramebuffer(GL_FRAMEBUFFER, bg_store_.fbo);
+  glDisable(GL_SCISSOR_TEST);
+  glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+  glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+  glFinish();  // commit BG pixels before the first atomic scanout binds it
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  bg_store_valid_ = true;
   return true;
 }
 
