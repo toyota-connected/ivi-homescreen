@@ -31,6 +31,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <memory>
 #include <optional>
 #include <string>
 #include <thread>
@@ -511,20 +512,28 @@ TEST_F(VulkanDrmVkms, TheVulkanContextReportsTheUsableVersion) {
 }
 
 #if BUILD_COMPOSITOR
+// How long a deferred free may take to be reaped by presents. Generous: vkms
+// here is rendered on the CPU, so a loaded machine slows every present, and a
+// count of presents is not a bound on time. The free's counter is shared with
+// it rather than borrowed from the test's stack, because a free the test gave
+// up on still runs, at teardown -- and wrote through a dangling reference.
+constexpr auto kReapWait = std::chrono::seconds(2);
+
 // A platform view's imports are freed on the raster thread between frames,
 // never on the thread that asks: the raster thread may be recording a frame
 // that binds them (it crashed in vkCreateImageView when the free ran at once).
 TEST_F(VulkanDrmVkms, ADeferredFreeWaitsForLaterPresents) {
   ASSERT_TRUE(PresentOneFrame()) << "the first present is the blocking modeset";
-  std::atomic<int> runs{0};
-  backend_->ScheduleDeferredDestroy([&] { runs.fetch_add(1); });
-  EXPECT_EQ(runs.load(), 0) << "the free ran on the caller's thread at once";
+  const auto runs = std::make_shared<std::atomic<int>>(0);
+  backend_->ScheduleDeferredDestroy([runs] { runs->fetch_add(1); });
+  EXPECT_EQ(runs->load(), 0) << "the free ran on the caller's thread at once";
   int presents = 0;
-  while (runs.load() == 0 && presents < 12) {
+  const auto deadline = std::chrono::steady_clock::now() + kReapWait;
+  while (runs->load() == 0 && std::chrono::steady_clock::now() < deadline) {
     ASSERT_TRUE(PresentOneFrame());
     ++presents;
   }
-  EXPECT_EQ(runs.load(), 1);
+  EXPECT_EQ(runs->load(), 1);
   EXPECT_GE(presents, 2) << "freed at the very next present: no margin for a "
                             "frame still in flight";
 }
@@ -542,25 +551,28 @@ TEST_F(VulkanDrmVkms, ADeferredFreeIsReapedOnTheRootSurfacePath) {
     return image.image != 0 && VulkanDrmBackend::PresentImageForTest(&image);
   };
   ASSERT_TRUE(present_root()) << "the first present is the blocking modeset";
-  std::atomic<int> runs{0};
-  backend_->ScheduleDeferredDestroy([&] { runs.fetch_add(1); });
+  const auto runs = std::make_shared<std::atomic<int>>(0);
+  backend_->ScheduleDeferredDestroy([runs] { runs->fetch_add(1); });
   int presents = 0;
-  while (runs.load() == 0 && presents < 12) {
+  const auto deadline = std::chrono::steady_clock::now() + kReapWait;
+  while (runs->load() == 0 && std::chrono::steady_clock::now() < deadline) {
     ASSERT_TRUE(present_root());
     ++presents;
   }
-  EXPECT_EQ(runs.load(), 1) << "12 root-surface presents and the free never "
-                               "ran: only teardown would have freed it";
+  EXPECT_EQ(runs->load(), 1) << presents
+                             << " root-surface presents and the "
+                                "free never ran: only teardown would have "
+                                "freed it";
   EXPECT_GE(presents, 2);
 }
 
 // One a present never reaped still runs, once the device is idle.
 TEST_F(VulkanDrmVkms, AnUnreapedDeferredFreeRunsAtTeardown) {
-  std::atomic<int> runs{0};
-  backend_->ScheduleDeferredDestroy([&] { runs.fetch_add(1); });
-  EXPECT_EQ(runs.load(), 0);
+  const auto runs = std::make_shared<std::atomic<int>>(0);
+  backend_->ScheduleDeferredDestroy([runs] { runs->fetch_add(1); });
+  EXPECT_EQ(runs->load(), 0);
   backend_.reset();
-  EXPECT_EQ(runs.load(), 1);
+  EXPECT_EQ(runs->load(), 1);
 }
 #endif
 
