@@ -235,10 +235,21 @@ class FakePlatformView : public ICompositorSurface {
     return id_;
   }
 
-  [[nodiscard]] uint32_t GetGlTextureName() const override { return tex_; }
+  // Counted: for a real view each call may import the latest frame.
+  [[nodiscard]] uint32_t GetGlTextureName() const override {
+    imports_++;
+    return tex_;
+  }
   [[nodiscard]] int32_t GetGlTextureWidth() const override { return 16; }
   [[nodiscard]] int32_t GetGlTextureHeight() const override { return 16; }
   [[nodiscard]] uint32_t GetGlTextureBufferId() const override { return 0; }
+  [[nodiscard]] GlLayerTexture GetLayerGlTexture(size_t index) const override {
+    GlLayerTexture out = ICompositorSurface::GetLayerGlTexture(index);
+    if (cropped_) {
+      out.geometry.src = RectF{0, 0, 8, 8};
+    }
+    return out;
+  }
 
   void OnScanoutRelease(uint32_t buffer_id) override {
     const std::lock_guard<std::mutex> lock(mu_);
@@ -250,8 +261,11 @@ class FakePlatformView : public ICompositorSurface {
   }
 
   void set_texture(uint32_t tex) { tex_ = tex; }
+  // Show a crop of the image, which takes the layered draw path.
+  void set_cropped(bool cropped) { cropped_ = cropped; }
   [[nodiscard]] int32_t width() const { return 16; }
   [[nodiscard]] int presents() const { return presents_; }
+  [[nodiscard]] int imports() const { return imports_; }
 
   [[nodiscard]] std::vector<uint32_t> released() const {
     const std::lock_guard<std::mutex> lock(mu_);
@@ -265,7 +279,9 @@ class FakePlatformView : public ICompositorSurface {
  private:
   const FlutterPlatformViewIdentifier id_;
   uint32_t tex_{0};
+  bool cropped_{false};
   int presents_{0};
+  mutable int imports_{0};
   mutable std::mutex mu_;
   std::vector<uint32_t> released_;
   std::vector<uint32_t> planes_;
@@ -812,6 +828,36 @@ TEST_F(DrmBackendVkms, GlCompositedViewGetsItsBufferBack) {
                                      "sentinel for 'no id'";
 
   compositor_->UnregisterSurface(7);
+}
+
+// A present takes a view's texture once and draws what it took. It used to
+// take it to decide how to draw the view and again to draw it, and a frame
+// submitted in between was imported over one nothing had drawn: no release was
+// ever queued for that one, and its producer waited for good.
+TEST_F(DrmBackendVkms, APresentTakesAViewsTextureOnce) {
+  for (const bool cropped : {false, true}) {
+    SCOPED_TRACE(cropped ? "cropped" : "whole");
+    auto view = std::make_shared<FakePlatformView>(21);
+    view->set_texture(tex_);
+    view->set_cropped(cropped);
+    compositor_->RegisterSurface(21, view);
+    ASSERT_TRUE(PresentPlatformView(21));
+    EXPECT_EQ(view->imports(), 1);
+    compositor_->UnregisterSurface(21);
+  }
+}
+
+TEST_F(DrmBackendVkmsFramed, APresentTakesAViewsTextureOnce) {
+  for (const bool cropped : {false, true}) {
+    SCOPED_TRACE(cropped ? "cropped" : "whole");
+    auto view = std::make_shared<FakePlatformView>(22);
+    view->set_texture(tex_);
+    view->set_cropped(cropped);
+    compositor_->RegisterSurface(22, view);
+    ASSERT_TRUE(PresentPlatformView(22));
+    EXPECT_EQ(view->imports(), 1);
+    compositor_->UnregisterSurface(22);
+  }
 }
 
 // A GL-composited view is on no plane, and has to be told so. Anything keyed

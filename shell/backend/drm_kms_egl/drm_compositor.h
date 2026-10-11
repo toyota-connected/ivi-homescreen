@@ -335,21 +335,33 @@ class DrmCompositor : public IFlipSink {
 
   // GL-composite every layer of a layered platform view into @p target_fbo --
   // any surface GetLayerCount != 1, or whose one layer is cropped, placed,
-  // rotated or opaque -- queueing each drawn frame's release. False when there
-  // was nothing to draw, in which case the caller treats the view as it would
-  // a surface with no texture.
+  // rotated or opaque -- queueing each drawn frame's release. @p layer0 is
+  // layer 0's texture when the caller already took it (SingleLayerTexture),
+  // and is drawn instead of importing again. False when there was nothing to
+  // draw, in which case the caller treats the view as it would a surface with
+  // no texture.
   bool CompositeLayeredSurface(
       GLuint target_fbo,
       const std::shared_ptr<ICompositorSurface>& surface,
       const FlutterLayer* layer,
       GLint fb_height,
       bool target_top_first,
-      bool blend);
+      bool blend,
+      const ICompositorSurface::GlLayerTexture* layer0);
 
-  // True for a surface the single-texture code paths draw as they always
-  // have: one layer, whole across the view, not opaque. Imports the layer's
-  // latest frame (it calls GetLayerGlTexture), so raster thread only.
-  static bool IsSingleWholeLayer(const ICompositorSurface& surface);
+  // Layer 0's texture for a one-layer surface, else nullopt. Imports
+  // the layer's latest frame (it calls GetLayerGlTexture), so raster thread
+  // only -- and once per surface per present: the draw uses what this
+  // returns. A second import in the same present replaced a frame nothing had
+  // drawn, so no release was ever queued for it and its producer waited for
+  // good.
+  static std::optional<ICompositorSurface::GlLayerTexture> SingleLayerTexture(
+      const ICompositorSurface& surface);
+
+  // True for a texture the single-texture code paths draw as they always
+  // have: whole across the view, not opaque.
+  static bool IsWholeImage(
+      const std::optional<ICompositorSurface::GlLayerTexture>& t);
 
   // Post-first-commit sanity probe. Confirms the kernel actually honored
   // the modeset by reading CRTC.ACTIVE + primary plane.FB_ID via

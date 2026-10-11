@@ -279,16 +279,23 @@ class LayeredSurface : public ICompositorSurface {
   }
   [[nodiscard]] size_t GetLayerCount() const override { return layers.size(); }
   [[nodiscard]] GlLayerTexture GetLayerGlTexture(size_t i) const override {
+    if (i == 0) {
+      layer0_taken++;
+    }
     return i < layers.size() ? layers[i] : GlLayerTexture{};
   }
   std::vector<GlLayerTexture> layers;
+  // How often layer 0 was asked for, which for a real view imports a frame.
+  mutable int layer0_taken{0};
 };
 
 // Draw `surface` into a kW x kH target through CompositeSurfaceLayers and read
 // it back top row first, for a target of either orientation.
-std::vector<uint8_t> DrawSurface(GlCompositor& compositor,
-                                 const ICompositorSurface& surface,
-                                 bool target_top_first) {
+std::vector<uint8_t> DrawSurface(
+    GlCompositor& compositor,
+    const ICompositorSurface& surface,
+    bool target_top_first,
+    const ICompositorSurface::GlLayerTexture* layer0 = nullptr) {
   GLuint target = 0;
   glGenTextures(1, &target);
   glBindTexture(GL_TEXTURE_2D, target);
@@ -302,7 +309,8 @@ std::vector<uint8_t> DrawSurface(GlCompositor& compositor,
   glClearColor(0, 0, 0, 0);
   glClear(GL_COLOR_BUFFER_BIT);
   compositor.CompositeSurfaceLayers(fbo, surface, {0, 0, kW, kH}, kH,
-                                    target_top_first, /*blend_first=*/false);
+                                    target_top_first, /*blend_first=*/false,
+                                    nullptr, layer0);
   std::vector<uint8_t> rows(Px(0, kH, kW));
   glBindFramebuffer(GL_FRAMEBUFFER, fbo);
   glReadPixels(0, 0, kW, kH, GL_RGBA, GL_UNSIGNED_BYTE, rows.data());
@@ -412,4 +420,38 @@ TEST_F(LayerDrawGl, ABottomUpSourceIsSampledFlipped) {
         << "row " << y << " of the bottom-up draw is not row " << (kH - 1 - y)
         << " of the top-first one";
   }
+}
+
+// Layer 0 handed in by a caller that already took it is drawn as is, and not
+// asked for again: for a real view that would import a newer frame over the
+// one taken, which nothing then draws or releases.
+TEST_F(LayerDrawGl, ALayerZeroAlreadyTakenIsDrawnNotTakenAgain) {
+  const std::array<uint8_t, 4> kTaken = {250, 0, 0, 255};
+  const std::array<uint8_t, 4> kNewer = {0, 0, 250, 255};
+  std::vector<uint8_t> taken_px(Px(0, kH, kW));
+  std::vector<uint8_t> newer_px(Px(0, kH, kW));
+  for (int i = 0; i < kW * kH; ++i) {
+    std::memcpy(&taken_px[Px(i, 0, 0)], kTaken.data(), 4);
+    std::memcpy(&newer_px[Px(i, 0, 0)], kNewer.data(), 4);
+  }
+  const GLuint taken_tex = MakeTexture(kW, kH, taken_px);
+  const GLuint newer_tex = MakeTexture(kW, kH, newer_px);
+  ICompositorSurface::GlLayerTexture taken;
+  taken.name = taken_tex;
+  taken.width = kW;
+  taken.height = kH;
+  taken.top_first = true;
+  taken.geometry.src = {0, 0, kW, kH};  // cropped to all of it: layered path
+  ICompositorSurface::GlLayerTexture newer = taken;
+  newer.name = newer_tex;
+  LayeredSurface surface;
+  surface.layers = {newer};
+
+  const auto out =
+      DrawSurface(*compositor_, surface, /*target_top_first=*/true, &taken);
+  EXPECT_EQ(surface.layer0_taken, 0) << "layer 0 was taken a second time";
+  EXPECT_EQ(std::memcmp(&out[Px(kW / 2, kH / 2, kW)], kTaken.data(), 4), 0)
+      << "drew a frame other than the one handed in";
+  glDeleteTextures(1, &taken_tex);
+  glDeleteTextures(1, &newer_tex);
 }

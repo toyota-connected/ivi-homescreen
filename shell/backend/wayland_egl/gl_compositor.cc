@@ -567,11 +567,13 @@ size_t GlCompositor::CompositeSurfaceLayers(
     bool target_top_first,
     bool blend_first,
     const std::function<void(const ICompositorSurface::GlLayerTexture&)>&
-        on_drawn) {
+        on_drawn,
+    const ICompositorSurface::GlLayerTexture* layer0) {
   size_t drawn = 0;
   const size_t count = surface.GetLayerCount();
   for (size_t i = 0; i < count; ++i) {
-    const ICompositorSurface::GlLayerTexture t = surface.GetLayerGlTexture(i);
+    const ICompositorSurface::GlLayerTexture t =
+        i == 0 && layer0 != nullptr ? *layer0 : surface.GetLayerGlTexture(i);
     if (t.name == 0) {
       continue;
     }

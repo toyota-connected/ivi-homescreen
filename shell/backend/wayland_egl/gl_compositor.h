@@ -121,6 +121,10 @@ class GlCompositor {
    * @param blend_first Whether the first layer drawn blends (something is
    *                    already under it). Later layers blend unless opaque.
    * @param on_drawn    Called for each layer drawn, e.g. to queue its release.
+   * @param layer0      Layer 0's texture, when the caller already took it this
+   *                    present: drawn as is rather than imported again. A
+   *                    second import replaces a frame nothing has drawn, and
+   *                    no release is queued for that frame.
    * @return            The number of layers drawn.
    *
    * Imports each layer's latest frame (GetLayerGlTexture), so it runs on the
@@ -134,7 +138,8 @@ class GlCompositor {
       bool target_top_first,
       bool blend_first,
       const std::function<void(const ICompositorSurface::GlLayerTexture&)>&
-          on_drawn = nullptr);
+          on_drawn = nullptr,
+      const ICompositorSurface::GlLayerTexture* layer0 = nullptr);
 
   // Thin wrapper: composite into the default framebuffer (FBO 0).
   void CompositeToDefault(GLuint src_fbo,
