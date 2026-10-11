@@ -1333,6 +1333,7 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
       vr > 0 ? static_cast<uint32_t>(1'000'000'000ULL / vr) : 16'666'667U;
   compositor_->period_ns = period_ns;
   vsync_.SetPeriodNs(period_ns);
+  vsync_.SetPaceToVblank(ivi::IVsyncProvider::PaceEnabledByEnv());
   vsync_.EnableProfile(profiling::FrameProfile::Enabled("IVI_VSYNC_PROFILE"),
                        "DrmVkVsync");
   {

@@ -425,7 +425,12 @@ TEST_F(VulkanDrmVkms, RecoveryClearsTheProviderLatchNotJustTheBackendOne) {
 
   // Flutter asks for the next frame. If the provider latch survived the
   // recovery this parks and the display is stalled again, one baton later.
+  // Paced, a request in the refresh the recovery handed a baton out in waits
+  // for the next vblank, so give it a few refreshes.
   backend_->VsyncForTest().SubmitBaton(nullptr, 0x6262);
+  for (int i = 0; i < 100 && backend_->VsyncForTest().HasParkedBaton(); ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
   EXPECT_FALSE(backend_->VsyncForTest().HasParkedBaton())
       << "the next baton parked, so the recovery cleared the backend latch and "
          "left the provider one up -- the display is still stalled";

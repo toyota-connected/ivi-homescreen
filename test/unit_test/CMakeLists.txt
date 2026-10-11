@@ -314,6 +314,7 @@ add_subdirectory(backend_output_binding-test)
 add_subdirectory(display_metadata-test)
 add_subdirectory(flip_arm-test)
 add_subdirectory(vsync_park-test)
+add_subdirectory(vsync_pace-test)
 add_subdirectory(mutation_stack-test)
 # The MCP registry is only compiled into ihs_shared when BUILD_MCP is on, so
 # its tests would have nothing to link against otherwise.
