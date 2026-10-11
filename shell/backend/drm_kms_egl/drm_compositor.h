@@ -580,6 +580,11 @@ class DrmCompositor : public IFlipSink {
   static void FireDeferredScanoutReleases(
       const std::vector<DeferredScanoutRelease>& batch);
 
+  // Surfaces of a batch fired from a flip event, kept until the next present
+  // so the last reference to one is never dropped off the raster thread.
+  // Guarded by deferred_releases_mu_.
+  std::vector<std::shared_ptr<ICompositorSurface>> fired_on_flip_;
+
   std::unique_ptr<drm::scene::LayerScene> scene_;
 
   // Embedder-side mirror of the scene's live layer set, keyed by

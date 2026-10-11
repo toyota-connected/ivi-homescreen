@@ -663,6 +663,11 @@ void DrmCompositor::DrainDeferredScanoutReleases() {
   // Take the batch under the lock, then fire the callbacks without it: they run
   // producer code (an eventfd signal) and must not re-enter under our mutex.
   FireDeferredScanoutReleases(TakeDeferredScanoutReleases());
+  std::vector<std::shared_ptr<ICompositorSurface>> fired;
+  {
+    const std::scoped_lock lock(deferred_releases_mu_);
+    fired.swap(fired_on_flip_);
+  }
 }
 
 void DrmCompositor::ReleaseSceneHold() {
@@ -1396,7 +1401,25 @@ void DrmCompositor::DestroyGbmStore(GbmBackingStore& store) const {
 void DrmCompositor::OnFlipEvent(const unsigned int sequence,
                                 const unsigned int tv_sec,
                                 const unsigned int tv_usec) {
+  // Every release queued so far is off screen now: the scene hands back a
+  // buffer only once the flip after the one that displaced it has completed,
+  // and a GL-composited frame's was queued by the present this flip shows.
+  // Taken before OnFlipComplete clears flip_pending_, so the next present,
+  // still waiting on that flag, has queued nothing yet.
+  //
+  // These used to wait for the top of the next present. A producer whose ring
+  // was out of buffers then submitted nothing, so nothing asked for that
+  // present, and it waited for good.
+  std::vector<DeferredScanoutRelease> off_screen =
+      TakeDeferredScanoutReleases();
   OnFlipComplete();
+  FireDeferredScanoutReleases(off_screen);
+  if (!off_screen.empty()) {
+    const std::scoped_lock lock(deferred_releases_mu_);
+    for (auto& r : off_screen) {
+      fired_on_flip_.push_back(std::move(r.surface));
+    }
+  }
   presentation_.Presented(atomic_serial_.load(std::memory_order_acquire),
                           FlipTime(sequence, tv_sec, tv_usec));
   // Only the vsync-driving (primary) output returns the baton; additional
@@ -4050,6 +4073,12 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
     scene_stale_ = false;
   }
   pres.Commit();
+  // The scene queues what it hands back after its ioctl returns. A flip that
+  // completed before then found nothing to send (see OnFlipEvent), and none
+  // may follow, so send it now.
+  if (!flip_pending_.load(std::memory_order_acquire)) {
+    DrainDeferredScanoutReleases();
+  }
 
   // Report each platform view's scanout plane back through its surface (feeds
   // the DRM_PLANE grant accessor, ihs_pv_grant_drm_plane_id). commit() ran

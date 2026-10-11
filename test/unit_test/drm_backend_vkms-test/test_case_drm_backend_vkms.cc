@@ -2429,6 +2429,248 @@ TEST_F(PvHostVkmsGl, ACompositedFrameIsReportedPresented) {
   EXPECT_NE(got[0].msc, 0U);
 }
 
+// Producers cycling rings get every buffer back, with more views than there
+// are planes for: some views composite and some scan out, and which is which
+// can change from frame to frame. Half way through, two frames arrive per
+// present, so each view's first is replaced before it is shown.
+TEST_F(PvHostVkmsPlanes, EveryBufferOfManyRingsComesBack) {
+  constexpr uint32_t kViews = 6;
+  constexpr uint32_t kRing = 3;
+  ASSERT_GE(card_.mode_w, kViews * kViewW);
+  const int fd = display_->SharedDevice()->fd();
+  // View 1 is the fixture's; the rest are made here.
+  FakeProducer extra[kViews - 1];
+  std::vector<std::string> types;
+  for (uint32_t v = 1; v < kViews; ++v) {
+    types.push_back("views/ring-" + std::to_string(v));
+  }
+  for (uint32_t v = 1; v < kViews; ++v) {
+    ASSERT_EQ(ihs_pv_register_factory(types[v - 1].c_str(), &fake_factory,
+                                      &extra[v - 1]),
+              IHS_PV_OK);
+    PlatformViewRegistry::CreateRequest req{};
+    req.id = static_cast<int32_t>(1 + v);
+    req.view_type = types[v - 1];
+    req.width = kViewW;
+    req.height = kViewH;
+    ASSERT_TRUE(state_.platform_view_registry->CreateViaFactory(req));
+    ASSERT_NE(extra[v - 1].view, nullptr);
+  }
+  const auto view_of = [&](uint32_t v) {
+    return v == 0 ? producer_.view : extra[v - 1].view;
+  };
+  const auto present_all = [&] {
+    FlutterPlatformView pv[kViews]{};
+    FlutterLayer layer[kViews]{};
+    const FlutterLayer* layers[kViews];
+    for (uint32_t v = 0; v < kViews; ++v) {
+      pv[v].struct_size = sizeof(FlutterPlatformView);
+      pv[v].identifier = 1 + v;
+      layer[v].struct_size = sizeof(FlutterLayer);
+      layer[v].type = kFlutterLayerContentTypePlatformView;
+      layer[v].platform_view = &pv[v];
+      layer[v].offset = FlutterPoint{static_cast<double>(v * kViewW), 0.0};
+      layer[v].size =
+          FlutterSize{static_cast<double>(kViewW), static_cast<double>(kViewH)};
+      layers[v] = &layer[v];
+    }
+    return comp_->PresentLayers(layers, kViews);
+  };
+
+  GbmSolidBuffer ring[kViews][kRing];
+  int out[kViews][kRing];
+  for (uint32_t v = 0; v < kViews; ++v) {
+    for (uint32_t i = 0; i < kRing; ++i) {
+      ASSERT_TRUE(ring[v][i].Create(fd, kViewW, kViewH, 0xFF1E7A46u + v));
+      out[v][i] = -1;
+    }
+  }
+  constexpr int kFrames = 30;
+  for (int frame = 0; frame < kFrames; ++frame) {
+    const uint32_t id = static_cast<uint32_t>(frame) % kRing;
+    for (uint32_t v = 0; v < kViews; ++v) {
+      for (int i = 0; i < 10 && out[v][id] >= 0 && !Readable(out[v][id]); ++i) {
+        ASSERT_TRUE(present_all());
+      }
+      ASSERT_TRUE(out[v][id] < 0 || Readable(out[v][id]))
+          << "view " << v << " slot " << id << " was never released (frame "
+          << frame << ")";
+      if (out[v][id] >= 0) {
+        ::close(out[v][id]);
+        out[v][id] = -1;
+      }
+      IhsFrame f = FrameOf(ring[v][id], id);
+      IhsLayer l = LayerOf(&f, 1);
+      ASSERT_EQ(
+          ihs_pv_submit_layers(view_of(v), &l, 1,
+                               static_cast<uint64_t>(frame) + 1, &out[v][id]),
+          IHS_PV_OK);
+    }
+    if (frame < kFrames / 2 || frame % 2 == 1) {
+      ASSERT_TRUE(present_all());
+    }
+  }
+  for (int i = 0; i < 10; ++i) {
+    ASSERT_TRUE(present_all());
+  }
+  const uint32_t shown = (kFrames - 1) % kRing;
+  for (uint32_t v = 0; v < kViews; ++v) {
+    for (uint32_t id = 0; id < kRing; ++id) {
+      if (id != shown) {
+        EXPECT_TRUE(out[v][id] < 0 || Readable(out[v][id]))
+            << "view " << v << " slot " << id << " is still held";
+      }
+      if (out[v][id] >= 0) {
+        ::close(out[v][id]);
+      }
+    }
+  }
+  for (uint32_t v = 1; v < kViews; ++v) {
+    state_.platform_view_registry->Dispose(static_cast<int32_t>(1 + v), false);
+    ihs_pv_unregister_factory(types[v - 1].c_str());
+  }
+}
+
+// The same with each producer on a thread of its own, submitting while the
+// compositor presents, the way a real producer does: a submit can land while
+// a present is choosing what to show, or between a commit and its flip.
+TEST_F(PvHostVkmsPlanes, EveryBufferOfRingsSubmittedConcurrentlyComesBack) {
+  constexpr uint32_t kViews = 4;
+  constexpr uint32_t kRing = 3;
+  constexpr int kFrames = 150;
+  ASSERT_GE(card_.mode_w, kViews * kViewW);
+  const int fd = display_->SharedDevice()->fd();
+  FakeProducer extra[kViews - 1];
+  std::vector<std::string> types;
+  for (uint32_t v = 1; v < kViews; ++v) {
+    types.push_back("views/concurrent-" + std::to_string(v));
+  }
+  for (uint32_t v = 1; v < kViews; ++v) {
+    ASSERT_EQ(ihs_pv_register_factory(types[v - 1].c_str(), &fake_factory,
+                                      &extra[v - 1]),
+              IHS_PV_OK);
+    PlatformViewRegistry::CreateRequest req{};
+    req.id = static_cast<int32_t>(1 + v);
+    req.view_type = types[v - 1];
+    req.width = kViewW;
+    req.height = kViewH;
+    ASSERT_TRUE(state_.platform_view_registry->CreateViaFactory(req));
+    ASSERT_NE(extra[v - 1].view, nullptr);
+  }
+  const auto view_of = [&](uint32_t v) {
+    return v == 0 ? producer_.view : extra[v - 1].view;
+  };
+  GbmSolidBuffer ring[kViews][kRing];
+  for (uint32_t v = 0; v < kViews; ++v) {
+    for (uint32_t i = 0; i < kRing; ++i) {
+      ASSERT_TRUE(ring[v][i].Create(fd, kViewW, kViewH, 0xFF1E7A46u + v));
+    }
+  }
+
+  std::atomic<uint32_t> done{0};
+  // Per view: the frame and slot it gave up waiting on, or -1.
+  std::atomic<int> stalled_frame[kViews];
+  std::atomic<int> stalled_slot[kViews];
+  std::vector<std::thread> producers;
+  for (uint32_t v = 0; v < kViews; ++v) {
+    stalled_frame[v] = -1;
+    stalled_slot[v] = -1;
+    producers.emplace_back([&, v] {
+      int out[kRing] = {-1, -1, -1};
+      for (int frame = 0; frame < kFrames; ++frame) {
+        const uint32_t id = static_cast<uint32_t>(frame) % kRing;
+        if (out[id] >= 0) {
+          pollfd pfd{out[id], POLLIN, 0};
+          if (::poll(&pfd, 1, 2000) != 1) {
+            stalled_frame[v] = frame;
+            stalled_slot[v] = static_cast<int>(id);
+            break;
+          }
+          ::close(out[id]);
+          out[id] = -1;
+        }
+        IhsFrame f = FrameOf(ring[v][id], id);
+        IhsLayer l = LayerOf(&f, 1);
+        if (ihs_pv_submit_layers(view_of(v), &l, 1,
+                                 static_cast<uint64_t>(frame) + 1,
+                                 &out[id]) != IHS_PV_OK) {
+          break;
+        }
+        // Faster than the display some of the time, so frames are replaced
+        // before they are shown; slower the rest.
+        std::this_thread::sleep_for(
+            std::chrono::milliseconds((frame / 10) % 2 == 0 ? 4 : 20));
+      }
+      for (int r : out) {
+        if (r >= 0) {
+          ::close(r);
+        }
+      }
+      done.fetch_add(1);
+    });
+  }
+
+  FlutterPlatformView pv[kViews]{};
+  FlutterLayer layer[kViews]{};
+  const FlutterLayer* layers[kViews];
+  for (uint32_t v = 0; v < kViews; ++v) {
+    pv[v].struct_size = sizeof(FlutterPlatformView);
+    pv[v].identifier = 1 + v;
+    layer[v].struct_size = sizeof(FlutterLayer);
+    layer[v].type = kFlutterLayerContentTypePlatformView;
+    layer[v].platform_view = &pv[v];
+    layer[v].offset = FlutterPoint{static_cast<double>(v * kViewW), 0.0};
+    layer[v].size =
+        FlutterSize{static_cast<double>(kViewW), static_cast<double>(kViewH)};
+    layers[v] = &layer[v];
+  }
+  for (int i = 0; i < 4000 && done.load() < kViews; ++i) {
+    comp_->PresentLayers(layers, kViews);
+  }
+  for (auto& t : producers) {
+    t.join();
+  }
+  for (uint32_t v = 0; v < kViews; ++v) {
+    EXPECT_EQ(stalled_frame[v].load(), -1)
+        << "view " << v << " waited for good on slot " << stalled_slot[v]
+        << " at frame " << stalled_frame[v];
+  }
+  for (uint32_t v = 1; v < kViews; ++v) {
+    state_.platform_view_registry->Dispose(static_cast<int32_t>(1 + v), false);
+    ihs_pv_unregister_factory(types[v - 1].c_str());
+  }
+}
+
+// A producer with a ring of three gets its first buffer back once its third
+// is on screen, with no present after that. Each submit asks for one present
+// and no more, so a producer out of free buffers asks for none: a release
+// that waits for another present never comes, and the producer waits for
+// good. The releases used to wait for the top of the next present.
+TEST_F(PvHostVkmsPlanes, ARingOfThreeGetsItsFirstBackWithoutAnotherPresent) {
+  const int fd = display_->SharedDevice()->fd();
+  constexpr int kRing = 3;
+  GbmSolidBuffer ring[kRing];
+  int release[kRing] = {-1, -1, -1};
+  for (int i = 0; i < kRing; ++i) {
+    ASSERT_TRUE(ring[i].Create(fd, kViewW, kViewH, 0xFF1E7A46u + i));
+  }
+  for (int i = 0; i < kRing; ++i) {
+    ASSERT_EQ(SubmitKeepingRelease(ring[i], i, i + 1, &release[i]), IHS_PV_OK);
+    ASSERT_GE(release[i], 0) << "no release fence for slot " << i;
+    ASSERT_TRUE(Present());
+  }
+  // Nothing presents from here on.
+  pollfd pfd{release[0], POLLIN, 0};
+  EXPECT_EQ(::poll(&pfd, 1, 500), 1)
+      << "slot 0 waits for a present that a producer out of buffers never "
+         "asks for";
+  EXPECT_FALSE(Readable(release[kRing - 1]))
+      << "the buffer on screen was released";
+  for (int r : release) {
+    ::close(r);
+  }
+}
+
 TEST_F(PvHostVkmsPlanes, AFrameOnAPlaneIsReleasedWhenTheViewLeavesFirst) {
   ExpectAFrameOnAPlaneReleasedOnceTheViewLeaves(/*dispose_first=*/false);
 }
