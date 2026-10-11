@@ -1194,9 +1194,10 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
         // several layers, or one cropped, placed within the view, rotated or
         // opaque -- is drawn layer by layer. Plugins that handle their own
         // presentation (legacy wl_subsurface path, etc.) expose no texture.
+        const bool one_layer = surface.GetLayerCount() == 1;
         const ICompositorSurface::GlLayerTexture first =
-            surface.GetLayerCount() == 1 ? surface.GetLayerGlTexture(0)
-                                         : ICompositorSurface::GlLayerTexture{};
+            one_layer ? surface.GetLayerGlTexture(0)
+                      : ICompositorSurface::GlLayerTexture{};
         if (first.name != 0 && first.geometry.IsWhole() &&
             !first.geometry.opaque) {
           NoteSampled(surface_sp, first);
@@ -1241,13 +1242,16 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
                            static_cast<int32_t>(layer->offset.y),
                            static_cast<int32_t>(layer->size.width),
                            static_cast<int32_t>(layer->size.height)};
+          // Layer 0 was imported above for a one-layer surface; draw that
+          // frame rather than importing over it.
           if (m_gl_compositor->CompositeSurfaceLayers(
                   0, surface, view, static_cast<GLint>(m_initial_height),
                   /*target_top_first=*/false, blend,
                   [this,
                    &surface_sp](const ICompositorSurface::GlLayerTexture& t) {
                     NoteSampled(surface_sp, t);
-                  }) > 0) {
+                  },
+                  one_layer ? &first : nullptr) > 0) {
             composited_any = true;
           }
         }
