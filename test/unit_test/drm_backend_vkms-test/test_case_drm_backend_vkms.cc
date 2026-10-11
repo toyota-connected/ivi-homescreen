@@ -90,6 +90,7 @@ extern "C" {
 #include <optional>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 namespace {
@@ -2210,11 +2211,11 @@ TEST_F(PvHostVkmsPlanes, EachLayerOfAViewGetsItsOwnPlane) {
   }
   ASSERT_TRUE(Present());
 
-  // Three planes: the view's two layers, plus the shell's own full-mode frame.
-  // That third one is new as of drm-cxx v4.0.0. vkms planes advertise no zpos
-  // (min == max == UINT64_MAX), and the zpos range gate that used to reject
-  // such a range refused the shell's frame a plane -- so only the view's
-  // 128x128 region had a framebuffer and the rest of the display had none.
+  // Three planes: the view's two layers, plus the shell's background under
+  // them, full mode on the primary. The frame has no backing store, so the
+  // shell puts one there; the primary used to keep whatever the modeset left,
+  // until the scene started turning off, on its first commit, the planes it
+  // did not light.
   // Assert what is on each plane rather than a bare count, so the next
   // allocator change that adds or merges a plane fails on content and not on
   // arithmetic.
@@ -2764,6 +2765,65 @@ TEST_F(PvHostVkmsPlanes, ARingOfThreeGetsItsFirstBackWithoutAnotherPresent) {
   for (int r : release) {
     ::close(r);
   }
+}
+
+// A frame of platform views alone has the shell's background under it, on a
+// plane covering the mode; one with a backing store at the bottom has that
+// store there instead, and going back brings the background back.
+TEST_F(PvHostVkmsPlanes, AFrameWithNoBackingStoreHasTheBackgroundUnderIt) {
+  const int fd = display_->SharedDevice()->fd();
+  GbmSolidBuffer a;
+  ASSERT_TRUE(a.Create(fd, kViewW, kViewH, 0xFF1E7A46u));
+  const auto planes_showing = [this] {
+    const std::vector<PlaneState> planes = ActivePlanes(card_.path);
+    int full = 0;
+    int view = 0;
+    for (const PlaneState& p : planes) {
+      full += p.crtc_w == card_.mode_w && p.crtc_h == card_.mode_h ? 1 : 0;
+      view += p.crtc_w == kViewW && p.crtc_h == kViewH ? 1 : 0;
+    }
+    return std::make_tuple(planes.size(), full, view);
+  };
+
+  ASSERT_EQ(SubmitSeq(a, 0, 1), IHS_PV_OK);
+  ASSERT_TRUE(Present());
+  auto [count, full, view] = planes_showing();
+  EXPECT_EQ(full, 1) << "no plane covers the mode under the view";
+  EXPECT_EQ(view, 1);
+  EXPECT_EQ(count, 2U);
+
+  FlutterBackingStoreConfig cfg{};
+  cfg.struct_size = sizeof(FlutterBackingStoreConfig);
+  cfg.size = FlutterSize{static_cast<double>(card_.mode_w),
+                         static_cast<double>(card_.mode_h)};
+  FlutterBackingStore bs{};
+  ASSERT_TRUE(comp_->CreateBackingStore(&cfg, &bs));
+  FlutterLayer ui{};
+  ui.struct_size = sizeof(FlutterLayer);
+  ui.type = kFlutterLayerContentTypeBackingStore;
+  ui.backing_store = &bs;
+  ui.size = cfg.size;
+  FlutterPlatformView pv{};
+  pv.struct_size = sizeof(FlutterPlatformView);
+  pv.identifier = 1;
+  FlutterLayer layer{};
+  layer.struct_size = sizeof(FlutterLayer);
+  layer.type = kFlutterLayerContentTypePlatformView;
+  layer.platform_view = &pv;
+  layer.size =
+      FlutterSize{static_cast<double>(kViewW), static_cast<double>(kViewH)};
+  const FlutterLayer* with_store[] = {&ui, &layer};
+  ASSERT_TRUE(comp_->PresentLayers(with_store, 2));
+  std::tie(count, full, view) = planes_showing();
+  EXPECT_EQ(full, 1) << "the backing store is not on a plane";
+  EXPECT_EQ(count, 2U) << "the background stayed beside the backing store";
+
+  ASSERT_TRUE(Present());
+  std::tie(count, full, view) = planes_showing();
+  EXPECT_EQ(full, 1) << "the background did not come back";
+  EXPECT_EQ(view, 1);
+  EXPECT_EQ(count, 2U);
+  comp_->CollectBackingStore(&bs);
 }
 
 TEST_F(PvHostVkmsPlanes, AFrameOnAPlaneIsReleasedWhenTheViewLeavesFirst) {

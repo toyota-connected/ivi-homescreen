@@ -675,6 +675,18 @@ class DrmCompositor : public IFlipSink {
   bool framed_{false};
   GbmBackingStore bg_store_{};
   bool bg_store_valid_{false};
+  // Create bg_store_ (mode-sized, opaque black, single-buffered) if it is not
+  // there yet. GL context current. False, logged as @p what, on failure.
+  bool EnsureBgStore(uint32_t format, const char* what);
+
+  // The scene path's bottom layer for a frame with no backing store under its
+  // platform views: bg_store_ on the primary, as the framed and direct-overlay
+  // paths have. Without it the primary showed whatever the modeset left there
+  // -- and nothing at all once the scene turns off, on its first commit, the
+  // planes it did not light, which a display that needs its primary covered
+  // refuses.
+  StoreBaton scene_bg_baton_{this, &bg_store_, nullptr};
+  FlutterLayer scene_bg_layer_{};
   uint32_t framed_primary_id_{0};
   uint32_t framed_overlay_id_{0};
   uint64_t framed_overlay_zpos_{0};
