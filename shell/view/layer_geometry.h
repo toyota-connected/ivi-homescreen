@@ -80,6 +80,16 @@ struct UvAffine {
   }
 };
 
+// @p uv for a buffer whose row 0 is the bottom row: the same placement, its
+// rows read the other way up. Layer geometry stays in the image's displayed
+// orientation; only the memory order differs.
+[[nodiscard]] inline UvAffine FlipRows(UvAffine uv) {
+  uv.b = -uv.b;
+  uv.d = -uv.d;
+  uv.ty = 1.0F - uv.ty;
+  return uv;
+}
+
 // Where destination point (s, t), normalized over the destination rect, lands
 // in the buffer, normalized over the source crop. wl_output.transform names
 // what the producer did (rotate counter-clockwise; FLIPPED mirrors around the

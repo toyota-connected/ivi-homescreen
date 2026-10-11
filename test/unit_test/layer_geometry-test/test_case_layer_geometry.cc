@@ -131,6 +131,34 @@ TEST(LayerGeometry, EveryTransformUndoesWhatTheProducerDid) {
   }
 }
 
+// A bottom-up buffer holds the same image with its rows in the other order.
+// Drawn through the flipped affine it comes back the right way up, for every
+// transform and through a crop: the flip is of memory order only, so the crop
+// still names the displayed image.
+TEST(LayerGeometry, FlipRowsReadsABottomUpBufferTheRightWayUp) {
+  constexpr int kW = 6;
+  constexpr int kH = 4;
+  const RectF crop{1, 1, 4, 2};
+  for (const BufferTransform t : kAll) {
+    SCOPED_TRACE(static_cast<uint32_t>(t));
+    const UvAffine top = UvForLayer(crop, kW, kH, t);
+    const UvAffine bottom = FlipRows(top);
+    for (int y = 0; y < kH; ++y) {
+      for (int x = 0; x < kW; ++x) {
+        const double s = (x + 0.5) / kW;
+        const double tt = (y + 0.5) / kH;
+        EXPECT_FLOAT_EQ(bottom.U(s, tt), top.U(s, tt));
+        EXPECT_NEAR(bottom.V(s, tt), 1.0F - top.V(s, tt), 1e-6F)
+            << "at destination (" << x << ", " << y << ")";
+      }
+    }
+    const UvAffine twice = FlipRows(bottom);
+    EXPECT_FLOAT_EQ(twice.b, top.b);
+    EXPECT_FLOAT_EQ(twice.d, top.d);
+    EXPECT_FLOAT_EQ(twice.ty, top.ty);
+  }
+}
+
 TEST(LayerGeometry, AxesSwapExactlyForTheQuarterTurns) {
   EXPECT_FALSE(TransformSwapsAxes(BufferTransform::kNormal));
   EXPECT_TRUE(TransformSwapsAxes(BufferTransform::k90));

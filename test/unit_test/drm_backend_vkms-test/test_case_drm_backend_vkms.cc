@@ -2065,6 +2065,55 @@ TEST_F(PvHostVkmsPlanes, AnImportGrantReportsThePlaneItIsScannedOutOn) {
       << "on a plane per KMS, but the accessor still reports 0";
 }
 
+// A bottom-up frame is never scanned out, even one that fits a plane: a plane
+// would show it upside down. It is composited instead, flipped as it is
+// sampled, and the producer is not hinted toward a format, since none would
+// put it on a plane. The same buffer top-first goes back to a plane.
+TEST_F(PvHostVkmsPlanes, ABottomUpFrameIsCompositedNotScannedOut) {
+  const int fd = display_->SharedDevice()->fd();
+  GbmSolidBuffer a;
+  GbmSolidBuffer b;
+  ASSERT_TRUE(a.Create(fd, kViewW, kViewH, 0xFF1E7A46u));
+  ASSERT_TRUE(b.Create(fd, kViewW, kViewH, 0xFF7A1E46u));
+  const auto on_plane = [this] {
+    const std::vector<PlaneState> planes = ActivePlanes(card_.path);
+    return std::any_of(planes.begin(), planes.end(), [](const PlaneState& p) {
+      return p.crtc_w == kViewW && p.crtc_h == kViewH;
+    });
+  };
+  const auto submit = [this](const GbmSolidBuffer& buffer, uint32_t buffer_id,
+                             uint8_t flags, uint64_t seq) {
+    IhsFrame f = FrameOf(buffer, buffer_id);
+    f.flags = flags;
+    IhsLayer layer = LayerOf(&f, 1);
+    int release = -1;
+    const int rc =
+        ihs_pv_submit_layers(producer_.view, &layer, 1, seq, &release);
+    if (release >= 0) {
+      ::close(release);
+    }
+    return rc;
+  };
+
+  ASSERT_EQ(submit(a, 0, IHS_PV_FRAME_BOTTOM_UP, 1), IHS_PV_OK);
+  auto got = PresentUntilReported(1);
+  ASSERT_EQ(got.size(), 1U) << "the bottom-up frame was never reported";
+  EXPECT_EQ(got[0].seq, 1U);
+  EXPECT_EQ(got[0].flags & IHS_PV_PRESENTED_ZERO_COPY, 0U)
+      << "reported zero-copy, so it was scanned out";
+  EXPECT_FALSE(on_plane()) << "a bottom-up frame is on a plane";
+  EXPECT_EQ(ihs_pv_grant_drm_plane_id(producer_.view), 0U);
+  EXPECT_TRUE(producer_.TakeHints().empty())
+      << "hinted a format for a frame no format puts on a plane";
+
+  ASSERT_EQ(submit(b, 1, 0, 2), IHS_PV_OK);
+  got = PresentUntilReported(1);
+  ASSERT_EQ(got.size(), 1U) << "the top-first frame was never reported";
+  EXPECT_EQ(got[0].seq, 2U);
+  EXPECT_NE(got[0].flags & IHS_PV_PRESENTED_ZERO_COPY, 0U);
+  EXPECT_TRUE(on_plane()) << "the top-first frame did not go back to a plane";
+}
+
 // The other half of the rule: a kind that cannot reach a plane reports 0. shm
 // is CPU-filled, so there is no plane to name whatever the compositor does.
 TEST_F(PvHostVkmsPlanes, ASoftwareGrantReportsNoPlane) {

@@ -3404,18 +3404,22 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
         }
         ICompositorSurface::Dmabuf& db = ld.dmabuf;
         // A new frame no plane scans out in its format goes to composition;
-        // tell the producer which formats would not (or that its fits).
+        // tell the producer which formats would not (or that its fits). Not a
+        // bottom-up frame: no format puts that on a plane.
         const uint32_t scan_fourcc =
             ld.geometry.opaque ? OpaqueScanoutFourcc(db.fourcc) : db.fourcc;
-        if (have_db) {
+        if (have_db && !db.bottom_up) {
           plane_formats_.Hint(surface->GetPresentationSink().get(), ld.layer_id,
                               scan_fourcc, db.modifier);
         }
         // No plane scans this buffer out, so a KMS pool gains nothing -- and
         // its import may be refused outright (vc4 takes no Broadcom UIF FB),
         // which leaves the layer with no frame at all: neither on a plane nor
-        // composited. Hand it back and composite.
-        if (have_db && !plane_formats_.Scans(scan_fourcc, db.modifier)) {
+        // composited. Hand it back and composite. A bottom-up frame goes the
+        // same way: a plane would show it upside down, and reflecting it is
+        // not something every display controller does safely.
+        if (have_db &&
+            (db.bottom_up || !plane_formats_.Scans(scan_fourcc, db.modifier))) {
           surface->OnScanoutRelease(db.buffer_id);
           CloseDmabufFds(&db);
           return PresentViaGlFallback(layers, layer_count);

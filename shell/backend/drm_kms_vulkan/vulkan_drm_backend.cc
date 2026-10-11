@@ -2531,12 +2531,21 @@ bool VulkanDrmBackend::ReconcilePlatformViewLayers(
     ICompositorSurface::Dmabuf& db = ld.dmabuf;
     const bool have_db = state == ICompositorSurface::DmabufState::kFrame;
     // A new frame no plane scans out in its format goes to the blend; tell
-    // the producer which formats would not (or that its fits).
-    if (have_db) {
+    // the producer which formats would not (or that its fits). Not a
+    // bottom-up frame: no format puts that on a plane.
+    if (have_db && !db.bottom_up) {
       plane_formats_.Hint(
           surface->GetPresentationSink().get(), ld.layer_id,
           ld.geometry.opaque ? OpaqueScanoutFourcc(db.fourcc) : db.fourcc,
           db.modifier);
+    }
+    // A bottom-up frame is never scanned out: a plane would show it upside
+    // down, and reflecting it is not something every display controller does
+    // safely. Hand the plane's copy back and let the blend sample it flipped.
+    if (have_db && db.bottom_up) {
+      surface->OnScanoutRelease(db.buffer_id);
+      CloseDmabufFds(&db);
+      return false;
     }
     void* tag = c.pv_layer_tags.Get(surface.get(), ld.layer_id);
     auto* layer = c.scene->find_by_identity_tag(tag);
@@ -3091,6 +3100,9 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
                         static_cast<uint32_t>(img.width),
                         static_cast<uint32_t>(img.height), view, &place)) {
           continue;  // entirely outside the view
+        }
+        if (!img.top_first) {
+          place.uv = FlipRows(place.uv);
         }
         auto src = reinterpret_cast<VkImage>(img.image);
         // Wait the producer's work before sampling. An implicit-sync producer

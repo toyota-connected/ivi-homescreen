@@ -501,6 +501,8 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   // The layout a vk_image layer 0 was handed over in (IhsVkImage::layout); 0
   // for an imported dma-buf.
   uint32_t current_handoff_layout{0};
+  // Row order of `current`, from its IHS_PV_FRAME_BOTTOM_UP bit.
+  bool current_bottom_up{false};
 
   // The producer's dma-buf kept alive beside the import, so a frame can reach
   // a KMS plane as well as be sampled. The importer consumes the submitted fds
@@ -517,6 +519,7 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     uint32_t height{0};
     uint32_t fourcc{0};
     uint64_t modifier{0};
+    bool bottom_up{false};
   };
   std::map<uint32_t, ScanoutBuffer> scanout;
   // Key of the buffer `current` points at, so its scanout twin can be found.
@@ -731,6 +734,7 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     uint64_t current_frame{0};
     uint32_t layout{VK_IMAGE_LAYOUT_UNDEFINED};
     uint32_t handoff_layout{0};  // as current_handoff_layout
+    bool bottom_up{false};       // as current_bottom_up
     int acquire_fd{-1};  // taken by the compositor, like pending_acquire_fd
 #endif
 #if IVI_HAVE_EGL
@@ -907,6 +911,7 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
       out.geometry = geom0;
       out.frame = current_frame;
       out.handoff_layout = current_handoff_layout;
+      out.top_first = !current_bottom_up;
       if (img != nullptr) {
         ShmSampledLocked(current_buffer_id);
       }
@@ -915,6 +920,7 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
       out.geometry = x->geom;
       out.frame = x->current_frame;
       out.handoff_layout = x->handoff_layout;
+      out.top_first = !x->bottom_up;
     }
     if (img == nullptr || img->image == VK_NULL_HANDLE) {
       return out;
@@ -1148,6 +1154,7 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
       out->height = sb.height;
       out->fourcc = sb.fourcc;
       out->modifier = sb.modifier;
+      out->bottom_up = sb.bottom_up;
       out->plane_count = sb.plane_count;
       for (uint32_t i = 0; i < sb.plane_count; ++i) {
         out->fd[i] = duped[i];
@@ -1217,6 +1224,7 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     }
     out->fourcc = f.format.fourcc;
     out->modifier = f.format.modifier;
+    out->bottom_up = (f.flags & IHS_PV_FRAME_BOTTOM_UP) != 0;
     out->color_space = f.color_space;  // YUV colorimetry for the plane CSC
     out->color_range = f.color_range;
     // HDR metadata is not carried per-frame on the Dmabuf: the DRM scene path
@@ -1882,6 +1890,7 @@ bool DupForScanout(const IhsFrame& frame, IhsPluginView::ScanoutBuffer* sb) {
   sb->height = frame.height;
   sb->fourcc = frame.format.fourcc;
   sb->modifier = frame.format.modifier;
+  sb->bottom_up = (frame.flags & IHS_PV_FRAME_BOTTOM_UP) != 0;
   bool ok = sb->plane_count > 0;
   for (uint32_t pi = 0; pi < sb->plane_count; ++pi) {
     sb->offset[pi] = frame.plane_offset[pi];
@@ -3100,6 +3109,7 @@ void ApplyLayerListLocked(IhsPluginView* v,
         x.current = img;
         x.current_buffer_id = es.frame.buffer_id;
         x.current_frame = v->submit_seq;
+        x.bottom_up = (es.frame.flags & IHS_PV_FRAME_BOTTOM_UP) != 0;
         x.layout = VK_IMAGE_LAYOUT_GENERAL;
         x.handoff_layout = es.has_vk_image ? es.vk_image.layout : 0;
         x.geom = es.geom;
@@ -3340,6 +3350,7 @@ int SubmitFrame0(void* user_data,
     v->current = img;
     v->current_buffer_id = frame->buffer_id;
     v->current_frame = v->submit_seq;
+    v->current_bottom_up = (frame->flags & IHS_PV_FRAME_BOTTOM_UP) != 0;
     v->current_buffer_valid = false;  // no dma-buf, so never on a plane
   } else if (it != v->buffers.end() && it->second.owns_image &&
              it->second.width == frame->width &&
@@ -3352,6 +3363,7 @@ int SubmitFrame0(void* user_data,
     v->current = &it->second;
     v->current_buffer_id = frame->buffer_id;
     v->current_frame = v->submit_seq;
+    v->current_bottom_up = (frame->flags & IHS_PV_FRAME_BOTTOM_UP) != 0;
     v->current_buffer_valid = true;
   } else {
     // New ring id, or the plugin re-created this slot at a different size (a
@@ -3400,6 +3412,7 @@ int SubmitFrame0(void* user_data,
     v->current = &pos->second;
     v->current_buffer_id = frame->buffer_id;
     v->current_frame = v->submit_seq;
+    v->current_bottom_up = (frame->flags & IHS_PV_FRAME_BOTTOM_UP) != 0;
     v->current_buffer_valid = scanout_ok;
     // Synthesised ids never repeat, so every earlier entry is dead. Retire them
     // (the reap margin covers a compositor present still binding one) so the

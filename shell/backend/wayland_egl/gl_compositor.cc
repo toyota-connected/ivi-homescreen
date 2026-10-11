@@ -585,9 +585,7 @@ size_t GlCompositor::CompositeSurfaceLayers(
     // UvAffine counts rows from the buffer's first row in memory. A texture
     // stored bottom row first (a GL render target) has that row at v = 1.
     if (!t.top_first) {
-      p.uv.b = -p.uv.b;
-      p.uv.d = -p.uv.d;
-      p.uv.ty = 1.0f - p.uv.ty;
+      p.uv = FlipRows(p.uv);
     }
     GLint gl_y = fb_height - p.dst.y - p.dst.h;
     if (target_top_first) {

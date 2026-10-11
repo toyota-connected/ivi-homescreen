@@ -871,8 +871,13 @@ typedef enum IhsFrameFlags {
    * the texture flipped, which costs nothing it was not already doing for the
    * opposite case.
    *
-   * Only the import path honors it -- a frame that reaches a DRM plane is
-   * scanned out by the display controller, which has no such control.
+   * From 1.22 every backend honors it, Vulkan included. A display controller
+   * cannot flip a plane on every target, so a frame with this bit is never
+   * scanned out: it is always composited, even when it would fit a plane and
+   * the grant allows one. A producer that wants scanout renders top-first and
+   * leaves the bit clear. Before 1.22 only the GL import path honored it: a
+   * Vulkan backend showed such a frame upside down, and a frame on a plane was
+   * scanned out as it was, so check the ABI minor before setting it.
    */
   IHS_PV_FRAME_BOTTOM_UP = 1u << 0
 } IhsFrameFlags;
