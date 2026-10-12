@@ -67,14 +67,6 @@ struct BackendVulkanContext {
   void* device;           // VkDevice
   void* queue;            // VkQueue (externally synchronized — see note below)
   uint32_t queue_family_index;
-  // A second queue from the same family, for a platform-view producer to
-  // submit on. The engine, the backend and the plugin otherwise share @queue:
-  // the embedder Vulkan API takes exactly one VkQueue, so the engine and the
-  // backend must, but a plugin need not, and on its own queue it neither takes
-  // the shared mutex nor queues behind a composite. Null when the family has
-  // only one queue, or on a backend that does not provide one.
-  void* plugin_queue;  // VkQueue
-  uint32_t plugin_queue_index;
   void* get_instance_proc_addr;  // PFN_vkGetInstanceProcAddr (shared loader)
   // The device extensions the backend enabled, so a plugin can gate optional
   // paths (e.g. sync_file semaphore export for explicit-sync acquire) on what

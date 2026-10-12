@@ -493,24 +493,6 @@ typedef struct IhsVulkanContext {
      mismatched VMA version is undefined; an out-of-tree plugin that cannot
      guarantee this should allocate manually. */
   void* vma_allocator; /* VmaAllocator */
-  /* A second graphics queue, yours alone, from @queue_family_index's family.
-     NULL when the family has one queue or the backend provides none; fall back
-     to @queue then, with the interposed loader as described above.
-
-     Submitting here instead of on @queue keeps a producer out of the mutex the
-     engine and the backend serialize on, and lets the driver schedule the two
-     independently. It does not make a producer's submits thread-safe among
-     themselves: the queue is yours, so synchronizing host access to it is too.
-
-     Not a priority mechanism. VkDeviceCreateInfo requires a unique
-     queueFamilyIndex per VkDeviceQueueCreateInfo, so queues from one family on
-     one device cannot be given different global priorities; what differs here
-     is only the in-family float priority, which is a hint. A producer wanting
-     a genuinely lower-priority queue needs its own device. */
-  void* plugin_queue; /* VkQueue */
-  /* Meaningful only when @plugin_queue is non-NULL. Zero otherwise, which is
-     also a valid queue index, so gate on the handle and not on this. */
-  uint32_t plugin_queue_index;
 } IhsVulkanContext;
 
 /*

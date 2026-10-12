@@ -2739,14 +2739,6 @@ int HostVulkanContext(void* user_data, IhsVulkanContext* out) {
   out->instance_extensions = vk.instance_extensions;
   out->instance_extension_count = vk.instance_extension_count;
   // No queue lock or VMA allocator yet: both stay null.
-  // Added after the struct shipped, so only where the caller's struct reaches
-  // them -- a plugin built against the older header sized its own struct
-  // smaller and writing past that is someone else's memory.
-  if (out->struct_size >= offsetof(IhsVulkanContext, plugin_queue_index) +
-                              sizeof(out->plugin_queue_index)) {
-    out->plugin_queue = vk.plugin_queue;
-    out->plugin_queue_index = vk.plugin_queue_index;
-  }
   return IHS_PV_OK;
 }
 
