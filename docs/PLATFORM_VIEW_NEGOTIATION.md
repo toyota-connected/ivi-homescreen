@@ -125,21 +125,35 @@ point waits a whole refresh more. `0` means the shell cannot say:
 | `drm-kms-egl` | the repaint window; `0` on the GL fallback at `--drm-pipeline-depth=2` |
 | Wayland, headless | `0`: the compositor or the consumer latches on its own schedule |
 
-A producer that paces its own frames can aim to submit just before it:
+A producer that paces its own frames can aim to have each frame ready just
+before it. Ready means submitted, with its acquire fence signaled: the composite
+waits on that fence, so a frame submitted in time whose GPU work runs past the
+latch still misses the refresh.
 
 ```c
 /* From IhsPvCallbacks::presented: ust_ns of the last frame shown, and
- * refresh_ns. */
+ * refresh_ns. render_estimate_ns covers render start to the GPU being done. */
 uint64_t next_vblank = ust_ns + refresh_ns;
 while (next_vblank <= now_ns) next_vblank += refresh_ns;
-uint64_t submit_by = next_vblank - caps.latch_lead_ns;
-uint64_t render_at = submit_by - render_estimate_ns - margin_ns;
+uint64_t ready_by = next_vblank - caps.latch_lead_ns;
+uint64_t render_at = ready_by - render_estimate_ns - margin_ns;
+/* Too late for this refresh: aim at the next. */
+while (render_at < now_ns) {
+  ready_by += refresh_ns;
+  render_at += refresh_ns;
+}
 ```
 
 A producer that renders right after each flip instead lands its frame at
 whatever phase that leaves against the latch. Then every frame either makes the
-next vblank or waits a refresh, run after run. Read the field again after a
-renegotiation: like the rest of the capabilities, it can change with the output.
+next vblank or waits a refresh, run after run.
+
+The value can change during a session without a renegotiation: a backend that
+falls back from planes or from its plane compositor changes when it takes
+frames. Query it again now and then (once a second costs nothing measurable),
+as well as after a renegotiation. It describes the backend's primary output; a
+view on another output of the same backend may be taken on that output's own
+schedule.
 
 ## Negotiation
 

@@ -298,9 +298,13 @@ typedef enum IhsPvResult {
  * newest submitted frame for the next refresh, or 0 when it cannot say (a
  * Wayland compositor latches on its own schedule). A frame submitted later
  * than that waits for the refresh after. A producer that paces its own frames
- * can aim to submit just before it: the next vblank comes from
- * IhsPvCallbacks::presented's @ust_ns and @refresh_ns. Added in 1.23; written
- * only when @struct_size covers it.
+ * can aim to have each frame ready just before it -- submitted, with its
+ * acquire fence signaled, since the composite waits on that fence. The next
+ * vblank comes from IhsPvCallbacks::presented's @ust_ns and @refresh_ns. The
+ * value can change during a session without a renegotiation (a backend that
+ * falls back from planes takes frames differently), so query it again now and
+ * then. It describes the backend's primary output. Added in 1.23; written only
+ * when @struct_size covers it.
  */
 typedef struct IhsPvCapabilities {
   size_t struct_size;

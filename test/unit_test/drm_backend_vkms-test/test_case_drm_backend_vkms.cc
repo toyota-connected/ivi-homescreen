@@ -3255,6 +3255,14 @@ TEST_F(DrmBackendVkmsRefreshRate, A60HzModeStillReports60) {
 // before any of it runs, and a compositor failure that logs nothing is very
 // hard to tell apart from one that did not happen. IHS_LOG_LEVEL=debug shows
 // the per-layer decisions PresentFramed makes.
+// The EGL backend reports its repaint window to producers too.
+TEST_F(PvHostVkms, CapabilitiesReportWhenTheShellTakesAFrame) {
+  IhsPvCapabilities caps{};
+  caps.struct_size = sizeof(caps);
+  ASSERT_EQ(ihs_pv_query_capabilities(&caps), IHS_PV_OK);
+  EXPECT_EQ(caps.latch_lead_ns, 5'000'000U) << "the default repaint window";
+}
+
 int main(int argc, char** argv) {
   IHS_LOGGING_START("TEST", "drm_backend vkms test");
 #if IHS_TEST_HAVE_CAPTURE
@@ -3265,12 +3273,4 @@ int main(int argc, char** argv) {
 #endif
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
-}
-
-// The EGL backend reports its repaint window to producers too.
-TEST_F(PvHostVkms, CapabilitiesReportWhenTheShellTakesAFrame) {
-  IhsPvCapabilities caps{};
-  caps.struct_size = sizeof(caps);
-  ASSERT_EQ(ihs_pv_query_capabilities(&caps), IHS_PV_OK);
-  EXPECT_EQ(caps.latch_lead_ns, 5'000'000U) << "the default repaint window";
 }
