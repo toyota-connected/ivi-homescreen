@@ -383,7 +383,9 @@ flip as described above. `IVI_DRM_REPAINT_WINDOW_US` sets the margin (default
 
 The window adapts. A commit whose flip misses the vblank it was meant for (the
 composite, or a fence it waits on, needed more of the refresh) widens the window
-by 1 ms, up to half a refresh. Flips on time ease it back toward its base over
+by 1 ms, up to half a refresh. Only presents that arrived before their window
+opened are judged: one that arrives later commits at once, and a wider window
+would not have helped it. Flips on time ease it back toward its base over
 a few seconds. The base is `IVI_DRM_REPAINT_WINDOW_US`, and
 `IVI_DRM_REPAINT_WINDOW_ADAPT=0` keeps the window fixed at it. Producers read
 the current window as `IhsPvCapabilities::latch_lead_ns`.

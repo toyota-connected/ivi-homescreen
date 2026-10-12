@@ -330,7 +330,7 @@ class DrmCompositor : public IFlipSink {
   // Then hold until the repaint window before the next vblank opens, so a
   // producer buffer that lands meanwhile makes that vblank. See
   // backend/common/repaint_window.h.
-  void WaitForRepaintWindow() const;
+  void WaitForRepaintWindow();
 
   // Fire the platform-view scanout releases held since the last present, now
   // that WaitForPendingFlip has confirmed their displacing flip completed.
@@ -767,7 +767,7 @@ class DrmCompositor : public IFlipSink {
   // thread reads; 0 = none), so the flip can tell whether its commit missed.
   uint64_t repaint_window_base_ns_{0};
   bool repaint_window_adapts_{true};
-  mutable std::atomic<uint64_t> commit_target_ns_{0};
+  std::atomic<uint64_t> commit_target_ns_{0};
   // After a flip shown at @shown_ns: widen or ease the window.
   void AdaptRepaintWindow(uint64_t shown_ns);
   // LatchLeadNs(), worked out on the raster thread from state only it touches.

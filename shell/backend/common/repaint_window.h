@@ -80,6 +80,36 @@ inline constexpr uint64_t kDefaultRepaintWindowNs = 5'000'000;
   return target_ns != 0 && shown_ns > target_ns + period_ns / 2;
 }
 
+// The vblank a present that reached the window at @arrival_ns is judged
+// against, or 0 to leave it unjudged. Only a present that arrived before its
+// window opened is judged: one that arrived later commits at once, and a wider
+// window -- which only holds early presents longer -- would not have helped it.
+[[nodiscard]] constexpr uint64_t JudgedTargetNs(const uint64_t arrival_ns,
+                                                const uint64_t last_flip_ns,
+                                                const uint64_t period_ns,
+                                                const uint64_t window_ns) {
+  const uint64_t target = TargetVblankNs(arrival_ns, last_flip_ns, period_ns);
+  if (target == 0 || window_ns == 0 || window_ns >= target) {
+    return 0;
+  }
+  return arrival_ns <= target - window_ns ? target : 0;
+}
+
+// What a flip shown at @shown_ns says about the commit judged against
+// @target_ns: nothing (no target, or one so old that this flip is not its), on
+// time, or missed.
+enum class FlipVerdict { kUnjudged, kOnTime, kMissed };
+
+[[nodiscard]] constexpr FlipVerdict JudgeFlip(const uint64_t target_ns,
+                                              const uint64_t shown_ns,
+                                              const uint64_t period_ns) {
+  if (target_ns == 0 || shown_ns > target_ns + 4 * period_ns) {
+    return FlipVerdict::kUnjudged;
+  }
+  return MissedVblank(target_ns, shown_ns, period_ns) ? FlipVerdict::kMissed
+                                                      : FlipVerdict::kOnTime;
+}
+
 // The window after a flip. A commit that missed its vblank widens it by a
 // millisecond, up to half a refresh: the work behind the commit (the
 // composite, or fences it waits on) needed more of the refresh than the

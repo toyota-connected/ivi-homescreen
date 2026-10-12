@@ -140,3 +140,29 @@ TEST(RepaintWindow, AdaptingIsOnUnlessTheEnvironmentSaysZero) {
   EXPECT_TRUE(RepaintWindowAdaptsFromEnv());
   unsetenv(kVar);
 }
+
+TEST(RepaintWindow, OnlyAPresentThatWaitedForItsWindowIsJudged) {
+  // Arrived 1 ms after the flip: it waits for the window, and is judged.
+  EXPECT_EQ(JudgedTargetNs(kFlip + kMs, kFlip, kPeriod, kWindow),
+            kFlip + kPeriod);
+  // Arrived just as the window opened: still on time to be judged.
+  EXPECT_EQ(JudgedTargetNs(kFlip + kPeriod - kWindow, kFlip, kPeriod, kWindow),
+            kFlip + kPeriod);
+  // Arrived inside the window: it commits at once, and a wider window would
+  // not have helped it.
+  EXPECT_EQ(JudgedTargetNs(kFlip + kPeriod - kMs, kFlip, kPeriod, kWindow), 0U);
+  EXPECT_EQ(JudgedTargetNs(kFlip + kMs, kFlip, kPeriod, 0), 0U) << "off";
+  EXPECT_EQ(JudgedTargetNs(kFlip + kMs, 0, kPeriod, kWindow), 0U)
+      << "no flip yet";
+}
+
+TEST(RepaintWindow, AFlipIsJudgedAgainstItsOwnTargetOnly) {
+  const uint64_t target = kFlip + kPeriod;
+  EXPECT_EQ(JudgeFlip(0, target, kPeriod), FlipVerdict::kUnjudged);
+  EXPECT_EQ(JudgeFlip(target, target, kPeriod), FlipVerdict::kOnTime);
+  EXPECT_EQ(JudgeFlip(target, target + kPeriod, kPeriod), FlipVerdict::kMissed);
+  // A target left behind by a present that never committed is not this
+  // flip's.
+  EXPECT_EQ(JudgeFlip(target, target + 5 * kPeriod, kPeriod),
+            FlipVerdict::kUnjudged);
+}

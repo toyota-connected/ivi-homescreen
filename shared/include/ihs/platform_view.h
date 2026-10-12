@@ -301,10 +301,13 @@ typedef enum IhsPvResult {
  * can aim to have each frame ready just before it -- submitted, with its
  * acquire fence signaled, since the composite waits on that fence. The next
  * vblank comes from IhsPvCallbacks::presented's @ust_ns and @refresh_ns. The
- * value can change during a session without a renegotiation (a backend that
- * falls back from planes takes frames differently), so query it again now and
- * then. It describes the backend's primary output. Added in 1.23; written only
- * when @struct_size covers it.
+ * value can change during a session without a renegotiation (the repaint
+ * window adapts to missed vblanks, and a backend that falls back from planes
+ * takes frames differently), so query it again now and then -- on the platform
+ * thread, like any ihs_pv_query_capabilities call: a producer rendering on its
+ * own thread posts the query with ihs_pv_post_platform_task and hands the
+ * value across. It describes the backend's primary output. Added in 1.23;
+ * written only when @struct_size covers it.
  */
 typedef struct IhsPvCapabilities {
   size_t struct_size;
