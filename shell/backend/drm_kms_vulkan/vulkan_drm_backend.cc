@@ -4010,12 +4010,35 @@ bool VulkanDrmBackend::CreateLogicalDevice(std::string& refusal_reason) {
     features_chain = &sync2_enable;
   }
 
-  constexpr float priority = 1.0f;
+  // Two queues where the family has them: one for the engine and this backend
+  // (the embedder API takes exactly one VkQueue, so those two must share), and
+  // one handed to a platform-view producer so its submits neither take the
+  // shared mutex nor queue behind a composite.
+  //
+  // One VkDeviceQueueCreateInfo, not two: VkDeviceCreateInfo requires a unique
+  // queueFamilyIndex per element, so queues from one family cannot be given
+  // different global priorities here. The float priorities below are the only
+  // differentiation available and are a hint to the driver.
+  uint32_t family_queue_count = 1;
+  {
+    uint32_t n = 0;
+    d().vkGetPhysicalDeviceQueueFamilyProperties(physical_device_, &n, nullptr);
+    std::vector<VkQueueFamilyProperties> qfs(n);
+    if (n > 0) {
+      d().vkGetPhysicalDeviceQueueFamilyProperties(physical_device_, &n,
+                                                   qfs.data());
+      if (graphics_queue_family_ < n) {
+        family_queue_count = qfs[graphics_queue_family_].queueCount;
+      }
+    }
+  }
+  const uint32_t queue_count = family_queue_count >= 2 ? 2u : 1u;
+  constexpr float priorities[] = {1.0f, 0.5f};
   VkDeviceQueueCreateInfo queue_info{};
   queue_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
   queue_info.queueFamilyIndex = graphics_queue_family_;
-  queue_info.queueCount = 1;
-  queue_info.pQueuePriorities = &priority;
+  queue_info.queueCount = queue_count;
+  queue_info.pQueuePriorities = priorities;
 
   VkPhysicalDeviceFeatures device_features{};
   // A platform-view engine that adopts this device creates anisotropic samplers
@@ -4111,6 +4134,25 @@ bool VulkanDrmBackend::CreateLogicalDevice(std::string& refusal_reason) {
   // an unregistered queue passes through unlocked and serializes nothing.
   ihs::vulkan::QueueInterposer::RegisterQueue(device_, graphics_queue_,
                                               &queue_mutex_);
+  if (queue_count >= 2) {
+    d().vkGetDeviceQueue(device_, graphics_queue_family_, 1, &plugin_queue_);
+    // Its own mutex, not the shared one: a producer on this queue serializes
+    // with nothing on the other. Registered all the same, because the
+    // interposed vkDeviceWaitIdle locks every queue registered for the device
+    // and the engine idles the device at shutdown while a producer may still
+    // be submitting.
+    ihs::vulkan::QueueInterposer::RegisterQueue(device_, plugin_queue_,
+                                                &plugin_queue_mutex_);
+    ihs::log::info(
+        "[VulkanDrmBackend] platform-view producer queue: family {} index 1 of "
+        "{} queue(s)",
+        graphics_queue_family_, family_queue_count);
+  } else {
+    ihs::log::info(
+        "[VulkanDrmBackend] graphics family {} has one queue; producers share "
+        "the engine's",
+        graphics_queue_family_);
+  }
   return true;
 }
 
@@ -4250,6 +4292,8 @@ bool VulkanDrmBackend::GetVulkanContext(BackendVulkanContext* out) const {
   out->device = device_;
   out->queue = graphics_queue_;
   out->queue_family_index = graphics_queue_family_;
+  out->plugin_queue = plugin_queue_;
+  out->plugin_queue_index = plugin_queue_ != VK_NULL_HANDLE ? 1u : 0u;
   // The INTERPOSED loader (not the raw d().vkGetInstanceProcAddr): a plugin
   // reusing the shared queue must resolve vkQueue* through the locking
   // trampolines, or its submits race the engine's and this backend's on the
