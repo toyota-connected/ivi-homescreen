@@ -82,6 +82,12 @@ static uint32_t UsableApiVersion(VkPhysicalDevice physical_device) {
 #define S2(x) S1(x)
 #define LOCATION __FILE__ " : " S2(__LINE__)
 
+namespace {
+// How long one swapchain acquire may wait for the compositor to release an
+// image.
+constexpr uint64_t kAcquireTimeoutNs = 1'000'000'000;
+}  // namespace
+
 #define CHECK_VK_RESULT(x)                                         \
   do {                                                             \
     vk::detail::resultCheck(static_cast<vk::Result>(x), LOCATION); \
@@ -1271,9 +1277,23 @@ FlutterVulkanImage WaylandVulkanBackend::GetNextImageCallback(
     b->InitializeSwapChain();
   }
 
-  CHECK_VK_RESULT(d().vkAcquireNextImageKHR(
-      b->device_, b->swapchain_, 1'000'000'000,  // timeout (ns) 1000ms
-      nullptr, b->image_ready_fence_, &b->last_image_index_));
+  // The engine needs an image back, so keep asking. On a failed acquire the
+  // fence is never signaled, and waiting on it would hang this thread for
+  // good; a compositor that holds every image releases one eventually.
+  for (;;) {
+    const VkResult acquired = d().vkAcquireNextImageKHR(
+        b->device_, b->swapchain_, kAcquireTimeoutNs, VK_NULL_HANDLE,
+        b->image_ready_fence_, &b->last_image_index_);
+    if (acquired == VK_SUCCESS || acquired == VK_SUBOPTIMAL_KHR) {
+      break;
+    }
+    b->NoteAcquireFailure(acquired);
+    if (acquired == VK_ERROR_OUT_OF_DATE_KHR) {
+      b->InitializeSwapChain();
+    } else if (acquired != VK_TIMEOUT && acquired != VK_NOT_READY) {
+      CHECK_VK_RESULT(acquired);
+    }
+  }
 
   CHECK_VK_RESULT(d().vkWaitForFences(b->device_, 1, &b->image_ready_fence_,
                                       true, UINT64_MAX));
@@ -1661,6 +1681,18 @@ uint64_t WaylandVulkanBackend::RequestPresentationFeedback() {
     return vsync_->RequestFeedback();
   }
   return 0;
+}
+
+void WaylandVulkanBackend::NoteAcquireFailure(const VkResult result) {
+  const uint64_t n = ++acquire_failures_;
+  // The first, then every 60th: a compositor holding every image fails each
+  // frame for as long as it does.
+  if (n == 1 || n % 60 == 0) {
+    ihs::log::warn(
+        "[WaylandVulkanBackend] vkAcquireNextImageKHR: {} ({} so far); the "
+        "compositor has released no image, frame skipped",
+        vk::to_string(static_cast<vk::Result>(result)), n);
+  }
 }
 
 void WaylandVulkanBackend::FinishPresentation(const uint64_t serial,
@@ -2268,12 +2300,25 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
                                               m_compositor_slots_.size()];
   CHECK_VK_RESULT(
       d().vkWaitForFences(device_, 1, &slot.in_flight, VK_TRUE, UINT64_MAX));
-  CHECK_VK_RESULT(d().vkResetFences(device_, 1, &slot.in_flight));
 
+  // No image means no frame. Submitting anyway would wait on an acquire
+  // semaphore nothing will signal: the driver blocks inside vkQueueSubmit,
+  // under the queue lock every producer on this device submits through, and
+  // the whole process stops. The slot's fence stays signaled, so the next
+  // frame can use the slot.
   uint32_t image_index = 0;
-  CHECK_VK_RESULT(d().vkAcquireNextImageKHR(device_, swapchain_, 1'000'000'000,
-                                            slot.image_available,
-                                            VK_NULL_HANDLE, &image_index));
+  const VkResult acquired = d().vkAcquireNextImageKHR(
+      device_, swapchain_, kAcquireTimeoutNs, slot.image_available,
+      VK_NULL_HANDLE, &image_index);
+  if (acquired == VK_SUBOPTIMAL_KHR || acquired == VK_ERROR_OUT_OF_DATE_KHR) {
+    resize_pending_ = true;
+  }
+  if (acquired != VK_SUCCESS && acquired != VK_SUBOPTIMAL_KHR) {
+    NoteAcquireFailure(acquired);
+    FinishPresentation(0, /*committed=*/false);
+    return false;
+  }
+  CHECK_VK_RESULT(d().vkResetFences(device_, 1, &slot.in_flight));
   last_image_index_ = image_index;
 
   VkImage dst = swapchain_images_[image_index];

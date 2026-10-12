@@ -811,4 +811,8 @@ class WaylandVulkanBackend final : public Backend {
   // The frame was committed (or not, @p committed false) under feedback
   // @p serial.
   void FinishPresentation(uint64_t serial, bool committed);
+  // A swapchain acquire that returned no image: counted, and logged now and
+  // then. Raster thread only.
+  void NoteAcquireFailure(VkResult result);
+  uint64_t acquire_failures_{0};
 };
