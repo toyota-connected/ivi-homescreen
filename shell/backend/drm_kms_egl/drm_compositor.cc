@@ -367,12 +367,14 @@ DrmCompositor::DrmCompositor(DrmBackend* backend, DrmOutputContext out)
                                 : nullptr) {
   refresh_ns_ = RefreshPeriodNs(out_.mode().clock, out_.mode().htotal,
                                 out_.mode().vtotal);
-  repaint_window_ns_ = RepaintWindowNsFromEnv(kDefaultRepaintWindowNs);
+  repaint_window_base_ns_ = RepaintWindowNsFromEnv(kDefaultRepaintWindowNs);
+  repaint_window_adapts_ = RepaintWindowAdaptsFromEnv();
+  repaint_window_ns_.store(repaint_window_base_ns_, std::memory_order_relaxed);
   // Before the first present, by the only path known yet: the pipeline depth.
   latch_lead_ns_.store(backend_->cfg_.pipeline_depth >= 2
                            ? 0U
                            : static_cast<uint32_t>(std::min<uint64_t>(
-                                 repaint_window_ns_, UINT32_MAX)),
+                                 repaint_window_base_ns_, UINT32_MAX)),
                        std::memory_order_release);
 }
 
@@ -1452,6 +1454,7 @@ void DrmCompositor::OnFlipEvent(const unsigned int sequence,
   // present, and it waited for good.
   std::vector<DeferredScanoutRelease> off_screen =
       TakeDeferredScanoutReleases();
+  AdaptRepaintWindow(FlipTime(sequence, tv_sec, tv_usec).ust_ns);
   // Before the flag clears: a present waiting on it reads the vblank next.
   last_flip_ns_.store(FlipTime(sequence, tv_sec, tv_usec).ust_ns,
                       std::memory_order_release);
@@ -1483,6 +1486,7 @@ void DrmCompositor::OnLegacyFlipPresented(const uint64_t serial,
                                           const unsigned int tv_sec,
                                           const unsigned int tv_usec) {
   const PresentationTime shown = FlipTime(sequence, tv_sec, tv_usec);
+  AdaptRepaintWindow(shown.ust_ns);
   last_flip_ns_.store(shown.ust_ns, std::memory_order_release);
   presentation_.Presented(serial, shown);
 }
@@ -1743,19 +1747,41 @@ bool DrmCompositor::WaitForPendingFlip() const {
 void DrmCompositor::PublishLatchLead() {
   const bool waits = !((fallback_latched_ || !planes_available_) &&
                        backend_->cfg_.pipeline_depth >= 2);
-  latch_lead_ns_.store(waits ? static_cast<uint32_t>(std::min<uint64_t>(
-                                   repaint_window_ns_, UINT32_MAX))
-                             : 0U,
-                       std::memory_order_release);
+  latch_lead_ns_.store(
+      waits
+          ? static_cast<uint32_t>(std::min<uint64_t>(
+                repaint_window_ns_.load(std::memory_order_relaxed), UINT32_MAX))
+          : 0U,
+      std::memory_order_release);
+}
+
+void DrmCompositor::AdaptRepaintWindow(const uint64_t shown_ns) {
+  const uint64_t target = commit_target_ns_.exchange(0);
+  // No commit to judge, or one so old that this flip is not its: a present
+  // that never committed leaves its target behind.
+  if (target == 0 || !repaint_window_adapts_ ||
+      shown_ns > target + 4ULL * refresh_ns_) {
+    return;
+  }
+  repaint_window_ns_.store(
+      AdaptRepaintWindowNs(repaint_window_ns_.load(std::memory_order_relaxed),
+                           repaint_window_base_ns_, refresh_ns_,
+                           MissedVblank(target, shown_ns, refresh_ns_)),
+      std::memory_order_relaxed);
 }
 
 void DrmCompositor::WaitForRepaintWindow() const {
+  const uint64_t last_flip = last_flip_ns_.load(std::memory_order_acquire);
   const uint64_t delay =
-      RepaintDelayNs(NsNow(), last_flip_ns_.load(std::memory_order_acquire),
-                     refresh_ns_, repaint_window_ns_);
+      RepaintDelayNs(NsNow(), last_flip, refresh_ns_,
+                     repaint_window_ns_.load(std::memory_order_relaxed));
   if (delay > 0) {
     std::this_thread::sleep_for(std::chrono::nanoseconds(delay));
   }
+  // Every present path latches and commits straight after this: the vblank it
+  // is meant for, for its flip to judge.
+  commit_target_ns_.store(TargetVblankNs(NsNow(), last_flip, refresh_ns_),
+                          std::memory_order_release);
 }
 
 // ─── GL compositing helpers ──────────────────────────────────────────────

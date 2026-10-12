@@ -371,15 +371,24 @@ Two things to know before turning it on:
 
 #### Repaint window
 
-On top of the flip wait, every present path waits until a fixed margin before
-the next vblank, counted from the last flip. Only then does it latch platform
+On top of the flip wait, every present path waits until a margin before the
+next vblank, counted from the last flip. Only then does it latch platform
 views' newest buffers and commit (or, on the GL fallback, composite and swap).
 The flip lands on the same vblank either way. A producer buffer submitted just
 after the flip makes that vblank instead of the next.
 
 The GL fallback waits only at depth 1; at depth 2 its frame queues behind the
 flip as described above. `IVI_DRM_REPAINT_WINDOW_US` sets the margin (default
-5000; `0` turns it off). With `IVI_DRM_PROFILE`, `wait` covers the flip and the
+5000; `0` turns it off).
+
+The window adapts. A commit whose flip misses the vblank it was meant for (the
+composite, or a fence it waits on, needed more of the refresh) widens the window
+by 1 ms, up to half a refresh. Flips on time ease it back toward its base over
+a few seconds. The base is `IVI_DRM_REPAINT_WINDOW_US`, and
+`IVI_DRM_REPAINT_WINDOW_ADAPT=0` keeps the window fixed at it. Producers read
+the current window as `IhsPvCapabilities::latch_lead_ns`.
+
+With `IVI_DRM_PROFILE`, `wait` covers the flip and the
 window together. Vsync requests are also paced to at most one per refresh; see
 [`shell/vsync`](../../vsync/README.md#pacing-to-the-vblank).
 
@@ -482,7 +491,8 @@ Pacing and scheduling are separate problems and both have to be right — see
 | `IVI_DRM_CAPTURE` | (off) | `1` arms the SIGUSR1 snapshot handler |
 | `IVI_DRM_VSYNC` | (on) | `0` falls back from Flutter `vsync_callback` (PAGE_FLIP_EVENT-locked) to the engine's internal wall-clock scheduler |
 | `IVI_VSYNC_PACE` | (on) | `0` answers every vsync request at once rather than at most one per refresh |
-| `IVI_DRM_REPAINT_WINDOW_US` | `5000` | How far before the vblank a present latches and commits, in microseconds; `0` commits as soon as Flutter presents. See [Repaint window](#repaint-window) |
+| `IVI_DRM_REPAINT_WINDOW_US` | `5000` | How far before the vblank a present latches and commits, in microseconds (the floor when it adapts); `0` commits as soon as Flutter presents. See [Repaint window](#repaint-window) |
+| `IVI_DRM_REPAINT_WINDOW_ADAPT` | (on) | `0` keeps the repaint window fixed instead of widening it after a missed vblank |
 | `IVI_DRM_RT` | (off) | Set to anything non-empty to enable per-thread priority elevation via Flutter's `thread_priority_setter` — rasterizer gets `SCHED_FIFO` prio 2, UI thread `SCHED_FIFO` prio 1, background tasks `SCHED_BATCH`. The deliberately low prios let amdgpu / ksoftirqd kthreads preempt the rasterizer during `glFinish` (bumping to prio 10 regressed cadence from 98% → 41% on this hardware). The platform task runner thread (asio flip monitor) is covered too. DrmSession / DrmSeat stay at default. |
 | `IVI_DRM_RASTER_DRAIN` | (on) | `0` stops the rasterizer draining its own `PAGE_FLIP_EVENT` in `WaitForPendingFlip`; it then waits on the flag in slices and the card's reader thread delivers the completion. The drain exists because that reader is unprioritized and can be CPU-starved under heavy raster load, leaving `flip_pending_` set so the next `drmModePageFlip` returns `EBUSY`. Turning it off also makes `stage_cursor=auto` revert to staging on nvidia-drm. |
 | `IVI_DRM_PRESENT_TRACE` | unset | Log the present-phase split (`wait_flip` / `swap` / `rest`) every 60th frame; how you size `--drm-pipeline-depth`. Prints nothing while the plane compositor drives scanout, because the traced path does not run |

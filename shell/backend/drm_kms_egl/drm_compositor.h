@@ -761,7 +761,15 @@ class DrmCompositor : public IFlipSink {
   // how far before the next vblank a present latches and commits (0 = at
   // once).
   std::atomic<uint64_t> last_flip_ns_{0};
-  uint64_t repaint_window_ns_{0};
+  std::atomic<uint64_t> repaint_window_ns_{0};
+  // The window's floor and whether it adapts (both fixed at construction), and
+  // the vblank the present latching now is meant for (raster writes, the flip
+  // thread reads; 0 = none), so the flip can tell whether its commit missed.
+  uint64_t repaint_window_base_ns_{0};
+  bool repaint_window_adapts_{true};
+  mutable std::atomic<uint64_t> commit_target_ns_{0};
+  // After a flip shown at @shown_ns: widen or ease the window.
+  void AdaptRepaintWindow(uint64_t shown_ns);
   // LatchLeadNs(), worked out on the raster thread from state only it touches.
   std::atomic<uint32_t> latch_lead_ns_{0};
   void PublishLatchLead();

@@ -84,3 +84,59 @@ TEST(RepaintWindow, TheEnvironmentSetsItInMicroseconds) {
   EXPECT_EQ(RepaintWindowNsFromEnv(kWindow), kWindow) << "not a number";
   unsetenv(kVar);
 }
+
+TEST(RepaintWindow, ACommitIsMeantForTheFirstVblankAfterIt) {
+  EXPECT_EQ(TargetVblankNs(kFlip + kMs, kFlip, kPeriod), kFlip + kPeriod);
+  EXPECT_EQ(TargetVblankNs(kFlip + kPeriod + kMs, kFlip, kPeriod),
+            kFlip + 2 * kPeriod);
+  EXPECT_EQ(TargetVblankNs(kFlip, 0, kPeriod), 0U) << "no flip yet";
+  EXPECT_EQ(TargetVblankNs(kFlip + 9 * kPeriod, kFlip, kPeriod), 0U)
+      << "too long since the last flip to count from";
+}
+
+TEST(RepaintWindow, AFlipARefreshLateMissedItsVblank) {
+  const uint64_t target = kFlip + kPeriod;
+  EXPECT_FALSE(MissedVblank(target, target, kPeriod));
+  EXPECT_FALSE(MissedVblank(target, target + kMs, kPeriod)) << "jitter";
+  EXPECT_TRUE(MissedVblank(target, target + kPeriod, kPeriod));
+  EXPECT_FALSE(MissedVblank(0, target + kPeriod, kPeriod)) << "no target";
+}
+
+TEST(RepaintWindow, AMissWidensTheWindowUpToHalfARefresh) {
+  uint64_t w = kWindow;
+  w = AdaptRepaintWindowNs(w, kWindow, kPeriod, /*missed=*/true);
+  EXPECT_EQ(w, kWindow + kMs);
+  for (int i = 0; i < 10; ++i) {
+    w = AdaptRepaintWindowNs(w, kWindow, kPeriod, true);
+  }
+  EXPECT_EQ(w, kPeriod / 2) << "capped at half a refresh";
+}
+
+TEST(RepaintWindow, FlipsOnTimeEaseItBackToTheBase) {
+  uint64_t w = kPeriod / 2;
+  int frames = 0;
+  while (w > kWindow && frames < 10'000) {
+    w = AdaptRepaintWindowNs(w, kWindow, kPeriod, /*missed=*/false);
+    ++frames;
+  }
+  EXPECT_EQ(w, kWindow) << "back to the base, not below it";
+  // A few seconds at 60 Hz, not a moment and not forever.
+  EXPECT_GT(frames, 60);
+  EXPECT_LT(frames, 600);
+  EXPECT_EQ(AdaptRepaintWindowNs(kWindow, kWindow, kPeriod, false), kWindow);
+}
+
+TEST(RepaintWindow, AWindowThatIsOffStaysOff) {
+  EXPECT_EQ(AdaptRepaintWindowNs(0, 0, kPeriod, /*missed=*/true), 0U);
+}
+
+TEST(RepaintWindow, AdaptingIsOnUnlessTheEnvironmentSaysZero) {
+  constexpr const char* kVar = "IVI_DRM_REPAINT_WINDOW_ADAPT";
+  unsetenv(kVar);
+  EXPECT_TRUE(RepaintWindowAdaptsFromEnv());
+  setenv(kVar, "0", 1);
+  EXPECT_FALSE(RepaintWindowAdaptsFromEnv());
+  setenv(kVar, "1", 1);
+  EXPECT_TRUE(RepaintWindowAdaptsFromEnv());
+  unsetenv(kVar);
+}

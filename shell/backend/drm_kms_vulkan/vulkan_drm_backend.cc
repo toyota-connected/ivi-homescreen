@@ -891,6 +891,12 @@ struct VulkanDrmBackend::CompositorState {
   // once). See repaint_window.h.
   std::atomic<uint64_t> last_flip_ns{0};
   std::atomic<uint64_t> repaint_window_ns{0};
+  // The window's floor (from setup) and whether it adapts; and the vblank the
+  // commit in flight is meant for (raster writes, reader reads; 0 = none), so
+  // its flip can tell whether it missed.
+  uint64_t repaint_window_base_ns = 0;
+  bool repaint_window_adapts = true;
+  std::atomic<uint64_t> commit_target_ns{0};
   // What PlatformViewLatchLeadNs reports, kept here so another thread never
   // reads the raster thread's plane-path flags.
   std::atomic<uint32_t> pv_latch_lead_ns{0};
@@ -1341,9 +1347,11 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   const uint32_t period_ns =
       vr > 0 ? static_cast<uint32_t>(1'000'000'000ULL / vr) : 16'666'667U;
   compositor_->period_ns = period_ns;
-  compositor_->repaint_window_ns.store(
-      RepaintWindowNsFromEnv(kDefaultRepaintWindowNs),
-      std::memory_order_relaxed);
+  compositor_->repaint_window_base_ns =
+      RepaintWindowNsFromEnv(kDefaultRepaintWindowNs);
+  compositor_->repaint_window_adapts = RepaintWindowAdaptsFromEnv();
+  compositor_->repaint_window_ns.store(compositor_->repaint_window_base_ns,
+                                       std::memory_order_relaxed);
   PublishLatchLead();
   vsync_.SetPeriodNs(period_ns);
   vsync_.SetPaceToVblank(ivi::IVsyncProvider::PaceEnabledByEnv());
@@ -1677,6 +1685,7 @@ uint64_t VulkanDrmBackend::LastFlipNsForTest() const {
 
 void VulkanDrmBackend::SetRepaintWindowForTest(const uint64_t window_ns) {
   if (compositor_) {
+    compositor_->repaint_window_base_ns = window_ns;
     compositor_->repaint_window_ns.store(window_ns, std::memory_order_relaxed);
     PublishLatchLead();
   }
@@ -1834,6 +1843,17 @@ void VulkanDrmBackend::OnFlipEvent(const unsigned int sequence,
   }
   const uint64_t tv_ns = static_cast<uint64_t>(tv_sec) * 1'000'000'000ULL +
                          static_cast<uint64_t>(tv_usec) * 1000ULL;
+  // A commit that missed the vblank it was meant for widens the window; one
+  // on time eases it back. The present path republishes the latch lead.
+  if (const uint64_t target = c->commit_target_ns.exchange(0);
+      target != 0 && c->repaint_window_adapts) {
+    c->repaint_window_ns.store(
+        AdaptRepaintWindowNs(
+            c->repaint_window_ns.load(std::memory_order_relaxed),
+            c->repaint_window_base_ns, c->period_ns,
+            MissedVblank(target, tv_ns, c->period_ns)),
+        std::memory_order_relaxed);
+  }
   // Before the flag clears: a present waiting on it reads the vblank next.
   c->last_flip_ns.store(tv_ns, std::memory_order_release);
   c->flip_pending.store(false, std::memory_order_release);
@@ -3299,6 +3319,7 @@ bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
     return true;
   }
   CompositorState& c = *compositor_;
+  PublishLatchLead();  // the window may have moved since the last present
 #if BUILD_COMPOSITOR
   // Before anything records: no frame of this present binds what is freed.
   ReapDeferredDestroys();
@@ -3704,8 +3725,17 @@ bool VulkanDrmBackend::PresentSlot(const size_t slot,
   // arm is: the branch below clears first_commit, so reading it after the
   // commit describes the next frame rather than this one.
   ScopedPresentation pres(c, ring_modeset);
+  // The vblank this commit is meant for, for its flip to judge.
+  c.commit_target_ns.store(
+      ring_modeset
+          ? 0
+          : TargetVblankNs(MonotonicNs(),
+                           c.last_flip_ns.load(std::memory_order_acquire),
+                           c.period_ns),
+      std::memory_order_release);
   // Pass `this` as the flip user_data so the event routes to OnFlipEvent.
   if (auto report = c.scene->commit(flags, this); !report) {
+    c.commit_target_ns.store(0, std::memory_order_release);
     // EACCES is how a VT switch-out actually reaches us: master is revoked and
     // the commit already in flight fails before libseat's pause callback
     // arrives (drmIsMaster lags it). Expected, so not an error -- but warn
