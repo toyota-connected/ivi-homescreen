@@ -149,6 +149,14 @@ class DrmCompositor : public IFlipSink {
   static DrmCompositor* OwnerOf(const FlutterBackingStore* store);
   bool PresentLayers(const FlutterLayer** layers, size_t layer_count);
 
+  // How long before the vblank a present latches platform views' buffers: the
+  // repaint window, or 0 when this output's presents do not wait for it (the
+  // GL fallback at pipeline depth 2). Any thread: the raster thread publishes
+  // it on each present.
+  [[nodiscard]] uint32_t LatchLeadNs() const {
+    return latch_lead_ns_.load(std::memory_order_acquire);
+  }
+
   // additional outputs (not the primary) must not drive the engine's
   // single vsync. Set false on every compositor except view 0's.
   void SetDrivesVsync(bool drives) { drives_vsync_ = drives; }
@@ -754,6 +762,9 @@ class DrmCompositor : public IFlipSink {
   // once).
   std::atomic<uint64_t> last_flip_ns_{0};
   uint64_t repaint_window_ns_{0};
+  // LatchLeadNs(), worked out on the raster thread from state only it touches.
+  std::atomic<uint32_t> latch_lead_ns_{0};
+  void PublishLatchLead();
   // Hand this frame's notes to the tracker under a new serial and publish that
   // serial, both *before* the commit. OnFlipEvent reads atomic_serial_ to
   // decide which serial a flip showed, so a serial published after the ioctl

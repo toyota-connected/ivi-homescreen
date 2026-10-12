@@ -2419,6 +2419,14 @@ void DrmBackend::ResizeCompositorSurface(FlutterPlatformViewIdentifier id,
 }
 #endif
 
+uint32_t DrmBackend::PlatformViewLatchLeadNs() const {
+#if BUILD_COMPOSITOR
+  return compositor_ ? compositor_->LatchLeadNs() : 0;
+#else
+  return 0;  // no compositor, so no platform views to take frames from
+#endif
+}
+
 uint64_t DrmBackend::GetKmsDevice() const {
   struct stat st{};
   if (drm_dev_ == nullptr || ::fstat(drm_dev_->fd(), &st) != 0 ||

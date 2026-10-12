@@ -891,6 +891,9 @@ struct VulkanDrmBackend::CompositorState {
   // once). See repaint_window.h.
   std::atomic<uint64_t> last_flip_ns{0};
   std::atomic<uint64_t> repaint_window_ns{0};
+  // What PlatformViewLatchLeadNs reports, kept here so another thread never
+  // reads the raster thread's plane-path flags.
+  std::atomic<uint32_t> pv_latch_lead_ns{0};
   drmEventContext evctx{};
 
   // Async page-flip reader: an asio descriptor over the DRM fd on its own
@@ -1341,6 +1344,7 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   compositor_->repaint_window_ns.store(
       RepaintWindowNsFromEnv(kDefaultRepaintWindowNs),
       std::memory_order_relaxed);
+  PublishLatchLead();
   vsync_.SetPeriodNs(period_ns);
   vsync_.SetPaceToVblank(ivi::IVsyncProvider::PaceEnabledByEnv());
   vsync_.EnableProfile(profiling::FrameProfile::Enabled("IVI_VSYNC_PROFILE"),
@@ -1674,6 +1678,7 @@ uint64_t VulkanDrmBackend::LastFlipNsForTest() const {
 void VulkanDrmBackend::SetRepaintWindowForTest(const uint64_t window_ns) {
   if (compositor_) {
     compositor_->repaint_window_ns.store(window_ns, std::memory_order_relaxed);
+    PublishLatchLead();
   }
 }
 
@@ -3540,6 +3545,7 @@ bool VulkanDrmBackend::CommitPlaneFrame(CompositorState& c,
     }
     DropPlaneLayers(c);
     plane_layers_latched_off_ = true;
+    PublishLatchLead();
     ihs::log::warn(
         "[VulkanDrmBackend] plane layers off for this session after a commit "
         "failure; blending from here");
@@ -4278,6 +4284,25 @@ bool VulkanDrmBackend::TextureMakeCurrent() {
 
 bool VulkanDrmBackend::TextureClearCurrent() {
   return false;
+}
+
+uint32_t VulkanDrmBackend::PlatformViewLatchLeadNs() const {
+  return compositor_
+             ? compositor_->pv_latch_lead_ns.load(std::memory_order_acquire)
+             : 0;
+}
+
+void VulkanDrmBackend::PublishLatchLead() {
+  // The plane-layer path takes platform-view buffers when it plans the frame,
+  // so it waits for no window and cannot say.
+  CompositorState& c = *compositor_;
+  const bool planes = plane_layers_ && !plane_layers_latched_off_;
+  c.pv_latch_lead_ns.store(
+      planes ? 0U
+             : static_cast<uint32_t>(std::min<uint64_t>(
+                   c.repaint_window_ns.load(std::memory_order_relaxed),
+                   UINT32_MAX)),
+      std::memory_order_release);
 }
 
 uint64_t VulkanDrmBackend::GetKmsDevice() const {
