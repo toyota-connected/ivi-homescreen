@@ -492,6 +492,8 @@ typedef struct IhsVulkanContext {
      is only the in-family float priority, which is a hint. A producer wanting
      a genuinely lower-priority queue needs its own device. */
   void* plugin_queue; /* VkQueue */
+  /* Meaningful only when @plugin_queue is non-NULL. Zero otherwise, which is
+     also a valid queue index, so gate on the handle and not on this. */
   uint32_t plugin_queue_index;
 } IhsVulkanContext;
 

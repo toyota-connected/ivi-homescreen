@@ -4237,6 +4237,15 @@ void VulkanDrmBackend::Teardown() {
     ihs::vulkan::QueueInterposer::UnregisterQueue(graphics_queue_);
     graphics_queue_ = VK_NULL_HANDLE;
   }
+  // Before the device goes, and for the same reason the engine's queue is
+  // unregistered: the interposer holds a pointer to plugin_queue_mutex_, which
+  // is a member of this backend. Left registered, a later vkDeviceWaitIdle --
+  // which locks every queue registered for the device -- would lock a
+  // destroyed mutex.
+  if (plugin_queue_ != VK_NULL_HANDLE) {
+    ihs::vulkan::QueueInterposer::UnregisterQueue(plugin_queue_);
+    plugin_queue_ = VK_NULL_HANDLE;
+  }
   if (device_ != VK_NULL_HANDLE) {
     d().vkDestroyDevice(device_, nullptr);
     device_ = VK_NULL_HANDLE;
