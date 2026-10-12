@@ -368,6 +368,12 @@ DrmCompositor::DrmCompositor(DrmBackend* backend, DrmOutputContext out)
   refresh_ns_ = RefreshPeriodNs(out_.mode().clock, out_.mode().htotal,
                                 out_.mode().vtotal);
   repaint_window_ns_ = RepaintWindowNsFromEnv(kDefaultRepaintWindowNs);
+  // Before the first present, by the only path known yet: the pipeline depth.
+  latch_lead_ns_.store(backend_->cfg_.pipeline_depth >= 2
+                           ? 0U
+                           : static_cast<uint32_t>(std::min<uint64_t>(
+                                 repaint_window_ns_, UINT32_MAX)),
+                       std::memory_order_release);
 }
 
 DrmCompositor::~DrmCompositor() {
@@ -1734,6 +1740,15 @@ bool DrmCompositor::WaitForPendingFlip() const {
   return true;
 }
 
+void DrmCompositor::PublishLatchLead() {
+  const bool waits = !((fallback_latched_ || !planes_available_) &&
+                       backend_->cfg_.pipeline_depth >= 2);
+  latch_lead_ns_.store(waits ? static_cast<uint32_t>(std::min<uint64_t>(
+                                   repaint_window_ns_, UINT32_MAX))
+                             : 0U,
+                       std::memory_order_release);
+}
+
 void DrmCompositor::WaitForRepaintWindow() const {
   const uint64_t delay =
       RepaintDelayNs(NsNow(), last_flip_ns_.load(std::memory_order_acquire),
@@ -2663,6 +2678,9 @@ bool DrmCompositor::PresentLayersLocked(const FlutterLayer** layers,
 
   backend_->MaybeCaptureSnapshot();
   EnsureGlCapsProbed();
+  // The path this present takes is settled from here; a latch to the GL
+  // fallback during it shows from the next.
+  PublishLatchLead();
 
   // Runtime latch: once an atomic commit fails irrecoverably we stay on
   // the GL path for the rest of the session. Keeps the user in a known-

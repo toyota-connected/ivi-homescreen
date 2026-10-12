@@ -113,6 +113,34 @@ A grant may honor a **weaker** mode than requested unless `EXPLICIT_REQUIRED`
 was set. A plugin that cannot cope with implicit sync must ask for
 `EXPLICIT_REQUIRED` rather than asking for `PREFERRED` and assuming.
 
+### When the shell takes a frame
+
+`caps.latch_lead_ns` (1.23) is how long before each vblank the shell takes a
+view's newest submitted frame for the next refresh. A frame submitted after that
+point waits a whole refresh more. `0` means the shell cannot say:
+
+| Backend | `latch_lead_ns` |
+| --- | --- |
+| `drm-kms-vulkan` | the repaint window (5 ms by default, `IVI_DRM_REPAINT_WINDOW_US`); `0` with plane layers (`IVI_DRMVK_PLANE_LAYERS`), which take buffers when the frame is planned |
+| `drm-kms-egl` | the repaint window; `0` on the GL fallback at `--drm-pipeline-depth=2` |
+| Wayland, headless | `0`: the compositor or the consumer latches on its own schedule |
+
+A producer that paces its own frames can aim to submit just before it:
+
+```c
+/* From IhsPvCallbacks::presented: ust_ns of the last frame shown, and
+ * refresh_ns. */
+uint64_t next_vblank = ust_ns + refresh_ns;
+while (next_vblank <= now_ns) next_vblank += refresh_ns;
+uint64_t submit_by = next_vblank - caps.latch_lead_ns;
+uint64_t render_at = submit_by - render_estimate_ns - margin_ns;
+```
+
+A producer that renders right after each flip instead lands its frame at
+whatever phase that leaves against the latch. Then every frame either makes the
+next vblank or waits a refresh, run after run. Read the field again after a
+renegotiation: like the rest of the capabilities, it can change with the output.
+
 ## Negotiation
 
 `ihs_pv_negotiate` scores the requirements against the active backend and live

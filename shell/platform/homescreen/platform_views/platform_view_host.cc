@@ -2661,6 +2661,12 @@ int HostQueryCapabilities(void* user_data, IhsPvCapabilities* out) {
       offsetof(IhsPvCapabilities, render_device) + sizeof(out->render_device)) {
     out->render_device = render_device;
   }
+  // Added in 1.23, under the same rule.
+  if (backend != nullptr &&
+      out->struct_size >= offsetof(IhsPvCapabilities, latch_lead_ns) +
+                              sizeof(out->latch_lead_ns)) {
+    out->latch_lead_ns = backend->PlatformViewLatchLeadNs();
+  }
   // Name the formats behind the dma-buf kinds. Only when one was actually
   // offered: advertising formats for a capability the backend does not have
   // would hand a plugin a format it can never submit.

@@ -179,6 +179,10 @@ class VulkanDrmBackend final : public Backend {
   // WaylandVulkanBackend provides.
   bool GetVulkanContext(BackendVulkanContext* out) const override;
   [[nodiscard]] uint64_t GetKmsDevice() const override;
+  [[nodiscard]] uint32_t PlatformViewLatchLeadNs() const override;
+  // Works out PlatformViewLatchLeadNs on the thread that owns the plane-path
+  // flags (setup, then raster) and stores it for any thread to read.
+  void PublishLatchLead();
 
 #if BUILD_COMPOSITOR
   // Platform-view surfaces. Backend's default implementations are no-ops, so

@@ -197,6 +197,16 @@ class Backend {
   [[nodiscard]] virtual uint64_t GetKmsDevice() const { return 0; }
 
   /**
+   * @brief How long before each vblank this backend takes platform views'
+   *        newest frames for the next refresh, or 0 when it cannot say.
+   *
+   * Reported to producers as IhsPvCapabilities::latch_lead_ns. The DRM
+   * backends composite at a repaint window before the vblank; Wayland and
+   * headless leave it to someone else's schedule and report 0.
+   */
+  [[nodiscard]] virtual uint32_t PlatformViewLatchLeadNs() const { return 0; }
+
+  /**
    * @brief Replace |*modifier| with one a plane can actually scan out for
    *        |fourcc|, when the negotiated one cannot be.
    *

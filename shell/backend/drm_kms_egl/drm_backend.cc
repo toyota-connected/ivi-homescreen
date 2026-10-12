@@ -2419,6 +2419,10 @@ void DrmBackend::ResizeCompositorSurface(FlutterPlatformViewIdentifier id,
 }
 #endif
 
+uint32_t DrmBackend::PlatformViewLatchLeadNs() const {
+  return compositor_ ? compositor_->LatchLeadNs() : 0;
+}
+
 uint64_t DrmBackend::GetKmsDevice() const {
   struct stat st{};
   if (drm_dev_ == nullptr || ::fstat(drm_dev_->fd(), &st) != 0 ||

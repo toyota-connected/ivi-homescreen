@@ -1770,3 +1770,28 @@ TEST_F(PvHostVkmsVk, AFrameSubmittedJustAfterTheFlipMakesTheNextVblank) {
       << "compositing at once shows it a refresh later; if it no longer does, "
          "this case no longer measures the window";
 }
+
+// A producer that paces its own frames reads when the shell takes them: the
+// repaint window before each vblank, and 0 once presents no longer wait for
+// one. A caller built against the 1.22 header, whose struct stops short of the
+// field, has nothing written past its end.
+TEST_F(PvHostVkmsVk, CapabilitiesReportWhenTheShellTakesAFrame) {
+  IhsPvCapabilities caps{};
+  caps.struct_size = sizeof(caps);
+  ASSERT_EQ(ihs_pv_query_capabilities(&caps), IHS_PV_OK);
+  EXPECT_EQ(caps.latch_lead_ns, 5'000'000U) << "the default repaint window";
+
+  backend_->SetRepaintWindowForTest(0);
+  caps = {};
+  caps.struct_size = sizeof(caps);
+  ASSERT_EQ(ihs_pv_query_capabilities(&caps), IHS_PV_OK);
+  EXPECT_EQ(caps.latch_lead_ns, 0U) << "compositing at once: nothing to aim at";
+  backend_->SetRepaintWindowForTest(5'000'000);
+
+  IhsPvCapabilities old{};
+  std::memset(&old, 0xab, sizeof(old));
+  old.struct_size = offsetof(IhsPvCapabilities, latch_lead_ns);
+  ASSERT_EQ(ihs_pv_query_capabilities(&old), IHS_PV_OK);
+  EXPECT_EQ(old.latch_lead_ns, 0xababababU)
+      << "written past the end of an older caller's struct";
+}

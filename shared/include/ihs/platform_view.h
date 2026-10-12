@@ -293,6 +293,14 @@ typedef enum IhsPvResult {
  * cannot tell. When its Vulkan or EGL context cannot name the GPU's node, a
  * DRM backend reports the render node of the KMS device it displays on, if
  * that has one. Added in 1.14; written only when @struct_size covers it.
+ *
+ * @latch_lead_ns is how long before each vblank the shell takes a view's
+ * newest submitted frame for the next refresh, or 0 when it cannot say (a
+ * Wayland compositor latches on its own schedule). A frame submitted later
+ * than that waits for the refresh after. A producer that paces its own frames
+ * can aim to submit just before it: the next vblank comes from
+ * IhsPvCallbacks::presented's @ust_ns and @refresh_ns. Added in 1.23; written
+ * only when @struct_size covers it.
  */
 typedef struct IhsPvCapabilities {
   size_t struct_size;
@@ -303,6 +311,7 @@ typedef struct IhsPvCapabilities {
   const IhsFormatModifier* formats;
   size_t format_count;
   uint64_t render_device; /* dev_t; 0 when unknown (1.14) */
+  uint32_t latch_lead_ns; /* before the vblank; 0 when unknown (1.23) */
 } IhsPvCapabilities;
 
 /*

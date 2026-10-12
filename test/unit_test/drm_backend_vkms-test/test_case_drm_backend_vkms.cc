@@ -3266,3 +3266,11 @@ int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
+
+// The EGL backend reports its repaint window to producers too.
+TEST_F(PvHostVkms, CapabilitiesReportWhenTheShellTakesAFrame) {
+  IhsPvCapabilities caps{};
+  caps.struct_size = sizeof(caps);
+  ASSERT_EQ(ihs_pv_query_capabilities(&caps), IHS_PV_OK);
+  EXPECT_EQ(caps.latch_lead_ns, 5'000'000U) << "the default repaint window";
+}

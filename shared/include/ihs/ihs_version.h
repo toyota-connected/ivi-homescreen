@@ -34,10 +34,11 @@
  * mask (see IhsPvRequirements::preferred_kind). 1.20 honors
  * IHS_PV_FRAME_BOTTOM_UP, so a GL producer can submit its rows bottom-up
  * instead of blitting them (see IhsFrameFlags). 1.22 honors it on every
- * backend and never scans such a frame out.
+ * backend and never scans such a frame out. 1.23 reports when the shell takes a
+ * view's frame for the next refresh (IhsPvCapabilities::latch_lead_ns).
  */
 #define IHS_SHARED_ABI_MAJOR 1u
-#define IHS_SHARED_ABI_MINOR 22u
+#define IHS_SHARED_ABI_MINOR 23u
 #define IHS_SHARED_ABI_VERSION \
   ((IHS_SHARED_ABI_MAJOR << 16) | IHS_SHARED_ABI_MINOR)
 
