@@ -384,6 +384,13 @@ configurations, not for precise per-frame attribution.
 - **Vulkan synchronization validation layer** — the explicit-sync dma-buf
   path (`IVI_VK_DMABUF`) has been validated hazard-free under it on
   mutter/RADV.
+- **Failed acquire** — `vkAcquireNextImageKHR: Timeout (N so far); the
+  compositor has released no image, frame skipped` (logged on the first and
+  every 60th) means the compositor held every swapchain image for the 1 s
+  acquire timeout. The compositor path skips that frame, and the root-surface
+  path asks again. Nothing is submitted against an image that was never
+  acquired, so a producer sharing the queue is not stopped by it. See Known
+  limitations for the usual cause.
 - **Startup decision** — the `vsync_callback` wiring decision (`wp_presentation`
   advertised, `clock_id`, `IVI_VK_VSYNC`) and the dmabuf pre-flight warning are
   logged once at `info`/`warn` level.
@@ -497,9 +504,17 @@ gives up backpressure for input latency — different operating point.
    reach the panel.
 3. **Cross-clock translation not implemented** — same as wayland_egl,
    compositors announcing a `clock_id` other than `CLOCK_MONOTONIC`
-   fall back to the wall-clock scheduler. No mainline compositor
-   needs this today.
-4. **Pre-existing tidy warnings on `wayland_vulkan.cc`** — three
+   fall back to the wall-clock scheduler. Weston's headless backend is one:
+   it announces `CLOCK_MONOTONIC_RAW`.
+4. **FIFO stalls on headless Weston after long uptime** — under FIFO, Mesa's
+   WSI stamps its timed commits (`wp_commit_timer_v1`) on `CLOCK_MONOTONIC`.
+   Headless Weston reads them on `CLOCK_MONOTONIC_RAW`. The two drift apart
+   over a host's uptime; after 12 days on one desktop they were 32.6 s apart.
+   Weston then holds each timed commit until its time comes and releases no
+   image, so acquires time out and frames are skipped (see Diagnostics). A
+   compositor that presents on `CLOCK_MONOTONIC` is not affected. For headless
+   test runs, `MESA_VK_WSI_PRESENT_MODE=mailbox` avoids it.
+5. **Pre-existing tidy warnings on `wayland_vulkan.cc`** — three
    `bugprone-branch-clone` / `readability-inconsistent-declaration-parameter-name`
    complaints in `debugReportCallback`, `debugUtilsCallback`, and
    `CollectBackingStore` predate this work. The lint CI doesn't
