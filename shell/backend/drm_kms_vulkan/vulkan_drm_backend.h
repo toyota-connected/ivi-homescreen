@@ -477,6 +477,13 @@ class VulkanDrmBackend final : public Backend {
   VkDevice device_ = VK_NULL_HANDLE;
   uint32_t graphics_queue_family_ = UINT32_MAX;
   VkQueue graphics_queue_ = VK_NULL_HANDLE;
+  // A second queue from the same family, handed to a platform-view producer so
+  // its submits do not serialize behind the engine's and this backend's on
+  // graphics_queue_. VK_NULL_HANDLE when the family has only one queue.
+  VkQueue plugin_queue_ = VK_NULL_HANDLE;
+  // Guards host access to plugin_queue_. Separate from queue_mutex_ by design:
+  // sharing it would reintroduce exactly the serialization the queue removes.
+  mutable std::mutex plugin_queue_mutex_;
   // Guards every host access to graphics_queue_. The engine, this backend and
   // a platform-view plugin all submit to it; Vulkan requires host access to a
   // VkQueue to be externally synchronized. Registered with QueueInterposer so
