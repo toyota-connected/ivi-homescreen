@@ -891,6 +891,12 @@ struct VulkanDrmBackend::CompositorState {
   // once). See repaint_window.h.
   std::atomic<uint64_t> last_flip_ns{0};
   std::atomic<uint64_t> repaint_window_ns{0};
+  // The window's floor (from setup) and whether it adapts; and the vblank the
+  // commit in flight is meant for (raster writes, reader reads; 0 = none), so
+  // its flip can tell whether it missed.
+  std::atomic<uint64_t> repaint_window_base_ns{0};
+  bool repaint_window_adapts = true;
+  std::atomic<uint64_t> commit_target_ns{0};
   // What PlatformViewLatchLeadNs reports, kept here so another thread never
   // reads the raster thread's plane-path flags.
   std::atomic<uint32_t> pv_latch_lead_ns{0};
@@ -1341,9 +1347,11 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   const uint32_t period_ns =
       vr > 0 ? static_cast<uint32_t>(1'000'000'000ULL / vr) : 16'666'667U;
   compositor_->period_ns = period_ns;
-  compositor_->repaint_window_ns.store(
-      RepaintWindowNsFromEnv(kDefaultRepaintWindowNs),
-      std::memory_order_relaxed);
+  const uint64_t window_base = RepaintWindowNsFromEnv(kDefaultRepaintWindowNs);
+  compositor_->repaint_window_base_ns.store(window_base,
+                                            std::memory_order_relaxed);
+  compositor_->repaint_window_adapts = RepaintWindowAdaptsFromEnv();
+  compositor_->repaint_window_ns.store(window_base, std::memory_order_relaxed);
   PublishLatchLead();
   vsync_.SetPeriodNs(period_ns);
   vsync_.SetPaceToVblank(ivi::IVsyncProvider::PaceEnabledByEnv());
@@ -1677,6 +1685,8 @@ uint64_t VulkanDrmBackend::LastFlipNsForTest() const {
 
 void VulkanDrmBackend::SetRepaintWindowForTest(const uint64_t window_ns) {
   if (compositor_) {
+    compositor_->repaint_window_base_ns.store(window_ns,
+                                              std::memory_order_relaxed);
     compositor_->repaint_window_ns.store(window_ns, std::memory_order_relaxed);
     PublishLatchLead();
   }
@@ -1834,6 +1844,18 @@ void VulkanDrmBackend::OnFlipEvent(const unsigned int sequence,
   }
   const uint64_t tv_ns = static_cast<uint64_t>(tv_sec) * 1'000'000'000ULL +
                          static_cast<uint64_t>(tv_usec) * 1000ULL;
+  // A commit that missed the vblank it was meant for widens the window; one
+  // on time eases it back. The present path republishes the latch lead.
+  if (const FlipVerdict verdict =
+          JudgeFlip(c->commit_target_ns.exchange(0), tv_ns, c->period_ns);
+      verdict != FlipVerdict::kUnjudged && c->repaint_window_adapts) {
+    c->repaint_window_ns.store(
+        AdaptRepaintWindowNs(
+            c->repaint_window_ns.load(std::memory_order_relaxed),
+            c->repaint_window_base_ns.load(std::memory_order_relaxed),
+            c->period_ns, verdict == FlipVerdict::kMissed),
+        std::memory_order_relaxed);
+  }
   // Before the flag clears: a present waiting on it reads the vblank next.
   c->last_flip_ns.store(tv_ns, std::memory_order_release);
   c->flip_pending.store(false, std::memory_order_release);
@@ -3299,6 +3321,7 @@ bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
     return true;
   }
   CompositorState& c = *compositor_;
+  PublishLatchLead();  // the window may have moved since the last present
 #if BUILD_COMPOSITOR
   // Before anything records: no frame of this present binds what is freed.
   ReapDeferredDestroys();
@@ -3531,6 +3554,8 @@ bool VulkanDrmBackend::CommitPlaneFrame(CompositorState& c,
   // Staged before the ioctl for the same reason as the latch: the flip event
   // reads c.presentation_serial to name what it showed.
   ScopedPresentation pres(c, modeset);
+  // The plane path waits for no window: its flips are not judged.
+  c.commit_target_ns.store(0, std::memory_order_release);
   if (auto report = c.scene->commit(flags, this); !report) {
     // Same EACCES reasoning as the ring path below.
     if (IsMasterRevoked(report.error())) {
@@ -3632,13 +3657,20 @@ bool VulkanDrmBackend::PresentSlot(const size_t slot,
   // Then hold the composite until the repaint window opens, so a producer
   // buffer that lands meanwhile makes this vblank rather than the next. The
   // flip lands on the same vblank either way.
+  // The vblank this present is judged against, recorded here so a composite
+  // that overruns it counts as a miss; 0 for one that arrived after its window
+  // opened, which a wider window would not have helped.
+  uint64_t judged_target = 0;
   if (!c.first_commit) {
-    const uint64_t delay = RepaintDelayNs(
-        MonotonicNs(), c.last_flip_ns.load(std::memory_order_acquire),
-        c.period_ns, c.repaint_window_ns.load(std::memory_order_relaxed));
+    const uint64_t arrival = MonotonicNs();
+    const uint64_t last_flip = c.last_flip_ns.load(std::memory_order_acquire);
+    const uint64_t window = c.repaint_window_ns.load(std::memory_order_relaxed);
+    const uint64_t delay =
+        RepaintDelayNs(arrival, last_flip, c.period_ns, window);
     if (delay > 0) {
       std::this_thread::sleep_for(std::chrono::nanoseconds(delay));
     }
+    judged_target = JudgedTargetNs(arrival, last_flip, c.period_ns, window);
   }
   const uint64_t t1 = stage_profile_enabled ? MonotonicNs() : 0;
 
@@ -3704,8 +3736,12 @@ bool VulkanDrmBackend::PresentSlot(const size_t slot,
   // arm is: the branch below clears first_commit, so reading it after the
   // commit describes the next frame rather than this one.
   ScopedPresentation pres(c, ring_modeset);
+  // For this commit's flip to judge (see judged_target above).
+  c.commit_target_ns.store(ring_modeset ? 0 : judged_target,
+                           std::memory_order_release);
   // Pass `this` as the flip user_data so the event routes to OnFlipEvent.
   if (auto report = c.scene->commit(flags, this); !report) {
+    c.commit_target_ns.store(0, std::memory_order_release);
     // EACCES is how a VT switch-out actually reaches us: master is revoked and
     // the commit already in flight fails before libseat's pause callback
     // arrives (drmIsMaster lags it). Expected, so not an error -- but warn

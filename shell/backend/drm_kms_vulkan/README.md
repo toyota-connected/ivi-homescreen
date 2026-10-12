@@ -22,7 +22,7 @@ compositor's `CreateBackingStore` / `PresentLayers` callbacks.
 | Triple-buffered, vsync-paced present (ring of scanout buffers) | ✓ | `avoid_backing_store_cache` + non-blocking page flips |
 | Page-flip-locked Flutter vsync | ✓ | `IVI_DRMVK_VSYNC=0` for wall-clock fallback |
 | At most one vsync per refresh, on the vblank | ✓ | `IVI_VSYNC_PACE=0` turns it off; see [`shell/vsync`](../../vsync/README.md#pacing-to-the-vblank) |
-| Repaint window: composite and commit shortly before the vblank | ✓ | `IVI_DRM_REPAINT_WINDOW_US` (default 5000; `0` composites at once) |
+| Repaint window: composite and commit shortly before the vblank, adapting to missed vblanks | ✓ | `IVI_DRM_REPAINT_WINDOW_US` (default 5000; `0` composites at once); `IVI_DRM_REPAINT_WINDOW_ADAPT=0` keeps it fixed |
 | Scanout rotation (0/90/180/270) | ✓ | `--drm-rotation`; 90/270 use a tiled non-DCC modifier |
 | Rotation-aware touch + HW cursor; per-device pointer transform | ✓ | `--input-transform` (shared DRM seat) |
 | KMS HW cursor (drm-cxx / xcursor) | ✓ | Requires libxcursor (`HAVE_DRM_CURSOR`); `--disable-cursor` |
@@ -348,19 +348,26 @@ loader is dlopen'd, never linked).
 
 ### Repaint window
 
-A present waits for the pending flip, then waits until a fixed margin before
-the next vblank, counted from the last flip. Only then does it composite,
+A present waits for the pending flip, then waits until a margin before the
+next vblank, counted from the last flip. Only then does it composite,
 taking each platform view's newest buffer, and commit. The flip lands on the
 same vblank either way. A producer that renders just after each flip (a map
 following the display) gets its frame into the present already waiting,
 instead of a refresh later.
 
-The margin covers the composite and the commit. Set it with
-`IVI_DRM_REPAINT_WINDOW_US`:
+The margin covers the composite and the commit:
 
 - Too wide gives a producer less of the refresh to land in.
-- Too narrow and the commit misses its vblank. Watch for flips a refresh later
-  than their commit.
+- Too narrow and the commit misses its vblank.
+
+The window adapts. A commit whose flip misses the vblank it was meant for (the
+composite, or a fence it waits on, needed more of the refresh) widens the window
+by 1 ms, up to half a refresh. Only presents that arrived before their window
+opened are judged: one that arrives later commits at once, and a wider window
+would not have helped it. Flips on time ease it back toward its base over
+a few seconds. The base is `IVI_DRM_REPAINT_WINDOW_US`, and
+`IVI_DRM_REPAINT_WINDOW_ADAPT=0` keeps the window fixed at it. Producers read
+the current window as `IhsPvCapabilities::latch_lead_ns`.
 
 It applies to the blend path. The plane-layer path (`IVI_DRMVK_PLANE_LAYERS`)
 picks platform-view buffers when it plans the frame, and does not wait.
@@ -376,7 +383,8 @@ and each submit timed to the vblank that shows it.
 |------|---------|--------|
 | `IVI_DRMVK_VSYNC` | (on) | `0` disables page-flip-locked vsync (falls back to the engine's wall-clock scheduler) |
 | `IVI_VSYNC_PACE` | (on) | `0` answers every vsync request at once rather than at most one per refresh |
-| `IVI_DRM_REPAINT_WINDOW_US` | `5000` | How far before the vblank a present composites and commits, in microseconds; `0` composites as soon as Flutter presents |
+| `IVI_DRM_REPAINT_WINDOW_US` | `5000` | How far before the vblank a present composites and commits, in microseconds (the floor when it adapts); `0` composites as soon as Flutter presents |
+| `IVI_DRM_REPAINT_WINDOW_ADAPT` | (on) | `0` keeps the repaint window fixed instead of widening it after a missed vblank |
 | `IVI_DRMVK_PROFILE` | (off) | Enables per-frame cadence profiling (also enabled by the `IVI_PROFILE` umbrella) |
 | `IVI_DRMVK_NO_EXPLICIT_SYNC` | (off) | Set to force the CPU-fence fallback instead of the explicit-sync (`IN_FENCE_FD`) scanout hand-off |
 | `IVI_HUD` | (off) | Enable the debug HUD (also honored via `[hud].enable`); `BUILD_HUD` builds only |

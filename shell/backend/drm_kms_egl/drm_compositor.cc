@@ -367,12 +367,14 @@ DrmCompositor::DrmCompositor(DrmBackend* backend, DrmOutputContext out)
                                 : nullptr) {
   refresh_ns_ = RefreshPeriodNs(out_.mode().clock, out_.mode().htotal,
                                 out_.mode().vtotal);
-  repaint_window_ns_ = RepaintWindowNsFromEnv(kDefaultRepaintWindowNs);
+  repaint_window_base_ns_ = RepaintWindowNsFromEnv(kDefaultRepaintWindowNs);
+  repaint_window_adapts_ = RepaintWindowAdaptsFromEnv();
+  repaint_window_ns_.store(repaint_window_base_ns_, std::memory_order_relaxed);
   // Before the first present, by the only path known yet: the pipeline depth.
   latch_lead_ns_.store(backend_->cfg_.pipeline_depth >= 2
                            ? 0U
                            : static_cast<uint32_t>(std::min<uint64_t>(
-                                 repaint_window_ns_, UINT32_MAX)),
+                                 repaint_window_base_ns_, UINT32_MAX)),
                        std::memory_order_release);
 }
 
@@ -1452,6 +1454,7 @@ void DrmCompositor::OnFlipEvent(const unsigned int sequence,
   // present, and it waited for good.
   std::vector<DeferredScanoutRelease> off_screen =
       TakeDeferredScanoutReleases();
+  AdaptRepaintWindow(FlipTime(sequence, tv_sec, tv_usec).ust_ns);
   // Before the flag clears: a present waiting on it reads the vblank next.
   last_flip_ns_.store(FlipTime(sequence, tv_sec, tv_usec).ust_ns,
                       std::memory_order_release);
@@ -1483,6 +1486,7 @@ void DrmCompositor::OnLegacyFlipPresented(const uint64_t serial,
                                           const unsigned int tv_sec,
                                           const unsigned int tv_usec) {
   const PresentationTime shown = FlipTime(sequence, tv_sec, tv_usec);
+  AdaptRepaintWindow(shown.ust_ns);
   last_flip_ns_.store(shown.ust_ns, std::memory_order_release);
   presentation_.Presented(serial, shown);
 }
@@ -1743,19 +1747,43 @@ bool DrmCompositor::WaitForPendingFlip() const {
 void DrmCompositor::PublishLatchLead() {
   const bool waits = !((fallback_latched_ || !planes_available_) &&
                        backend_->cfg_.pipeline_depth >= 2);
-  latch_lead_ns_.store(waits ? static_cast<uint32_t>(std::min<uint64_t>(
-                                   repaint_window_ns_, UINT32_MAX))
-                             : 0U,
-                       std::memory_order_release);
+  latch_lead_ns_.store(
+      waits
+          ? static_cast<uint32_t>(std::min<uint64_t>(
+                repaint_window_ns_.load(std::memory_order_relaxed), UINT32_MAX))
+          : 0U,
+      std::memory_order_release);
 }
 
-void DrmCompositor::WaitForRepaintWindow() const {
+void DrmCompositor::AdaptRepaintWindow(const uint64_t shown_ns) {
+  const FlipVerdict verdict =
+      JudgeFlip(commit_target_ns_.exchange(0), shown_ns, refresh_ns_);
+  if (verdict == FlipVerdict::kUnjudged || !repaint_window_adapts_) {
+    return;
+  }
+  repaint_window_ns_.store(
+      AdaptRepaintWindowNs(repaint_window_ns_.load(std::memory_order_relaxed),
+                           repaint_window_base_ns_, refresh_ns_,
+                           verdict == FlipVerdict::kMissed),
+      std::memory_order_relaxed);
+}
+
+void DrmCompositor::WaitForRepaintWindow() {
+  const uint64_t arrival = NsNow();
+  const uint64_t last_flip = last_flip_ns_.load(std::memory_order_acquire);
+  const uint64_t window = repaint_window_ns_.load(std::memory_order_relaxed);
   const uint64_t delay =
-      RepaintDelayNs(NsNow(), last_flip_ns_.load(std::memory_order_acquire),
-                     refresh_ns_, repaint_window_ns_);
+      RepaintDelayNs(arrival, last_flip, refresh_ns_, window);
   if (delay > 0) {
     std::this_thread::sleep_for(std::chrono::nanoseconds(delay));
   }
+  // Every present path latches and commits straight after this: the vblank it
+  // is judged against, so a composite that overruns it counts as a miss. 0 for
+  // a present that arrived after its window opened, which a wider window would
+  // not have helped.
+  commit_target_ns_.store(
+      JudgedTargetNs(arrival, last_flip, refresh_ns_, window),
+      std::memory_order_release);
 }
 
 // ─── GL compositing helpers ──────────────────────────────────────────────
@@ -2650,6 +2678,9 @@ bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
 
 bool DrmCompositor::PresentLayersLocked(const FlutterLayer** layers,
                                         const size_t layer_count) {
+  // A present that stopped short of its commit left its target behind; this
+  // one sets its own, or none (the GL fallback at depth 2 waits for no window).
+  commit_target_ns_.store(0, std::memory_order_release);
   // A disposed platform view's GL imports, freed with this present's context
   // current. Freed on the platform thread instead, with no context, the
   // textures stayed, and the driver kept each one's dma-buf open.

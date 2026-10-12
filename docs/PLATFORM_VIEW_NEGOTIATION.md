@@ -121,7 +121,7 @@ point waits a whole refresh more. `0` means the shell cannot say:
 
 | Backend | `latch_lead_ns` |
 | --- | --- |
-| `drm-kms-vulkan` | the repaint window (5 ms by default, `IVI_DRM_REPAINT_WINDOW_US`); `0` with plane layers (`IVI_DRMVK_PLANE_LAYERS`), which take buffers when the frame is planned |
+| `drm-kms-vulkan` | the repaint window: 5 ms by default (`IVI_DRM_REPAINT_WINDOW_US`), wider after vblanks the compositor missed; `0` with plane layers (`IVI_DRMVK_PLANE_LAYERS`), which take buffers when the frame is planned |
 | `drm-kms-egl` | the repaint window; `0` on the GL fallback at `--drm-pipeline-depth=2` |
 | Wayland, headless | `0`: the compositor or the consumer latches on its own schedule |
 
@@ -148,10 +148,16 @@ A producer that renders right after each flip instead lands its frame at
 whatever phase that leaves against the latch. Then every frame either makes the
 next vblank or waits a refresh, run after run.
 
-The value can change during a session without a renegotiation: a backend that
-falls back from planes or from its plane compositor changes when it takes
+The value can change during a session without a renegotiation: the DRM
+backends widen the window after missed vblanks and ease it back, and a backend
+that falls back from planes or from its plane compositor changes when it takes
 frames. Query it again now and then (once a second costs nothing measurable),
-as well as after a renegotiation. It describes the backend's primary output; a
+as well as after a renegotiation. Like every `ihs_pv_query_capabilities` call,
+that must be on the platform thread: a producer that renders on its own thread
+posts the query with `ihs_pv_post_platform_task` and hands the value across, for
+example through an atomic. The window can widen by 1 ms a refresh during
+a burst of missed vblanks, so a producer that polls once a second trails it by
+up to a second. It describes the backend's primary output; a
 view on another output of the same backend may be taken on that output's own
 schedule.
 
