@@ -319,6 +319,10 @@ class DrmCompositor : public IFlipSink {
                              bool external = false) const;
 
   bool WaitForPendingFlip() const;
+  // Then hold until the repaint window before the next vblank opens, so a
+  // producer buffer that lands meanwhile makes that vblank. See
+  // backend/common/repaint_window.h.
+  void WaitForRepaintWindow() const;
 
   // Fire the platform-view scanout releases held since the last present, now
   // that WaitForPendingFlip has confirmed their displacing flip completed.
@@ -745,6 +749,11 @@ class DrmCompositor : public IFlipSink {
   std::atomic<uint64_t> atomic_serial_{0};
   // The output's refresh period, for the reports.
   uint32_t refresh_ns_{0};
+  // The last flip's vblank timestamp (flip thread writes, raster reads), and
+  // how far before the next vblank a present latches and commits (0 = at
+  // once).
+  std::atomic<uint64_t> last_flip_ns_{0};
+  uint64_t repaint_window_ns_{0};
   // Hand this frame's notes to the tracker under a new serial and publish that
   // serial, both *before* the commit. OnFlipEvent reads atomic_serial_ to
   // decide which serial a flip showed, so a serial published after the ioctl
