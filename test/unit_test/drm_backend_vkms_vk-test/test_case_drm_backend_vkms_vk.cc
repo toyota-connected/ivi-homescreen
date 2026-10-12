@@ -31,10 +31,14 @@
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <functional>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -983,6 +987,11 @@ void RecordRelease(void* user_data, void* image, const uint32_t buffer_id) {
   r->calls.fetch_add(1);
 }
 
+// Where the view's presented reports go, when a case wants them: the frame's
+// seq, the time it started to be shown and the refresh period.
+std::function<void(uint64_t seq, uint64_t ust_ns, uint32_t refresh_ns)>
+    g_on_presented;
+
 int NoopFactory(const IhsPvCreateInfo* /*info*/,
                 void* factory_user_data,
                 IhsPlatformView* view,
@@ -991,6 +1000,13 @@ int NoopFactory(const IhsPvCreateInfo* /*info*/,
   *static_cast<IhsPlatformView**>(factory_user_data) = view;
   out_callbacks->struct_size = sizeof(*out_callbacks);
   out_callbacks->dispose = [](void* /*u*/) {};
+  out_callbacks->presented = [](void* /*u*/, const uint64_t seq,
+                                const uint64_t ust_ns, const uint32_t refresh,
+                                uint64_t /*msc*/, uint32_t /*flags*/) {
+    if (g_on_presented) {
+      g_on_presented(seq, ust_ns, refresh);
+    }
+  };
   *out_user_data = nullptr;
   return IHS_PV_OK;
 }
@@ -1585,4 +1601,172 @@ int main(int argc, char** argv) {
   IHS_LOGGING_START("TEST", "drm_kms_vulkan vkms test");
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
+}
+
+namespace {
+
+uint64_t NowNs() {
+  timespec ts{};
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return static_cast<uint64_t>(ts.tv_sec) * 1'000'000'000ULL +
+         static_cast<uint64_t>(ts.tv_nsec);
+}
+
+void SleepUntil(const uint64_t t_ns) {
+  timespec ts{};
+  ts.tv_sec = static_cast<time_t>(t_ns / 1'000'000'000ULL);
+  ts.tv_nsec = static_cast<long>(t_ns % 1'000'000'000ULL);
+  while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, nullptr) ==
+         EINTR) {
+  }
+}
+
+// The next flip after @seen, or 0 if none comes within @timeout_ms.
+uint64_t AwaitFlipAfter(const VulkanDrmBackend& backend,
+                        const uint64_t seen,
+                        const int timeout_ms = 200) {
+  const uint64_t end = NowNs() + static_cast<uint64_t>(timeout_ms) * 1'000'000;
+  while (NowNs() < end) {
+    if (const uint64_t f = backend.LastFlipNsForTest(); f != seen) {
+      return f;
+    }
+    std::this_thread::sleep_for(std::chrono::microseconds(100));
+  }
+  return 0;
+}
+
+// Submits @buffer whole as frame @seq.
+bool SubmitSeq(IhsPlatformView* view,
+               const PooledBuffer& buffer,
+               const uint32_t buffer_id,
+               const uint64_t seq) {
+  IhsFrame f = buffer.Frame();
+  f.buffer_id = buffer_id;
+  IhsLayer layer{};
+  layer.struct_size = sizeof(layer);
+  layer.frame = &f;
+  layer.acquire_fence_fd = -1;
+  int release = -1;
+  const int rc = ihs_pv_submit_layers(view, &layer, 1, seq, &release);
+  if (release >= 0) {
+    ::close(release);
+  }
+  return rc == IHS_PV_OK;
+}
+
+}  // namespace
+
+// The latency a producer that renders just after each flip sees -- a map
+// whose frames follow the display -- with Flutter presenting just after the
+// flip too: Flutter at +1 ms, the producer at +2 ms, every refresh. Measured
+// from each submit to the vblank that first shows it, in refreshes.
+//
+// Compositing as soon as Flutter presents takes the producer's frame a
+// refresh late every time: the present it lands after has already gone out,
+// and the next one shows it a refresh later. Compositing at the repaint
+// window takes it into the present already waiting, onto the next vblank.
+TEST_F(PvHostVkmsVk, AFrameSubmittedJustAfterTheFlipMakesTheNextVblank) {
+  PooledBuffer buffers[2];
+  for (auto& b : buffers) {
+    ASSERT_TRUE(b.Create(display_->SharedDevice()->fd(), kViewW, kViewH));
+  }
+
+  constexpr int kFrames = 60;
+  constexpr uint64_t kWindowNs = 5'000'000;
+  constexpr uint64_t kFlutterAt = 1'000'000;
+  constexpr uint64_t kProducerAt = 2'000'000;
+  uint64_t seq = 0;
+
+  // Refreshes from submit to shown, for each frame that was shown.
+  const auto run = [&](const uint64_t window_ns) {
+    backend_->SetRepaintWindowForTest(window_ns);
+    std::mutex mu;
+    std::map<uint64_t, uint64_t> submitted;
+    std::map<uint64_t, uint64_t> shown;
+    uint32_t period = 0;
+    g_on_presented = [&](const uint64_t s, const uint64_t ust,
+                         const uint32_t refresh) {
+      const std::lock_guard<std::mutex> lock(mu);
+      shown[s] = ust;
+      period = refresh;
+    };
+    // Get flips going.
+    for (int i = 0; i < 3; ++i) {
+      EXPECT_TRUE(
+          SubmitSeq(pv_, buffers[i % 2], static_cast<uint32_t>(i % 2), ++seq));
+      EXPECT_TRUE(Present());
+    }
+    const uint64_t first = seq + 1;
+    std::atomic<bool> producer_ok{true};
+    std::thread producer([&] {
+      uint64_t flip = backend_->LastFlipNsForTest();
+      for (int i = 0; i < kFrames; ++i) {
+        flip = AwaitFlipAfter(*backend_, flip);
+        if (flip == 0) {
+          producer_ok = false;
+          return;
+        }
+        SleepUntil(flip + kProducerAt);
+        const uint64_t s = first + static_cast<uint64_t>(i);
+        const uint64_t at = NowNs();
+        if (!SubmitSeq(pv_, buffers[s % 2], static_cast<uint32_t>(s % 2), s)) {
+          producer_ok = false;
+          return;
+        }
+        const std::lock_guard<std::mutex> lock(mu);
+        submitted[s] = at;
+      }
+    });
+    uint64_t flip = backend_->LastFlipNsForTest();
+    for (int i = 0; i < kFrames + 2; ++i) {
+      flip = AwaitFlipAfter(*backend_, flip);
+      if (flip == 0) {
+        break;
+      }
+      SleepUntil(flip + kFlutterAt);
+      EXPECT_TRUE(Present()) << "present " << i;
+    }
+    producer.join();
+    seq = first + kFrames;
+    // The last presents' flips report the last frames.
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    g_on_presented = nullptr;
+    EXPECT_TRUE(producer_ok.load()) << "the producer lost the flips";
+
+    const std::lock_guard<std::mutex> lock(mu);
+    std::vector<double> refreshes;
+    if (period == 0) {
+      ADD_FAILURE() << "no refresh period reported";
+      return refreshes;
+    }
+    for (const auto& [s, at] : submitted) {
+      if (const auto it = shown.find(s); it != shown.end() && it->second > at) {
+        refreshes.push_back(static_cast<double>(it->second - at) /
+                            static_cast<double>(period));
+      }
+    }
+    std::sort(refreshes.begin(), refreshes.end());
+    return refreshes;
+  };
+  const auto p95 = [](const std::vector<double>& v) {
+    return v.empty() ? 0.0
+                     : v[static_cast<size_t>(static_cast<double>(v.size() - 1) *
+                                             0.95)];
+  };
+
+  const std::vector<double> windowed = run(kWindowNs);
+  const std::vector<double> at_once = run(0);
+  ASSERT_GE(windowed.size(), static_cast<size_t>(kFrames / 2))
+      << "too few frames shown to judge";
+  ASSERT_GE(at_once.size(), static_cast<size_t>(kFrames / 2));
+  std::printf(
+      "[ latency ] submit to shown, refreshes: window p50 %.2f p95 "
+      "%.2f (%zu shown); at once p50 %.2f p95 %.2f (%zu shown)\n",
+      windowed[windowed.size() / 2], p95(windowed), windowed.size(),
+      at_once[at_once.size() / 2], p95(at_once), at_once.size());
+  EXPECT_LT(p95(windowed), 1.0) << "the window should take it onto the next "
+                                   "vblank";
+  EXPECT_GT(at_once[at_once.size() / 2], 1.0)
+      << "compositing at once shows it a refresh later; if it no longer does, "
+         "this case no longer measures the window";
 }
