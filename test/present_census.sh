@@ -124,6 +124,53 @@ declare -a RESULTS=()
 # --write / --check failures, which happen after the census has already run.
 die() { echo "error: $*" >&2; exit 2; }
 log() { echo "[census] $*"; }
+# The pids whose executable *is* $HOMESCREEN, by /proc/<pid>/exe.
+#
+# Neither of the obvious spellings is safe, and both failure modes were seen
+# on a shared board:
+#
+#   pkill -f "$HOMESCREEN" matches any command line *containing* the path,
+#   which includes this script's own callers. A wrapper that names the binary
+#   when invoking present_census.sh was killed by the reap it had asked for,
+#   orphaning the shell it was measuring -- observed as a homescreen alive 11
+#   minutes into a 60 s census with no census line written, and ~1.9 GiB of
+#   GPU memory held against every other session on the board.
+#
+#   pkill -x homescreen matches by name, and on a board shared with other
+#   sessions those are their builds, under their own paths. Killing someone
+#   else's run is worse than leaking one of ours.
+#
+# Matching the resolved executable is exact: it cannot catch a script that
+# merely mentions the path, and it cannot catch another copy of the binary
+# somewhere else. An unreadable /proc/<pid>/exe (another user's process) just
+# does not match.
+homescreen_pids() {
+    local target
+    # ${HOMESCREEN:-} and not $HOMESCREEN: the EXIT trap can reach cleanup
+    # before the prerequisite check has run, and set -u would abort there.
+    target="$(readlink -f -- "${HOMESCREEN:-}" 2>/dev/null)" || return 0
+    [[ -n "$target" ]] || return 0
+    local dir pid
+    for dir in /proc/[0-9]*; do
+        pid="${dir#/proc/}"
+        if [[ "$(readlink -f -- "$dir/exe" 2>/dev/null)" == "$target" ]]; then
+            printf '%s\n' "$pid"
+        fi
+    done
+}
+
+# Signal every live copy of the binary. Returns 1 when none were found, so a
+# caller can tell "nothing to do" from "asked them to stop".
+signal_homescreens() {  # signal_homescreens <signal>
+    local sig="$1" pid found=1
+    while read -r pid; do
+        [[ -n "$pid" ]] || continue
+        kill "-${sig}" "$pid" 2>/dev/null
+        found=0
+    done < <(homescreen_pids)
+    return "$found"
+}
+
 # KEEP_LOG=1 leaves the per-backend logs behind, and says where.
 #
 # Every census figure is folded out of those logs, so when an invariant fails
@@ -136,7 +183,7 @@ log() { echo "[census] $*"; }
 # where the logs matter most, since die() is reachable after the census has run,
 # from --write and --check.
 cleanup() {
-    [[ -n "${HOMESCREEN:-}" ]] && pkill -KILL -f "$HOMESCREEN" 2>/dev/null
+    [[ -n "${HOMESCREEN:-}" ]] && signal_homescreens KILL
     if [[ "$KEEP_LOG" == "1" ]]; then
         log "logs kept: $TMPDIR"
     else
@@ -201,15 +248,15 @@ check_prereqs() {
 }
 
 # ─── Process control (shared with input_event_driven.sh conventions) ─────────
+
 reap_homescreen() {
-    pgrep -f "$HOMESCREEN" >/dev/null 2>&1 || return 0
-    pkill -TERM -f "$HOMESCREEN" 2>/dev/null
+    signal_homescreens TERM || return 0
     local i
     for i in $(seq 1 15); do
-        pgrep -f "$HOMESCREEN" >/dev/null 2>&1 || return 0
+        [[ -z "$(homescreen_pids)" ]] && return 0
         sleep 0.2
     done
-    pkill -KILL -f "$HOMESCREEN" 2>/dev/null
+    signal_homescreens KILL
     sleep 0.5
 }
 
