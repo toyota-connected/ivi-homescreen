@@ -370,6 +370,10 @@ class VulkanDrmBackend final : public Backend {
   /// CompositorState is only complete in the implementation.
   [[nodiscard]] bool FlipPendingForTest() const;
   [[nodiscard]] int DrmFdForTest() const;
+  /// The last flip's vblank timestamp (CLOCK_MONOTONIC ns, 0 before one),
+  /// and the repaint window a case runs under (0 = composite at once).
+  [[nodiscard]] uint64_t LastFlipNsForTest() const;
+  void SetRepaintWindowForTest(uint64_t window_ns);
   /// Put the latch up without a commit, so a case can be sure it is testing the
   /// clearing rather than racing a flip event that cleared it first.
   void SetFlipPendingForTest(bool pending);

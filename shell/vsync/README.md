@@ -18,6 +18,7 @@ shared baton class and the per-source providers.
 | Cold-start safety (parked baton survives before runner is wired) | ✓ | Always |
 | Frame parking (suspend production, keep engine warm) | ✓ | Always |
 | Discard + parked-baton delivery (wall-clock fallback) | ✓ | Always |
+| Vblank pacing: at most one baton per refresh, on the vblank | ✓ | On for the DRM backends; `IVI_VSYNC_PACE=0` turns it off |
 | Per-present cadence profiling (window + session summary) | ✓ | `IVI_VSYNC_PROFILE` |
 | `WaylandVsyncProvider` — `wp_presentation` → `OnVsync` | ✓ | `-DBUILD_BACKEND_WAYLAND_EGL=ON` or `-DBUILD_BACKEND_WAYLAND_VULKAN=ON` |
 | `ConsumerPacedVsyncSource` — backpressure / credit-based pacing | ✓ | Always compiled (used by `headless-egl`) |
@@ -51,7 +52,9 @@ the provider and returns. The provider then decides when to hand it back:
 - **`IsSourcePending()` true** (a present is already in flight) → wait for the
   source's completion event.
 - **`IsSourcePending()` false** (idle pipeline) → drain inline, on the wall
-  clock, so Flutter is never stalled.
+  clock, so Flutter is never stalled. When the provider paces to the vblank
+  and a baton already went out this refresh, the request waits for the next
+  vblank instead; see [Pacing to the vblank](#pacing-to-the-vblank).
 
 `DeliverVsync(frame_start_ns)` / `DeliverDiscard()` are called by the source
 when a frame is actually presented or dropped. `PostOnVsync` posts
@@ -125,6 +128,29 @@ Wayland provider is gated:
 | DRM page-flip | `DeliverVsync` is called when the kernel delivers `PAGE_FLIP_EVENT` on the card fd. |
 | Software page-flip | `DeliverVsync` is called when the sink's page-flip completes. |
 | `ConsumerPacedVsyncSource` | A parked baton becomes deliverable when the consumer releases a frame slot (`AddCredit`); no present is recorded. |
+
+### Pacing to the vblank
+
+Nothing is in flight from the moment a baton goes out until that frame
+commits, so an unpaced provider answers every request made in that window at
+once. A ticker that asks again as soon as it is answered gets a burst of empty
+frames right after each vblank, and a frame started before the one ahead of it
+has presented waits a whole refresh behind it.
+
+`SetPaceToVblank(true)` hands out at most one baton per refresh:
+
+- A request made after a baton already went out this refresh waits for the
+  next vblank, counted from the last presentation (`DeliverVsync`) and the
+  period. It is delivered from a timer on the runner's `io_context`, and the
+  vblank is its frame start.
+- A flip still hands the baton back at once.
+- A request after a refresh with no baton out is still answered at once, so an
+  idle display wakes as quickly as before.
+
+The DRM backends (`drm-kms-vulkan`, `drm-kms-egl`) turn it on.
+`IVI_VSYNC_PACE=0` turns it off. `SetPacingClockForTest` replaces the clock and
+the timer, so a test sets the time and fires the deferred delivery itself (see
+`test/unit_test/vsync_pace-test`).
 
 ### Vsync profiling
 

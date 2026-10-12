@@ -387,6 +387,7 @@ DrmBackend::DrmBackend(DrmConfig cfg, homescreen::DrmSession* session)
   // RecordFlipComplete(). Enabled() also honors the umbrella IVI_PROFILE.
   vsync_.EnableProfile(profiling::FrameProfile::Enabled("IVI_VSYNC_PROFILE"),
                        "DrmVsync");
+  vsync_.SetPaceToVblank(ivi::IVsyncProvider::PaceEnabledByEnv());
   // Motion-to-photon (IVI_M2P_PROFILE): the flip path feeds RecordPresent and
   // DrmSeat feeds RecordInput, both marshaled onto the platform task runner.
   InitMotionToPhoton();

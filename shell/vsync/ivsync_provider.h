@@ -19,6 +19,9 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
+#include <memory>
+#include <mutex>
 #include <string>
 
 #include <shell/platform/embedder/embedder.h>
@@ -53,7 +56,7 @@ namespace ivi {
 class IVsyncProvider {
  public:
   IVsyncProvider() = default;
-  virtual ~IVsyncProvider() = default;
+  virtual ~IVsyncProvider();
 
   IVsyncProvider(const IVsyncProvider&) = delete;
   IVsyncProvider& operator=(const IVsyncProvider&) = delete;
@@ -133,6 +136,39 @@ class IVsyncProvider {
     return parked_.load(std::memory_order_acquire);
   }
 
+  /// Hand Flutter at most one vsync per refresh, on the display's vblanks.
+  ///
+  /// Without it a request made while nothing is in flight is answered at once,
+  /// and nothing is in flight from the moment a baton goes out until that
+  /// frame commits: a ticker's next request lands in that window, gets the
+  /// next baton at once, and so on -- hundreds of empty frames in the first
+  /// milliseconds after a vblank, and a frame started before the one in front
+  /// of it has presented, which then waits a whole refresh behind it.
+  ///
+  /// Paced, a request made after a baton has gone out this refresh waits for
+  /// the next vblank (from the last presentation and the period), and gets
+  /// that vblank as its frame start. A flip still hands the baton back at
+  /// once, and a request after a refresh with no baton is still answered at
+  /// once, so an idle display wakes as quickly as before.
+  void SetPaceToVblank(bool pace) {
+    pace_.store(pace, std::memory_order_release);
+  }
+
+  /// The DRM backends' default: paced unless IVI_VSYNC_PACE=0.
+  [[nodiscard]] static bool PaceEnabledByEnv();
+
+  /// Test seam: the clock pacing reads (CLOCK_MONOTONIC nanoseconds) and what
+  /// it does to deliver at a later time (normally a timer on the runner). A
+  /// test calls FireDeferredForTest() to run the delivery it was asked for.
+  void SetPacingClockForTest(std::function<uint64_t()> now,
+                             std::function<void(uint64_t due_ns)> schedule) {
+    now_for_test_ = std::move(now);
+    schedule_for_test_ = std::move(schedule);
+  }
+  void FireDeferredForTest() {
+    OnDeferredDue(deferred_due_ns_.load(std::memory_order_acquire));
+  }
+
  protected:
   /// True when a present is already in flight, so SubmitBaton should wait for
   /// the source rather than draining inline. Default reads source_pending_;
@@ -188,6 +224,27 @@ class IVsyncProvider {
   // Exchange the parked baton out and marshal it (no profiling — the public
   // DeliverVsync/DeliverDiscard wrappers record the present/discard).
   void DeliverBaton(uint64_t now_ns);
+
+  // Pacing (SetPaceToVblank). The earliest time the next baton may go out,
+  // set on every hand-out to the vblank after it; the time of the last real
+  // presentation, whose phase the vblanks are counted from; and the time a
+  // deferred delivery is due (0 = none armed).
+  [[nodiscard]] uint64_t NowNs() const;
+  [[nodiscard]] uint64_t NextVblankAfter(uint64_t t_ns) const;
+  void NoteHandOut(uint64_t at_ns);
+  void ScheduleDeferred(uint64_t due_ns);
+  void OnDeferredDue(uint64_t due_ns);
+  std::atomic<bool> pace_{false};
+  std::atomic<uint64_t> last_vblank_ns_{0};
+  std::atomic<uint64_t> next_allowed_ns_{0};
+  std::atomic<uint64_t> deferred_due_ns_{0};
+  // The timer lives on the runner's io_context and may fire after this
+  // provider is gone; it reaches the provider only through this, under its
+  // lock, and Stop() / the destructor clear the owner first.
+  struct PaceTimer;
+  std::shared_ptr<PaceTimer> pace_timer_;
+  std::function<uint64_t()> now_for_test_;
+  std::function<void(uint64_t)> schedule_for_test_;
 
   std::atomic<intptr_t> vsync_baton_{0};
   std::atomic<FLUTTER_API_SYMBOL(FlutterEngine)> engine_{nullptr};

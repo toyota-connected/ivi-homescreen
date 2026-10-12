@@ -58,6 +58,7 @@
 #include <drm-cxx/sync/fence.hpp>
 
 #include "backend/common/flip_arm.h"
+#include "backend/common/repaint_window.h"
 #include "backend/drm_kms_egl/drm_cursor.h"
 #include "backend/drm_kms_egl/scene_layer_source_vk.h"
 #if BUILD_HUD
@@ -885,6 +886,11 @@ struct VulkanDrmBackend::CompositorState {
   std::vector<size_t> plane_scanning_slots;
   std::vector<size_t> plane_pending_slots;
   uint32_t period_ns = 16'666'667U;  // connector refresh period (from setup)
+  // The last flip's vblank timestamp (reader thread writes, raster reads), and
+  // how far before the next vblank a present composites and commits (0 = at
+  // once). See repaint_window.h.
+  std::atomic<uint64_t> last_flip_ns{0};
+  std::atomic<uint64_t> repaint_window_ns{0};
   drmEventContext evctx{};
 
   // Async page-flip reader: an asio descriptor over the DRM fd on its own
@@ -1332,7 +1338,11 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   const uint32_t period_ns =
       vr > 0 ? static_cast<uint32_t>(1'000'000'000ULL / vr) : 16'666'667U;
   compositor_->period_ns = period_ns;
+  compositor_->repaint_window_ns.store(
+      RepaintWindowNsFromEnv(kDefaultRepaintWindowNs),
+      std::memory_order_relaxed);
   vsync_.SetPeriodNs(period_ns);
+  vsync_.SetPaceToVblank(ivi::IVsyncProvider::PaceEnabledByEnv());
   vsync_.EnableProfile(profiling::FrameProfile::Enabled("IVI_VSYNC_PROFILE"),
                        "DrmVkVsync");
   {
@@ -1656,6 +1666,17 @@ uint64_t VulkanDrmBackend::PresentedFramesForTest() const {
   return compositor_ ? compositor_->frame : 0;
 }
 
+uint64_t VulkanDrmBackend::LastFlipNsForTest() const {
+  return compositor_ ? compositor_->last_flip_ns.load(std::memory_order_acquire)
+                     : 0;
+}
+
+void VulkanDrmBackend::SetRepaintWindowForTest(const uint64_t window_ns) {
+  if (compositor_) {
+    compositor_->repaint_window_ns.store(window_ns, std::memory_order_relaxed);
+  }
+}
+
 bool VulkanDrmBackend::FlipPendingForTest() const {
   return compositor_ &&
          compositor_->flip_pending.load(std::memory_order_acquire);
@@ -1806,11 +1827,13 @@ void VulkanDrmBackend::OnFlipEvent(const unsigned int sequence,
   if (c == nullptr) {
     return;
   }
+  const uint64_t tv_ns = static_cast<uint64_t>(tv_sec) * 1'000'000'000ULL +
+                         static_cast<uint64_t>(tv_usec) * 1000ULL;
+  // Before the flag clears: a present waiting on it reads the vblank next.
+  c->last_flip_ns.store(tv_ns, std::memory_order_release);
   c->flip_pending.store(false, std::memory_order_release);
   vsync_.SetSourcePending(false);
   stall_->NoteFlip();  // progress, for the stall detector
-  const uint64_t tv_ns = static_cast<uint64_t>(tv_sec) * 1'000'000'000ULL +
-                         static_cast<uint64_t>(tv_usec) * 1000ULL;
   // The kernel's vblank timestamp for a flip the display completed.
   PresentationTime shown;
   shown.ust_ns = tv_ns;
@@ -3579,18 +3602,6 @@ bool VulkanDrmBackend::PresentSlot(const size_t slot,
       profiling::FrameProfile::Enabled("IVI_DRMVK_PROFILE");
   drm_kms_vulkan::VulkanBackingStore* store = c.slots[slot].store.get();
 
-  // Flush the renderer's color writes so the scanout engine sees this frame.
-  // The embedder host-syncs all layers before present_layers, so the render is
-  // already retired; this barrier only makes the writes visible to KMS. On the
-  // explicit-sync path it returns a sync_file the scene hands to IN_FENCE_FD so
-  // the kernel — not the raster thread — waits on it; -1 means CPU-fenced.
-  // Owned here so every exit below closes it exactly once --- the early returns
-  // during layer creation included.
-  const ScopedFd scanout_fence(
-      SubmitScanoutBarrier(c, store->image(), store->view(), store->width(),
-                           store->height(), layers, count));
-  const uint64_t t1 = stage_profile_enabled ? MonotonicNs() : 0;
-
   // The engine's raster thread pipelines: it hands us frame N+1 while flip N is
   // still in flight, and a single plane can hold only one flip, so we wait for
   // the previous flip here. Do NOT read the fd — the async reader is the single
@@ -3603,7 +3614,6 @@ bool VulkanDrmBackend::PresentSlot(const size_t slot,
        ++spin_ms) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
-  const uint64_t t2 = stage_profile_enabled ? MonotonicNs() : 0;
   const bool stalled =
       static_cast<uint32_t>(spin_ms) * 1'000'000U > c.period_ns;
   // Rotate: the completed flip's slot is now scanning; the slot it replaced
@@ -3613,6 +3623,31 @@ bool VulkanDrmBackend::PresentSlot(const size_t slot,
     c.scanning_slot = c.pending_slot;
     c.pending_slot = -1;
   }
+  // Then hold the composite until the repaint window opens, so a producer
+  // buffer that lands meanwhile makes this vblank rather than the next. The
+  // flip lands on the same vblank either way.
+  if (!c.first_commit) {
+    const uint64_t delay = RepaintDelayNs(
+        MonotonicNs(), c.last_flip_ns.load(std::memory_order_acquire),
+        c.period_ns, c.repaint_window_ns.load(std::memory_order_relaxed));
+    if (delay > 0) {
+      std::this_thread::sleep_for(std::chrono::nanoseconds(delay));
+    }
+  }
+  const uint64_t t1 = stage_profile_enabled ? MonotonicNs() : 0;
+
+  // Flush the renderer's color writes so the scanout engine sees this frame.
+  // The embedder host-syncs all layers before present_layers, so the render is
+  // already retired; this barrier only makes the writes visible to KMS. On the
+  // explicit-sync path it returns a sync_file the scene hands to IN_FENCE_FD so
+  // the kernel — not the raster thread — waits on it; -1 means CPU-fenced.
+  // Owned here so every exit below closes it exactly once --- the early returns
+  // during layer creation included. Platform views composite here, from the
+  // newest buffer each producer has submitted.
+  const ScopedFd scanout_fence(
+      SubmitScanoutBarrier(c, store->image(), store->view(), store->width(),
+                           store->height(), layers, count));
+  const uint64_t t2 = stage_profile_enabled ? MonotonicNs() : 0;
 
   // Create the single presenting layer once the ring has a slot; thereafter the
   // ring source rotates which slot's framebuffer the layer scans out.
@@ -3727,7 +3762,7 @@ bool VulkanDrmBackend::PresentSlot(const size_t slot,
     frame_profile_.Record("VulkanDrmBackend", /*ok=*/true, /*now_ns=*/0,
                           stalled);
     const uint64_t t3 = MonotonicNs();
-    c.stages.account(t1 - t0, t2 - t1, t3 - t2, t3 - t0);
+    c.stages.account(t2 - t1, t1 - t0, t3 - t2, t3 - t0);
     if (c.stages.frames >= kStageWindow) {
       const auto& st = c.stages;
       const auto mean_ms = [](const uint64_t sum, const uint32_t n) {

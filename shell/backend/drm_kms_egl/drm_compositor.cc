@@ -44,6 +44,7 @@
 #include <drm-cxx/scene/external_dma_buf_pool.hpp>
 #include <drm-cxx/sync/fence.hpp>
 
+#include "backend/common/repaint_window.h"
 #include "backend/drm_kms_egl/driver_probe.h"
 #include "backend/drm_kms_egl/drm_backend.h"
 #include "backend/drm_kms_egl/drm_cursor.h"
@@ -366,6 +367,7 @@ DrmCompositor::DrmCompositor(DrmBackend* backend, DrmOutputContext out)
                                 : nullptr) {
   refresh_ns_ = RefreshPeriodNs(out_.mode().clock, out_.mode().htotal,
                                 out_.mode().vtotal);
+  repaint_window_ns_ = RepaintWindowNsFromEnv(kDefaultRepaintWindowNs);
 }
 
 DrmCompositor::~DrmCompositor() {
@@ -1444,6 +1446,9 @@ void DrmCompositor::OnFlipEvent(const unsigned int sequence,
   // present, and it waited for good.
   std::vector<DeferredScanoutRelease> off_screen =
       TakeDeferredScanoutReleases();
+  // Before the flag clears: a present waiting on it reads the vblank next.
+  last_flip_ns_.store(FlipTime(sequence, tv_sec, tv_usec).ust_ns,
+                      std::memory_order_release);
   OnFlipComplete();
   FireDeferredScanoutReleases(off_screen);
   // And what the scene still holds of the frames this flip took off screen.
@@ -1471,7 +1476,9 @@ void DrmCompositor::OnLegacyFlipPresented(const uint64_t serial,
                                           const unsigned int sequence,
                                           const unsigned int tv_sec,
                                           const unsigned int tv_usec) {
-  presentation_.Presented(serial, FlipTime(sequence, tv_sec, tv_usec));
+  const PresentationTime shown = FlipTime(sequence, tv_sec, tv_usec);
+  last_flip_ns_.store(shown.ust_ns, std::memory_order_release);
+  presentation_.Presented(serial, shown);
 }
 
 PresentationTime DrmCompositor::FlipTime(const unsigned int sequence,
@@ -1727,6 +1734,15 @@ bool DrmCompositor::WaitForPendingFlip() const {
   return true;
 }
 
+void DrmCompositor::WaitForRepaintWindow() const {
+  const uint64_t delay =
+      RepaintDelayNs(NsNow(), last_flip_ns_.load(std::memory_order_acquire),
+                     refresh_ns_, repaint_window_ns_);
+  if (delay > 0) {
+    std::this_thread::sleep_for(std::chrono::nanoseconds(delay));
+  }
+}
+
 // ─── GL compositing helpers ──────────────────────────────────────────────
 
 void DrmCompositor::CompositeLayerIntoFbo(GLuint target_fbo,
@@ -1812,6 +1828,13 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
   // fallback latches -- no GL-composited platform view ever got a buffer back
   // and its producer waited out the release-fence timeout on every frame. Same
   // defect as #530, one path over.
+  // Composite at the repaint window, as the plane paths do. Depth 1 only:
+  // Present below waits out the pending flip there anyway, and at depth 2 the
+  // frame is meant to queue behind it rather than wait.
+  if (backend_->cfg_.pipeline_depth < 2 && backend_->WaitForPendingFlip()) {
+    WaitForRepaintWindow();
+  }
+
   std::vector<DeferredScanoutRelease> previous = TakeDeferredScanoutReleases();
 
   // Take the CRTC back from the scene: its last commit left the primary at
@@ -1990,6 +2013,7 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
   if (!WaitForPendingFlip()) {
     return PresentViaGlFallback(layers, count);
   }
+  WaitForRepaintWindow();
 
   // The previous frame's flip has completed, so anything held for a post-flip
   // release is off the plane -- return it to its producer.
@@ -2686,6 +2710,7 @@ bool DrmCompositor::PresentLayersLocked(const FlutterLayer** layers,
   if (!WaitForPendingFlip()) {
     return PresentViaGlFallback(layers, layer_count);
   }
+  WaitForRepaintWindow();
   const uint64_t t1 = profile ? NsNow() : 0;
 
   // ── Build the drm-cxx Output with one Layer per Flutter layer ──
@@ -3276,6 +3301,7 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   if (!WaitForPendingFlip()) {
     return PresentViaGlFallback(layers, layer_count);
   }
+  WaitForRepaintWindow();
   const uint64_t t1 = profile ? NsNow() : 0;
 
   // The previous frame's flip has now completed, so every platform-view buffer
@@ -4544,6 +4570,7 @@ bool DrmCompositor::PresentDirectOverlay(const FlutterLayer** layers,
   if (!WaitForPendingFlip()) {
     return PresentViaGlFallback(layers, count);
   }
+  WaitForRepaintWindow();
   const uint64_t t1 = profile ? NsNow() : 0;
 
   // Find the single backing-store layer. Any platform-view layer, or
