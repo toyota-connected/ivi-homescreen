@@ -295,8 +295,9 @@ typedef enum IhsPvResult {
  * that has one. Added in 1.14; written only when @struct_size covers it.
  *
  * @latch_lead_ns is how long before each vblank the shell takes a view's
- * newest submitted frame for the next refresh, or 0 when it cannot say (a
- * Wayland compositor latches on its own schedule). A frame submitted later
+ * newest submitted frame for the next refresh, or 0 when it cannot say. On
+ * Wayland it is when the shell samples views into its window's frame, learned
+ * from recent frames, and 0 until it has seen one. A frame submitted later
  * than that waits for the refresh after. A producer that paces its own frames
  * can aim to have each frame ready just before it -- submitted, with its
  * acquire fence signaled, since the composite waits on that fence. The next

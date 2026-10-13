@@ -215,6 +215,66 @@ TEST_F(VsyncPace, StoppingDropsADeferredDelivery) {
   SUCCEED();
 }
 
+TEST_F(VsyncPace, AFlipHandsBackAtOnceByDefault) {
+  Present(kVblank);
+  ASSERT_TRUE(Request(kVblank + 1 * kMs));
+  ASSERT_FALSE(Request(kVblank + 2 * kMs));
+  // A presentation in the same refresh still delivers.
+  Present(kVblank + 3 * kMs);
+  EXPECT_FALSE(vsync_.HasParkedBaton());
+}
+
+TEST_F(VsyncPace, WithPaceFlipsAnOlderFramesPresentationWaits) {
+  vsync_.SetPaceFlips(true);
+  Present(kVblank);
+  ASSERT_TRUE(Request(kVblank + 1 * kMs)) << "the first frame of the refresh";
+  ASSERT_FALSE(Request(kVblank + 2 * kMs));
+  ASSERT_EQ(scheduled_.size(), 1U);
+
+  // An older frame is shown on this refresh's vblank, after the baton went
+  // out: it must not start a second frame.
+  Present(kVblank);
+  EXPECT_TRUE(vsync_.HasParkedBaton()) << "left for the next vblank";
+  ASSERT_FALSE(scheduled_.empty());
+  EXPECT_EQ(scheduled_.back(), kVblank + kPeriod);
+
+  now_ = kVblank + kPeriod;
+  vsync_.FireDeferredForTest();
+  EXPECT_FALSE(vsync_.HasParkedBaton()) << "handed out on the vblank";
+}
+
+TEST_F(VsyncPace, WithPaceFlipsANextRefreshPresentationDelivers) {
+  vsync_.SetPaceFlips(true);
+  Present(kVblank);
+  ASSERT_TRUE(Request(kVblank + 1 * kMs));
+  ASSERT_FALSE(Request(kVblank + 2 * kMs));
+  Present(kVblank + kPeriod);
+  EXPECT_FALSE(vsync_.HasParkedBaton()) << "a new refresh: delivered at once";
+}
+
+TEST_F(VsyncPace, WithPaceFlipsAPresentationWithNoBatonArmsNothing) {
+  vsync_.SetPaceFlips(true);
+  Present(kVblank);
+  ASSERT_TRUE(Request(kVblank + 1 * kMs));
+  Present(kVblank);  // nothing parked
+  EXPECT_TRUE(scheduled_.empty());
+}
+
+TEST_F(VsyncPace, KeepPhaseDefersARequestInTheRefreshAfterAHandOut) {
+  vsync_.SetPaceKeepPhase(true);
+  Present(kVblank);
+  ASSERT_TRUE(Request(kVblank + 1 * kMs));
+  EXPECT_FALSE(Request(kVblank + kPeriod + 6 * kMs));
+  ASSERT_EQ(scheduled_.size(), 1U);
+  EXPECT_EQ(scheduled_[0], kVblank + 2 * kPeriod);
+}
+
+TEST_F(VsyncPace, WithoutKeepPhaseThatRequestIsAnsweredAtOnce) {
+  Present(kVblank);
+  ASSERT_TRUE(Request(kVblank + 1 * kMs));
+  EXPECT_TRUE(Request(kVblank + kPeriod + 6 * kMs));
+}
+
 // The real timer, end to end: a deferred baton is handed out by the runner's
 // io_context once the vblank passes.
 TEST(VsyncPaceTimer, TheRunnerDeliversADeferredBaton) {
@@ -239,4 +299,84 @@ TEST(VsyncPaceTimer, TheRunnerDeliversADeferredBaton) {
   }
   EXPECT_FALSE(vsync.HasParkedBaton()) << "the timer handed it out";
   vsync.Stop();
+}
+
+TEST_F(VsyncPace, WithPaceFlipsADiscardInTheSameRefreshWaits) {
+  vsync_.SetPaceFlips(true);
+  Present(kVblank);
+  ASSERT_TRUE(Request(kVblank + 1 * kMs));
+  ASSERT_FALSE(Request(kVblank + 2 * kMs));
+  now_ = kVblank + 3 * kMs;
+  vsync_.DeliverDiscard();  // an older commit replaced before it was shown
+  EXPECT_TRUE(vsync_.HasParkedBaton()) << "not a second frame this refresh";
+  EXPECT_EQ(scheduled_.back(), kVblank + kPeriod);
+}
+
+TEST_F(VsyncPace, AStaleDeferredDueDoesNotDeliver) {
+  Present(kVblank);
+  ASSERT_TRUE(Request(kVblank + 1 * kMs));
+  ASSERT_FALSE(Request(kVblank + 2 * kMs));
+  Present(kVblank + kPeriod);  // the flip delivers and disarms
+  ASSERT_FALSE(vsync_.HasParkedBaton());
+  vsync_.FireDeferredForTest();  // the old wait fires late
+  EXPECT_FALSE(vsync_.HasParkedBaton());
+}
+
+namespace {
+uint64_t MonotonicNowNs() {
+  timespec ts{};
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return static_cast<uint64_t>(ts.tv_sec) * 1'000'000'000ULL +
+         static_cast<uint64_t>(ts.tv_nsec);
+}
+
+// Defers one baton to the next vblank and waits for the runner to hand it out.
+bool DeferredBatonIsDelivered(ivi::IVsyncProvider& vsync) {
+  vsync.DeliverVsync(MonotonicNowNs());
+  vsync.SubmitBaton(nullptr, kBaton);
+  if (vsync.HasParkedBaton()) {
+    return false;  // the first request must be answered at once
+  }
+  vsync.SubmitBaton(nullptr, kBaton);
+  if (!vsync.HasParkedBaton()) {
+    return false;  // the second must wait for the vblank
+  }
+  for (int i = 0; i < 200 && vsync.HasParkedBaton(); ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  return !vsync.HasParkedBaton();
+}
+}  // namespace
+
+// A Wayland display's provider outlives the view whose runner it was wired to,
+// and is wired to the next view's runner.
+TEST(VsyncPaceTimer, AStoppedProviderDeliversOnTheNextRunner) {
+  ivi::IVsyncProvider vsync;
+  vsync.SetPeriodNs(static_cast<uint32_t>(kPeriod));
+  vsync.SetPaceToVblank(true);
+  {
+    WiredRunner first;
+    vsync.SetEngine(nullptr, first.get());
+    EXPECT_TRUE(DeferredBatonIsDelivered(vsync));
+    vsync.Stop();
+  }
+  WiredRunner second;
+  vsync.SetEngine(nullptr, second.get());
+  EXPECT_TRUE(DeferredBatonIsDelivered(vsync)) << "the waits reach it again";
+  vsync.Stop();
+}
+
+TEST(VsyncPaceTimer, AWaitStillArmedWhenTheRunnerGoesIsHarmless) {
+  ivi::IVsyncProvider vsync;
+  vsync.SetPeriodNs(static_cast<uint32_t>(kPeriod));
+  vsync.SetPaceToVblank(true);
+  {
+    WiredRunner runner;
+    vsync.SetEngine(nullptr, runner.get());
+    vsync.DeliverVsync(MonotonicNowNs());
+    vsync.SubmitBaton(nullptr, kBaton);
+    vsync.SubmitBaton(nullptr, kBaton);  // armed for the next vblank
+    vsync.Stop();
+  }  // the runner and its io_context go first, as on Wayland
+  SUCCEED();
 }

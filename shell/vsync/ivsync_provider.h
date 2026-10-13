@@ -55,7 +55,7 @@ namespace ivi {
  */
 class IVsyncProvider {
  public:
-  IVsyncProvider() = default;
+  IVsyncProvider();
   virtual ~IVsyncProvider();
 
   IVsyncProvider(const IVsyncProvider&) = delete;
@@ -154,6 +154,33 @@ class IVsyncProvider {
     pace_.store(pace, std::memory_order_release);
   }
 
+  /// Make a presentation obey the pacing too (needs SetPaceToVblank).
+  ///
+  /// By default a flip hands the baton back at once: on DRM the flip is the
+  /// vblank, so it is the start of a new refresh by definition. A source that
+  /// lets more than one present be in flight is different: the presentation of
+  /// an older frame can arrive just after a baton went out on this refresh's
+  /// vblank, and answering it would start a second frame in one refresh. With
+  /// this on, such a presentation leaves the baton for the next vblank.
+  void SetPaceFlips(bool pace_flips) {
+    pace_flips_.store(pace_flips, std::memory_order_release);
+  }
+
+  /// Keep frames on the vblank while frames keep coming (needs
+  /// SetPaceToVblank).
+  ///
+  /// By default a request made when no baton went out this refresh is
+  /// answered at once, so an idle display wakes quickly. When what asks for
+  /// frames is something mid-refresh -- a platform view submitting its own
+  /// frames -- that rule starts every frame at the moment of the request, and
+  /// the window's frames drift off the vblank. With this on, a request is
+  /// answered at once only after an idle refresh with no baton (two periods
+  /// since the last hand-out's vblank); otherwise it waits for the next
+  /// vblank.
+  void SetPaceKeepPhase(bool keep) {
+    pace_keep_phase_.store(keep, std::memory_order_release);
+  }
+
   /// The DRM backends' default: paced unless IVI_VSYNC_PACE=0.
   [[nodiscard]] static bool PaceEnabledByEnv();
 
@@ -187,13 +214,18 @@ class IVsyncProvider {
     return engine_.load(std::memory_order_acquire);
   }
 
+  /// CLOCK_MONOTONIC nanoseconds, or the test clock when one is set.
+  [[nodiscard]] uint64_t NowNs() const;
+
  public:
   /// The frame_start_time of the most recent baton handed to Flutter — i.e. the
-  /// input cutoff of the frame currently building/committing. Because a present
+  /// input cutoff of the frame currently building/committing. When a present
   /// in flight keeps the next baton parked, this value is stable across a
   /// single frame's commit, letting a source tag that frame's presentation
   /// feedback with the cutoff of the inputs it actually consumed
-  /// (motion-to-photon). 0 until the first baton is delivered. Public so a
+  /// (motion-to-photon). A source that lets the next baton go out while a
+  /// commit waits (Wayland grid pacing) makes it approximate. 0 until the
+  /// first baton is delivered. Public so a
   /// backend that owns (rather than subclasses) the provider — the DRM/KMS
   /// page-flip path — can read the cutoff when recording the scanout endpoint.
   [[nodiscard]] uint64_t LastDeliveredFrameStartNs() const {
@@ -229,18 +261,23 @@ class IVsyncProvider {
   // set on every hand-out to the vblank after it; the time of the last real
   // presentation, whose phase the vblanks are counted from; and the time a
   // deferred delivery is due (0 = none armed).
-  [[nodiscard]] uint64_t NowNs() const;
   [[nodiscard]] uint64_t NextVblankAfter(uint64_t t_ns) const;
   void NoteHandOut(uint64_t at_ns);
   void ScheduleDeferred(uint64_t due_ns);
   void OnDeferredDue(uint64_t due_ns);
+  // With SetPaceFlips: true when a baton already went out this refresh, so a
+  // presentation or discard must leave the baton for the next vblank (and
+  // arms that delivery if one is parked).
+  bool DeferToPace();
   std::atomic<bool> pace_{false};
+  std::atomic<bool> pace_flips_{false};
+  std::atomic<bool> pace_keep_phase_{false};
   std::atomic<uint64_t> last_vblank_ns_{0};
   std::atomic<uint64_t> next_allowed_ns_{0};
   std::atomic<uint64_t> deferred_due_ns_{0};
-  // The timer lives on the runner's io_context and may fire after this
-  // provider is gone; it reaches the provider only through this, under its
-  // lock, and Stop() / the destructor clear the owner first.
+  // Deferred waits run on the runner's io_context and may fire after this
+  // provider is stopped or gone; they reach it only through this, under its
+  // lock. SetEngine() sets the owner; Stop() and the destructor clear it.
   struct PaceTimer;
   std::shared_ptr<PaceTimer> pace_timer_;
   std::function<uint64_t()> now_for_test_;

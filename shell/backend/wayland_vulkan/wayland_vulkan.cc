@@ -2917,6 +2917,11 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
         }
         presentation_->Note(surface->GetPresentationSink(), img.frame,
                             /*zero_copy=*/false);
+        // The views' newest frames are taken now; this is the latch they aim
+        // at.
+        if (vsync_ != nullptr) {
+          vsync_->NoteLatch();
+        }
         auto src = reinterpret_cast<VkImage>(img.image);
         // The image's real format: 0 keeps the historical B8G8R8A8_UNORM
         // contract (RGB producers); a planar YUV producer reports its format
@@ -3066,6 +3071,9 @@ void WaylandVulkanBackend::BlitPlatformViewVulkan(VkCommandBuffer cmd,
     }
     presentation_->Note(surface->GetPresentationSink(), img.frame,
                         /*zero_copy=*/false);
+    if (vsync_ != nullptr) {
+      vsync_->NoteLatch();
+    }
     const auto sx0 = static_cast<int32_t>(std::lround(crop.x));
     // The crop is in the image's displayed orientation. A bottom-up buffer
     // holds those rows the other way up: take them from the mirrored band and

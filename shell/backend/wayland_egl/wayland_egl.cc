@@ -576,6 +576,10 @@ void WaylandEglBackend::NoteSampled(
     const ICompositorSurface::GlLayerTexture& texture) {
   presentation_->Note(surface->GetPresentationSink(), texture.frame,
                       /*zero_copy=*/false);
+  // The views' newest frames are taken now; this is the latch they aim at.
+  if (vsync_ != nullptr) {
+    vsync_->NoteLatch();
+  }
   // Hand the producer its buffer back once this frame is off the host's hands
   // (presented, overtaken or discarded). The GL path has no plane to release
   // it, and a producer that waits on its release fence -- the eventfd the view

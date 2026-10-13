@@ -177,9 +177,57 @@ class WaylandVsyncProvider : public IVsyncProvider {
     return last_refresh_ns_.load(std::memory_order_acquire);
   }
 
+  /// Pace frames on the vblanks the presentations reveal, not on each commit's
+  /// presentation. On by default; IVI_WL_VSYNC_GRID=0 turns it off.
+  ///
+  /// Waiting for a commit to be presented before starting the next frame ties
+  /// the frame rate to the host's latency: one commit shown a refresh late
+  /// starts the next frame a refresh late, the host's repaint loop idles in
+  /// the gap and restarts a refresh late again, and the window settles at
+  /// half rate. On the grid, a frame starts on each vblank (at most one per
+  /// refresh, from the last presentation and the period) while up to
+  /// kGridInFlight commits wait to be shown, so a late commit costs one
+  /// refresh, not every one after it.
+  void SetGridPacing(bool grid);
+  [[nodiscard]] static bool GridPacingEnabledByEnv();
+
+  /// The compositor took platform views' newest frames at @p take_ns (the
+  /// rasterizer thread, as it samples them into the window's frame). Feeds
+  /// LatchLeadNs(). Calls within a quarter refresh of the last one belong to
+  /// the same frame and are ignored.
+  void NoteLatch(uint64_t take_ns);
+  void NoteLatch() { NoteLatch(NowNs()); }
+
+  /// How long before a vblank the window samples platform views' frames:
+  /// the refresh period less the take's phase after the last presentation,
+  /// as a decaying maximum so it covers the earliest recent take. 0 until a
+  /// take has been seen after a presentation, or with IVI_WL_LATCH_LEAD=0.
+  /// Reported to producers as IhsPvCapabilities::latch_lead_ns.
+  [[nodiscard]] uint32_t LatchLeadNs() const {
+    return latch_lead_ns_.load(std::memory_order_acquire);
+  }
+
+  /// Commits that may wait to be shown while grid pacing starts new frames:
+  /// kGridInFlight unless IVI_WL_VSYNC_GRID_DEPTH says otherwise. Clamped to
+  /// 1..kGridInFlight.
+  static constexpr size_t kGridInFlight = 2;
+  void SetGridDepth(size_t depth);
+
+  /// Test seam: the number of commits waiting to be shown, as RequestFeedback
+  /// and RetireFeedback keep it, without a compositor.
+  void SetInFlightForTest(size_t n) {
+    in_flight_.store(n, std::memory_order_release);
+    feedback_pending_.store(n != 0, std::memory_order_release);
+  }
+
  protected:
   // IVsyncProvider source hooks (read on the event thread + SubmitBaton).
+  // On the grid only a full pipeline holds the baton for a presentation.
   [[nodiscard]] bool IsSourcePending() const override {
+    if (grid_.load(std::memory_order_acquire)) {
+      return in_flight_.load(std::memory_order_acquire) >=
+             grid_depth_.load(std::memory_order_acquire);
+    }
     return feedback_pending_.load(std::memory_order_acquire);
   }
   [[nodiscard]] uint32_t PeriodNs() const override {
@@ -211,6 +259,22 @@ class WaylandVsyncProvider : public IVsyncProvider {
   // now live in the base.
   std::atomic<bool> feedback_pending_{false};
   std::atomic<uint32_t> last_refresh_ns_{0};
+  std::atomic<size_t> in_flight_{0};
+  // Grid pacing asked for (SetGridPacing), and in force: it starts with the
+  // first presentation that gives a refresh period.
+  std::atomic<bool> grid_wanted_{false};
+  std::atomic<bool> grid_{false};
+  void ApplyGrid(bool on);
+  std::atomic<size_t> grid_depth_{kGridInFlight};
+
+  // NoteLatch / LatchLeadNs. The last presentation's time; under latch_mu_,
+  // the last take counted and the period the lead was learned at; and the
+  // published lead.
+  std::atomic<uint64_t> last_present_ns_{0};
+  std::mutex latch_mu_;
+  uint64_t last_take_ns_{0};
+  uint64_t latch_period_ns_{0};
+  std::atomic<uint32_t> latch_lead_ns_{0};
 
   std::mutex feedback_mu_;
   std::vector<std::unique_ptr<WpFeedbackHandler>> feedback_in_flight_;

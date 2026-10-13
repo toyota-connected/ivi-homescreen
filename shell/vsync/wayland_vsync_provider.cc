@@ -44,6 +44,9 @@ constexpr size_t kFeedbackInFlightCap = 16;
 // 10Hz floor on the reported refresh period — clamps a hostile/virtual
 // compositor from wedging the engine on a far-future frame_target_time.
 constexpr uint32_t kMaxPlausibleRefreshNs = 100'000'000;
+// LatchLeadNs decays toward later takes by this fraction of the gap per frame:
+// about half in 0.7 s at 60 Hz. An earlier take widens it at once.
+constexpr uint64_t kLatchLeadDecay = 64;
 }  // namespace
 
 // Handler method bodies — the classes are defined in the header so unique_ptr
@@ -117,6 +120,16 @@ bool WaylandVsyncProvider::TryBindGlobal(wl_registry* registry,
   // swap, IVI_VK_PROFILE = vk present). IVI_PROFILE enables everything.
   EnableProfile(profiling::FrameProfile::Enabled("IVI_VSYNC_PROFILE"),
                 "WaylandVsync");
+  SetGridPacing(GridPacingEnabledByEnv());
+  if (const char* env = std::getenv("IVI_WL_VSYNC_GRID_DEPTH")) {
+    const unsigned long depth = std::strtoul(env, nullptr, 10);
+    if (depth < 1 || depth > kGridInFlight) {
+      ihs::log::warn("[WaylandVsync] IVI_WL_VSYNC_GRID_DEPTH={} ignored (1-{})",
+                     env, kGridInFlight);
+    } else {
+      SetGridDepth(depth);
+    }
+  }
   ihs::log::debug("[WaylandVsync] bound wp_presentation v{}", bind_ver);
   return true;
 }
@@ -128,6 +141,60 @@ bool WaylandVsyncProvider::Usable() const {
   }();
   return !env_disabled && presentation_ != nullptr &&
          clock_compatible_.load(std::memory_order_acquire);
+}
+
+bool WaylandVsyncProvider::GridPacingEnabledByEnv() {
+  const char* env = std::getenv("IVI_WL_VSYNC_GRID");
+  return !(env != nullptr && std::string_view(env) == "0");
+}
+
+void WaylandVsyncProvider::SetGridPacing(const bool grid) {
+  grid_wanted_.store(grid, std::memory_order_release);
+  ApplyGrid(grid && last_refresh_ns_.load(std::memory_order_acquire) != 0);
+}
+
+void WaylandVsyncProvider::ApplyGrid(const bool on) {
+  grid_.store(on, std::memory_order_release);
+  SetPaceToVblank(on);
+  SetPaceFlips(on);
+  SetPaceKeepPhase(on);
+}
+
+void WaylandVsyncProvider::SetGridDepth(const size_t depth) {
+  grid_depth_.store(std::clamp<size_t>(depth, 1, kGridInFlight),
+                    std::memory_order_release);
+}
+
+void WaylandVsyncProvider::NoteLatch(const uint64_t take_ns) {
+  static const bool disabled = [] {
+    const char* env = std::getenv("IVI_WL_LATCH_LEAD");
+    return env != nullptr && std::string_view(env) == "0";
+  }();
+  const uint64_t period = PeriodNs();
+  const uint64_t last = last_present_ns_.load(std::memory_order_acquire);
+  if (disabled || last == 0 || take_ns < last || period == 0) {
+    return;
+  }
+  // Views on one display share this provider, each sampled on its own
+  // rasterizer thread.
+  const std::lock_guard<std::mutex> lock(latch_mu_);
+  if (last_take_ns_ != 0 && take_ns >= last_take_ns_ &&
+      take_ns - last_take_ns_ < period / 4) {
+    return;  // another layer of the same frame
+  }
+  last_take_ns_ = take_ns;
+  // The phase is on a circle: a take just after a vblank leads by almost a
+  // whole period, which is right -- the producer must be ready by then.
+  const uint64_t lead = period - (take_ns - last) % period;
+  uint64_t cur = latch_lead_ns_.load(std::memory_order_relaxed);
+  if (period != latch_period_ns_) {
+    latch_period_ns_ = period;  // a new mode: what was learned no longer holds
+    cur = 0;
+  }
+  const uint64_t next =
+      (cur == 0 || lead >= cur) ? lead : cur - (cur - lead) / kLatchLeadDecay;
+  latch_lead_ns_.store(static_cast<uint32_t>(std::min<uint64_t>(next, period)),
+                       std::memory_order_release);
 }
 
 // SetEngine + SubmitBaton are inherited from IVsyncProvider (the shared
@@ -160,9 +227,12 @@ uint64_t WaylandVsyncProvider::RequestFeedback() {
   }
   auto handler = std::make_unique<WpFeedbackHandler>(this);
   // Stamp this frame's input cutoff: the frame being committed now was driven
-  // by the last baton we delivered (a present in flight keeps the next one
-  // parked), so its frame_start_time is the cutoff of the inputs it consumed.
-  // OnPresented reads it back for the motion-to-photon frame-accurate drain.
+  // by the last baton we delivered, so its frame_start_time is the cutoff of
+  // the inputs it consumed. OnPresented reads it back for the motion-to-photon
+  // frame-accurate drain. Without grid pacing a present in flight keeps the
+  // next baton parked, so this is exact. On the grid the next baton can go out
+  // before this frame commits, and the cutoff can belong to the frame after
+  // it: the profile is then approximate.
   handler->cutoff_ns_ = LastDeliveredFrameStartNs();
   const uint64_t serial =
       feedback_serial_.fetch_add(1, std::memory_order_relaxed) + 1;
@@ -171,6 +241,7 @@ uint64_t WaylandVsyncProvider::RequestFeedback() {
   {
     std::lock_guard<std::mutex> lock(feedback_mu_);
     feedback_in_flight_.push_back(std::move(handler));
+    in_flight_.store(feedback_in_flight_.size(), std::memory_order_release);
   }
   feedback_pending_.store(true, std::memory_order_release);
   return serial;
@@ -193,10 +264,14 @@ void WaylandVsyncProvider::RetireFeedback(WpFeedbackHandler* fb) {
       vec.erase(it);
     }
     empty = vec.empty();
+    in_flight_.store(vec.size(), std::memory_order_release);
   }
   if (empty) {
     feedback_pending_.store(false, std::memory_order_release);
   }
+  // Pairs with SubmitBaton's fence: the presentation that follows sees a
+  // baton it parked, or SubmitBaton sees this retirement.
+  std::atomic_thread_fence(std::memory_order_seq_cst);
   // owned destructs here (outside the lock), destroying the wl_proxy.
 }
 
@@ -207,6 +282,14 @@ void WaylandVsyncProvider::OnPresented(const uint64_t present_ns,
                                        WpFeedbackHandler* fb) {
   if (refresh_ns > 0 && refresh_ns <= kMaxPlausibleRefreshNs) {
     last_refresh_ns_.store(refresh_ns, std::memory_order_release);
+  }
+  last_present_ns_.store(present_ns, std::memory_order_release);
+  // Grid pacing waits for a real refresh period: refresh 0 (unknown, or a
+  // variable rate) leaves presentation-paced frames.
+  if (!grid_.load(std::memory_order_acquire) &&
+      grid_wanted_.load(std::memory_order_acquire) &&
+      last_refresh_ns_.load(std::memory_order_acquire) != 0) {
+    ApplyGrid(true);
   }
   // Read the frame's input cutoff and serial before RetireFeedback destroys
   // fb.
@@ -269,6 +352,14 @@ void WaylandVsyncProvider::Stop() {
   }
   drained.clear();  // destroys each feedback proxy, canceling its listener
   feedback_pending_.store(false, std::memory_order_release);
+  in_flight_.store(0, std::memory_order_release);
+  last_present_ns_.store(0, std::memory_order_release);
+  {
+    const std::lock_guard<std::mutex> lock(latch_mu_);
+    last_take_ns_ = 0;
+    latch_period_ns_ = 0;
+  }
+  latch_lead_ns_.store(0, std::memory_order_release);
 
   // Base drops the parked baton, clears engine/runner, and logs the session
   // cadence summary.

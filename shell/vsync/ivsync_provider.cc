@@ -16,6 +16,7 @@
 
 #include "vsync/ivsync_provider.h"
 
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <ctime>
@@ -29,12 +30,14 @@
 
 namespace ivi {
 
-// The deferred-delivery timer, shared with its handler so the handler can find
-// out, under the lock, whether the provider is still there.
+// Shared with every deferred-delivery wait, so a wait that fires after the
+// provider was stopped or destroyed finds out, under the lock, that there is
+// no one to deliver to. Each wait owns its own timer (see ScheduleDeferred),
+// so no timer outlives the io_context it was made on: the provider can outlive
+// the runner, as a Wayland display outlives its views.
 struct IVsyncProvider::PaceTimer {
   std::mutex mu;
   IVsyncProvider* owner{nullptr};
-  std::unique_ptr<asio::steady_timer> timer;  // runner thread only
 };
 
 bool IVsyncProvider::PaceEnabledByEnv() {
@@ -42,11 +45,11 @@ bool IVsyncProvider::PaceEnabledByEnv() {
   return !(env != nullptr && std::string_view(env) == "0");
 }
 
+IVsyncProvider::IVsyncProvider() : pace_timer_(std::make_shared<PaceTimer>()) {}
+
 IVsyncProvider::~IVsyncProvider() {
-  if (pace_timer_) {
-    const std::lock_guard<std::mutex> lock(pace_timer_->mu);
-    pace_timer_->owner = nullptr;
-  }
+  const std::lock_guard<std::mutex> lock(pace_timer_->mu);
+  pace_timer_->owner = nullptr;
 }
 
 uint64_t IVsyncProvider::NowNs() const {
@@ -91,27 +94,24 @@ void IVsyncProvider::ScheduleDeferred(const uint64_t due_ns) {
     deferred_due_ns_.store(0, std::memory_order_release);
     return;  // the kick latch delivers it once the runner is wired
   }
-  if (!pace_timer_) {
-    pace_timer_ = std::make_shared<PaceTimer>();
-    pace_timer_->owner = this;
-  }
   auto state = pace_timer_;
   auto* io = runner->GetIoContext();
   asio::post(*runner->GetStrandContext(), [state, io, due_ns]() {
-    if (!state->timer) {
-      state->timer = std::make_unique<asio::steady_timer>(*io);
-    }
+    // A timer per wait, owned by its handler: it dies when the wait completes,
+    // or with the io_context if that goes first. A wait superseded by a later
+    // one is not canceled; it fires, and OnDeferredDue ignores a due time no
+    // longer asked for.
+    auto timer = std::make_shared<asio::steady_timer>(*io);
     // Both clocks are CLOCK_MONOTONIC; express the due time as a delay.
     timespec ts{};
     clock_gettime(CLOCK_MONOTONIC, &ts);
     const uint64_t now = static_cast<uint64_t>(ts.tv_sec) * 1'000'000'000ULL +
                          static_cast<uint64_t>(ts.tv_nsec);
-    const auto delay =
-        std::chrono::nanoseconds(due_ns > now ? due_ns - now : 0);
-    state->timer->expires_after(delay);
-    state->timer->async_wait([state, due_ns](const asio::error_code& ec) {
+    timer->expires_after(
+        std::chrono::nanoseconds(due_ns > now ? due_ns - now : 0));
+    timer->async_wait([state, timer, due_ns](const asio::error_code& ec) {
       if (ec) {
-        return;  // re-armed for another vblank, or shutting down
+        return;  // shutting down
       }
       const std::lock_guard<std::mutex> lock(state->mu);
       if (state->owner != nullptr) {
@@ -124,11 +124,11 @@ void IVsyncProvider::ScheduleDeferred(const uint64_t due_ns) {
 void IVsyncProvider::OnDeferredDue(const uint64_t due_ns) {
   // Only the delivery still asked for: a flip may have handed the baton back
   // meanwhile, and re-armed or cleared this.
-  if (due_ns == 0 ||
-      deferred_due_ns_.load(std::memory_order_acquire) != due_ns) {
+  uint64_t expected = due_ns;
+  if (due_ns == 0 || !deferred_due_ns_.compare_exchange_strong(
+                         expected, 0, std::memory_order_acq_rel)) {
     return;
   }
-  deferred_due_ns_.store(0, std::memory_order_release);
   if (IsSourcePending()) {
     return;  // a present went out meanwhile: its flip returns the baton
   }
@@ -139,6 +139,11 @@ void IVsyncProvider::SetEngine(FLUTTER_API_SYMBOL(FlutterEngine) engine,
                                TaskRunner* runner) {
   engine_.store(engine, std::memory_order_release);
   runner_.store(runner, std::memory_order_release);
+  {
+    // Deferred deliveries reach this provider again (Stop() let go of them).
+    const std::lock_guard<std::mutex> lock(pace_timer_->mu);
+    pace_timer_->owner = runner != nullptr ? this : nullptr;
+  }
   // Kick latch (#210): the engine's first vsync request can land before the
   // runner is wired, leaving a baton parked. Drain it now that we can deliver.
   DrainParkedBaton();
@@ -150,6 +155,9 @@ void IVsyncProvider::SubmitBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine,
   // Store the baton first so a source event racing us (a present landing
   // between the IsSourcePending() check and the store) still finds it.
   vsync_baton_.store(baton, std::memory_order_release);
+  // Pairs with the fence in the source's completion path: either it sees this
+  // baton, or this sees its present retired.
+  std::atomic_thread_fence(std::memory_order_seq_cst);
   if (IsSourcePending()) {
     return;  // a present is in flight; its completion will return the baton
   }
@@ -157,8 +165,15 @@ void IVsyncProvider::SubmitBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine,
   // next vblank rather than starting a second frame now.
   if (pace_.load(std::memory_order_acquire)) {
     const uint64_t due = next_allowed_ns_.load(std::memory_order_acquire);
-    if (NowNs() < due) {
+    const uint64_t now = NowNs();
+    if (now < due) {
       ScheduleDeferred(due);
+      return;
+    }
+    // Frames are still coming: start this one on the next vblank, not now.
+    if (pace_keep_phase_.load(std::memory_order_acquire) && due != 0 &&
+        now < due + PeriodNs()) {
+      ScheduleDeferred(NextVblankAfter(now));
       return;
     }
   }
@@ -173,15 +188,37 @@ void IVsyncProvider::EnableProfile(const bool enabled, std::string label) {
 }
 
 void IVsyncProvider::DeliverVsync(const uint64_t frame_start_ns) {
-  if (pace_.load(std::memory_order_acquire)) {
-    last_vblank_ns_.store(frame_start_ns, std::memory_order_release);
-    deferred_due_ns_.store(0, std::memory_order_release);  // the flip delivers
-  }
   if (profile_enabled_) {
     // Real present — record the inter-present interval from its timestamp.
     profile_.Record(profile_label_, /*ok=*/true, frame_start_ns);
   }
+  if (pace_.load(std::memory_order_acquire)) {
+    last_vblank_ns_.store(frame_start_ns, std::memory_order_release);
+    // A baton already went out on this refresh: the presentation of an older
+    // frame must not start a second one. It waits for the next vblank.
+    if (DeferToPace()) {
+      return;
+    }
+    deferred_due_ns_.store(0, std::memory_order_release);  // the flip delivers
+  }
   DeliverBaton(frame_start_ns);
+}
+
+bool IVsyncProvider::DeferToPace() {
+  if (!pace_flips_.load(std::memory_order_acquire)) {
+    return false;
+  }
+  const uint64_t due = next_allowed_ns_.load(std::memory_order_acquire);
+  if (NowNs() >= due) {
+    return false;  // a new refresh: deliver now
+  }
+  // Pairs with SubmitBaton's fence: see a baton it parked, or it sees what
+  // retired the present.
+  std::atomic_thread_fence(std::memory_order_seq_cst);
+  if (HasParkedBaton()) {
+    ScheduleDeferred(due);
+  }
+  return true;
 }
 
 void IVsyncProvider::DeliverDiscard() {
@@ -190,6 +227,11 @@ void IVsyncProvider::DeliverDiscard() {
   }
   if (profile_enabled_) {
     profile_.Record(profile_label_, /*ok=*/false);  // counts a discard
+  }
+  // Paced and a baton already went out this refresh: the discard of an older
+  // commit must not start a second frame either.
+  if (pace_.load(std::memory_order_acquire) && DeferToPace()) {
+    return;
   }
   // Still hand the baton back (wall clock) so Flutter keeps scheduling.
   DeliverBaton(LibFlutterEngine->GetCurrentTime());
@@ -295,7 +337,10 @@ void IVsyncProvider::Stop() {
   engine_.store(nullptr, std::memory_order_release);
   runner_.store(nullptr, std::memory_order_release);
   deferred_due_ns_.store(0, std::memory_order_release);
-  if (pace_timer_) {
+  next_allowed_ns_.store(0, std::memory_order_release);
+  last_vblank_ns_.store(0, std::memory_order_release);
+  {
+    // Waits still armed fire into nothing; SetEngine() binds them again.
     const std::lock_guard<std::mutex> lock(pace_timer_->mu);
     pace_timer_->owner = nullptr;
   }

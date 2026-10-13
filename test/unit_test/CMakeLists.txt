@@ -306,6 +306,7 @@ add_subdirectory(backing_store_pool-test)
 # build -- same reasoning as gl_process_resolver-test above.
 if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN)
     add_subdirectory(present_layer_sequencer-test)
+    add_subdirectory(wayland_vsync_grid-test)
 endif ()
 add_subdirectory(compositor_registry-test)
 add_subdirectory(platform_view_registry-test)

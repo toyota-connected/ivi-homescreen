@@ -159,6 +159,13 @@ class WaylandEglBackend : public Egl, public Backend {
    */
   [[nodiscard]] VsyncCallback GetVsyncCallback() const override;
 
+  /// When the window samples platform views' frames, before the vblank its
+  /// commit aims at, from the vsync provider's takes (0 until it has seen
+  /// one).
+  [[nodiscard]] uint32_t PlatformViewLatchLeadNs() const override {
+    return vsync_ != nullptr ? vsync_->LatchLeadNs() : 0;
+  }
+
   /**
    * @brief Stash the engine handle for the wp_presentation_feedback
    * path. Captured atomically because dispatch may read it from a
