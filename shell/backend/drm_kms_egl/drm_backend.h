@@ -435,6 +435,14 @@ class DrmBackend : public Backend, public IFlipSink {
 
  private:
   DrmBackend(DrmConfig cfg, homescreen::DrmSession* session);
+  // The mode to drive @p connector with -- the --drm-mode spec, else the
+  // preferred mode, else the first. nullopt when a spec was given and nothing
+  // matches. @p label names the connector in the error messages. Const and
+  // side-effect free so a reconfigure can ask without committing (#765).
+  [[nodiscard]] std::optional<drmModeModeInfo> SelectMode(
+      const drmModeConnector* connector,
+      std::string_view label) const;
+
   bool InitDrm();
   bool InitGbm();
   bool InitEgl();

@@ -489,6 +489,86 @@ DrmBackend::~DrmBackend() {
   // teardown. The backend holds only a non-owning pointer.
 }
 
+// Pick the mode to drive @p connector with: the --drm-mode spec when one is
+// set, else the connector's preferred mode, else its first. @p label names the
+// connector in the error messages.
+//
+// Extracted from InitDrm so a reconfigure can re-run it (#765). It reports
+// through the return value rather than assigning mode_, because the caller owns
+// both the DRM resources to unwind and the decision about what "no mode"
+// means: fatal at startup, a refusal to change on a re-resolve.
+std::optional<drmModeModeInfo> DrmBackend::SelectMode(
+    const drmModeConnector* connector,
+    const std::string_view label) const {
+  if (connector == nullptr || connector->count_modes <= 0) {
+    return std::nullopt;
+  }
+
+  if (!cfg_.mode_spec.has_value()) {
+    for (int i = 0; i < connector->count_modes; ++i) {
+      if ((connector->modes[i].type & DRM_MODE_TYPE_PREFERRED) != 0) {
+        return connector->modes[i];
+      }
+    }
+    return connector->modes[0];
+  }
+
+  // Parse "<W>x<H>@<R>" via strtoul so we catch overflow and trailing
+  // garbage; sscanf("%u...") silently wraps on out-of-range input
+  // (cert-err34-c). Each segment must be a non-zero unsigned int that
+  // fits in uint32_t and is followed by the expected delimiter.
+  const auto parse_u32 = [](const char* p, char sep, uint32_t& out,
+                            const char*& next) -> bool {
+    errno = 0;
+    char* end = nullptr;
+    const unsigned long v = std::strtoul(p, &end, 10);
+    if (end == p || errno == ERANGE || v == 0 ||
+        v > std::numeric_limits<uint32_t>::max() || *end != sep) {
+      return false;
+    }
+    out = static_cast<uint32_t>(v);
+    next = end + 1;  // skip the separator
+    return true;
+  };
+
+  uint32_t want_w = 0;
+  uint32_t want_h = 0;
+  uint32_t want_r = 0;
+  const char* p = cfg_.mode_spec->c_str();
+  const char* p2 = nullptr;
+  const char* p3 = nullptr;
+  char* end = nullptr;
+  bool ok = parse_u32(p, 'x', want_w, p2) && parse_u32(p2, '@', want_h, p3);
+  if (ok) {
+    errno = 0;
+    const unsigned long r = std::strtoul(p3, &end, 10);
+    ok = end != p3 && errno != ERANGE && r != 0 &&
+         r <= std::numeric_limits<uint32_t>::max() && *end == '\0';
+    if (ok) {
+      want_r = static_cast<uint32_t>(r);
+    }
+  }
+  if (!ok) {
+    ihs::log::error(
+        "[DrmBackend] --drm-mode='{}' is not in '<W>x<H>@<R>' form "
+        "(e.g. 1920x1080@120)",
+        *cfg_.mode_spec);
+    return std::nullopt;
+  }
+
+  for (int i = 0; i < connector->count_modes; ++i) {
+    const auto& m = connector->modes[i];
+    if (m.hdisplay == want_w && m.vdisplay == want_h && m.vrefresh == want_r) {
+      return m;
+    }
+  }
+  ihs::log::error(
+      "[DrmBackend] --drm-mode='{}' not available on connector {}; run "
+      "--drm-list-modes for the supported list",
+      *cfg_.mode_spec, label);
+  return std::nullopt;
+}
+
 bool DrmBackend::InitDrm() {
   // The card is opened and held at master by the device-context
   // (DrmDisplay::SharedDevice); Create stored the non-owning pointer. The
@@ -667,80 +747,16 @@ bool DrmBackend::InitDrm() {
   // preferred-mode pick. Useful for high-refresh validation when the
   // panel reports a lower refresh as preferred (e.g. 2560x1440@60Hz
   // preferred on a panel that also offers 1920x1080@120Hz).
+  const auto picked = SelectMode(connector, connector_name(connector));
+  if (!picked.has_value()) {
+    drmModeFreeConnector(connector);
+    drmModeFreeResources(res);
+    return false;
+  }
+  mode_ = *picked;
   if (cfg_.mode_spec.has_value()) {
-    // Parse "<W>x<H>@<R>" via strtoul so we catch overflow and trailing
-    // garbage; sscanf("%u…") silently wraps on out-of-range input
-    // (cert-err34-c). Each segment must be a non-zero unsigned int that
-    // fits in uint32_t and is followed by the expected delimiter.
-    const auto parse_u32 = [](const char* p, char sep, uint32_t& out,
-                              const char*& next) -> bool {
-      errno = 0;
-      char* end = nullptr;
-      const unsigned long v = std::strtoul(p, &end, 10);
-      if (end == p || errno == ERANGE || v == 0 ||
-          v > std::numeric_limits<uint32_t>::max() || *end != sep) {
-        return false;
-      }
-      out = static_cast<uint32_t>(v);
-      next = end + 1;  // skip the separator
-      return true;
-    };
-    uint32_t want_w = 0;
-    uint32_t want_h = 0;
-    uint32_t want_r = 0;
-    const char* p = cfg_.mode_spec->c_str();
-    const char* p2 = nullptr;
-    const char* p3 = nullptr;
-    char* end = nullptr;
-    bool ok = parse_u32(p, 'x', want_w, p2) && parse_u32(p2, '@', want_h, p3);
-    if (ok) {
-      errno = 0;
-      const unsigned long r = std::strtoul(p3, &end, 10);
-      ok = end != p3 && errno != ERANGE && r != 0 &&
-           r <= std::numeric_limits<uint32_t>::max() && *end == '\0';
-      if (ok) {
-        want_r = static_cast<uint32_t>(r);
-      }
-    }
-    if (!ok) {
-      ihs::log::error(
-          "[DrmBackend] --drm-mode='{}' is not in '<W>x<H>@<R>' form "
-          "(e.g. 1920x1080@120)",
-          *cfg_.mode_spec);
-      drmModeFreeConnector(connector);
-      drmModeFreeResources(res);
-      return false;
-    }
-    for (int i = 0; i < connector->count_modes; ++i) {
-      const auto& m = connector->modes[i];
-      if (m.hdisplay == want_w && m.vdisplay == want_h &&
-          m.vrefresh == want_r) {
-        mode_ = m;
-        break;
-      }
-    }
-    if (mode_.clock == 0) {
-      ihs::log::error(
-          "[DrmBackend] --drm-mode='{}' not available on connector {}; run "
-          "--drm-list-modes for the supported list",
-          *cfg_.mode_spec, connector_name(connector));
-      drmModeFreeConnector(connector);
-      drmModeFreeResources(res);
-      return false;
-    }
     ihs::log::info("[DrmBackend] mode override: {}x{}@{}Hz (--drm-mode)",
                    mode_.hdisplay, mode_.vdisplay, mode_.vrefresh);
-  } else {
-    for (int i = 0; i < connector->count_modes; ++i) {
-      const auto& m = connector->modes[i];
-      if (m.type & DRM_MODE_TYPE_PREFERRED) {
-        mode_ = m;
-        break;
-      }
-    }
-    if (mode_.clock == 0) {
-      mode_ = connector->modes[0];
-    }
   }
 
   // Framebuffer size: explicit request wins; otherwise full-screen.
