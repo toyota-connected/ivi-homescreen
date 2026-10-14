@@ -268,14 +268,17 @@ class IVsyncProvider {
   void DrainParkedBaton(uint64_t frame_start_ns = 0);
   // Exchange the parked baton out and marshal it (no profiling — the public
   // DeliverVsync/DeliverDiscard wrappers record the present/discard).
-  void DeliverBaton(uint64_t now_ns);
+  // @p on_vblank: @p now_ns is the vblank that began the refresh.
+  void DeliverBaton(uint64_t now_ns, bool on_vblank);
 
   // Pacing (SetPaceToVblank). The earliest time the next baton may go out,
-  // set on every hand-out to the vblank after it; the time of the last real
-  // presentation, whose phase the vblanks are counted from; and the time a
-  // deferred delivery is due (0 = none armed).
+  // set on every hand-out to the vblank after the refresh it went out in; the
+  // time of the last real presentation, whose phase the vblanks are counted
+  // from; and the time a deferred delivery is due (0 = none armed).
   [[nodiscard]] uint64_t NextVblankAfter(uint64_t t_ns) const;
-  void NoteHandOut(uint64_t at_ns);
+  // @p on_vblank: @p at_ns is a vblank, which may be counted from an older
+  // presentation than the last.
+  void NoteHandOut(uint64_t at_ns, bool on_vblank);
   void ScheduleDeferred(uint64_t due_ns);
   void OnDeferredDue(uint64_t due_ns);
   // With SetPaceFlips: true when a baton already went out this refresh, so a

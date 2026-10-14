@@ -76,10 +76,21 @@ uint64_t IVsyncProvider::NextVblankAfter(const uint64_t t_ns) const {
   return last + ((t_ns - last) / period + 1) * period;
 }
 
-void IVsyncProvider::NoteHandOut(const uint64_t at_ns) {
-  if (pace_.load(std::memory_order_acquire)) {
-    next_allowed_ns_.store(NextVblankAfter(at_ns), std::memory_order_release);
+void IVsyncProvider::NoteHandOut(const uint64_t at_ns, const bool on_vblank) {
+  if (!pace_.load(std::memory_order_acquire)) {
+    return;
   }
+  uint64_t next = NextVblankAfter(at_ns);
+  if (on_vblank) {
+    // A vblank counted from an older presentation can fall just before the
+    // one the latest presentation counts: the frame belongs to the refresh
+    // that one begins. Half a period on picks the vblank after it, from the
+    // latest presentation. A frame start older than the refresh it is handed
+    // out in (a late presentation) still holds that refresh.
+    next = std::max(NextVblankAfter(at_ns + PeriodNs() / 2),
+                    NextVblankAfter(NowNs()));
+  }
+  next_allowed_ns_.store(next, std::memory_order_release);
 }
 
 void IVsyncProvider::ScheduleDeferred(const uint64_t due_ns) {
@@ -134,7 +145,7 @@ void IVsyncProvider::OnDeferredDue(const uint64_t due_ns) {
   if (IsSourcePending()) {
     return;  // a present went out meanwhile: its flip returns the baton
   }
-  DeliverBaton(due_ns);  // the vblank is this frame's start
+  DeliverBaton(due_ns, /*on_vblank=*/true);  // the vblank is this frame's start
 }
 
 void IVsyncProvider::SetEngine(FLUTTER_API_SYMBOL(FlutterEngine) engine,
@@ -212,7 +223,7 @@ void IVsyncProvider::DeliverVsync(const uint64_t frame_start_ns) {
     }
     deferred_due_ns_.store(0, std::memory_order_release);  // the flip delivers
   }
-  DeliverBaton(frame_start_ns);
+  DeliverBaton(frame_start_ns, /*on_vblank=*/true);
 }
 
 bool IVsyncProvider::DeferToPace() {
@@ -245,7 +256,7 @@ void IVsyncProvider::DeliverDiscard() {
     return;
   }
   // Still hand the baton back (wall clock) so Flutter keeps scheduling.
-  DeliverBaton(LibFlutterEngine->GetCurrentTime());
+  DeliverBaton(LibFlutterEngine->GetCurrentTime(), /*on_vblank=*/false);
 }
 
 bool IVsyncProvider::DeliverParkedBaton() {
@@ -262,7 +273,7 @@ bool IVsyncProvider::DeliverParkedBaton() {
   if (baton == 0) {
     return false;
   }
-  NoteHandOut(NowNs());
+  NoteHandOut(NowNs(), /*on_vblank=*/false);
   auto* engine = engine_.load(std::memory_order_acquire);
   if (engine != nullptr) {
     PostOnVsync(engine, baton, LibFlutterEngine->GetCurrentTime());
@@ -281,7 +292,7 @@ void IVsyncProvider::SetParked(const bool parked) {
   }
 }
 
-void IVsyncProvider::DeliverBaton(const uint64_t now_ns) {
+void IVsyncProvider::DeliverBaton(const uint64_t now_ns, const bool on_vblank) {
   if (parked_.load(std::memory_order_acquire)) {
     // Leave it parked. Not returning the baton is what stops frame
     // production; SetParked(false) hands this one back.
@@ -291,7 +302,7 @@ void IVsyncProvider::DeliverBaton(const uint64_t now_ns) {
   if (baton == 0) {
     return;
   }
-  NoteHandOut(now_ns);
+  NoteHandOut(now_ns, on_vblank);
   auto* engine = engine_.load(std::memory_order_acquire);
   if (engine != nullptr) {
     PostOnVsync(engine, baton, now_ns);
@@ -314,7 +325,9 @@ void IVsyncProvider::DrainParkedBaton(const uint64_t frame_start_ns) {
   if (baton == 0) {
     return;
   }
-  NoteHandOut(NowNs());
+  // A frame start given is the vblank that began the refresh.
+  NoteHandOut(frame_start_ns != 0 ? frame_start_ns : NowNs(),
+              /*on_vblank=*/frame_start_ns != 0);
   auto* engine = engine_.load(std::memory_order_acquire);
   if (engine != nullptr) {
     PostOnVsync(engine, baton,
