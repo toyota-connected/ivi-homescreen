@@ -84,14 +84,17 @@ int main(void) {
   /* Printed, not just asserted: when a port does fail the static assertions
    * above, the first question is "what are the numbers now", and the answer
    * should not require rebuilding this by hand. */
-  printf("IhsOsgiPeerInfo   size=%zu struct_size@%zu dart_api_dl_data@%zu port@%zu\n",
-         sizeof(IhsOsgiPeerInfo), offsetof(IhsOsgiPeerInfo, struct_size),
-         offsetof(IhsOsgiPeerInfo, dart_api_dl_data),
-         offsetof(IhsOsgiPeerInfo, port));
-  printf("IhsOsgiBundleInfo size=%zu struct_size@%zu peer@%zu symbolic_name@%zu\n",
-         sizeof(IhsOsgiBundleInfo), offsetof(IhsOsgiBundleInfo, struct_size),
-         offsetof(IhsOsgiBundleInfo, peer),
-         offsetof(IhsOsgiBundleInfo, symbolic_name));
+  printf(
+      "IhsOsgiPeerInfo   size=%zu struct_size@%zu dart_api_dl_data@%zu "
+      "port@%zu\n",
+      sizeof(IhsOsgiPeerInfo), offsetof(IhsOsgiPeerInfo, struct_size),
+      offsetof(IhsOsgiPeerInfo, dart_api_dl_data),
+      offsetof(IhsOsgiPeerInfo, port));
+  printf(
+      "IhsOsgiBundleInfo size=%zu struct_size@%zu peer@%zu symbolic_name@%zu\n",
+      sizeof(IhsOsgiBundleInfo), offsetof(IhsOsgiBundleInfo, struct_size),
+      offsetof(IhsOsgiBundleInfo, peer),
+      offsetof(IhsOsgiBundleInfo, symbolic_name));
 
   /* The surface is inert without a host, which is the state this test runs in:
    * no shell has installed one. Asserting that here keeps the "safe default"
