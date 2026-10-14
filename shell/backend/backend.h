@@ -201,8 +201,10 @@ class Backend {
    *        newest frames for the next refresh, or 0 when it cannot say.
    *
    * Reported to producers as IhsPvCapabilities::latch_lead_ns. The DRM
-   * backends composite at a repaint window before the vblank; Wayland and
-   * headless leave it to someone else's schedule and report 0.
+   * backends composite at a repaint window before the vblank. The Wayland
+   * backends sample the views when they composite the window's frame, and
+   * report how long before the vblank that is (WaylandVsyncProvider). Headless
+   * reports 0.
    */
   [[nodiscard]] virtual uint32_t PlatformViewLatchLeadNs() const { return 0; }
 

@@ -19,6 +19,8 @@ shared baton class and the per-source providers.
 | Frame parking (suspend production, keep engine warm) | ✓ | Always |
 | Discard + parked-baton delivery (wall-clock fallback) | ✓ | Always |
 | Vblank pacing: at most one baton per refresh, on the vblank | ✓ | On for the DRM backends; `IVI_VSYNC_PACE=0` turns it off |
+| Wayland grid pacing: frames on the vblanks, up to 2 commits in flight | ✓ | On by default; `IVI_WL_VSYNC_GRID=0` turns it off; `IVI_WL_VSYNC_GRID_DEPTH=1` allows 1 |
+| Wayland latch lead: when the window samples platform views, before the vblank | ✓ | On by default; `IVI_WL_LATCH_LEAD=0` reports 0 |
 | Per-present cadence profiling (window + session summary) | ✓ | `IVI_VSYNC_PROFILE` |
 | `WaylandVsyncProvider` — `wp_presentation` → `OnVsync` | ✓ | `-DBUILD_BACKEND_WAYLAND_EGL=ON` or `-DBUILD_BACKEND_WAYLAND_VULKAN=ON` |
 | `ConsumerPacedVsyncSource` — backpressure / credit-based pacing | ✓ | Always compiled (used by `headless-egl`) |
@@ -143,14 +145,61 @@ has presented waits a whole refresh behind it.
   next vblank, counted from the last presentation (`DeliverVsync`) and the
   period. It is delivered from a timer on the runner's `io_context`, and the
   vblank is its frame start.
-- A flip still hands the baton back at once.
+- A flip still hands the baton back at once, unless `SetPaceFlips(true)`: then
+  a presentation that arrives after a baton already went out this refresh
+  leaves the baton for the next vblank.
 - A request after a refresh with no baton out is still answered at once, so an
-  idle display wakes as quickly as before.
+  idle display wakes as quickly as before. With `SetPaceKeepPhase(true)` that
+  needs a whole refresh with no baton: a request in the refresh after a
+  hand-out waits for the next vblank, so frames asked for mid-refresh (a
+  platform view submitting) still start on the vblank.
+
+Each deferred delivery waits on its own timer, owned by its handler, so no
+timer outlives the runner's `io_context`. `SetEngine()` binds the waits to the
+provider and `Stop()` lets go of them, so the provider can outlive a runner
+and be wired to the next one.
 
 The DRM backends (`drm-kms-vulkan`, `drm-kms-egl`) turn it on.
 `IVI_VSYNC_PACE=0` turns it off. `SetPacingClockForTest` replaces the clock and
 the timer, so a test sets the time and fires the deferred delivery itself (see
 `test/unit_test/vsync_pace-test`).
+
+### Wayland grid pacing
+
+Without it, `WaylandVsyncProvider` holds the baton while any commit waits for
+its presentation, so the frame rate follows the host's latency. One commit
+shown a refresh late starts the next frame a refresh late. The host's repaint
+loop goes idle in the gap and restarts a refresh late again, and the window
+settles at half rate. On a vendor compositor this showed as runs locked at
+30 fps with every commit shown two vblanks after it.
+
+With grid pacing (`SetGridPacing`, on unless `IVI_WL_VSYNC_GRID=0`), the
+provider paces to the vblank with `SetPaceFlips` and `SetPaceKeepPhase` too.
+Only a full pipeline holds the baton for a presentation: `kGridInFlight`, 2
+commits waiting to be shown, or 1 with `IVI_WL_VSYNC_GRID_DEPTH=1`. Frames start
+on the vblanks the presentations reveal, at most one per refresh, so a late
+commit costs one refresh, not every one after it. A discard is paced the same
+way as a presentation. Grid pacing starts with the first presentation that
+reports a refresh period; a compositor that reports 0 (unknown or variable)
+keeps presentation-paced frames.
+
+With grid pacing on, the motion-to-photon cutoff stamped on a commit's
+feedback is approximate: the next baton can go out before that frame commits.
+
+### Wayland latch lead
+
+A Wayland backend composites platform views into the window's frame on the
+rasterizer thread, then commits. A view's newest frame is taken at that
+moment, not at a repaint window before the vblank as on DRM. Each backend
+calls `NoteLatch()` when it samples a view's frame. The provider turns that
+into a lead before the next vblank: the period less the take's phase after the
+last presentation. It keeps a decaying maximum, which widens at once for an
+earlier take and eases back over about a second. The backend reports it as
+`PlatformViewLatchLeadNs()`, which the platform-view host passes on as
+`IhsPvCapabilities::latch_lead_ns`. It is 0 until a take has been seen after a
+presentation, and `IVI_WL_LATCH_LEAD=0` keeps it at 0. A change of refresh
+period starts it over. Views on one display share the provider, so takes from
+several rasterizer threads are serialized.
 
 ### Vsync profiling
 
