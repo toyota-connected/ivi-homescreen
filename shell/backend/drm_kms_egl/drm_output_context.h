@@ -27,11 +27,14 @@ struct Resolved;
 // The per-scanout-output geometry a DrmCompositor targets: one CRTC, its
 // connector, and the mode/framebuffer extent. One card's DrmBackend owns the
 // shared EGL/GBM/context; each output it drives gets one DrmOutputContext plus
-// one DrmCompositor. Values are snapshotted
-// from the resolved DRM state at compositor construction and fixed for the
-// output's lifetime. The accessor names mirror DrmBackend's so the compositor
-// reads its output's geometry here instead of from the (single-output) backend;
-// EGL/GBM/device/flip accounting still come from the shared backend_.
+// one DrmCompositor. Values are snapshotted from the resolved DRM state at
+// compositor construction. They are fixed for the output's lifetime with one
+// exception: a connector reconfigure replaces the whole context through
+// DrmCompositor::OnModeChanged, because the mode's timing changed under us
+// (#765). Nothing mutates a context in place -- it is rebuilt. The accessor
+// names mirror DrmBackend's so the compositor reads its output's geometry here
+// instead of from the (single-output) backend; EGL/GBM/device/flip accounting
+// still come from the shared backend_.
 class DrmOutputContext {
  public:
   DrmOutputContext() = default;

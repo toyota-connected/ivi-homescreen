@@ -781,6 +781,10 @@ homescreen::ViewExtent FlutterView::ResolveViewExtent() const {
   return extent;
 }
 
+bool FlutterView::OnOutputReconfigured() const {
+  return m_backend != nullptr && m_backend->OnOutputReconfigured();
+}
+
 void FlutterView::UpdateDisplayMetadata() const {
   if (!m_flutter_engine || !m_flutter_engine->IsRunning()) {
     return;

@@ -3249,6 +3249,121 @@ TEST_F(DrmBackendVkmsRefreshRate, A60HzModeStillReports60) {
   EXPECT_NEAR(backend->RefreshRateHz(), 60.0, 0.5);
 }
 
+// #765: a connector reconfigure re-resolves the mode. The backend adopts a
+// refresh-only change and refuses an extent change, because the scanout ring
+// is sized to the extent and Resize() is a no-op on this backend.
+//
+// Driven by re-running the resolve rather than by a real uevent: vkms exposes
+// connector status through configfs but no way to change a connector's mode,
+// so a genuine same-connector mode change cannot be synthesized here. What is
+// testable is the decision, which is where the bugs would be.
+class DrmBackendVkmsReconfigure : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    card_ = FindVkms();
+    if (card_.path.empty()) {
+      GTEST_SKIP() << "no vkms card on this host (sudo modprobe vkms)";
+    }
+    if (!card_.ok()) {
+      GTEST_SKIP() << card_.path << " is vkms but exposes no connected "
+                   << "connector with modes";
+    }
+    display_ = std::make_unique<DrmDisplay>(0, 0, 60.0, card_.path,
+                                            /*no_seat=*/true);
+    if (display_->SharedDevice() == nullptr) {
+      GTEST_SKIP() << "no DRM master on " << card_.path;
+    }
+  }
+
+  std::unique_ptr<DrmBackend> BackendWithMode(const std::string& spec) {
+    DrmConfig cfg{card_.path, std::nullopt, std::nullopt,
+                  /*debug_backend=*/false};
+    cfg.no_seat = true;
+    cfg.disable_cursor = true;
+    cfg.mode_spec = spec;
+    return DrmBackend::Create(cfg, display_->session(),
+                              display_->SharedDevice(), display_.get());
+  }
+
+  VkmsCard card_;
+  std::unique_ptr<DrmDisplay> display_;
+};
+
+// Nothing changed: the connector still reports the mode we picked, so the
+// re-resolve is a no-op and the caller is told not to bother re-reporting.
+TEST_F(DrmBackendVkmsReconfigure, AnUnchangedConnectorAdoptsNothing) {
+  auto backend = BackendWithMode("1024x768@60");
+  if (backend == nullptr) {
+    GTEST_SKIP() << "this vkms has no 1024x768@60 mode";
+  }
+  const uint32_t before = backend->RefreshPeriodNs();
+
+  EXPECT_FALSE(backend->OnOutputReconfigured());
+  EXPECT_EQ(backend->RefreshPeriodNs(), before);
+  EXPECT_EQ(backend->vrefresh(), 60u);
+}
+
+// The decision itself, over synthetic modes, because the vkms path cannot
+// reach two of the three branches: with a mode_spec set, re-resolving picks
+// the same mode and stops at kNone before any refusal is considered. An
+// earlier version of this file asserted the refusal and passed for that
+// reason, proving nothing.
+//
+// 1920x1080 at 60 and at 59.94 is the case that matters: both report
+// vrefresh 60, so a classifier comparing on vrefresh would call them
+// identical and never adopt the change (#762).
+TEST(DrmBackendModeChange, SameTimingIsNoChange) {
+  drmModeModeInfo a{};
+  a.hdisplay = 1920;
+  a.vdisplay = 1080;
+  a.clock = 148500;
+  a.htotal = 2200;
+  a.vtotal = 1125;
+  a.vrefresh = 60;
+  EXPECT_EQ(DrmBackend::ClassifyModeChange(a, a),
+            DrmBackend::ModeChange::kNone);
+}
+
+TEST(DrmBackendModeChange, A5994VariantIsARefreshOnlyChange) {
+  drmModeModeInfo sixty{};
+  sixty.hdisplay = 1920;
+  sixty.vdisplay = 1080;
+  sixty.clock = 148500;
+  sixty.htotal = 2200;
+  sixty.vtotal = 1125;
+  sixty.vrefresh = 60;
+
+  drmModeModeInfo fifty_nine_94 = sixty;
+  fifty_nine_94.clock = 148352;  // same totals, different pixel clock
+  ASSERT_EQ(fifty_nine_94.vrefresh, sixty.vrefresh)
+      << "the point of this case is that vrefresh cannot tell them apart";
+
+  EXPECT_EQ(DrmBackend::ClassifyModeChange(fifty_nine_94, sixty),
+            DrmBackend::ModeChange::kRefreshOnly);
+}
+
+TEST(DrmBackendModeChange, ADifferentExtentIsRefused) {
+  drmModeModeInfo current{};
+  current.hdisplay = 1920;
+  current.vdisplay = 1080;
+  current.clock = 148500;
+  current.htotal = 2200;
+  current.vtotal = 1125;
+  current.vrefresh = 60;
+
+  drmModeModeInfo smaller = current;
+  smaller.hdisplay = 1280;
+  smaller.vdisplay = 720;
+  EXPECT_EQ(DrmBackend::ClassifyModeChange(smaller, current),
+            DrmBackend::ModeChange::kExtentRefused);
+
+  // Refused on extent even when the timing also differs, so the extent check
+  // has to come first.
+  smaller.clock = 74250;
+  EXPECT_EQ(DrmBackend::ClassifyModeChange(smaller, current),
+            DrmBackend::ModeChange::kExtentRefused);
+}
+
 }  // namespace
 
 // Own main rather than gtest_main: the shell's logging has to be started

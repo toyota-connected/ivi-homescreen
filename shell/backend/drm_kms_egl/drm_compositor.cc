@@ -5048,6 +5048,21 @@ void DrmCompositor::ApplyCursorReservation() {
       cursor_reserved_plane_);
 }
 
+void DrmCompositor::OnModeChanged(const drmModeModeInfo& mode) {
+  // DrmOutputContext is a value type with no setters, deliberately. Rebuild it
+  // rather than opening it up: everything but the mode is unchanged, since a
+  // refresh-only change keeps the same CRTC, connector and framebuffer extent.
+  out_ =
+      DrmOutputContext(out_.crtc_id(), out_.crtc_index(), out_.connector_id(),
+                       mode, out_.width(), out_.height(), &out_.resolved());
+  // From the mode timings, not vrefresh: this is the figure frame judging and
+  // the repaint window are measured against, so it wants the exact period.
+  refresh_ns_ = RefreshPeriodNs(mode.clock, mode.htotal, mode.vtotal);
+  ihs::log::info(
+      "[DrmCompositor] mode changed to {}x{}@{}Hz, refresh period now {} ns",
+      mode.hdisplay, mode.vdisplay, mode.vrefresh, refresh_ns_);
+}
+
 void DrmCompositor::SetPaused(const bool paused) {
   paused_.store(paused, std::memory_order_release);
   // Mirror the pause edge into the scene so its layer sources can

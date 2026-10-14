@@ -489,6 +489,86 @@ DrmBackend::~DrmBackend() {
   // teardown. The backend holds only a non-owning pointer.
 }
 
+// Pick the mode to drive @p connector with: the --drm-mode spec when one is
+// set, else the connector's preferred mode, else its first. @p label names the
+// connector in the error messages.
+//
+// Extracted from InitDrm so a reconfigure can re-run it (#765). It reports
+// through the return value rather than assigning mode_, because the caller owns
+// both the DRM resources to unwind and the decision about what "no mode"
+// means: fatal at startup, a refusal to change on a re-resolve.
+std::optional<drmModeModeInfo> DrmBackend::SelectMode(
+    const drmModeConnector* connector,
+    const std::string_view label) const {
+  if (connector == nullptr || connector->count_modes <= 0) {
+    return std::nullopt;
+  }
+
+  if (!cfg_.mode_spec.has_value()) {
+    for (int i = 0; i < connector->count_modes; ++i) {
+      if ((connector->modes[i].type & DRM_MODE_TYPE_PREFERRED) != 0) {
+        return connector->modes[i];
+      }
+    }
+    return connector->modes[0];
+  }
+
+  // Parse "<W>x<H>@<R>" via strtoul so we catch overflow and trailing
+  // garbage; sscanf("%u...") silently wraps on out-of-range input
+  // (cert-err34-c). Each segment must be a non-zero unsigned int that
+  // fits in uint32_t and is followed by the expected delimiter.
+  const auto parse_u32 = [](const char* p, char sep, uint32_t& out,
+                            const char*& next) -> bool {
+    errno = 0;
+    char* end = nullptr;
+    const unsigned long v = std::strtoul(p, &end, 10);
+    if (end == p || errno == ERANGE || v == 0 ||
+        v > std::numeric_limits<uint32_t>::max() || *end != sep) {
+      return false;
+    }
+    out = static_cast<uint32_t>(v);
+    next = end + 1;  // skip the separator
+    return true;
+  };
+
+  uint32_t want_w = 0;
+  uint32_t want_h = 0;
+  uint32_t want_r = 0;
+  const char* p = cfg_.mode_spec->c_str();
+  const char* p2 = nullptr;
+  const char* p3 = nullptr;
+  char* end = nullptr;
+  bool ok = parse_u32(p, 'x', want_w, p2) && parse_u32(p2, '@', want_h, p3);
+  if (ok) {
+    errno = 0;
+    const unsigned long r = std::strtoul(p3, &end, 10);
+    ok = end != p3 && errno != ERANGE && r != 0 &&
+         r <= std::numeric_limits<uint32_t>::max() && *end == '\0';
+    if (ok) {
+      want_r = static_cast<uint32_t>(r);
+    }
+  }
+  if (!ok) {
+    ihs::log::error(
+        "[DrmBackend] --drm-mode='{}' is not in '<W>x<H>@<R>' form "
+        "(e.g. 1920x1080@120)",
+        *cfg_.mode_spec);
+    return std::nullopt;
+  }
+
+  for (int i = 0; i < connector->count_modes; ++i) {
+    const auto& m = connector->modes[i];
+    if (m.hdisplay == want_w && m.vdisplay == want_h && m.vrefresh == want_r) {
+      return m;
+    }
+  }
+  ihs::log::error(
+      "[DrmBackend] --drm-mode='{}' not available on connector {}; run "
+      "--drm-list-modes for the supported list",
+      *cfg_.mode_spec, label);
+  return std::nullopt;
+}
+
 bool DrmBackend::InitDrm() {
   // The card is opened and held at master by the device-context
   // (DrmDisplay::SharedDevice); Create stored the non-owning pointer. The
@@ -667,80 +747,16 @@ bool DrmBackend::InitDrm() {
   // preferred-mode pick. Useful for high-refresh validation when the
   // panel reports a lower refresh as preferred (e.g. 2560x1440@60Hz
   // preferred on a panel that also offers 1920x1080@120Hz).
+  const auto picked = SelectMode(connector, connector_name(connector));
+  if (!picked.has_value()) {
+    drmModeFreeConnector(connector);
+    drmModeFreeResources(res);
+    return false;
+  }
+  mode_ = *picked;
   if (cfg_.mode_spec.has_value()) {
-    // Parse "<W>x<H>@<R>" via strtoul so we catch overflow and trailing
-    // garbage; sscanf("%u…") silently wraps on out-of-range input
-    // (cert-err34-c). Each segment must be a non-zero unsigned int that
-    // fits in uint32_t and is followed by the expected delimiter.
-    const auto parse_u32 = [](const char* p, char sep, uint32_t& out,
-                              const char*& next) -> bool {
-      errno = 0;
-      char* end = nullptr;
-      const unsigned long v = std::strtoul(p, &end, 10);
-      if (end == p || errno == ERANGE || v == 0 ||
-          v > std::numeric_limits<uint32_t>::max() || *end != sep) {
-        return false;
-      }
-      out = static_cast<uint32_t>(v);
-      next = end + 1;  // skip the separator
-      return true;
-    };
-    uint32_t want_w = 0;
-    uint32_t want_h = 0;
-    uint32_t want_r = 0;
-    const char* p = cfg_.mode_spec->c_str();
-    const char* p2 = nullptr;
-    const char* p3 = nullptr;
-    char* end = nullptr;
-    bool ok = parse_u32(p, 'x', want_w, p2) && parse_u32(p2, '@', want_h, p3);
-    if (ok) {
-      errno = 0;
-      const unsigned long r = std::strtoul(p3, &end, 10);
-      ok = end != p3 && errno != ERANGE && r != 0 &&
-           r <= std::numeric_limits<uint32_t>::max() && *end == '\0';
-      if (ok) {
-        want_r = static_cast<uint32_t>(r);
-      }
-    }
-    if (!ok) {
-      ihs::log::error(
-          "[DrmBackend] --drm-mode='{}' is not in '<W>x<H>@<R>' form "
-          "(e.g. 1920x1080@120)",
-          *cfg_.mode_spec);
-      drmModeFreeConnector(connector);
-      drmModeFreeResources(res);
-      return false;
-    }
-    for (int i = 0; i < connector->count_modes; ++i) {
-      const auto& m = connector->modes[i];
-      if (m.hdisplay == want_w && m.vdisplay == want_h &&
-          m.vrefresh == want_r) {
-        mode_ = m;
-        break;
-      }
-    }
-    if (mode_.clock == 0) {
-      ihs::log::error(
-          "[DrmBackend] --drm-mode='{}' not available on connector {}; run "
-          "--drm-list-modes for the supported list",
-          *cfg_.mode_spec, connector_name(connector));
-      drmModeFreeConnector(connector);
-      drmModeFreeResources(res);
-      return false;
-    }
     ihs::log::info("[DrmBackend] mode override: {}x{}@{}Hz (--drm-mode)",
                    mode_.hdisplay, mode_.vdisplay, mode_.vrefresh);
-  } else {
-    for (int i = 0; i < connector->count_modes; ++i) {
-      const auto& m = connector->modes[i];
-      if (m.type & DRM_MODE_TYPE_PREFERRED) {
-        mode_ = m;
-        break;
-      }
-    }
-    if (mode_.clock == 0) {
-      mode_ = connector->modes[0];
-    }
   }
 
   // Framebuffer size: explicit request wins; otherwise full-screen.
@@ -1296,6 +1312,103 @@ void DrmBackend::SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine,
   // runner isn't wired yet so the #210 kick latch delivers it (SetEngine).
   engine_handle_.store(engine, std::memory_order_release);
   vsync_.SubmitBaton(engine, baton);
+}
+
+DrmBackend::ModeChange DrmBackend::ClassifyModeChange(
+    const drmModeModeInfo& picked,
+    const drmModeModeInfo& current) {
+  if (picked.hdisplay != current.hdisplay ||
+      picked.vdisplay != current.vdisplay) {
+    return ModeChange::kExtentRefused;
+  }
+  const bool same_timing =
+      picked.clock == current.clock && picked.htotal == current.htotal &&
+      picked.vtotal == current.vtotal && picked.flags == current.flags;
+  return same_timing ? ModeChange::kNone : ModeChange::kRefreshOnly;
+}
+
+bool DrmBackend::OnOutputReconfigured() {
+  if (drm_dev_ == nullptr || connector_id_ == 0) {
+    return false;
+  }
+  drmModeConnector* connector =
+      drmModeGetConnector(drm_dev_->fd(), connector_id_);
+  if (connector == nullptr) {
+    ihs::log::warn(
+        "[DrmBackend] reconfigure: connector {} is gone; keeping the current "
+        "mode",
+        connector_id_);
+    return false;
+  }
+  const std::string label = "id " + std::to_string(connector_id_);
+  const std::optional<drmModeModeInfo> picked = SelectMode(connector, label);
+  drmModeFreeConnector(connector);
+
+  if (!picked.has_value()) {
+    // SelectMode has already said why. A startup failure is fatal; here it
+    // only means we keep driving what we have, which still works.
+    ihs::log::warn(
+        "[DrmBackend] reconfigure: no usable mode on connector {}; keeping "
+        "{}x{}@{}Hz",
+        connector_id_, mode_.hdisplay, mode_.vdisplay, mode_.vrefresh);
+    return false;
+  }
+  const ModeChange change = ClassifyModeChange(*picked, mode_);
+  if (change == ModeChange::kNone) {
+    return false;  // a reconfigure that did not change our mode
+  }
+  if (change == ModeChange::kExtentRefused) {
+    // Refused, loudly and once per distinct extent. Adopting it means
+    // reallocating the GBM surface, the scanout ring and the engine's render
+    // targets under a live engine; Resize() is a documented no-op here, so
+    // there is nothing to adopt it with yet (#765).
+    static uint32_t warned_w = 0;
+    static uint32_t warned_h = 0;
+    if (warned_w != picked->hdisplay || warned_h != picked->vdisplay) {
+      warned_w = picked->hdisplay;
+      warned_h = picked->vdisplay;
+      ihs::log::warn(
+          "[DrmBackend] reconfigure: connector {} now reports {}x{}@{}Hz but "
+          "we are scanning out {}x{}; an extent change needs the ring "
+          "reallocated and is not supported, so the old mode is kept",
+          connector_id_, picked->hdisplay, picked->vdisplay, picked->vrefresh,
+          mode_.hdisplay, mode_.vdisplay);
+    }
+    return false;
+  }
+
+  // Refresh-only change. Quiesce exactly as a session pause does: no
+  // PAGE_FLIP_EVENT is coming for a commit made against the old mode, and the
+  // queued-frame handler that would commit it never runs.
+  ihs::log::info(
+      "[DrmBackend] reconfigure: {}x{} timing changed, {}Hz -> {}Hz; "
+      "re-modesetting on the next present",
+      mode_.hdisplay, mode_.vdisplay, mode_.vrefresh, picked->vrefresh);
+  flip_pending_.store(false, std::memory_order_release);
+  DropQueuedFlip();
+  if (drm_display_ != nullptr) {
+    drm_display_->WakeFlipDrain();
+  }
+
+  mode_ = *picked;
+  // The next Present re-modesets, rather than committing a new mode under a
+  // flip that may still be in flight. Same mechanism OnSessionResumed uses.
+  mode_set_ = false;
+
+#if BUILD_COMPOSITOR
+  if (compositor_ != nullptr) {
+    compositor_->OnModeChanged(mode_);
+  }
+#endif
+
+  // Nothing above produces a frame, and an idle UI will not ask for one. Same
+  // two cases as resume: drain a parked baton, else prompt the engine.
+  if (auto* engine = engine_handle_.load(std::memory_order_acquire)) {
+    if (!vsync_.DeliverParkedBaton()) {
+      LibFlutterEngine->ScheduleFrame(engine);
+    }
+  }
+  return true;
 }
 
 void DrmBackend::OnSessionPaused() {

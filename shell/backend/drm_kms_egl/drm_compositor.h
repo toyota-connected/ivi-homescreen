@@ -182,6 +182,13 @@ class DrmCompositor : public IFlipSink {
   // OnResume() clears the pause flag, drops the stale flip-pending
   // latch (no PAGE_FLIP_EVENT will come for the suppressed commits),
   // and forces the next commit to be a full modeset.
+  // The connector was reconfigured and @p mode is what it reports now. Same
+  // extent, different timing -- the backend refuses an extent change, because
+  // the scanout ring is sized to it. Replaces the output context and
+  // recomputes the cached refresh period, which is otherwise derived once at
+  // construction and would keep reporting the old mode's cadence (#765).
+  void OnModeChanged(const drmModeModeInfo& mode);
+
   void SetPaused(bool paused);
   void OnResume();
 
