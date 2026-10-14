@@ -299,9 +299,10 @@ class Backend {
    * re-reporting display metadata that has not moved. The default does
    * nothing and returns false, for backends with no mode of their own.
    *
-   * Only a refresh-only change is adopted. A different extent is refused,
-   * because the scanout ring and the engine's render targets are sized to it
-   * and Resize() is a documented no-op on these backends (#765).
+   * A refresh-only change is adopted in place. A different extent is adopted
+   * too on the GL DRM backend, but only once the thread that draws into the
+   * scanout surfaces can rebuild them, so the return says "acting on it"
+   * rather than "done" (#765). Backends with no path for it still refuse.
    */
   virtual bool OnOutputReconfigured() { return false; }
 

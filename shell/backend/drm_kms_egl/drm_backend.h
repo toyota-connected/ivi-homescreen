@@ -25,6 +25,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <EGL/egl.h>
@@ -344,6 +345,14 @@ class DrmBackend : public Backend, public IFlipSink {
   // waiting on PAGE_FLIP_EVENT to be drained).
   void SetPlatformTaskRunner(TaskRunner* runner) override;
 
+  // Called on the platform strand after an extent change has been applied, so
+  // the view can re-send the window metrics (the engine's viewport is sized to
+  // the old extent) and the display metadata. Wired by FlutterView from the
+  // same post-Engine::Run hook that installs the engine handle; the raster
+  // thread reads it under pending_extent_mu_ because that hook races the first
+  // present.
+  void SetExtentAdoptedHandler(std::function<void()> handler);
+
   // Cancel the pending async_wait on flip_descriptor_ and detach the fd.
   // MUST be called from FlutterView::~FlutterView before m_flutter_engine
   // destructs — otherwise TaskRunner::~TaskRunner blocks forever joining
@@ -418,10 +427,21 @@ class DrmBackend : public Backend, public IFlipSink {
   [[nodiscard]] const drmModeModeInfo& mode() const { return mode_; }
   // What a re-resolve should do about a newly reported mode.
   enum class ModeChange {
-    kNone,           // same scanout configuration; nothing to do
-    kRefreshOnly,    // same extent, different timing: adopt it
-    kExtentRefused,  // different extent: the ring is sized to the old one
+    kNone,         // same scanout configuration; nothing to do
+    kRefreshOnly,  // same extent, different timing: adopt it in place
+    kExtent,       // different extent: the scanout ring has to be rebuilt
   };
+
+  // The FB extent to drive @p mode at: the configured size when one is set,
+  // else the mode's own, clamped to the mode either way -- a CRTC_W larger
+  // than the mode fails the atomic TEST. Static and taking the request
+  // explicitly so bring-up and an extent change share one rule, and so the
+  // clamp -- which only a mode smaller than the request makes matter -- is
+  // testable without a card.
+  [[nodiscard]] static std::pair<uint32_t, uint32_t> FbExtentForMode(
+      std::optional<uint32_t> requested_w,
+      std::optional<uint32_t> requested_h,
+      const drmModeModeInfo& mode);
 
   // Compares on timings rather than vrefresh, which is DIV_ROUND_CLOSEST of
   // the real rate and so identical for the 59.94 and 60 Hz variants of a CEA
@@ -431,9 +451,36 @@ class DrmBackend : public Backend, public IFlipSink {
       const drmModeModeInfo& picked,
       const drmModeModeInfo& current);
 
-  // |Backend| A connector reconfigure: re-run the mode pick and adopt a
-  // refresh-only change. Returns true when something changed, so the caller
-  // knows whether re-reporting display metadata is worth anything.
+  // Ask for @p mode on the next present, classified the same way a connector
+  // reconfigure is: a refresh-only change is adopted in place here, an extent
+  // change is latched for the raster thread to rebuild the scanout surfaces
+  // (ApplyPendingExtentChange), and a mode we are already driving is dropped.
+  // Returns what it decided. Either adopting branch also kicks a frame, since
+  // neither takes effect until a present runs.
+  //
+  // OnOutputReconfigured is this with the mode re-resolved from the connector
+  // first; separate so a caller that already knows the mode -- a test, or a
+  // runtime mode switch -- does not have to go through a uevent.
+  ModeChange RequestModeChange(const drmModeModeInfo& mode);
+
+  // Consume an extent change latched by RequestModeChange: rebuild the scanout
+  // surfaces at the new extent, re-arm the modeset, and tell the compositor and
+  // the engine. Returns true when one was applied, false when nothing was
+  // latched.
+  //
+  // Raster thread only -- it destroys the surface eglSwapBuffers draws into.
+  // Wired into the renderer's present hook rather than into Present(), because
+  // that hook is the one raster-thread callback both present paths run through:
+  // with the plane compositor driving scanout, Present() is never called at
+  // all.
+  bool ApplyPendingExtentChange();
+
+  // |Backend| A connector reconfigure: re-run the mode pick and adopt the
+  // result. A refresh-only change is adopted here; an extent change is only
+  // latched, because reallocating the scanout surfaces belongs to the thread
+  // that draws into them (ApplyPendingExtentChange). Returns true when
+  // something changed, so the caller knows whether re-reporting display
+  // metadata is worth anything.
   bool OnOutputReconfigured() override;
 
   // |Backend| From the selected mode, not from the vsync provider: the
@@ -470,6 +517,28 @@ class DrmBackend : public Backend, public IFlipSink {
   bool InitDrm();
   bool InitGbm();
   bool InitEgl();
+
+  // The two scanout surfaces, split out of InitGbm/InitEgl so an extent
+  // change re-runs exactly what bring-up ran. Both read fb_w_/fb_h_, so a
+  // caller sets those first. Raster thread only once presents are running:
+  // the EGL window surface is the one eglSwapBuffers draws into.
+  bool CreateGbmSurface();
+  bool CreateEglWindowSurface();
+  void DestroyScanoutSurfaces();
+
+  // The shared tail of a scanout rebuild: bind the new surfaces, re-arm the
+  // modeset, and tell the compositor what it is now committing. Run for both
+  // outcomes of an extent change, the new extent and a revert to the old.
+  void FinishScanoutRebuild();
+
+  // Post extent_adopted_ onto the platform strand. The raster thread owns the
+  // reallocation; only the view knows the engine to re-measure.
+  void NotifyExtentAdopted();
+
+  // Make sure a present runs, so a mode change that only takes effect in one
+  // reaches the panel on an idle UI.
+  void KickFrameForModeChange();
+
   bool SetInitialMode();
   uint32_t AddFb(gbm_bo* bo) const;
   bool WaitForPendingFlip() const;
@@ -620,6 +689,15 @@ class DrmBackend : public Backend, public IFlipSink {
   uint32_t queued_fb_ = 0;
 
   bool mode_set_ = false;
+
+  // Extent change latched by OnOutputReconfigured (platform thread) for the
+  // raster thread to apply. The atomic is the per-present fast path; the mutex
+  // guards the mode -- too big to publish atomically -- and the handler, whose
+  // installation races the first present.
+  std::mutex pending_extent_mu_;
+  std::optional<drmModeModeInfo> pending_extent_mode_;
+  std::function<void()> extent_adopted_;
+  std::atomic<bool> extent_change_pending_{false};
 
   // Shared baton park/drain/marshal (#10 vsync fold). DRM's two source-state
   // inputs are dynamic — the legacy flip latch vs. the active compositor's flip

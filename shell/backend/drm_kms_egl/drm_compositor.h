@@ -182,12 +182,21 @@ class DrmCompositor : public IFlipSink {
   // OnResume() clears the pause flag, drops the stale flip-pending
   // latch (no PAGE_FLIP_EVENT will come for the suppressed commits),
   // and forces the next commit to be a full modeset.
-  // The connector was reconfigured and @p mode is what it reports now. Same
-  // extent, different timing -- the backend refuses an extent change, because
-  // the scanout ring is sized to it. Replaces the output context and
-  // recomputes the cached refresh period, which is otherwise derived once at
-  // construction and would keep reporting the old mode's cadence (#765).
-  void OnModeChanged(const drmModeModeInfo& mode);
+  // The connector was reconfigured: @p mode is what it reports now and
+  // @p fb_w x @p fb_h the extent the backend has rebuilt its scanout surfaces
+  // at. Replaces the output context, recomputes the cached refresh period
+  // (derived once at construction, so it would otherwise keep reporting the
+  // old cadence), refreshes the MODE_ID blob the modeset and the scene each
+  // hold, and re-arms the next commit to carry ALLOW_MODESET. When the extent
+  // moved it also rebuilds everything sized to it: the composition buffers,
+  // the background store and the framed-mode decision (#765).
+  //
+  // Raster thread, and the caller owns the flip quiesce. Returns false when
+  // the plane path can no longer be driven at this mode; the GL fallback is
+  // unaffected either way.
+  [[nodiscard]] bool OnModeChanged(const drmModeModeInfo& mode,
+                                   uint32_t fb_w,
+                                   uint32_t fb_h);
 
   void SetPaused(bool paused);
   void OnResume();
@@ -342,6 +351,12 @@ class DrmCompositor : public IFlipSink {
   // Fire the platform-view scanout releases held since the last present, now
   // that WaitForPendingFlip has confirmed their displacing flip completed.
   void DrainDeferredScanoutReleases();
+
+  // Return every backing-store slot the release pipeline is tracking to Free,
+  // for the cases where the flips that would have freed them are never coming:
+  // a VT switch-out dropped them, or their store is about to be rebuilt at a
+  // new extent.
+  void ReleaseAllSlots();
 
   // Records that a platform view was GL-composited this present, queueing the
   // frame it just sampled for release once this present's flip completes. See

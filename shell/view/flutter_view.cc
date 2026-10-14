@@ -639,6 +639,27 @@ bool FlutterView::Initialize() {
     m_backend->SetPlatformTaskRunner(m_flutter_engine->GetPlatformTaskRunner());
   }
 
+#if BUILD_BACKEND_DRM_KMS_EGL
+  // A DRM connector that comes back at a different extent: the backend rebuilds
+  // its scanout surfaces on the raster thread and calls this once it has, on
+  // the platform strand. The engine's viewport is still sized to the old extent
+  // at that point and nothing else re-measures it, so the window metrics have
+  // to be re-sent -- the display metadata alone only tells Flutter the size, it
+  // does not resize the view (#765).
+  if (auto* drm_backend = dynamic_cast<DrmBackend*>(m_backend.get())) {
+    drm_backend->SetExtentAdoptedHandler([this]() {
+      const homescreen::ViewExtent extent = ResolveViewExtent();
+      const auto result =
+          m_flutter_engine->SetWindowSize(static_cast<size_t>(extent.height),
+                                          static_cast<size_t>(extent.width));
+      ihs::log::info(
+          "[FlutterView] extent adopted: SendWindowMetrics {}x{} result={}",
+          extent.width, extent.height, static_cast<int>(result));
+      UpdateDisplayMetadata();
+    });
+  }
+#endif
+
   // notify display update. The extent, the rate precedence and the scale all
   // come from the shared resolver, so the re-notify in UpdateDisplayMetadata
   // reports the same shape this did (#760).
