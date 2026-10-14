@@ -30,7 +30,9 @@ mapfile -d '' FILES < <(
         "${REPO_ROOT}/shell" \
         "${REPO_ROOT}/shared" \
         "${REPO_ROOT}/test" \
-        \( -name '*.cc' -o -name '*.cpp' -o -name '*.h' -o -name '*.hpp' \) \
+        "${REPO_ROOT}/tools" \
+        \( -name '*.cc' -o -name '*.cpp' -o -name '*.c' \
+           -o -name '*.h' -o -name '*.hpp' \) \
         -not -path "${REPO_ROOT}/shell/platform/homescreen/client_wrapper/*" \
         -not -path "${REPO_ROOT}/shell/platform/homescreen/public/*" \
         -print0

@@ -48,17 +48,23 @@ else
   override CFLAGS += $(shell pkg-config --cflags gbm libdrm)
 endif
 
-all: dmabuf_import_probe
+all: dmabuf_import_probe vk_ext_probe
 
 dmabuf_import_probe: dmabuf_import_probe.c
 	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS) -lgbm -ldrm -lvulkan
 
-# The CI gate. Compiles without linking, so it needs gbm/libdrm headers but no
-# Vulkan loader, no driver and no GPU on the runner.
-compile-only: dmabuf_import_probe.c
-	$(CC) $(CFLAGS) -Werror -c $< -o /dev/null
+# Which Vulkan device extensions a driver advertises. Needs no gbm, so it
+# builds anywhere the Vulkan headers do -- including boards with no GBM
+# headers installed, which is most of them.
+vk_ext_probe: vk_ext_probe.c
+	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS) -lvulkan
+
+# The CI gate. Compiles every harness without linking, so it needs the
+# gbm/libdrm headers but no Vulkan loader, no driver and no GPU on the runner.
+compile-only: dmabuf_import_probe.c vk_ext_probe.c
+	for src in $^; do $(CC) $(CFLAGS) -Werror -c $$src -o /dev/null || exit 1; done
 
 clean:
-	rm -f dmabuf_import_probe
+	rm -f dmabuf_import_probe vk_ext_probe
 
 .PHONY: all compile-only clean

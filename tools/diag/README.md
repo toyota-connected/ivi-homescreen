@@ -66,6 +66,28 @@ real and still charges those images 64 bytes, but the exporter headroom makes it
 moot. Keep the flag: it is how you tell the two halves apart on a driver where
 only one of them has landed.
 
+## `vk_ext_probe.c` — which device extensions does this driver advertise?
+
+Enough of `vulkaninfo` to answer one question without building Vulkan-Tools:
+the driver's identity and its device extension list, with the handful that
+decide capability in this codebase called out by name. Exits non-zero if any of
+those is missing.
+
+```sh
+make vk_ext_probe
+./vk_ext_probe          # add --all for the full list
+```
+
+Instance-level work only — no surface, no display, no DRM master — so it is safe
+to run on a board with a compositor up, and it needs no GBM headers, which most
+boards lack.
+
+It exists because "does this board grant exportable fences" decides whether
+ivi-homescreen#638's queue-interposer stall is even reachable, and the answer
+was not written down for any of our hardware. It is also the quickest way to
+find out whether a driver will admit the dma-buf and modifier extensions the
+platform-view path needs, before building anything against it.
+
 ### Cross-building for a board
 
 Ask `emb` for the toolchain rather than writing a path down — the profile

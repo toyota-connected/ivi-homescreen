@@ -21,9 +21,10 @@
  * devices to process. Opening /dev/uinput needs privilege (it is root-only on a
  * stock distro); the harness runs this under sudo.
  *
- *   uinput_gen mouse    --hz <rate> --seconds <s>            EV_REL pointer storm
- *   uinput_gen keyboard --hold <keysym> --seconds <s>        one key held down
- *   uinput_gen touch    --hz <rate> --seconds <s> --slots N  protocol-B MT burst
+ *   uinput_gen mouse    --hz <rate> --seconds <s>            EV_REL pointer
+ * storm uinput_gen keyboard --hold <keysym> --seconds <s>        one key held
+ * down uinput_gen touch    --hz <rate> --seconds <s> --slots N  protocol-B MT
+ * burst
  *
  * The device is created, a settle delay lets udev + libinput enumerate it, the
  * stream runs for --seconds, then the device is destroyed. Exit 0 on success.
@@ -73,8 +74,8 @@ static int setup_common(int fd, const char* name) {
   struct uinput_setup us;
   memset(&us, 0, sizeof(us));
   us.id.bustype = BUS_USB;
-  us.id.vendor = 0x1d6b;   /* placeholder */
-  us.id.product = 0x0104;  /* placeholder */
+  us.id.vendor = 0x1d6b;  /* placeholder */
+  us.id.product = 0x0104; /* placeholder */
   strncpy(us.name, name, sizeof(us.name) - 1);
   if (ioctl(fd, UI_DEV_SETUP, &us) < 0) {
     perror("UI_DEV_SETUP");
@@ -97,7 +98,7 @@ static int run_mouse(int fd, long hz, long seconds) {
   if (setup_common(fd, "ivi-uinput-mouse") < 0) {
     return 1;
   }
-  sleep(1);  /* udev + libinput enumerate */
+  sleep(1); /* udev + libinput enumerate */
   const long deadline = now_ms() + seconds * 1000;
   int dx = 4;
   long i = 0;
@@ -106,7 +107,7 @@ static int run_mouse(int fd, long hz, long seconds) {
     emit(fd, EV_REL, REL_Y, (i & 8) ? 3 : -3);
     syn(fd);
     if ((++i % 40) == 0) {
-      dx = -dx;  /* stay roughly in place */
+      dx = -dx; /* stay roughly in place */
     }
     pace(hz);
   }
@@ -120,13 +121,13 @@ static int run_keyboard(int fd, int keysym, long seconds) {
     return 1;
   }
   sleep(1);
-  emit(fd, EV_KEY, keysym, 1);  /* press */
+  emit(fd, EV_KEY, keysym, 1); /* press */
   syn(fd);
   const long deadline = now_ms() + seconds * 1000;
   while (now_ms() < deadline) {
-    pace(1000);  /* hold; the seat's repeater generates ticks */
+    pace(1000); /* hold; the seat's repeater generates ticks */
   }
-  emit(fd, EV_KEY, keysym, 0);  /* release */
+  emit(fd, EV_KEY, keysym, 0); /* release */
   syn(fd);
   return 0;
 }
@@ -137,8 +138,12 @@ static int run_touch(int fd, long hz, long seconds, int slots) {
   ioctl(fd, UI_SET_KEYBIT, BTN_TOUCH);
   ioctl(fd, UI_SET_PROPBIT, INPUT_PROP_DIRECT);
   struct uinput_abs_setup abs;
-  const int codes[] = {ABS_MT_SLOT,      ABS_MT_TRACKING_ID, ABS_MT_POSITION_X,
-                       ABS_MT_POSITION_Y, ABS_X,             ABS_Y};
+  const int codes[] = {ABS_MT_SLOT,
+                       ABS_MT_TRACKING_ID,
+                       ABS_MT_POSITION_X,
+                       ABS_MT_POSITION_Y,
+                       ABS_X,
+                       ABS_Y};
   const int maxes[] = {slots - 1, 65535, 1920, 1080, 1920, 1080};
   for (size_t k = 0; k < sizeof(codes) / sizeof(codes[0]); ++k) {
     ioctl(fd, UI_SET_ABSBIT, codes[k]);
@@ -157,12 +162,12 @@ static int run_touch(int fd, long hz, long seconds, int slots) {
   while (now_ms() < deadline) {
     for (int s = 0; s < slots; ++s) {
       emit(fd, EV_ABS, ABS_MT_SLOT, s);
-      emit(fd, EV_ABS, ABS_MT_TRACKING_ID, 100 + s);  /* down/persist */
+      emit(fd, EV_ABS, ABS_MT_TRACKING_ID, 100 + s); /* down/persist */
       emit(fd, EV_ABS, ABS_MT_POSITION_X, 100 + s * 40 + (frame % 20));
       emit(fd, EV_ABS, ABS_MT_POSITION_Y, 200 + (frame % 30));
     }
     emit(fd, EV_KEY, BTN_TOUCH, 1);
-    syn(fd);  /* one flush == one frame == 10 slot updates */
+    syn(fd); /* one flush == one frame == 10 slot updates */
     ++frame;
     pace(hz);
   }
