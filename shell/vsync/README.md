@@ -194,6 +194,11 @@ still commits before the host's deadline. Its frame start is that vblank, as
 for a frame started on it. The window is 2 ms (`SetStartWindow`,
 `IVI_WL_VSYNC_START_WINDOW_MS`, 0 to 8, 0 turns it off), and at most half the
 period counts. It starts no second frame in a refresh that already has one.
+That includes a frame started on a vblank counted from an older presentation,
+which can fall just before the real vblank when the reported period is off,
+and one handed out by a presentation that arrives after the next vblank. The
+next frame waits for the vblank after that refresh, counted from the latest
+presentation, so frame starts stay locked to it.
 
 With grid pacing on, the motion-to-photon cutoff stamped on a commit's
 feedback is approximate: the next baton can go out before that frame commits.

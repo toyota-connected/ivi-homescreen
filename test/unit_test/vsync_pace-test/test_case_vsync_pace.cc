@@ -346,6 +346,56 @@ TEST_F(VsyncPace, TheStartWindowStartsNoSecondFrameInARefresh) {
   EXPECT_EQ(scheduled_[0], kVblank + kPeriod);
 }
 
+TEST_F(VsyncPace, AVblankJustBeforeARealOneStartsNoSecondFrameInItsRefresh) {
+  vsync_.SetPaceFlips(true);
+  vsync_.SetPaceKeepPhase(true);
+  vsync_.SetPaceStartWindow(2 * kMs);
+  Present(kVblank);
+  ASSERT_TRUE(Request(kVblank + 1 * kMs));
+  ASSERT_FALSE(Request(kVblank + 5 * kMs));
+  now_ = kVblank + kPeriod + 100'000;
+  vsync_.FireDeferredForTest();
+  ASSERT_FALSE(vsync_.HasParkedBaton());
+  // The display's refresh runs a little long: its vblank lands 30 us after
+  // the one counted from the last presentation.
+  constexpr uint64_t kLate = 30'000;
+  Present(kVblank + kPeriod + kLate);
+  ASSERT_FALSE(Request(kVblank + kPeriod + 1 * kMs));
+  now_ = kVblank + 2 * kPeriod + 100'000;
+  vsync_.FireDeferredForTest();
+  ASSERT_FALSE(vsync_.HasParkedBaton()) << "handed out on the counted vblank";
+
+  // That frame is the refresh's, though its vblank fell just before the real
+  // one: a request in the start window waits for the next, counted from the
+  // latest presentation.
+  EXPECT_FALSE(Request(kVblank + 2 * kPeriod + 1 * kMs));
+  ASSERT_FALSE(scheduled_.empty());
+  EXPECT_EQ(scheduled_.back(), kVblank + 3 * kPeriod + kLate);
+}
+
+TEST_F(VsyncPace, ALatePresentationStartsNoSecondFrameInARefresh) {
+  vsync_.SetPaceFlips(true);
+  vsync_.SetPaceKeepPhase(true);
+  vsync_.SetPaceStartWindow(2 * kMs);
+  Present(kVblank);
+  ASSERT_TRUE(Request(kVblank + 1 * kMs));
+  ASSERT_FALSE(Request(kVblank + 5 * kMs));
+  now_ = kVblank + kPeriod + 100'000;
+  vsync_.FireDeferredForTest();
+  ASSERT_FALSE(vsync_.HasParkedBaton());
+  ASSERT_FALSE(Request(kVblank + kPeriod + 5 * kMs));
+  // The presentation of the last refresh's vblank comes after the next one,
+  // before the timer: it hands the baton out in this refresh.
+  now_ = kVblank + 2 * kPeriod + 200'000;
+  vsync_.DeliverVsync(kVblank + kPeriod);
+  ASSERT_FALSE(vsync_.HasParkedBaton());
+
+  EXPECT_FALSE(Request(kVblank + 2 * kPeriod + 1 * kMs))
+      << "a baton already went out this refresh";
+  ASSERT_FALSE(scheduled_.empty());
+  EXPECT_EQ(scheduled_.back(), kVblank + 3 * kPeriod);
+}
+
 TEST_F(VsyncPace, WithoutKeepPhaseThatRequestIsAnsweredAtOnce) {
   Present(kVblank);
   ASSERT_TRUE(Request(kVblank + 1 * kMs));
