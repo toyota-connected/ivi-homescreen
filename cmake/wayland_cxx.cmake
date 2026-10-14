@@ -298,12 +298,23 @@ function(ivi_wayland_protocols target)
         OUTPUT wayland-protocols/viewporter_client.hpp TARGET ${target})
 
     # linux-dmabuf-unstable-v1 — the wayland_vulkan zero-copy present path binds
-    # v4 feedback for the compositor's scanout modifiers. Shipped header
+    # feedback for the compositor's scanout modifiers. Shipped header
     # wl/linux_dmabuf.hpp carries the interface tables, so generate WITHOUT
     # --emit-interface-tables (same rule as xdg-shell). Generating it
     # unconditionally costs nothing on stacks that never bind it.
-    _ivi_wl_generate(PROTOCOL
-        "${IVI_WL_PROTOCOLS_BASE}/unstable/linux-dmabuf/linux-dmabuf-unstable-v1.xml"
+    #
+    # Vendored, like fractional-scale and drm-lease above: wl/linux_dmabuf.hpp
+    # defines wl_iface() for all three interfaces of dmabuf v5, including
+    # zwp_linux_dmabuf_feedback_v1, which only appears in the XML from
+    # wayland-protocols >= 1.24 — above the >=1.20 floor this file probes for.
+    # Taken from IVI_WL_PROTOCOLS_BASE, a 1.20-era sysroot generates two of the
+    # three traits and the shipped header then fails to compile against it
+    # ("use of undeclared identifier 'zwp_linux_dmabuf_feedback_v1_traits'"),
+    # which took the Vulkan Wayland backend out of reach on such a target for no
+    # reason at runtime: that header's tables are version-5 but the bind version
+    # is the caller's, and v1-5 all work. Pinning the XML to the vendored copy
+    # keeps the generated traits and the shipped tables describing one version.
+    _ivi_wl_generate(PROTOCOL "${_loc}/linux-dmabuf-unstable-v1.xml"
         MODE client-header
         OUTPUT wayland-protocols/linux_dmabuf_client.hpp TARGET ${target})
 

@@ -72,6 +72,37 @@ jobs:
             -D BUILD_NUMBER=${GITHUB_RUN_ID} \
             -D CMAKE_VERBOSE_MAKEFILE=ON
 
+      - name: Verify the vendored protocol XML is what codegen reads
+        working-directory: ${{github.workspace}}/build/debug
+        run: |
+          set -eu
+          # These protocols are newer than the >=1.20 floor cmake/wayland_cxx.cmake
+          # probes for, so they are vendored in shell/wayland/protocols/ and must be
+          # generated from there. Taken from the system wayland-protocols instead, a
+          # 1.20-era sysroot generates an incomplete binding set and the shipped wl/
+          # headers fail to compile against it -- which is invisible on a CI runner
+          # with modern wayland-protocols, so assert the input rather than the build.
+          #
+          # These three are generated for any surface build. drm-lease-v1 is
+          # vendored too but sits behind BUILD_BACKEND_WAYLAND_LEASED_DRM, so it
+          # is not a codegen input here at all -- and an absent input is an error
+          # below, so listing it would fail this job rather than cover it. Add it
+          # to a job that enables that backend, not to this one.
+          rc=0
+          for xml in linux-dmabuf-unstable-v1 fractional-scale-v1 linux-drm-syncobj-v1; do
+            found=$(grep -o "[^ ]*${xml}\.xml" build.ninja | sort -u || true)
+            if [ -z "$found" ]; then
+              echo "::error::${xml}.xml is not a codegen input at all"; rc=1; continue
+            fi
+            for f in $found; do
+              case "$f" in
+                */shell/wayland/protocols/${xml}.xml) echo "ok   ${xml}.xml <- vendored" ;;
+                *) echo "::error::${xml}.xml read from '$f', not shell/wayland/protocols/"; rc=1 ;;
+              esac
+            done
+          done
+          exit $rc
+
       - name: Build Debug Package
         working-directory: ${{github.workspace}}/build/debug
         run: |
