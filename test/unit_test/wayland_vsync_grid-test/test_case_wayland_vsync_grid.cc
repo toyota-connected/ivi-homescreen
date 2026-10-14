@@ -167,6 +167,42 @@ TEST_F(WaylandVsyncGrid, ARequestMidRefreshWhileFramesComeWaitsForTheVblank) {
   EXPECT_EQ(scheduled_[0], kVblank + 2 * kPeriod);
 }
 
+TEST_F(WaylandVsyncGrid, ARequestJustAfterTheVblankStartsItsFrameAtOnce) {
+  Present(kVblank);
+  ASSERT_TRUE(Request(kVblank + 1 * kMs));
+  // A platform view submits just after the next vblank, in the start window:
+  // a frame started now still makes this refresh.
+  EXPECT_TRUE(Request(kVblank + kPeriod + 1 * kMs));
+  EXPECT_TRUE(scheduled_.empty());
+}
+
+TEST_F(WaylandVsyncGrid, AFullPipelineHoldsARequestInTheStartWindow) {
+  Present(kVblank);
+  ASSERT_TRUE(Request(kVblank + 1 * kMs));
+  vsync_.SetInFlightForTest(ivi::WaylandVsyncProvider::kGridInFlight);
+  EXPECT_FALSE(Request(kVblank + kPeriod + 1 * kMs))
+      << "the window does not start a frame past the in-flight depth";
+  EXPECT_TRUE(scheduled_.empty()) << "a presentation returns the baton";
+}
+
+TEST_F(WaylandVsyncGrid, AZeroStartWindowKeepsThatRequestForTheVblank) {
+  vsync_.SetStartWindow(0);
+  Present(kVblank);
+  ASSERT_TRUE(Request(kVblank + 1 * kMs));
+  EXPECT_FALSE(Request(kVblank + kPeriod + 1 * kMs));
+  ASSERT_EQ(scheduled_.size(), 1U);
+  EXPECT_EQ(scheduled_[0], kVblank + 2 * kPeriod);
+}
+
+TEST_F(WaylandVsyncGrid, AStartWindowSetOffTheGridHoldsOnceItIsOn) {
+  vsync_.SetGridPacing(false);
+  vsync_.SetStartWindow(0);
+  vsync_.SetGridPacing(true);
+  Present(kVblank);
+  ASSERT_TRUE(Request(kVblank + 1 * kMs));
+  EXPECT_FALSE(Request(kVblank + kPeriod + 1 * kMs));
+}
+
 TEST_F(WaylandVsyncGrid, ARequestAfterAnIdleRefreshIsAnsweredAtOnce) {
   Present(kVblank);
   ASSERT_TRUE(Request(kVblank + 1 * kMs));
