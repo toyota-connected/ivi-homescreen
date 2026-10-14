@@ -1,0 +1,105 @@
+# Radxa Zero 3W/3E (RK3566, Mali-G52) on radxa's bookworm image.
+#
+# Self-contained, unlike the rpi targets: emb's board library ships only the
+# Raspberry Pi family, so there is no radxa board to `extends:`. This file
+# therefore carries three layers at once -- the hardware facts (toolchain,
+# image, rootfs partition, CPU tuning), the base GUI/input stack a board file
+# would normally supply, and the usual project layer. Keep the base stack in
+# step with emb's own boards/raspberry-pi.emb.yaml.
+#
+# ## EGL only
+#
+# PanVK is still gated behind PAN_I_WANT_A_BROKEN_VULKAN_DRIVER=1 on this
+# image, measured on the board: a plain `vulkaninfo` returns
+# VK_ERROR_INCOMPATIBLE_DRIVER naming that variable, and with the gate set the
+# Mali reports apiVersion 1.0.289 and complains that renderD128 is not a
+# panfrost node. Mesa there is 24.2 from the oibaf PPA, so this is not a
+# stale-Mesa artifact. Hence no Vulkan backend and no mesa-vulkan-drivers in
+# the sysroot; libvulkan-dev stays, because a renderer built with
+# FILAMENT_SUPPORTS_VULKAN=ON still needs the headers to compile.
+#
+# ## drm-kms-egl, and why BUILD_COMPOSITOR matters
+#
+# The board has no compositor and no X -- HDMI-A-1 is connected on card0 and
+# nothing holds DRM master -- so the embedder drives KMS directly. The DRM
+# compositor and LayerScene plane path live behind BUILD_COMPOSITOR, and
+# without it the FlutterCompositor API compiles out and platform-view content
+# never reaches a KMS plane. A platform view is the whole point here.
+cross:
+  targets:
+    radxa-zero3:
+      provider: arm-gnu
+      version_policy: pinned
+      triple: aarch64-none-linux-gnu
+      # bookworm is gcc 12 / glibc 2.36.
+      toolchain_version: 12.3.rel1
+      image_url: https://github.com/radxa-build/radxa-zero3/releases/download/rsdk-b1/radxa-zero3_bookworm_kde_b1.output_512.img.xz
+      # RK3566 is four Cortex-A55 and nothing else -- no DynamIQ pair to
+      # describe, unlike RK3588.
+      cpu_flags: [-mcpu=cortex-a55]
+      sysroot:
+        # radxa's image is GPT: p2 is a 300M boot partition, p3 the rootfs.
+        partition: 3
+        dev_packages:
+          # -- base GUI/input stack (the board-file layer) ----------------
+          - libegl-dev
+          # bookworm's name for it; trixie renamed this to libgles-dev.
+          - libgles2-mesa-dev
+          - libwayland-dev
+          - wayland-protocols
+          - libxkbcommon-dev
+          - libudev-dev
+          - libdrm-dev
+          - libgbm-dev
+          - libinput-dev
+          - libseat-dev
+          - libxcursor-dev
+          - libvulkan-dev
+          - libglib2.0-dev
+          - libsystemd-dev
+          - zlib1g-dev
+          # -- project layer ---------------------------------------------
+          - libcamera-dev
+          - libcurl4-openssl-dev
+          - libgstreamer1.0-dev
+          - libgstreamer-plugins-base1.0-dev
+          - libjpeg-dev
+          - libpipewire-0.3-dev
+          - libsecret-1-dev
+          - libxml2-dev
+        symlinks:
+          # radxa's vendor linux-libc-dev omits /usr/include/drm/, which the
+          # drm-kms-egl backend includes as <drm/*.h>. Point it at libdrm-dev's
+          # identical kernel-uapi copies.
+          usr/include/drm: libdrm
+      augment:
+        # bookworm has no libdisplay-info-dev, same as raspios bookworm.
+        - pkg: libdisplay-info
+          min: "0.2.0"
+          url: https://gitlab.freedesktop.org/emersion/libdisplay-info/-/archive/0.2.0/libdisplay-info-0.2.0.tar.gz
+          build: meson
+          static: true
+        # Host codegen tool: cmake/wayland_cxx.cmake resolves the scanner under
+        # cross via find_program, so it is built host-native and put on the
+        # cross build's PATH.
+        - pkg: wayland-cxx-scanner
+          url: https://github.com/jwinarske/wayland-cxx-scanner/archive/9c86b8e7e87e2c9d5ff34939d044df4053e70970.tar.gz
+          build: cmake
+          host: true
+          defines:
+            WAYLAND_CXX_SCANNER_BUILD_TOOL: 'ON'
+            WAYLAND_CXX_SCANNER_TOOL_ONLY: 'ON'
+      host_dev_packages:
+        - libpugixml-dev
+      backends:
+        drm-kms-egl:
+          BUILD_BACKEND_WAYLAND_EGL: 'OFF'
+          BUILD_BACKEND_WAYLAND_VULKAN: 'OFF'
+          BUILD_BACKEND_DRM_KMS_EGL: 'ON'
+          BUILD_BACKEND_SOFTWARE: 'OFF'
+          BUILD_COMPOSITOR: 'ON'
+        wayland-egl:
+          BUILD_BACKEND_WAYLAND_EGL: 'ON'
+          BUILD_BACKEND_WAYLAND_VULKAN: 'OFF'
+          BUILD_BACKEND_DRM_KMS_EGL: 'OFF'
+          BUILD_BACKEND_SOFTWARE: 'OFF'
