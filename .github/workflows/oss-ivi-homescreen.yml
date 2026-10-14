@@ -82,6 +82,12 @@ jobs:
           # 1.20-era sysroot generates an incomplete binding set and the shipped wl/
           # headers fail to compile against it -- which is invisible on a CI runner
           # with modern wayland-protocols, so assert the input rather than the build.
+          #
+          # These three are generated for any surface build. drm-lease-v1 is
+          # vendored too but sits behind BUILD_BACKEND_WAYLAND_LEASED_DRM, so it
+          # is not a codegen input here at all -- and an absent input is an error
+          # below, so listing it would fail this job rather than cover it. Add it
+          # to a job that enables that backend, not to this one.
           rc=0
           for xml in linux-dmabuf-unstable-v1 fractional-scale-v1 linux-drm-syncobj-v1; do
             found=$(grep -o "[^ ]*${xml}\.xml" build.ninja | sort -u || true)
