@@ -16,6 +16,7 @@
 
 #include "backend/software/drm_dumb_sink.h"
 #include "logging/logging.h"
+#include "view/presentation.h"
 
 #include <drm_fourcc.h>
 #include <fcntl.h>
@@ -320,9 +321,11 @@ bool DrmDumbSink::InitFromFd(uint32_t want_connector_id) {
   const drmModeModeInfo mode = connector->modes[chosen_idx];
   mode_width_ = mode.hdisplay;
   mode_height_ = mode.vdisplay;
-  mode_vrefresh_ = mode.vrefresh;  // 0 preserved; see RefreshPeriodNs (#732)
+  // Exact period from the timings; 0 preserved so RefreshPeriodNs can still
+  // say "no mode" (#732, #762).
+  mode_period_ns_ = ModeRefreshPeriodNs(mode.clock, mode.htotal, mode.vtotal);
   refresh_rate_hz_ =
-      mode.vrefresh > 0 ? static_cast<double>(mode.vrefresh) : 60.0;
+      mode_period_ns_ > 0 ? 1e9 / static_cast<double>(mode_period_ns_) : 60.0;
   refresh_period_ns_.store(static_cast<uint64_t>(1e9 / refresh_rate_hz_),
                            std::memory_order_release);
   vsync_.SetPeriodNs(static_cast<uint32_t>(

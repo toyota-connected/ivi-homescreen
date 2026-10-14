@@ -3364,6 +3364,70 @@ TEST(DrmBackendModeChange, ADifferentExtentIsRefused) {
             DrmBackend::ModeChange::kExtentRefused);
 }
 
+// #762: the reported period comes from the mode's timings, not its vrefresh.
+//
+// Driven against whatever modes this host's vkms offers rather than a
+// hardcoded one: find a mode where the exact period and the integer-vrefresh
+// period actually differ, select it, and require the backend to report the
+// exact figure. A default vkms has several -- 2560x1600 advertises vrefresh
+// 60 and is really 59.9866Hz, a 3727ns gap -- but which ones exist is a
+// kernel detail, so the case looks rather than assumes.
+TEST_F(DrmBackendVkmsRefreshRate, ReportsThePeriodFromTheModesTimings) {
+  drmModeConnector* connector = nullptr;
+  drmModeRes* res = drmModeGetResources(display_->SharedDevice()->fd());
+  ASSERT_NE(res, nullptr);
+  for (int i = 0; i < res->count_connectors && connector == nullptr; ++i) {
+    drmModeConnector* c =
+        drmModeGetConnector(display_->SharedDevice()->fd(), res->connectors[i]);
+    if (c != nullptr && c->connection == DRM_MODE_CONNECTED &&
+        c->count_modes > 0) {
+      connector = c;
+    } else if (c != nullptr) {
+      drmModeFreeConnector(c);
+    }
+  }
+  ASSERT_NE(connector, nullptr) << "no connected vkms connector with modes";
+
+  // A mode whose two periods disagree by enough to be unambiguous.
+  std::string spec;
+  uint32_t want_exact = 0;
+  uint32_t want_integer = 0;
+  for (int i = 0; i < connector->count_modes; ++i) {
+    const drmModeModeInfo& m = connector->modes[i];
+    if (m.vrefresh == 0 || m.clock == 0) {
+      continue;
+    }
+    const uint32_t exact = ModeRefreshPeriodNs(m.clock, m.htotal, m.vtotal);
+    const uint32_t integer = 1'000'000'000U / m.vrefresh;
+    if (exact != 0 && exact != integer) {
+      spec = std::to_string(m.hdisplay) + "x" + std::to_string(m.vdisplay) +
+             "@" + std::to_string(m.vrefresh);
+      want_exact = exact;
+      want_integer = integer;
+      break;
+    }
+  }
+  drmModeFreeConnector(connector);
+  drmModeFreeResources(res);
+  if (spec.empty()) {
+    GTEST_SKIP() << "every mode on this vkms has vrefresh exactly matching its "
+                 << "timings; nothing to tell the two apart";
+  }
+
+  auto backend = BackendWithMode(spec);
+  ASSERT_NE(backend, nullptr) << "could not select " << spec;
+
+  EXPECT_EQ(backend->RefreshPeriodNs(), want_exact)
+      << spec << ": expected the timing-derived period";
+  EXPECT_NE(backend->RefreshPeriodNs(), want_integer)
+      << spec << ": that is the integer-vrefresh period, which is the bug";
+
+  // And the rate the view reports is just that period inverted, so the two
+  // cannot disagree.
+  EXPECT_NEAR(backend->RefreshRateHz(), 1e9 / static_cast<double>(want_exact),
+              1e-6);
+}
+
 }  // namespace
 
 // Own main rather than gtest_main: the shell's logging has to be started

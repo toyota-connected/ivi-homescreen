@@ -251,11 +251,11 @@ class VulkanDrmBackend final : public Backend {
   [[nodiscard]] uint32_t width() const { return width_; }
   [[nodiscard]] uint32_t height() const { return height_; }
   // |Backend| From the selected mode; 0 before one is set. See the note on
-  // DrmBackend::RefreshPeriodNs for why not the vsync provider (#732), and
-  // #762 for the integer vrefresh a 59.94Hz mode rounds to 60.
+  // DrmBackend::RefreshPeriodNs for why not the vsync provider (#732).
+  // Latched from the mode's timings rather than its vrefresh, which the
+  // kernel rounds (#762); SetupCompositor does the arithmetic.
   [[nodiscard]] uint32_t RefreshPeriodNs() const override {
-    const uint32_t vr = mode_vrefresh_;
-    return vr > 0 ? static_cast<uint32_t>(1'000'000'000ULL / vr) : 0;
+    return mode_period_ns_;
   }
   // Scanout rotation in degrees (0|90|180|270). FlutterView forwards it to the
   // seat so the HW cursor sprite is transformed from render space (where the
@@ -436,9 +436,10 @@ class VulkanDrmBackend final : public Backend {
 
   // Scanout mode selector ("<W>x<H>[@<R>]"); empty = connector preferred mode.
   std::string mode_spec_;
-  // The selected mode's vrefresh in Hz, latched by SetupCompositor; 0 until
-  // a mode is set. Reported to the engine via RefreshPeriodNs (#732).
-  uint32_t mode_vrefresh_{0};
+  // The selected mode's exact refresh period in ns, latched by
+  // SetupCompositor; 0 until a mode is set. Reported to the engine via
+  // RefreshPeriodNs (#732) and derived from the timings, not vrefresh (#762).
+  uint32_t mode_period_ns_{0};
   // --drm-connector / view.backend.drm.connector. Empty = first connected
   // connector with a mode. Unused on the leased tier, which pins by id.
   std::string connector_name_;

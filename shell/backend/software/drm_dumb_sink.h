@@ -141,12 +141,11 @@ class DrmDumbSink final : public ISurfaceSink {
   }
 
   // |ISurfaceSink| From the mode, latched in InitFromFd; 0 when the mode
-  // reports no vrefresh. Not refresh_period_ns_, which defaults to 60Hz and
-  // so cannot distinguish that (#732). Integer vrefresh, so a 59.94Hz mode
-  // reports 60 (#762).
+  // says nothing. Not refresh_period_ns_, which defaults to 60Hz and so
+  // cannot distinguish that (#732). Latched from the mode's timings rather
+  // than its rounded vrefresh (#762); InitFromFd does the arithmetic.
   [[nodiscard]] uint32_t RefreshPeriodNs() const override {
-    const uint32_t vr = mode_vrefresh_;
-    return vr > 0 ? static_cast<uint32_t>(1'000'000'000ULL / vr) : 0;
+    return mode_period_ns_;
   }
 
  private:
@@ -258,8 +257,10 @@ class DrmDumbSink final : public ISurfaceSink {
   profiling::MotionToPhoton* m2p_{nullptr};
   // Refresh period as nanoseconds; computed once from the picked mode.
   std::atomic<uint64_t> refresh_period_ns_{16'666'667};
-  // The mode's vrefresh in Hz as the kernel reported it, 0 included.
-  uint32_t mode_vrefresh_{0};
+  // The mode's exact refresh period in ns from its timings, 0 when the mode
+  // does not say. Distinct from refresh_period_ns_, which carries a 60Hz
+  // default so the vblank wait always has a bound.
+  uint32_t mode_period_ns_{0};
 
   // Software cursor composited onto each frame (XRGB8888 path); shared with the
   // seat, which updates its position. Null when the cursor is disabled.

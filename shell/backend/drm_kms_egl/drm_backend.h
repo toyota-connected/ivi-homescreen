@@ -44,6 +44,7 @@
 #include "backend/backend.h"
 #include "backend/drm_kms_egl/drm_output_context.h"
 #include "backend/drm_kms_egl/flip_sink.h"
+#include "view/presentation.h"
 #include "vsync/ivsync_provider.h"
 
 class DrmCompositor;
@@ -437,11 +438,14 @@ class DrmBackend : public Backend, public IFlipSink {
 
   // |Backend| From the selected mode, not from the vsync provider: the
   // provider's period_ns_ defaults to 60Hz and so cannot say "no mode yet",
-  // which is the distinction #732 turns on. Integer vrefresh, so a 59.94Hz
-  // mode reports 60 (#762).
+  // which is the distinction #732 turns on.
+  //
+  // From the mode's timings, not its vrefresh: the kernel fills vrefresh with
+  // DIV_ROUND_CLOSEST of the real rate, so a 59.94Hz mode reports 60 and the
+  // period comes out 16.6us short of a 16.7ms frame (#762). The leading :: is
+  // load-bearing -- the member hides the global of the same name.
   [[nodiscard]] uint32_t RefreshPeriodNs() const override {
-    const uint32_t vr = vrefresh();
-    return vr > 0 ? static_cast<uint32_t>(1'000'000'000ULL / vr) : 0;
+    return ModeRefreshPeriodNs(mode_.clock, mode_.htotal, mode_.vtotal);
   }
   [[nodiscard]] EGLDisplay egl_display() const { return egl_display_; }
   [[nodiscard]] gbm_device* gbm() const { return gbm_device_; }

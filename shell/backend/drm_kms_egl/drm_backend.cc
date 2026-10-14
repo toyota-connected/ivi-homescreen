@@ -1298,8 +1298,12 @@ bool DrmBackend::DrmVsyncProvider::IsSourcePending() const {
 }
 
 uint32_t DrmBackend::DrmVsyncProvider::PeriodNs() const {
-  const uint32_t vr = backend_->mode_.vrefresh;
-  return vr > 0 ? static_cast<uint32_t>(1000000000ULL / vr) : 16666667U;
+  // frame_target_time, so this is the budget Flutter is told it has. From the
+  // timings for the same reason the reported rate is (#762); the two must
+  // agree, which is the invariant #758 built. 60Hz when the mode says nothing,
+  // since a zero budget is worse than a wrong one.
+  const uint32_t exact = backend_->RefreshPeriodNs();
+  return exact > 0 ? exact : 16666667U;
 }
 
 void DrmBackend::SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine,
