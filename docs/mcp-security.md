@@ -67,7 +67,7 @@ layers because the tool table is a list and lists get added to.
 A node whose role is `password_input`, or whose obscured flag is set, never
 has its `value` serialized. `ui_set_text` refuses an obscured target outright:
 an agent that can type into a password field can read back what it typed
-through the application's own behaviour, so suppressing the read alone would
+through the application's own behavior, so suppressing the read alone would
 not have closed it.
 
 ### Nothing grows without a bound

@@ -85,7 +85,7 @@ mapfile -d '' FILES < <(
         "${REPO_ROOT}/shared" \
         "${REPO_ROOT}/test" \
         "${REPO_ROOT}/scripts" \
-        "${REPO_ROOT}/doc" \
+        "${REPO_ROOT}/docs" \
         "${REPO_ROOT}/tools" \
         \( -name '*.cc' -o -name '*.cpp' -o -name '*.h' -o -name '*.hpp' \
            -o -name '*.md' -o -name '*.sh' -o -name '*.py' \
