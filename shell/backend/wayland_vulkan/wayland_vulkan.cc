@@ -41,6 +41,7 @@
 #include <drm_fourcc.h>      // DRM_FORMAT_XRGB8888
 #include <wayland-client.h>  // wl_surface_attach/damage_buffer/commit
 
+#include "backend/wayland_vulkan/dmabuf_feedback_start.h"
 #include "backend/wayland_vulkan/wl_dmabuf_present.h"
 #include "backend/wayland_vulkan/wl_explicit_sync.h"
 #if BUILD_HUD
@@ -1780,25 +1781,32 @@ void WaylandVulkanBackend::CreateSurface(size_t /* index */,
     vsync_->SetSurface(surface);
   }
 
-  // Bind v4 dma-buf feedback for the zero-copy present path. Independent of
-  // Mesa's WSI dmabuf bind; per-surface feedback carries the accurate scanout
-  // flag for this surface. A roundtrip drains the initial advertisement so
-  // fb_snapshot_ is populated before the first frame.
+  // Bind dma-buf feedback for the zero-copy present path. Independent of
+  // Mesa's WSI dmabuf bind. Per-surface feedback (v4+) carries the accurate
+  // scanout flag for this surface; a v3 compositor's format/modifier events
+  // give the modifiers without it.
   if (shell_display_ != nullptr && shell_display_->GetLinuxDmabufName() != 0) {
     dmabuf_feedback_ =
         std::make_unique<wl::DmabufFeedback<WaylandVulkanBackend>>();
     dmabuf_feedback_->Record(shell_display_->GetLinuxDmabufName(),
                              shell_display_->GetLinuxDmabufVersion());
-    if (dmabuf_feedback_->Bind(shell_display_->GetRegistry(), this) &&
-        dmabuf_feedback_->StartSurface(wl_display_,
-                                       reinterpret_cast<wl_proxy*>(surface))) {
-      wl_display_roundtrip(wl_display_);
-    } else {
-      ihs::log::info(
-          "[WaylandVulkanBackend] dma-buf feedback v{} unavailable; zero-copy "
-          "present path disabled (WSI swapchain fallback)",
-          shell_display_->GetLinuxDmabufVersion());
-      dmabuf_feedback_.reset();
+    switch (wl_vulkan::StartDmabufFeedback(
+        *dmabuf_feedback_, shell_display_->GetRegistry(), this, wl_display_,
+        reinterpret_cast<wl_proxy*>(surface))) {
+      case wl_vulkan::DmabufFeedbackSource::kSurface:
+        break;
+      case wl_vulkan::DmabufFeedbackSource::kFormatEvents:
+        ihs::log::info(
+            "[WaylandVulkanBackend] dma-buf v3: no per-surface feedback; "
+            "modifiers from the bind's format events");
+        break;
+      case wl_vulkan::DmabufFeedbackSource::kNone:
+        ihs::log::info(
+            "[WaylandVulkanBackend] dma-buf feedback v{} unavailable; "
+            "zero-copy present path disabled (WSI swapchain fallback)",
+            shell_display_->GetLinuxDmabufVersion());
+        dmabuf_feedback_.reset();
+        break;
     }
   }
 

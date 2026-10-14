@@ -15,7 +15,7 @@ profiler used to characterize them.
 | Wall-clock scheduler fallback | Built-in | Auto when vsync unusable / `IVI_VK_VSYNC=0` |
 | Selectable swapchain present mode (`fifo`/`fifo_relaxed`/`mailbox`/`immediate`) | Built-in | `IVI_VK_PRESENT_MODE` (default `fifo`); falls back to FIFO if unadvertised |
 | Vulkan compositor for platform-view layers | Opt-in | `BUILD_COMPOSITOR` |
-| Zero-copy dma-buf present path (bypasses WSI swapchain) | Experimental | `IVI_VK_DMABUF`; needs `zwp_linux_dmabuf_v1` v4 + renderable modifier |
+| Zero-copy dma-buf present path (bypasses WSI swapchain) | Experimental | `IVI_VK_DMABUF`; needs `zwp_linux_dmabuf_v1` v3+ and a renderable modifier |
 | Explicit sync on the dma-buf path via `wp_linux_drm_syncobj` | Experimental | Auto when advertised + timeline semaphores; `IVI_VK_NO_EXPLICIT_SYNC` forces CPU fence |
 | VkQueue host-access serialization (queue interposer) | Built-in | Always (embedder proc-address swap) |
 | Vulkan share-context export to plugins (`GetVulkanContext`) | Built-in | Always once device is created |
@@ -137,6 +137,7 @@ internal wall-clock scheduler. The decision is logged once at startup.
 | [vulkan_backing_store.h](vulkan_backing_store.h) / [vulkan_backing_store.cc](vulkan_backing_store.cc) | `VulkanBackingStore` — device-local `VkImage` render target (optionally dma-buf-exported), layout tracking (`BUILD_COMPOSITOR`) |
 | [wl_layer_compositor.h](wl_layer_compositor.h) / [wl_layer_compositor.cc](wl_layer_compositor.cc) | `LayerCompositor` — premultiplied src-over layer composition into a slot image (`BUILD_COMPOSITOR`) |
 | [wl_dmabuf_present.h](wl_dmabuf_present.h) / [wl_dmabuf_present.cc](wl_dmabuf_present.cc) | `DmabufImage` / `WlDmabufBuffer` + `NegotiateModifiers` — modifier-tiled dma-buf slots and modifier negotiation (`IVI_VK_DMABUF`) |
+| [dmabuf_feedback_start.h](dmabuf_feedback_start.h) | `StartDmabufFeedback` — where the compositor's modifiers come from: per-surface feedback (v4+), the bind's format events (v3), or none |
 | [wl_explicit_sync.h](wl_explicit_sync.h) / [wl_explicit_sync.cc](wl_explicit_sync.cc) | `ExplicitSync` — `wp_linux_drm_syncobj` producer/consumer timeline sync for the dma-buf path |
 | [shaders/](shaders/) | GLSL/SPIR-V shaders for the `LayerCompositor` blend pipeline |
 
@@ -221,9 +222,12 @@ needs `zwp_linux_dmabuf_v1`/`wl_drm` to allocate at all (`VK_ERROR_SURFACE_LOST`
 otherwise), and under MAILBOX discards thousands of frames for latency. The
 dma-buf path removes that layer:
 
-1. `wl::DmabufFeedback` (v4) reports the compositor's scanout-capable modifiers
-   and `main_device`; `NegotiateModifiers` intersects them with the modifiers
-   this device can export for `B8G8R8A8_UNORM`/`XRGB8888`.
+1. `wl::DmabufFeedback` reports the compositor's modifiers: from per-surface
+   feedback at v4+ (scanout-capable tranches and `main_device`), or at v3 from
+   the bind's format/modifier events (one tranche, no scanout flag, no device).
+   The scanout tranches' modifiers are used when there are any, else all of
+   them; `NegotiateModifiers` intersects those with the modifiers this device
+   can export for `B8G8R8A8_UNORM`/`XRGB8888`.
 2. A ring of modifier-tiled, dma-buf-exported `VkImage` slots (`wl_dmabuf_present`),
    each wrapped as a `wl_buffer` via `zwp_linux_buffer_params`.
 3. `PresentLayersDmabuf` blits the engine's backing-store layers into the current

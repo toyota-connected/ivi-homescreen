@@ -208,6 +208,7 @@ endif ()
 # VulkanBackingStore belongs to the wayland-vulkan backend.
 if (BUILD_BACKEND_WAYLAND_VULKAN)
     add_subdirectory(vk_store_dmabuf-test)
+    add_subdirectory(dmabuf_feedback_start-test)
 endif ()
 # The shared-queue interposer behind both Vulkan backends.
 if (BUILD_BACKEND_WAYLAND_VULKAN OR BUILD_BACKEND_DRM_KMS_VULKAN)
