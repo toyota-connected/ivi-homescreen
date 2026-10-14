@@ -258,11 +258,29 @@ not usable there). vc4 and amdgpu are unaffected.
   not compiled, no HW cursor available at runtime
 - **blend2d** missing → `HAVE_DRM_CAPTURE` undefined, `drm_capture.cc`
   not compiled, SIGUSR1 snapshot becomes a no-op
-- **libseat** missing → `DrmSession::Open()` returns nullptr, backend
-  falls back to direct `/dev/dri/card*` open + foreground-VT guard
 
-All three are configure-time soft probes; missing any one is logged at
-`message(STATUS …)` and the build continues.
+libxcursor and blend2d are configure-time soft probes; missing either is
+logged at `message(STATUS …)` and the build continues.
+
+**libseat is not.** It defaults to a hard requirement, so a sysroot without
+`libseat-dev` fails the configure rather than shipping a build that has
+quietly lost VT-switch support. Override it explicitly:
+
+| `-D DRM_CXX_SESSION=` | configure | `libseat.so.1` in `DT_NEEDED` | runtime |
+| --- | --- | --- | --- |
+| *unset* (default) | fails without `libseat-dev` | yes | libseat session, VT switching |
+| `AUTO` | soft probe | if found | session when found, else direct open |
+| `OFF` | no probe | no | direct open only |
+
+`OFF` is for an image with no `libseat1` — a kiosk that owns the display
+outright, which is what `--drm-no-seat` already does at runtime. It needs no
+source change: drm-cxx compiles a stub whose `Seat::open()` returns `nullopt`,
+and `DrmSession::Open()` already turns that into the direct-open fallback.
+
+> The build needs `libseat-dev` in the sysroot; the binary needs
+> `libseat.so.1` in the **target image**. Nothing at configure time can check
+> the latter, so a cross build for an image without it fails in the loader
+> after deploy. The configure prints a reminder whenever libseat is linked.
 
 ---
 

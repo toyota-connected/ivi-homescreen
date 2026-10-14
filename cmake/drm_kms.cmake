@@ -32,12 +32,30 @@ set(DRM_CXX_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
 set(DRM_CXX_INSTALL          OFF CACHE BOOL "" FORCE)
 set(DRM_CXX_VULKAN           OFF CACHE BOOL "" FORCE)
 
-# Force-on the drm-cxx modules ivi-homescreen UNCONDITIONALLY depends on,
-# so a missing system dep fails the configure step here rather than
-# silently auto-disabling the module and producing a binary that crashes
-# at first use. Today only DRM_CXX_SESSION qualifies: drm::session::Seat
-# is consumed unconditionally in backend/drm_kms_egl/drm_session.cc.
-set(DRM_CXX_SESSION ON CACHE BOOL "" FORCE)
+# Default the seat module to a hard requirement, so a sysroot without
+# libseat-dev fails the configure here rather than silently auto-disabling
+# it and shipping a build that has quietly lost VT-switch support.
+#
+# Only the default. An explicit -DDRM_CXX_SESSION=<AUTO|ON|OFF> is honored,
+# because an image with no libseat1 is a real target -- a kiosk that owns
+# the display outright, which --drm-no-seat already serves at runtime -- and
+# a FORCE here made that unbuildable: -D only seeds the cache, so the pin
+# overwrote it and libseat.so.1 stayed a hard DT_NEEDED on a binary that
+# then died in the loader (#795).
+#
+# Nothing on our side has to change for OFF to work. drm-cxx compiles a
+# stub (src/session/seat.cpp, the !DRM_CXX_HAS_LIBSEAT branch) whose
+# Seat::open() returns nullopt, which is the same answer DrmSession::Open
+# already turns into the direct-open fallback in DrmDisplay. Do NOT try to
+# guard the call site on DRM_CXX_HAS_LIBSEAT: it is a PRIVATE compile
+# definition on the drm-cxx target, so in our translation units it is
+# undefined and such a guard would pin every build to the no-seat path.
+#
+# STRING, not BOOL: drm-cxx declares it tri-state with a STRINGS property,
+# and typing it BOOL here replaces the AUTO/ON/OFF dropdown with a checkbox.
+if (NOT DEFINED DRM_CXX_SESSION)
+    set(DRM_CXX_SESSION ON CACHE STRING "" FORCE)
+endif ()
 
 # Leave AUTO (don't FORCE) on the drm-cxx modules whose ivi-homescreen
 # consumers are themselves gated on the same system dep — shell/CMakeLists
@@ -105,6 +123,46 @@ unset(_drmcxx_srcs)
 unset(_drmcxx_capture)
 
 message(STATUS "drm::capture available .. ${IVI_DRM_HAVE_CAPTURE}")
+
+# drm-cxx's libseat verdict, hoisted the same way and for the same reason:
+# DRM_CXX_HAS_LIBSEAT decides whether the seat module is real or the stub,
+# and it is PRIVATE to drm-cxx, so this is the only place that can say so.
+get_directory_property(IVI_DRM_HAVE_SEAT
+        DIRECTORY "${_drm_cxx_src}" DEFINITION DRM_CXX_HAS_LIBSEAT)
+if (NOT IVI_DRM_HAVE_SEAT)
+    set(IVI_DRM_HAVE_SEAT 0)
+endif ()
+
+# Cross-check against the link drm-cxx actually made, for the same reason the
+# capture gate above does: a submodule bump could rename the variable and
+# get_directory_property would quietly return empty, turning a seat-capable
+# build into a silent no-seat one.
+get_target_property(_drmcxx_links drm-cxx LINK_LIBRARIES)
+set(_drmcxx_seat 0)
+if (_drmcxx_links MATCHES "PkgConfig::libseat")
+    set(_drmcxx_seat 1)
+endif ()
+if (NOT _drmcxx_seat EQUAL IVI_DRM_HAVE_SEAT)
+    message(FATAL_ERROR
+        "drm-cxx seat gate mismatch: DRM_CXX_HAS_LIBSEAT reads "
+        "'${IVI_DRM_HAVE_SEAT}' but PkgConfig::libseat is ${_drmcxx_seat} in "
+        "drm-cxx's link libraries. That variable belongs to drm-cxx; check "
+        "whether a submodule bump renamed it.")
+endif ()
+unset(_drmcxx_links)
+unset(_drmcxx_seat)
+
+message(STATUS "drm::session::Seat available .. ${IVI_DRM_HAVE_SEAT}")
+if (IVI_DRM_HAVE_SEAT)
+    # The asymmetry that costs a deploy round trip: the build needs
+    # libseat-dev in the sysroot, the binary needs libseat.so.1 in the
+    # target image, and nothing here can check the latter. Say it while the
+    # build log is still in front of whoever is cross-compiling.
+    message(STATUS
+            "drm-kms: libseat linked -- the TARGET IMAGE must provide "
+            "libseat.so.1 at runtime (e.g. apt install libseat1), or "
+            "configure with -DDRM_CXX_SESSION=OFF")
+endif ()
 
 # Treat drm-cxx as a system library (vendored submodule we keep pristine):
 # mark its interface headers SYSTEM so they're -isystem for consumers, and

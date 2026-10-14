@@ -22,12 +22,16 @@ jobs:
             extra_pkgs: g++-14
             compositor: 'ON'
             vulkan: 'OFF'
+            session_arg: ''
+            expect_libseat: 'yes'
           - compiler: clang
             cc: clang-19
             cxx: clang++-19
             extra_pkgs: clang-19 llvm-19 lld-19 libc++-19-dev libc++abi-19-dev
             compositor: 'ON'
             vulkan: 'OFF'
+            session_arg: ''
+            expect_libseat: 'yes'
           # The legacy DrmBackend::Present path is only reachable with the
           # compositor off, so nothing else here compiles it. Two separate
           # commits broke this configuration before the job existed.
@@ -44,6 +48,24 @@ jobs:
             extra_pkgs: g++-14
             compositor: 'OFF'
             vulkan: 'ON'
+            session_arg: ''
+            expect_libseat: 'yes'
+          # The no-libseat configuration, for an image that has no libseat1.
+          # It was unbuildable until #795: cmake/drm_kms.cmake FORCEd
+          # DRM_CXX_SESSION ON, and -D only seeds the cache, so the opt-out
+          # was accepted and then discarded -- libseat.so.1 stayed a hard
+          # DT_NEEDED and the binary died in the loader after deploy. Nothing
+          # else here configures it, so nothing else would notice the pin
+          # coming back. The link assertion below is the actual gate; this
+          # entry exists to give it the OFF side to compare.
+          - compiler: gcc-noseat
+            cc: gcc-14
+            cxx: g++-14
+            extra_pkgs: g++-14
+            compositor: 'ON'
+            vulkan: 'ON'
+            session_arg: '-D DRM_CXX_SESSION=OFF'
+            expect_libseat: 'no'
 
     name: drm-${{ matrix.compiler }}
     permissions:
@@ -84,6 +106,7 @@ jobs:
             -D BUILD_BACKEND_WAYLAND_VULKAN=OFF \
             -D BUILD_COMPOSITOR=${{ matrix.compositor }} \
             -D BUILD_BACKEND_DRM_KMS_VULKAN=${{ matrix.vulkan }} \
+            ${{ matrix.session_arg }} \
             -D BUILD_NUMBER=${GITHUB_RUN_ID}
 
       - name: Build
@@ -93,6 +116,24 @@ jobs:
         run: |
           strings ${{github.workspace}}/build/shell/homescreen \
             | grep -q '\[DrmBackend\]'
+
+      - name: Verify the libseat link matches the configuration
+        run: |
+          set -eu
+          bin=${{github.workspace}}/build/shell/homescreen
+          if readelf -d "$bin" | grep -q 'libseat\.so\.1'; then
+            linked=yes
+          else
+            linked=no
+          fi
+          echo "DT_NEEDED libseat.so.1: $linked (expected ${{ matrix.expect_libseat }})"
+          if [ "$linked" != "${{ matrix.expect_libseat }}" ]; then
+            echo "::error::libseat link does not match the configuration." \
+                 "DRM_CXX_SESSION=OFF must drop libseat.so.1 from DT_NEEDED," \
+                 "and the default must keep it (#795)."
+            readelf -d "$bin" | grep NEEDED
+            exit 1
+          fi
 
   vkms-smoke:
     if: ${{ github.server_url == 'https://github.com' }}
