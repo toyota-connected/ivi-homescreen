@@ -677,6 +677,26 @@ class WaylandVulkanBackend final : public Backend {
   // slots at @p w x @p h. Returns false (and clears dmabuf_present_active_) on
   // any allocation failure, so present falls back to the swapchain.
   bool InitDmabufRing(uint32_t w, uint32_t h);
+
+  // Declare (@p opaque true) or withdraw the surface's opaque region, sized to
+  // the dma-buf ring's extent.
+  //
+  // The ring's buffers are DRM_FORMAT_XRGB8888, which carries no alpha channel,
+  // so this surface is opaque in fact. A wl_surface has no opaque region by
+  // default, which means the compositor must assume the content is translucent:
+  // it blends every frame, and the view cannot be a candidate for a hardware
+  // plane. Saying so costs nothing and is what lets a compositor scan the
+  // buffer out where the rest of the scene allows it.
+  //
+  // Deliberately scoped to this path. The WSI swapchain takes
+  // VK_COMPOSITE_ALPHA_INHERIT whenever the surface offers it, which hands
+  // alpha semantics to this region, and the GL backend's config carries
+  // EGL_ALPHA_SIZE 8 under BUILD_EGL_TRANSPARENCY (on by default) -- neither
+  // can claim opacity, so neither does.
+  //
+  // Region state is double-buffered: it applies on the next wl_surface.commit,
+  // which the present path does every frame.
+  void SetSurfaceOpaque(uint32_t w, uint32_t h, bool opaque);
   // Composite the layers into the current slot and commit its wl_buffer on the
   // surface. Returns the present result like PresentLayersImpl.
   bool PresentLayersDmabuf(const FlutterLayer** layers, size_t count);

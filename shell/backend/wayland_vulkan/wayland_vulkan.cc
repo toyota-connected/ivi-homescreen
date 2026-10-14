@@ -2574,6 +2574,11 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
 }
 
 bool WaylandVulkanBackend::InitDmabufRing(uint32_t w, uint32_t h) {
+  // Withdraw first, claim again only on success. Every failure below falls the
+  // present path back to the WSI swapchain, whose alpha is whatever this region
+  // says -- so a region left over from the previous extent would be a false
+  // claim about buffers this surface no longer shows.
+  SetSurfaceOpaque(0, 0, /*opaque=*/false);
   {
     std::lock_guard<std::mutex> queue_lock(queue_mutex_);
     d().vkQueueWaitIdle(queue_);
@@ -2638,11 +2643,38 @@ bool WaylandVulkanBackend::InitDmabufRing(uint32_t w, uint32_t h) {
   dmabuf_ring_w_ = w;
   dmabuf_ring_h_ = h;
   dmabuf_frame_ = 0;
+  // XRGB8888 has no alpha, so stop the compositor assuming it does.
+  SetSurfaceOpaque(w, h, true);
   ihs::log::info(
       "[WaylandVulkanBackend] dma-buf present ring: {} slots {}x{} modifier "
-      "{:#018x}",
+      "{:#018x}, opaque region declared",
       dmabuf_slots_.size(), w, h, dmabuf_slots_.front().image->modifier());
   return true;
+}
+
+void WaylandVulkanBackend::SetSurfaceOpaque(const uint32_t w,
+                                            const uint32_t h,
+                                            const bool opaque) {
+  auto* surface = wl_surface_.load(std::memory_order_acquire);
+  if (surface == nullptr || shell_display_ == nullptr) {
+    return;
+  }
+  if (!opaque) {
+    wl_surface_set_opaque_region(surface, nullptr);
+    return;
+  }
+  wl_compositor* compositor = shell_display_->GetCompositor();
+  if (compositor == nullptr) {
+    return;
+  }
+  wl_region* region = wl_compositor_create_region(compositor);
+  if (region == nullptr) {
+    return;
+  }
+  wl_region_add(region, 0, 0, static_cast<int32_t>(w), static_cast<int32_t>(h));
+  wl_surface_set_opaque_region(surface, region);
+  // The compositor copies the region on set; the proxy is ours to drop.
+  wl_region_destroy(region);
 }
 
 void WaylandVulkanBackend::WarnMissingPlatformView(
