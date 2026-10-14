@@ -50,7 +50,7 @@ jobs:
             vulkan: 'ON'
             session_arg: ''
             expect_libseat: 'yes'
-          # The no-libseat configuration, for an image that has no libseat1.
+          # The no-libseat configuration, for an image with no libseat.so.1.
           # It was unbuildable until #795: cmake/drm_kms.cmake FORCEd
           # DRM_CXX_SESSION ON, and -D only seeds the cache, so the opt-out
           # was accepted and then discarded -- libseat.so.1 stayed a hard

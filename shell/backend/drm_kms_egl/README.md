@@ -268,11 +268,11 @@ quietly lost VT-switch support. Override it explicitly:
 
 | `-D DRM_CXX_SESSION=` | configure | `libseat.so.1` in `DT_NEEDED` | runtime |
 | --- | --- | --- | --- |
-| *unset* (default) | fails without `libseat-dev` | yes | libseat session, VT switching |
-| `AUTO` | soft probe | if found | session when found, else direct open |
+| *unset* (default) or `ON` | fails without `libseat-dev` | yes | seat session when one is reachable, else direct open |
+| `AUTO` | soft probe | if found | seat session when found and reachable, else direct open |
 | `OFF` | no probe | no | direct open only |
 
-`OFF` is for an image with no `libseat1` — a kiosk that owns the display
+`OFF` is for an image with no `libseat.so.1` — a kiosk that owns the display
 outright, which is what `--drm-no-seat` already does at runtime. It needs no
 source change: drm-cxx compiles a stub whose `Seat::open()` returns `nullopt`,
 and `DrmSession::Open()` already turns that into the direct-open fallback.

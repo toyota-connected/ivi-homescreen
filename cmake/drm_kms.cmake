@@ -37,7 +37,7 @@ set(DRM_CXX_VULKAN           OFF CACHE BOOL "" FORCE)
 # it and shipping a build that has quietly lost VT-switch support.
 #
 # Only the default. An explicit -DDRM_CXX_SESSION=<AUTO|ON|OFF> is honored,
-# because an image with no libseat1 is a real target -- a kiosk that owns
+# because an image with no libseat.so.1 is a real target -- a kiosk that owns
 # the display outright, which --drm-no-seat already serves at runtime -- and
 # a FORCE here made that unbuildable: -D only seeds the cache, so the pin
 # overwrote it and libseat.so.1 stayed a hard DT_NEEDED on a binary that
@@ -160,7 +160,7 @@ if (IVI_DRM_HAVE_SEAT)
     # build log is still in front of whoever is cross-compiling.
     message(STATUS
             "drm-kms: libseat linked -- the TARGET IMAGE must provide "
-            "libseat.so.1 at runtime (e.g. apt install libseat1), or "
+            "libseat.so.1 at runtime, or "
             "configure with -DDRM_CXX_SESSION=OFF")
 endif ()
 
