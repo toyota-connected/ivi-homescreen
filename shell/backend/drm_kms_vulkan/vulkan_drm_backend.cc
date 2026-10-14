@@ -76,6 +76,7 @@
 #include "shell/platform/homescreen/flutter_desktop_texture_registrar.h"
 #include "task_runner.h"
 #include "view/layer_scanout.h"
+#include "view/presentation.h"
 
 static_assert(kDrmRotate0 == DRM_MODE_ROTATE_0 &&
                   kDrmRotate90 == DRM_MODE_ROTATE_90 &&
@@ -1342,10 +1343,14 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   // Refresh-adaptive pacing: tell the vsync provider the connector's period so
   // Flutter targets the real refresh, and start the async page-flip reader that
   // returns each frame's baton on vblank.
-  const uint32_t vr = target.mode.vrefresh;
-  mode_vrefresh_ = vr;  // for RefreshPeriodNs; 0 stays "no mode" (#732)
+  // From the timings: vrefresh is DIV_ROUND_CLOSEST of the real rate, so a
+  // 59.94Hz mode would report 60 and give a budget 16.6us short (#762). One
+  // computation feeding both the reported rate and the pacing period, so the
+  // two cannot disagree -- the invariant #758 built.
+  mode_period_ns_ = ModeRefreshPeriodNs(target.mode.clock, target.mode.htotal,
+                                        target.mode.vtotal);
   const uint32_t period_ns =
-      vr > 0 ? static_cast<uint32_t>(1'000'000'000ULL / vr) : 16'666'667U;
+      mode_period_ns_ > 0 ? mode_period_ns_ : 16'666'667U;
   compositor_->period_ns = period_ns;
   const uint64_t window_base = RepaintWindowNsFromEnv(kDefaultRepaintWindowNs);
   compositor_->repaint_window_base_ns.store(window_base,

@@ -141,8 +141,8 @@ TEST(Presentation, InFlightIsBounded) {
 
 TEST(Presentation, RefreshPeriodFromAMode) {
   // 1920x1080@60: 148.5 MHz, 2200 x 1125.
-  EXPECT_EQ(RefreshPeriodNs(148500, 2200, 1125), 16'666'666U);
-  EXPECT_EQ(RefreshPeriodNs(0, 2200, 1125), 0U);
+  EXPECT_EQ(ModeRefreshPeriodNs(148500, 2200, 1125), 16'666'666U);
+  EXPECT_EQ(ModeRefreshPeriodNs(0, 2200, 1125), 0U);
 }
 
 // Retire actions -- a producer's buffer handed back -- run once the frame that

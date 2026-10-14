@@ -298,9 +298,14 @@ class PresentationTracker {
 
 // The refresh period of a mode, in nanoseconds, from its pixel clock (kHz)
 // and totals. 0 when the mode does not say.
-constexpr uint32_t RefreshPeriodNs(const uint32_t clock_khz,
-                                   const uint32_t htotal,
-                                   const uint32_t vtotal) {
+//
+// Named for the mode rather than plain RefreshPeriodNs because Backend and
+// three of its subclasses have a zero-argument member of that name: inside
+// those classes the member hides this, and the call fails on arity rather
+// than resolving to it (#762).
+constexpr uint32_t ModeRefreshPeriodNs(const uint32_t clock_khz,
+                                       const uint32_t htotal,
+                                       const uint32_t vtotal) {
   if (clock_khz == 0 || htotal == 0 || vtotal == 0) {
     return 0;
   }

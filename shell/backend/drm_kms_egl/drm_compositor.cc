@@ -365,8 +365,8 @@ DrmCompositor::DrmCompositor(DrmBackend* backend, DrmOutputContext out)
       out_(out),
       profile_(ProfileEnabled() ? std::make_unique<FrameProfileState>()
                                 : nullptr) {
-  refresh_ns_ = RefreshPeriodNs(out_.mode().clock, out_.mode().htotal,
-                                out_.mode().vtotal);
+  refresh_ns_ = ModeRefreshPeriodNs(out_.mode().clock, out_.mode().htotal,
+                                    out_.mode().vtotal);
   repaint_window_base_ns_ = RepaintWindowNsFromEnv(kDefaultRepaintWindowNs);
   repaint_window_adapts_ = RepaintWindowAdaptsFromEnv();
   repaint_window_ns_.store(repaint_window_base_ns_, std::memory_order_relaxed);
@@ -5057,7 +5057,7 @@ void DrmCompositor::OnModeChanged(const drmModeModeInfo& mode) {
                        mode, out_.width(), out_.height(), &out_.resolved());
   // From the mode timings, not vrefresh: this is the figure frame judging and
   // the repaint window are measured against, so it wants the exact period.
-  refresh_ns_ = RefreshPeriodNs(mode.clock, mode.htotal, mode.vtotal);
+  refresh_ns_ = ModeRefreshPeriodNs(mode.clock, mode.htotal, mode.vtotal);
   ihs::log::info(
       "[DrmCompositor] mode changed to {}x{}@{}Hz, refresh period now {} ns",
       mode.hdisplay, mode.vdisplay, mode.vrefresh, refresh_ns_);

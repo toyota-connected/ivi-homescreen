@@ -15,6 +15,7 @@
  */
 
 #include "display/drm_output_provider.h"
+#include "view/presentation.h"
 
 #include "display/connector_edid.h"
 #include "display/output_identity.h"
@@ -159,7 +160,14 @@ std::vector<OutputInfo> DrmOutputProvider::EnumerateOutputs() const {
     if (mode != nullptr) {
       info.width_px = static_cast<int32_t>(mode->width());
       info.height_px = static_cast<int32_t>(mode->height());
-      info.refresh_hz = static_cast<double>(mode->refresh());
+      // From the timings, not ModeInfo::refresh(), which returns the kernel's
+      // integer vrefresh -- so a 59.94Hz mode would advertise 60 to anything
+      // reading OutputInfo (#762). Falls back to the integer when the mode
+      // carries no usable timings.
+      const uint32_t period_ns = ModeRefreshPeriodNs(
+          mode->clock_khz(), mode->drm_mode.htotal, mode->drm_mode.vtotal);
+      info.refresh_hz = period_ns > 0 ? 1e9 / static_cast<double>(period_ns)
+                                      : static_cast<double>(mode->refresh());
     }
 
     outputs.push_back(std::move(info));
