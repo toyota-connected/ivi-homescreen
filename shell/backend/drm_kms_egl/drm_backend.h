@@ -415,6 +415,26 @@ class DrmBackend : public Backend, public IFlipSink {
   [[nodiscard]] uint32_t mode_height() const { return mode_.vdisplay; }
   [[nodiscard]] uint32_t vrefresh() const { return mode_.vrefresh; }
   [[nodiscard]] const drmModeModeInfo& mode() const { return mode_; }
+  // What a re-resolve should do about a newly reported mode.
+  enum class ModeChange {
+    kNone,           // same scanout configuration; nothing to do
+    kRefreshOnly,    // same extent, different timing: adopt it
+    kExtentRefused,  // different extent: the ring is sized to the old one
+  };
+
+  // Compares on timings rather than vrefresh, which is DIV_ROUND_CLOSEST of
+  // the real rate and so identical for the 59.94 and 60 Hz variants of a CEA
+  // mode (#762) -- the exact case a reconfigure has to notice. Pure, so the
+  // three branches are testable without a card.
+  [[nodiscard]] static ModeChange ClassifyModeChange(
+      const drmModeModeInfo& picked,
+      const drmModeModeInfo& current);
+
+  // |Backend| A connector reconfigure: re-run the mode pick and adopt a
+  // refresh-only change. Returns true when something changed, so the caller
+  // knows whether re-reporting display metadata is worth anything.
+  bool OnOutputReconfigured() override;
+
   // |Backend| From the selected mode, not from the vsync provider: the
   // provider's period_ns_ defaults to 60Hz and so cannot say "no mode yet",
   // which is the distinction #732 turns on. Integer vrefresh, so a 59.94Hz

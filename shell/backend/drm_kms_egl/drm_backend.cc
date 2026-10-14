@@ -1314,6 +1314,103 @@ void DrmBackend::SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine,
   vsync_.SubmitBaton(engine, baton);
 }
 
+DrmBackend::ModeChange DrmBackend::ClassifyModeChange(
+    const drmModeModeInfo& picked,
+    const drmModeModeInfo& current) {
+  if (picked.hdisplay != current.hdisplay ||
+      picked.vdisplay != current.vdisplay) {
+    return ModeChange::kExtentRefused;
+  }
+  const bool same_timing =
+      picked.clock == current.clock && picked.htotal == current.htotal &&
+      picked.vtotal == current.vtotal && picked.flags == current.flags;
+  return same_timing ? ModeChange::kNone : ModeChange::kRefreshOnly;
+}
+
+bool DrmBackend::OnOutputReconfigured() {
+  if (drm_dev_ == nullptr || connector_id_ == 0) {
+    return false;
+  }
+  drmModeConnector* connector =
+      drmModeGetConnector(drm_dev_->fd(), connector_id_);
+  if (connector == nullptr) {
+    ihs::log::warn(
+        "[DrmBackend] reconfigure: connector {} is gone; keeping the current "
+        "mode",
+        connector_id_);
+    return false;
+  }
+  const std::string label = "id " + std::to_string(connector_id_);
+  const std::optional<drmModeModeInfo> picked = SelectMode(connector, label);
+  drmModeFreeConnector(connector);
+
+  if (!picked.has_value()) {
+    // SelectMode has already said why. A startup failure is fatal; here it
+    // only means we keep driving what we have, which still works.
+    ihs::log::warn(
+        "[DrmBackend] reconfigure: no usable mode on connector {}; keeping "
+        "{}x{}@{}Hz",
+        connector_id_, mode_.hdisplay, mode_.vdisplay, mode_.vrefresh);
+    return false;
+  }
+  const ModeChange change = ClassifyModeChange(*picked, mode_);
+  if (change == ModeChange::kNone) {
+    return false;  // a reconfigure that did not change our mode
+  }
+  if (change == ModeChange::kExtentRefused) {
+    // Refused, loudly and once per distinct extent. Adopting it means
+    // reallocating the GBM surface, the scanout ring and the engine's render
+    // targets under a live engine; Resize() is a documented no-op here, so
+    // there is nothing to adopt it with yet (#765).
+    static uint32_t warned_w = 0;
+    static uint32_t warned_h = 0;
+    if (warned_w != picked->hdisplay || warned_h != picked->vdisplay) {
+      warned_w = picked->hdisplay;
+      warned_h = picked->vdisplay;
+      ihs::log::warn(
+          "[DrmBackend] reconfigure: connector {} now reports {}x{}@{}Hz but "
+          "we are scanning out {}x{}; an extent change needs the ring "
+          "reallocated and is not supported, so the old mode is kept",
+          connector_id_, picked->hdisplay, picked->vdisplay, picked->vrefresh,
+          mode_.hdisplay, mode_.vdisplay);
+    }
+    return false;
+  }
+
+  // Refresh-only change. Quiesce exactly as a session pause does: no
+  // PAGE_FLIP_EVENT is coming for a commit made against the old mode, and the
+  // queued-frame handler that would commit it never runs.
+  ihs::log::info(
+      "[DrmBackend] reconfigure: {}x{} timing changed, {}Hz -> {}Hz; "
+      "re-modesetting on the next present",
+      mode_.hdisplay, mode_.vdisplay, mode_.vrefresh, picked->vrefresh);
+  flip_pending_.store(false, std::memory_order_release);
+  DropQueuedFlip();
+  if (drm_display_ != nullptr) {
+    drm_display_->WakeFlipDrain();
+  }
+
+  mode_ = *picked;
+  // The next Present re-modesets, rather than committing a new mode under a
+  // flip that may still be in flight. Same mechanism OnSessionResumed uses.
+  mode_set_ = false;
+
+#if BUILD_COMPOSITOR
+  if (compositor_ != nullptr) {
+    compositor_->OnModeChanged(mode_);
+  }
+#endif
+
+  // Nothing above produces a frame, and an idle UI will not ask for one. Same
+  // two cases as resume: drain a parked baton, else prompt the engine.
+  if (auto* engine = engine_handle_.load(std::memory_order_acquire)) {
+    if (!vsync_.DeliverParkedBaton()) {
+      LibFlutterEngine->ScheduleFrame(engine);
+    }
+  }
+  return true;
+}
+
 void DrmBackend::OnSessionPaused() {
   ihs::log::info("[DrmBackend] session paused (VT switch-out)");
   session_paused_.store(true, std::memory_order_release);

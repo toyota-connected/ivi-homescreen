@@ -591,6 +591,14 @@ void App::OnDisplayOutputsChanged(IDisplay* display,
         ApplyOnDisconnect(view.get());
         break;
       case homescreen::OutputTransition::kReconfigured:
+        // The output a view is on changed its mode. Ask the backend to
+        // re-resolve; it adopts a refresh-only change and refuses an extent
+        // change. Only re-report metadata when something actually moved --
+        // a reconfigure that leaves our mode alone is common (#765).
+        if (view->OnOutputReconfigured()) {
+          view->UpdateDisplayMetadata();
+        }
+        break;
       case homescreen::OutputTransition::kNone:
         break;
     }

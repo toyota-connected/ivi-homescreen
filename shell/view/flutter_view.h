@@ -151,6 +151,11 @@ class FlutterView {
   // pixel ratio) to a running engine. Called by WaylandWindow::ApplyScale when
   // the surface scale changes, and by App when an output transition moves a
   // view or gives it an output back (#760); safe no-op before the engine runs.
+  // The output this view is on was reconfigured: let the backend re-resolve
+  // its mode. True when it adopted a change, so the caller knows whether
+  // re-reporting display metadata says anything new (#765).
+  [[nodiscard]] bool OnOutputReconfigured() const;
+
   void UpdateDisplayMetadata() const;
 
   /**

@@ -299,6 +299,19 @@ class Backend {
   [[nodiscard]] virtual uint32_t RefreshPeriodNs() const { return 0; }
 
   /**
+   * @brief The connector this backend drives was reconfigured; re-resolve.
+   *
+   * Returns true when the backend adopted a change, so the caller can skip
+   * re-reporting display metadata that has not moved. The default does
+   * nothing and returns false, for backends with no mode of their own.
+   *
+   * Only a refresh-only change is adopted. A different extent is refused,
+   * because the scanout ring and the engine's render targets are sized to it
+   * and Resize() is a documented no-op on these backends (#765).
+   */
+  virtual bool OnOutputReconfigured() { return false; }
+
+  /**
    * @brief RefreshPeriodNs() as a rate in Hz, or 0.0 when it is unknown.
    *
    * Not virtual: one conversion, so no backend can report a rate that
