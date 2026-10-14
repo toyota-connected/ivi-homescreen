@@ -120,6 +120,17 @@ bool WaylandVsyncProvider::TryBindGlobal(wl_registry* registry,
   // swap, IVI_VK_PROFILE = vk present). IVI_PROFILE enables everything.
   EnableProfile(profiling::FrameProfile::Enabled("IVI_VSYNC_PROFILE"),
                 "WaylandVsync");
+  if (const char* env = std::getenv("IVI_WL_VSYNC_START_WINDOW_MS")) {
+    char* end = nullptr;
+    const double ms = std::strtod(env, &end);
+    if (end == env || *end != '\0' || !(ms >= 0 && ms <= 8)) {
+      ihs::log::warn(
+          "[WaylandVsync] IVI_WL_VSYNC_START_WINDOW_MS={} ignored (0-8)", env);
+    } else {
+      start_window_ns_.store(static_cast<uint64_t>(ms * 1e6),
+                             std::memory_order_release);
+    }
+  }
   SetGridPacing(GridPacingEnabledByEnv());
   if (const char* env = std::getenv("IVI_WL_VSYNC_GRID_DEPTH")) {
     const unsigned long depth = std::strtoul(env, nullptr, 10);
@@ -158,6 +169,14 @@ void WaylandVsyncProvider::ApplyGrid(const bool on) {
   SetPaceToVblank(on);
   SetPaceFlips(on);
   SetPaceKeepPhase(on);
+  SetPaceStartWindow(on ? start_window_ns_.load(std::memory_order_acquire) : 0);
+}
+
+void WaylandVsyncProvider::SetStartWindow(const uint64_t window_ns) {
+  start_window_ns_.store(window_ns, std::memory_order_release);
+  if (grid_.load(std::memory_order_acquire)) {
+    SetPaceStartWindow(window_ns);  // off the grid, ApplyGrid picks it up
+  }
 }
 
 void WaylandVsyncProvider::SetGridDepth(const size_t depth) {

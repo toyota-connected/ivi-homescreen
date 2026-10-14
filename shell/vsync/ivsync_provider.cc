@@ -16,6 +16,8 @@
 
 #include "vsync/ivsync_provider.h"
 
+#include <algorithm>
+
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -170,10 +172,19 @@ void IVsyncProvider::SubmitBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine,
       ScheduleDeferred(due);
       return;
     }
-    // Frames are still coming: start this one on the next vblank, not now.
+    // Frames are still coming: start this one on the next vblank, not now,
+    // unless the refresh has only just begun (the start window). Then it
+    // starts now, from the vblank that began the refresh.
+    const uint64_t period = PeriodNs();
     if (pace_keep_phase_.load(std::memory_order_acquire) && due != 0 &&
-        now < due + PeriodNs()) {
-      ScheduleDeferred(NextVblankAfter(now));
+        now < due + period) {
+      const uint64_t window = std::min(
+          pace_start_window_ns_.load(std::memory_order_acquire), period / 2);
+      if (now - due > window) {
+        ScheduleDeferred(NextVblankAfter(now));
+        return;
+      }
+      DrainParkedBaton(due);
       return;
     }
   }
@@ -287,7 +298,7 @@ void IVsyncProvider::DeliverBaton(const uint64_t now_ns) {
   }
 }
 
-void IVsyncProvider::DrainParkedBaton() {
+void IVsyncProvider::DrainParkedBaton(const uint64_t frame_start_ns) {
   if (parked_.load(std::memory_order_acquire)) {
     // Parked. This is the inline kick SubmitBaton takes when no present is in
     // flight, so without this check a fresh request from the engine is served
@@ -306,7 +317,9 @@ void IVsyncProvider::DrainParkedBaton() {
   NoteHandOut(NowNs());
   auto* engine = engine_.load(std::memory_order_acquire);
   if (engine != nullptr) {
-    PostOnVsync(engine, baton, LibFlutterEngine->GetCurrentTime());
+    PostOnVsync(engine, baton,
+                frame_start_ns != 0 ? frame_start_ns
+                                    : LibFlutterEngine->GetCurrentTime());
   }
 }
 

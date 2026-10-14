@@ -175,10 +175,21 @@ class IVsyncProvider {
   /// frames -- that rule starts every frame at the moment of the request, and
   /// the window's frames drift off the vblank. With this on, a request is
   /// answered at once only after an idle refresh with no baton (two periods
-  /// since the last hand-out's vblank); otherwise it waits for the next
-  /// vblank.
+  /// since the last hand-out's vblank), or within SetPaceStartWindow of the
+  /// vblank; otherwise it waits for the next vblank.
   void SetPaceKeepPhase(bool keep) {
     pace_keep_phase_.store(keep, std::memory_order_release);
+  }
+
+  /// With SetPaceKeepPhase: a request this soon after the vblank that started
+  /// the refresh, with no baton out in it yet, is answered at once instead of
+  /// on the next vblank, with that vblank as its frame start. A platform view
+  /// that submits just after the vblank then gets its frame into this
+  /// refresh, as a frame started now can still meet the host's deadline. At
+  /// most half the period counts, so keep-phase still holds the rest of the
+  /// refresh. 0 (the default) keeps every such request for the next vblank.
+  void SetPaceStartWindow(uint64_t window_ns) {
+    pace_start_window_ns_.store(window_ns, std::memory_order_release);
   }
 
   /// The DRM backends' default: paced unless IVI_VSYNC_PACE=0.
@@ -252,7 +263,9 @@ class IVsyncProvider {
                    intptr_t baton,
                    uint64_t now_ns);
   // Drain a parked baton inline (idle pipeline / runner-wired kick latch).
-  void DrainParkedBaton();
+  // Hands out a parked baton now. @p frame_start_ns is the frame start
+  // Flutter is given; 0 means the current time.
+  void DrainParkedBaton(uint64_t frame_start_ns = 0);
   // Exchange the parked baton out and marshal it (no profiling — the public
   // DeliverVsync/DeliverDiscard wrappers record the present/discard).
   void DeliverBaton(uint64_t now_ns);
@@ -272,6 +285,7 @@ class IVsyncProvider {
   std::atomic<bool> pace_{false};
   std::atomic<bool> pace_flips_{false};
   std::atomic<bool> pace_keep_phase_{false};
+  std::atomic<uint64_t> pace_start_window_ns_{0};
   std::atomic<uint64_t> last_vblank_ns_{0};
   std::atomic<uint64_t> next_allowed_ns_{0};
   std::atomic<uint64_t> deferred_due_ns_{0};

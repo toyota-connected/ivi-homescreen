@@ -269,6 +269,83 @@ TEST_F(VsyncPace, KeepPhaseDefersARequestInTheRefreshAfterAHandOut) {
   EXPECT_EQ(scheduled_[0], kVblank + 2 * kPeriod);
 }
 
+TEST_F(VsyncPace, KeepPhaseAnswersARequestWithinTheStartWindowAtOnce) {
+  vsync_.SetPaceKeepPhase(true);
+  vsync_.SetPaceStartWindow(2 * kMs);
+  Present(kVblank);
+  ASSERT_TRUE(Request(kVblank + 1 * kMs));
+  // The next refresh has no baton out yet, and has only just begun.
+  EXPECT_TRUE(Request(kVblank + kPeriod + 1 * kMs));
+  EXPECT_TRUE(scheduled_.empty());
+}
+
+TEST_F(VsyncPace, KeepPhaseDefersARequestPastTheStartWindow) {
+  vsync_.SetPaceKeepPhase(true);
+  vsync_.SetPaceStartWindow(2 * kMs);
+  Present(kVblank);
+  ASSERT_TRUE(Request(kVblank + 1 * kMs));
+  EXPECT_FALSE(Request(kVblank + kPeriod + 3 * kMs));
+  ASSERT_EQ(scheduled_.size(), 1U);
+  EXPECT_EQ(scheduled_[0], kVblank + 2 * kPeriod);
+}
+
+TEST_F(VsyncPace, TheStartWindowIncludesItsLastNanosecond) {
+  vsync_.SetPaceKeepPhase(true);
+  vsync_.SetPaceStartWindow(2 * kMs);
+  Present(kVblank);
+  ASSERT_TRUE(Request(kVblank + 1 * kMs));
+  EXPECT_TRUE(Request(kVblank + kPeriod + 2 * kMs));
+  EXPECT_TRUE(scheduled_.empty());
+}
+
+TEST_F(VsyncPace, ARequestJustPastTheStartWindowWaits) {
+  vsync_.SetPaceKeepPhase(true);
+  vsync_.SetPaceStartWindow(2 * kMs);
+  Present(kVblank);
+  ASSERT_TRUE(Request(kVblank + 1 * kMs));
+  EXPECT_FALSE(Request(kVblank + kPeriod + 2 * kMs + 1));
+  ASSERT_EQ(scheduled_.size(), 1U);
+  EXPECT_EQ(scheduled_[0], kVblank + 2 * kPeriod);
+}
+
+TEST_F(VsyncPace, AtMostHalfAPeriodOfTheStartWindowCounts) {
+  vsync_.SetPaceKeepPhase(true);
+  vsync_.SetPaceStartWindow(kPeriod);
+  Present(kVblank);
+  ASSERT_TRUE(Request(kVblank + 1 * kMs));
+  EXPECT_FALSE(Request(kVblank + kPeriod + kPeriod / 2 + 1 * kMs))
+      << "keep-phase still holds the second half of the refresh";
+  ASSERT_EQ(scheduled_.size(), 1U);
+  EXPECT_EQ(scheduled_[0], kVblank + 2 * kPeriod);
+}
+
+TEST_F(VsyncPace, AStartInTheWindowLeavesAnArmedWaitNothingToDeliver) {
+  vsync_.SetPaceKeepPhase(true);
+  vsync_.SetPaceStartWindow(2 * kMs);
+  Present(kVblank);
+  ASSERT_TRUE(Request(kVblank + 1 * kMs));
+  // Mid-refresh: parked and armed for the next vblank.
+  ASSERT_FALSE(Request(kVblank + 5 * kMs));
+  ASSERT_EQ(scheduled_.size(), 1U);
+  // The wait has not fired yet when the request comes again in the window.
+  EXPECT_TRUE(Request(kVblank + kPeriod + 1 * kMs));
+  vsync_.FireDeferredForTest();  // nothing left to hand out
+  EXPECT_FALSE(Request(kVblank + kPeriod + 1 * kMs + 500'000))
+      << "one frame in the refresh";
+  EXPECT_EQ(scheduled_.back(), kVblank + 2 * kPeriod);
+}
+
+TEST_F(VsyncPace, TheStartWindowStartsNoSecondFrameInARefresh) {
+  vsync_.SetPaceKeepPhase(true);
+  vsync_.SetPaceStartWindow(2 * kMs);
+  Present(kVblank);
+  ASSERT_TRUE(Request(kVblank + 0 * kMs));
+  // A baton already went out this refresh: still the next vblank.
+  EXPECT_FALSE(Request(kVblank + 1 * kMs));
+  ASSERT_EQ(scheduled_.size(), 1U);
+  EXPECT_EQ(scheduled_[0], kVblank + kPeriod);
+}
+
 TEST_F(VsyncPace, WithoutKeepPhaseThatRequestIsAnsweredAtOnce) {
   Present(kVblank);
   ASSERT_TRUE(Request(kVblank + 1 * kMs));

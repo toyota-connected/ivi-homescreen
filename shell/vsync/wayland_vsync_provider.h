@@ -213,6 +213,15 @@ class WaylandVsyncProvider : public IVsyncProvider {
   static constexpr size_t kGridInFlight = 2;
   void SetGridDepth(size_t depth);
 
+  /// On the grid, how long after a refresh's vblank a request, with no frame
+  /// started in that refresh, still starts at once (SetPaceStartWindow): 2 ms
+  /// unless IVI_WL_VSYNC_START_WINDOW_MS says otherwise (0 to 8, 0 turns it
+  /// off; at most half the period counts). A frame started that early still
+  /// commits before a host's deadline, so a platform view submitting just
+  /// after the vblank is shown a refresh sooner.
+  static constexpr uint64_t kStartWindowNs = 2'000'000;
+  void SetStartWindow(uint64_t window_ns);
+
   /// Test seam: the number of commits waiting to be shown, as RequestFeedback
   /// and RetireFeedback keep it, without a compositor.
   void SetInFlightForTest(size_t n) {
@@ -266,6 +275,7 @@ class WaylandVsyncProvider : public IVsyncProvider {
   std::atomic<bool> grid_{false};
   void ApplyGrid(bool on);
   std::atomic<size_t> grid_depth_{kGridInFlight};
+  std::atomic<uint64_t> start_window_ns_{kStartWindowNs};
 
   // NoteLatch / LatchLeadNs. The last presentation's time; under latch_mu_,
   // the last take counted and the period the lead was learned at; and the

@@ -20,6 +20,7 @@ shared baton class and the per-source providers.
 | Discard + parked-baton delivery (wall-clock fallback) | ✓ | Always |
 | Vblank pacing: at most one baton per refresh, on the vblank | ✓ | On for the DRM backends; `IVI_VSYNC_PACE=0` turns it off |
 | Wayland grid pacing: frames on the vblanks, up to 2 commits in flight | ✓ | On by default; `IVI_WL_VSYNC_GRID=0` turns it off; `IVI_WL_VSYNC_GRID_DEPTH=1` allows 1 |
+| Wayland start window: a frame asked for just after the vblank starts at once | ✓ | 2 ms on the grid; `IVI_WL_VSYNC_START_WINDOW_MS` sets it (0 to 8, 0 off) |
 | Wayland latch lead: when the window samples platform views, before the vblank | ✓ | On by default; `IVI_WL_LATCH_LEAD=0` reports 0 |
 | Per-present cadence profiling (window + session summary) | ✓ | `IVI_VSYNC_PROFILE` |
 | `WaylandVsyncProvider` — `wp_presentation` → `OnVsync` | ✓ | `-DBUILD_BACKEND_WAYLAND_EGL=ON` or `-DBUILD_BACKEND_WAYLAND_VULKAN=ON` |
@@ -152,7 +153,9 @@ has presented waits a whole refresh behind it.
   idle display wakes as quickly as before. With `SetPaceKeepPhase(true)` that
   needs a whole refresh with no baton: a request in the refresh after a
   hand-out waits for the next vblank, so frames asked for mid-refresh (a
-  platform view submitting) still start on the vblank.
+  platform view submitting) still start on the vblank. `SetPaceStartWindow`
+  lets one made just after that vblank start at once (see the Wayland grid
+  section).
 
 Each deferred delivery waits on its own timer, owned by its handler, so no
 timer outlives the runner's `io_context`. `SetEngine()` binds the waits to the
@@ -182,6 +185,15 @@ commit costs one refresh, not every one after it. A discard is paced the same
 way as a presentation. Grid pacing starts with the first presentation that
 reports a refresh period; a compositor that reports 0 (unknown or variable)
 keeps presentation-paced frames.
+
+Keep-phase holds a request made mid-refresh for the next vblank. One made just
+after the vblank, with no frame started in that refresh yet, starts at once
+instead: a platform view that submits a little after the vblank, with Flutter
+idle, would otherwise wait a whole refresh, while a frame started that early
+still commits before the host's deadline. Its frame start is that vblank, as
+for a frame started on it. The window is 2 ms (`SetStartWindow`,
+`IVI_WL_VSYNC_START_WINDOW_MS`, 0 to 8, 0 turns it off), and at most half the
+period counts. It starts no second frame in a refresh that already has one.
 
 With grid pacing on, the motion-to-photon cutoff stamped on a commit's
 feedback is approximate: the next baton can go out before that frame commits.
