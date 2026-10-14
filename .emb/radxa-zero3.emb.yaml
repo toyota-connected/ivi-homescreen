@@ -9,14 +9,26 @@
 #
 # ## EGL only
 #
-# PanVK is still gated behind PAN_I_WANT_A_BROKEN_VULKAN_DRIVER=1 on this
-# image, measured on the board: a plain `vulkaninfo` returns
-# VK_ERROR_INCOMPATIBLE_DRIVER naming that variable, and with the gate set the
-# Mali reports apiVersion 1.0.289 and complains that renderD128 is not a
-# panfrost node. Mesa there is 24.2 from the oibaf PPA, so this is not a
-# stale-Mesa artifact. Hence no Vulkan backend and no mesa-vulkan-drivers in
-# the sysroot; libvulkan-dev stays, because a renderer built with
-# FILAMENT_SUPPORTS_VULKAN=ON still needs the headers to compile.
+# PanVK is gated behind PAN_I_WANT_A_BROKEN_VULKAN_DRIVER=1 and is not
+# conformant on this GPU, so no Vulkan backend here and no
+# mesa-vulkan-drivers in the sysroot. libvulkan-dev stays, because a renderer
+# built with FILAMENT_SUPPORTS_VULKAN=ON still needs the headers to compile.
+#
+# On the stock image -- Mesa 24.2 from the oibaf PPA -- a plain `vulkaninfo`
+# returns VK_ERROR_INCOMPATIBLE_DRIVER naming that variable, and with the gate
+# set the Mali reports apiVersion 1.0.289 and complains that renderD128 is not
+# a panfrost node.
+#
+# That part IS a stale-Mesa artifact, contrary to what this comment said
+# before. Cross-building Mesa 26.3.0-devel for this board and deploying only
+# libvulkan_panfrost.so gives `Mali-G52 r1 MC1`, panfrost arch v7,
+# apiVersion 1.3.363, 162 device extensions including
+# EXT_image_drm_format_modifier, no renderD128 complaint, and
+# `drm_kms_vulkan_probe /dev/dri/card0` reporting ZERO-COPY GATE: PASS with
+# LINEAR on the primary plane. See docs/CROSS_BUILDING_MESA.md for the recipe.
+#
+# So the reason to stay EGL-only is the gate and the 0.0.0.0 conformance, not
+# the driver being unusable. Revisit if the image's Mesa moves forward.
 #
 # ## drm-kms-egl, and why BUILD_COMPOSITOR matters
 #
