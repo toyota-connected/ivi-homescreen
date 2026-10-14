@@ -35,6 +35,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <functional>
 #include <limits>
 #include <mutex>
 #include <optional>
@@ -44,6 +45,8 @@
 #include <tuple>
 #include <utility>
 #include <vector>
+
+#include "asio/post.hpp"
 
 #include <drm-cxx/core/format.hpp>
 #include <drm-cxx/core/property_store.hpp>
@@ -760,12 +763,7 @@ bool DrmBackend::InitDrm() {
   }
 
   // Framebuffer size: explicit request wins; otherwise full-screen.
-  // Clamp to the mode so a too-large request still produces a valid
-  // centered rect (CRTC_W > mode would fail the atomic TEST).
-  fb_w_ =
-      std::min<uint32_t>(cfg_.width.value_or(mode_.hdisplay), mode_.hdisplay);
-  fb_h_ =
-      std::min<uint32_t>(cfg_.height.value_or(mode_.vdisplay), mode_.vdisplay);
+  std::tie(fb_w_, fb_h_) = FbExtentForMode(cfg_.width, cfg_.height, mode_);
 
   drmModeEncoder* enc = nullptr;
   if (connector->encoder_id) {
@@ -910,6 +908,14 @@ bool DrmBackend::InitGbm() {
     return false;
   }
 
+  return CreateGbmSurface();
+}
+
+// The GBM surface alone, at the current fb_w_/fb_h_. Split from InitGbm so an
+// extent change re-runs the allocation bring-up ran, including the
+// modifier-aware attempt and its fallback -- the modifier set is a property of
+// the plane, not of the extent, so re-querying it is the correct thing to do.
+bool DrmBackend::CreateGbmSurface() {
   // Try gbm_surface_create_with_modifiers first when the kernel
   // advertises any modifiers for our format. NVIDIA L4T's GBM only
   // implements the modifier-aware entrypoint (legacy gbm_surface_create
@@ -1104,6 +1110,14 @@ bool DrmBackend::InitEgl() {
   egl_texture_context_ = eglCreateContext(
       egl_display_, egl_config_, egl_context_, kEsContextAttribs.data());
 
+  return CreateEglWindowSurface();
+}
+
+// The EGL window surface over gbm_surface_. Split from InitEgl so an extent
+// change can re-create it against a fresh GBM surface without rebuilding the
+// display, the config or the three contexts, none of which depend on the
+// extent.
+bool DrmBackend::CreateEglWindowSurface() {
   egl_surface_ = eglCreateWindowSurface(
       egl_display_, egl_config_,
       reinterpret_cast<EGLNativeWindowType>(gbm_surface_), nullptr);
@@ -1318,12 +1332,21 @@ void DrmBackend::SetVsyncBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine,
   vsync_.SubmitBaton(engine, baton);
 }
 
+std::pair<uint32_t, uint32_t> DrmBackend::FbExtentForMode(
+    const std::optional<uint32_t> requested_w,
+    const std::optional<uint32_t> requested_h,
+    const drmModeModeInfo& mode) {
+  return {
+      std::min<uint32_t>(requested_w.value_or(mode.hdisplay), mode.hdisplay),
+      std::min<uint32_t>(requested_h.value_or(mode.vdisplay), mode.vdisplay)};
+}
+
 DrmBackend::ModeChange DrmBackend::ClassifyModeChange(
     const drmModeModeInfo& picked,
     const drmModeModeInfo& current) {
   if (picked.hdisplay != current.hdisplay ||
       picked.vdisplay != current.vdisplay) {
-    return ModeChange::kExtentRefused;
+    return ModeChange::kExtent;
   }
   const bool same_timing =
       picked.clock == current.clock && picked.htotal == current.htotal &&
@@ -1357,61 +1380,244 @@ bool DrmBackend::OnOutputReconfigured() {
         connector_id_, mode_.hdisplay, mode_.vdisplay, mode_.vrefresh);
     return false;
   }
-  const ModeChange change = ClassifyModeChange(*picked, mode_);
+  return RequestModeChange(*picked) != ModeChange::kNone;
+}
+
+DrmBackend::ModeChange DrmBackend::RequestModeChange(
+    const drmModeModeInfo& mode) {
+  const ModeChange change = ClassifyModeChange(mode, mode_);
   if (change == ModeChange::kNone) {
-    return false;  // a reconfigure that did not change our mode
-  }
-  if (change == ModeChange::kExtentRefused) {
-    // Refused, loudly and once per distinct extent. Adopting it means
-    // reallocating the GBM surface, the scanout ring and the engine's render
-    // targets under a live engine; Resize() is a documented no-op here, so
-    // there is nothing to adopt it with yet (#765).
-    static uint32_t warned_w = 0;
-    static uint32_t warned_h = 0;
-    if (warned_w != picked->hdisplay || warned_h != picked->vdisplay) {
-      warned_w = picked->hdisplay;
-      warned_h = picked->vdisplay;
-      ihs::log::warn(
-          "[DrmBackend] reconfigure: connector {} now reports {}x{}@{}Hz but "
-          "we are scanning out {}x{}; an extent change needs the ring "
-          "reallocated and is not supported, so the old mode is kept",
-          connector_id_, picked->hdisplay, picked->vdisplay, picked->vrefresh,
-          mode_.hdisplay, mode_.vdisplay);
-    }
-    return false;
+    return change;  // already driving it
   }
 
-  // Refresh-only change. Quiesce exactly as a session pause does: no
-  // PAGE_FLIP_EVENT is coming for a commit made against the old mode, and the
-  // queued-frame handler that would commit it never runs.
+  if (change == ModeChange::kExtent) {
+    // Latch only. Adopting an extent means destroying the GBM surface
+    // eglSwapBuffers draws into and the EGL window surface over it, which is
+    // the raster thread's to do -- see ApplyPendingExtentChange, which the
+    // next present runs. Nothing here touches mode_, fb_w_/fb_h_ or the flip
+    // state: the raster thread owns all of it from the moment the latch is
+    // published, so there is no window where a commit sees half a change.
+    ihs::log::info(
+        "[DrmBackend] mode change to {}x{}@{}Hz requested, driving {}x{}@{}Hz; "
+        "rebuilding scanout on the next present",
+        mode.hdisplay, mode.vdisplay, mode.vrefresh, mode_.hdisplay,
+        mode_.vdisplay, mode_.vrefresh);
+    {
+      const std::lock_guard<std::mutex> lock(pending_extent_mu_);
+      pending_extent_mode_ = mode;
+    }
+    extent_change_pending_.store(true, std::memory_order_release);
+    KickFrameForModeChange();
+    return change;
+  }
+
+  // Refresh-only change, adopted here. Quiesce exactly as a session pause
+  // does: no PAGE_FLIP_EVENT is coming for a commit made against the old mode,
+  // and the queued-frame handler that would commit it never runs.
   ihs::log::info(
-      "[DrmBackend] reconfigure: {}x{} timing changed, {}Hz -> {}Hz; "
-      "re-modesetting on the next present",
-      mode_.hdisplay, mode_.vdisplay, mode_.vrefresh, picked->vrefresh);
+      "[DrmBackend] {}x{} timing changed, {}Hz -> {}Hz; re-modesetting on the "
+      "next present",
+      mode_.hdisplay, mode_.vdisplay, mode_.vrefresh, mode.vrefresh);
   flip_pending_.store(false, std::memory_order_release);
   DropQueuedFlip();
   if (drm_display_ != nullptr) {
     drm_display_->WakeFlipDrain();
   }
 
-  mode_ = *picked;
+  mode_ = mode;
   // The next Present re-modesets, rather than committing a new mode under a
   // flip that may still be in flight. Same mechanism OnSessionResumed uses.
   mode_set_ = false;
 
 #if BUILD_COMPOSITOR
-  if (compositor_ != nullptr) {
-    compositor_->OnModeChanged(mode_);
+  if (compositor_ != nullptr &&
+      !compositor_->OnModeChanged(mode_, fb_w_, fb_h_)) {
+    ihs::log::error(
+        "[DrmBackend] reconfigure: compositor rebind failed; the plane path "
+        "will keep committing the old timing");
   }
 #endif
 
-  // Nothing above produces a frame, and an idle UI will not ask for one. Same
-  // two cases as resume: drain a parked baton, else prompt the engine.
+  KickFrameForModeChange();
+  return change;
+}
+
+// Neither branch of RequestModeChange produces a frame, and an idle UI will not
+// ask for one -- but both need a present to run before they reach the panel.
+// Same two cases as resume: drain a parked baton, else prompt the engine.
+void DrmBackend::KickFrameForModeChange() {
   if (auto* engine = engine_handle_.load(std::memory_order_acquire)) {
     if (!vsync_.DeliverParkedBaton()) {
       LibFlutterEngine->ScheduleFrame(engine);
     }
   }
+}
+
+void DrmBackend::SetExtentAdoptedHandler(std::function<void()> handler) {
+  const std::lock_guard<std::mutex> lock(pending_extent_mu_);
+  extent_adopted_ = std::move(handler);
+}
+
+void DrmBackend::NotifyExtentAdopted() {
+  std::function<void()> handler;
+  {
+    const std::lock_guard<std::mutex> lock(pending_extent_mu_);
+    handler = extent_adopted_;
+  }
+  auto* runner = platform_task_runner_.load(std::memory_order_acquire);
+  if (!handler || runner == nullptr || runner->GetStrandContext() == nullptr) {
+    return;
+  }
+  asio::post(*runner->GetStrandContext(),
+             [handler = std::move(handler)]() { handler(); });
+}
+
+// Drop the scanout surfaces and everything naming their buffers. The order
+// mirrors the destructor's, which is the one this backend is proven on:
+// unbind so the driver stops holding the surface, drop the EGL surface, then
+// the KMS FBs and the buffers they named, then the GBM surface those buffers
+// came out of. A buffer still bound to the CRTC survives the RmFB -- the
+// kernel holds its own reference until the next modeset replaces it, which is
+// what the caller arms mode_set_ = false for.
+//
+// Raster thread only, and only with the flip path quiesced.
+void DrmBackend::DestroyScanoutSurfaces() {
+  if (egl_display_ != EGL_NO_DISPLAY) {
+    eglMakeCurrent(egl_display_, EGL_NO_SURFACE, EGL_NO_SURFACE,
+                   EGL_NO_CONTEXT);
+    if (egl_surface_ != EGL_NO_SURFACE) {
+      eglDestroySurface(egl_display_, egl_surface_);
+      egl_surface_ = EGL_NO_SURFACE;
+    }
+  }
+  if (drm_dev_ != nullptr && pending_fb_ != 0) {
+    drmModeRmFB(drm_dev_->fd(), pending_fb_);
+  }
+  pending_fb_ = 0;
+  if (pending_bo_ != nullptr) {
+    gbm_surface_release_buffer(gbm_surface_, pending_bo_);
+    pending_bo_ = nullptr;
+  }
+  if (drm_dev_ != nullptr && current_fb_ != 0) {
+    drmModeRmFB(drm_dev_->fd(), current_fb_);
+  }
+  current_fb_ = 0;
+  if (current_bo_ != nullptr) {
+    gbm_surface_release_buffer(gbm_surface_, current_bo_);
+    current_bo_ = nullptr;
+  }
+  if (gbm_surface_ != nullptr) {
+    gbm_surface_destroy(gbm_surface_);
+    gbm_surface_ = nullptr;
+  }
+}
+
+// Bind the fresh surfaces, re-arm the modeset, and hand the compositor the
+// configuration it is now expected to commit. Both outcomes of a rebuild run
+// this -- the new extent and a revert to the old one -- because either way the
+// surfaces are new objects the CRTC has never been pointed at.
+//
+// A failed bind is reported rather than returned: the engine re-binds through
+// make_current before the next frame anyway, and what it costs here is the
+// compositor's GL reallocation, which says so itself.
+void DrmBackend::FinishScanoutRebuild() {
+  if (!MakeCurrent()) {
+    ihs::log::error(
+        "[DrmBackend] scanout rebuild: MakeCurrent failed; the compositor's "
+        "reallocation below will fail with it");
+  }
+  // Set before the compositor is told, so a plane-path commit on this same
+  // pass carries ALLOW_MODESET too.
+  mode_set_ = false;
+#if BUILD_COMPOSITOR
+  if (compositor_ != nullptr &&
+      !compositor_->OnModeChanged(mode_, fb_w_, fb_h_)) {
+    ihs::log::error(
+        "[DrmBackend] scanout rebuild: compositor rebuild failed; the plane "
+        "path is no longer usable at this mode");
+  }
+#endif
+}
+
+bool DrmBackend::ApplyPendingExtentChange() {
+  if (!extent_change_pending_.load(std::memory_order_acquire)) {
+    return false;
+  }
+  drmModeModeInfo picked{};
+  {
+    const std::lock_guard<std::mutex> lock(pending_extent_mu_);
+    if (!pending_extent_mode_.has_value()) {
+      extent_change_pending_.store(false, std::memory_order_release);
+      return false;
+    }
+    picked = *pending_extent_mode_;
+    pending_extent_mode_.reset();
+  }
+  extent_change_pending_.store(false, std::memory_order_release);
+
+  // Same rule InitDrm picks the FB size by, so a configured (framed) size
+  // survives the change and an unconfigured one follows the panel.
+  const auto [new_w, new_h] = FbExtentForMode(cfg_.width, cfg_.height, picked);
+
+  // Quiesce on this thread rather than from the latch. WaitForPendingFlip
+  // returns once the completion handler has run, so nothing on the platform
+  // strand is left mid-update of current_bo_/pending_bo_ when the teardown
+  // below walks them -- which clearing flip_pending_ from the other side would
+  // not give us. The two gates above this call in the present hook cover the
+  // cases where a flip never completes at all.
+  (void)WaitForPendingFlip();
+  DropQueuedFlip();
+
+  const drmModeModeInfo prev_mode = mode_;
+  const uint32_t prev_w = fb_w_;
+  const uint32_t prev_h = fb_h_;
+
+  DestroyScanoutSurfaces();
+  mode_ = picked;
+  fb_w_ = new_w;
+  fb_h_ = new_h;
+
+  if (!CreateGbmSurface() || !CreateEglWindowSurface()) {
+    // The old surfaces are already gone, so there is nothing to keep driving
+    // with -- go back to the extent that was working rather than leave the
+    // rasterizer with no surface to swap.
+    ihs::log::error(
+        "[DrmBackend] extent change to {}x{} failed to allocate; reverting to "
+        "{}x{}",
+        new_w, new_h, prev_w, prev_h);
+    DestroyScanoutSurfaces();
+    mode_ = prev_mode;
+    fb_w_ = prev_w;
+    fb_h_ = prev_h;
+    if (!CreateGbmSurface() || !CreateEglWindowSurface()) {
+      ihs::log::critical(
+          "[DrmBackend] scanout surfaces are gone and will not reallocate at "
+          "either extent; presents cannot continue");
+      return false;
+    }
+    // Back on what was working, but on new surface objects, so the next commit
+    // still has to be a modeset.
+    FinishScanoutRebuild();
+    KickFrameForModeChange();
+    return false;  // from the engine's side, nothing changed
+  }
+  FinishScanoutRebuild();
+
+  ihs::log::info(
+      "[DrmBackend] extent change applied: mode {}x{}@{}Hz, fb {}x{} (was "
+      "{}x{} fb {}x{})",
+      mode_.hdisplay, mode_.vdisplay, mode_.vrefresh, fb_w_, fb_h_,
+      prev_mode.hdisplay, prev_mode.vdisplay, prev_w, prev_h);
+
+  // The engine's viewport is still sized to the old extent, and the metadata
+  // the reconfigure re-sent described it. Both are the view's to redo, on the
+  // platform thread.
+  NotifyExtentAdopted();
+  // The present that called this acks without swapping, so the first frame at
+  // the new extent has to be asked for. The window metrics above normally
+  // produce one on their own; this covers the case where they do not, which is
+  // a framed config whose FB size did not move even though the mode did.
+  KickFrameForModeChange();
   return true;
 }
 
@@ -2299,6 +2505,21 @@ FlutterRendererConfig DrmBackend::GetRenderConfig() {
   };
   config.open_gl.present = [](void* user_data) -> bool {
     auto* b = BackendFromState(user_data);
+    // Consume a latched extent change here, not inside Present(): this is the
+    // one raster-thread hook both present paths run through, and the plane
+    // path returns just below without ever calling Present(). It runs after
+    // the frame this call acks, so the new extent takes effect on the next
+    // one -- the engine is still rendering at the old size until the window
+    // metrics NotifyExtentAdopted triggers reach it anyway.
+    if (b->ApplyPendingExtentChange()) {
+      // The surface this frame was drawn into is gone and the one that
+      // replaced it holds undefined pixels, so swapping it through the
+      // re-modeset below would put those on the panel. Ack the frame without
+      // presenting -- the same thing the pause gate does -- and let the frame
+      // the new window metrics trigger be the first one presented at the new
+      // extent.
+      return true;
+    }
 #if BUILD_COMPOSITOR
     // When the plane compositor owns scanout, DrmCompositor::PresentLayers
     // has already committed the frame atomically — the engine's renderer

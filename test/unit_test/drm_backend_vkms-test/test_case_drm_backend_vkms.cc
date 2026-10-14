@@ -3249,14 +3249,15 @@ TEST_F(DrmBackendVkmsRefreshRate, A60HzModeStillReports60) {
   EXPECT_NEAR(backend->RefreshRateHz(), 60.0, 0.5);
 }
 
-// #765: a connector reconfigure re-resolves the mode. The backend adopts a
-// refresh-only change and refuses an extent change, because the scanout ring
-// is sized to the extent and Resize() is a no-op on this backend.
+// #765: a connector reconfigure re-resolves the mode. A refresh-only change is
+// adopted on the spot; an extent change is latched for the raster thread,
+// which rebuilds the scanout surfaces at the new extent.
 //
-// Driven by re-running the resolve rather than by a real uevent: vkms exposes
-// connector status through configfs but no way to change a connector's mode,
-// so a genuine same-connector mode change cannot be synthesized here. What is
-// testable is the decision, which is where the bugs would be.
+// vkms exposes connector status through configfs but no way to change a
+// connector's mode, so a genuine same-connector reconfigure cannot be
+// synthesized here. The resolve is re-run directly instead, and the extent
+// cases go through RequestModeChange with a mode taken from the connector's
+// own list -- so the mode asked for is one this card would really drive.
 class DrmBackendVkmsReconfigure : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -3283,6 +3284,38 @@ class DrmBackendVkmsReconfigure : public ::testing::Test {
     cfg.mode_spec = spec;
     return DrmBackend::Create(cfg, display_->session(),
                               display_->SharedDevice(), display_.get());
+  }
+
+  // A mode this card offers whose extent differs from @p current. Taken from
+  // the connector rather than synthesized, so the rebuild under test is asked
+  // for something the card can actually be driven at. nullopt when the card
+  // offers only one extent, which is a skip rather than a failure.
+  std::optional<drmModeModeInfo> AModeOfADifferentExtent(
+      const drmModeModeInfo& current) const {
+    const int fd = display_->SharedDevice()->fd();
+    drmModeRes* res = drmModeGetResources(fd);
+    if (res == nullptr) {
+      return std::nullopt;
+    }
+    std::optional<drmModeModeInfo> found;
+    for (int i = 0; i < res->count_connectors && !found.has_value(); ++i) {
+      drmModeConnector* c = drmModeGetConnector(fd, res->connectors[i]);
+      if (c == nullptr) {
+        continue;
+      }
+      if (c->connection == DRM_MODE_CONNECTED) {
+        for (int m = 0; m < c->count_modes; ++m) {
+          if (c->modes[m].hdisplay != current.hdisplay ||
+              c->modes[m].vdisplay != current.vdisplay) {
+            found = c->modes[m];
+            break;
+          }
+        }
+      }
+      drmModeFreeConnector(c);
+    }
+    drmModeFreeResources(res);
+    return found;
   }
 
   VkmsCard card_;
@@ -3342,7 +3375,7 @@ TEST(DrmBackendModeChange, A5994VariantIsARefreshOnlyChange) {
             DrmBackend::ModeChange::kRefreshOnly);
 }
 
-TEST(DrmBackendModeChange, ADifferentExtentIsRefused) {
+TEST(DrmBackendModeChange, ADifferentExtentIsAnExtentChange) {
   drmModeModeInfo current{};
   current.hdisplay = 1920;
   current.vdisplay = 1080;
@@ -3355,13 +3388,141 @@ TEST(DrmBackendModeChange, ADifferentExtentIsRefused) {
   smaller.hdisplay = 1280;
   smaller.vdisplay = 720;
   EXPECT_EQ(DrmBackend::ClassifyModeChange(smaller, current),
-            DrmBackend::ModeChange::kExtentRefused);
+            DrmBackend::ModeChange::kExtent);
 
-  // Refused on extent even when the timing also differs, so the extent check
-  // has to come first.
+  // kExtent even when the timing also differs, so the extent check has to come
+  // first: the surface rebuild subsumes the re-modeset, and classifying this
+  // as kRefreshOnly would adopt the new timing at the old extent.
   smaller.clock = 74250;
   EXPECT_EQ(DrmBackend::ClassifyModeChange(smaller, current),
-            DrmBackend::ModeChange::kExtentRefused);
+            DrmBackend::ModeChange::kExtent);
+
+  // Each axis alone is enough. A mode that only grows vertically is the
+  // rotation case, and an hdisplay-only comparison would miss it.
+  drmModeModeInfo taller = current;
+  taller.vdisplay = 1200;
+  EXPECT_EQ(DrmBackend::ClassifyModeChange(taller, current),
+            DrmBackend::ModeChange::kExtent);
+  drmModeModeInfo wider = current;
+  wider.hdisplay = 2560;
+  EXPECT_EQ(DrmBackend::ClassifyModeChange(wider, current),
+            DrmBackend::ModeChange::kExtent);
+}
+
+// #765: the FB extent rule, which an extent change re-runs. Pure, so both the
+// configured and the clamped case are reachable without a card -- and the
+// clamp is the one a change can newly trigger: a request that fitted the old
+// mode need not fit a smaller new one.
+TEST(DrmBackendFbExtent, FullScreenWhenNothingIsConfigured) {
+  drmModeModeInfo mode{};
+  mode.hdisplay = 1920;
+  mode.vdisplay = 1080;
+  const auto [w, h] =
+      DrmBackend::FbExtentForMode(std::nullopt, std::nullopt, mode);
+  EXPECT_EQ(w, 1920u);
+  EXPECT_EQ(h, 1080u);
+}
+
+TEST(DrmBackendFbExtent, AConfiguredSizeWinsAndSurvivesAModeChange) {
+  drmModeModeInfo mode{};
+  mode.hdisplay = 1920;
+  mode.vdisplay = 1080;
+  auto [w, h] = DrmBackend::FbExtentForMode(1280u, 720u, mode);
+  EXPECT_EQ(w, 1280u);
+  EXPECT_EQ(h, 720u);
+
+  // Still framed at the same size on a bigger mode: the request is the FB,
+  // not a fraction of the panel.
+  mode.hdisplay = 2560;
+  mode.vdisplay = 1440;
+  std::tie(w, h) = DrmBackend::FbExtentForMode(1280u, 720u, mode);
+  EXPECT_EQ(w, 1280u);
+  EXPECT_EQ(h, 720u);
+}
+
+TEST(DrmBackendFbExtent, AModeSmallerThanTheRequestClampsPerAxis) {
+  drmModeModeInfo mode{};
+  mode.hdisplay = 1024;
+  mode.vdisplay = 768;
+
+  // CRTC_W greater than the mode fails the atomic TEST, so the clamp is what
+  // keeps a configured size valid across a shrink.
+  auto [w, h] = DrmBackend::FbExtentForMode(1920u, 1080u, mode);
+  EXPECT_EQ(w, 1024u);
+  EXPECT_EQ(h, 768u);
+
+  // Per axis, not all-or-nothing: a request that overflows only one axis keeps
+  // its own value on the other.
+  std::tie(w, h) = DrmBackend::FbExtentForMode(1920u, 480u, mode);
+  EXPECT_EQ(w, 1024u);
+  EXPECT_EQ(h, 480u);
+}
+
+// #765, the other half: an extent change applied for real. The classifier
+// tests above cover the decision; this covers the rebuild, which is where the
+// EGL/GBM lifetime mistakes would be. vkms offers more than one extent, so the
+// mode requested here is one the card would actually drive.
+TEST_F(DrmBackendVkmsReconfigure, AnExtentChangeIsLatchedThenApplied) {
+  auto backend = BackendWithMode("1024x768@60");
+  if (backend == nullptr) {
+    GTEST_SKIP() << "this vkms has no 1024x768@60 mode";
+  }
+  const auto other = AModeOfADifferentExtent(backend->mode());
+  if (!other.has_value()) {
+    GTEST_SKIP() << "this vkms offers only one extent; nothing to change to";
+  }
+
+  // Requested, not applied. Nothing the raster thread owns has moved yet --
+  // the point of the split, since the surfaces are still being drawn into.
+  EXPECT_EQ(backend->RequestModeChange(*other),
+            DrmBackend::ModeChange::kExtent);
+  EXPECT_EQ(backend->mode_width(), 1024u);
+  EXPECT_EQ(backend->mode_height(), 768u);
+  EXPECT_EQ(backend->width(), 1024u);
+  EXPECT_EQ(backend->height(), 768u);
+
+  // The raster-thread half, with the context the renderer's present hook would
+  // have made current.
+  ASSERT_TRUE(backend->MakeCurrent());
+  ASSERT_TRUE(backend->ApplyPendingExtentChange());
+
+  EXPECT_EQ(backend->mode_width(), other->hdisplay);
+  EXPECT_EQ(backend->mode_height(), other->vdisplay);
+  // No configured size, so the FB follows the mode.
+  EXPECT_EQ(backend->width(), other->hdisplay);
+  EXPECT_EQ(backend->height(), other->vdisplay);
+  // Derived from the new timings, so what the engine paces to and what is on
+  // screen cannot disagree (#758).
+  EXPECT_EQ(backend->RefreshPeriodNs(),
+            ModeRefreshPeriodNs(other->clock, other->htotal, other->vtotal));
+
+  // The latch is consumed. A second pass must not tear down surfaces that are
+  // live again.
+  EXPECT_FALSE(backend->ApplyPendingExtentChange());
+
+  // The surfaces really did come back: a present has something to swap, and
+  // the modeset the rebuild armed goes out on it.
+  EXPECT_TRUE(backend->Present());
+}
+
+// Re-requesting the extent we just adopted is kNone, so a uevent storm does
+// not rebuild the ring once per event.
+TEST_F(DrmBackendVkmsReconfigure, ReRequestingTheAppliedModeIsNoChange) {
+  auto backend = BackendWithMode("1024x768@60");
+  if (backend == nullptr) {
+    GTEST_SKIP() << "this vkms has no 1024x768@60 mode";
+  }
+  const auto other = AModeOfADifferentExtent(backend->mode());
+  if (!other.has_value()) {
+    GTEST_SKIP() << "this vkms offers only one extent; nothing to change to";
+  }
+  ASSERT_EQ(backend->RequestModeChange(*other),
+            DrmBackend::ModeChange::kExtent);
+  ASSERT_TRUE(backend->MakeCurrent());
+  ASSERT_TRUE(backend->ApplyPendingExtentChange());
+
+  EXPECT_EQ(backend->RequestModeChange(*other), DrmBackend::ModeChange::kNone);
+  EXPECT_FALSE(backend->ApplyPendingExtentChange());
 }
 
 // #762: the reported period comes from the mode's timings, not its vrefresh.

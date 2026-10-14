@@ -5048,19 +5048,154 @@ void DrmCompositor::ApplyCursorReservation() {
       cursor_reserved_plane_);
 }
 
-void DrmCompositor::OnModeChanged(const drmModeModeInfo& mode) {
+bool DrmCompositor::OnModeChanged(const drmModeModeInfo& mode,
+                                  const uint32_t fb_w,
+                                  const uint32_t fb_h) {
+  const bool extent_changed = fb_w != out_.width() || fb_h != out_.height() ||
+                              mode.hdisplay != out_.mode_width() ||
+                              mode.vdisplay != out_.mode_height();
+
   // DrmOutputContext is a value type with no setters, deliberately. Rebuild it
-  // rather than opening it up: everything but the mode is unchanged, since a
-  // refresh-only change keeps the same CRTC, connector and framebuffer extent.
+  // rather than opening it up: the CRTC, the connector and the probe result are
+  // the same card whichever mode it is driving.
   out_ =
       DrmOutputContext(out_.crtc_id(), out_.crtc_index(), out_.connector_id(),
-                       mode, out_.width(), out_.height(), &out_.resolved());
+                       mode, fb_w, fb_h, &out_.resolved());
   // From the mode timings, not vrefresh: this is the figure frame judging and
   // the repaint window are measured against, so it wants the exact period.
   refresh_ns_ = ModeRefreshPeriodNs(mode.clock, mode.htotal, mode.vtotal);
+
+  bool ok = true;
+
+  // Both of these hold a MODE_ID blob built from the mode they were handed at
+  // construction, and the plane path's modeset is attach()ed from the blob --
+  // not from out_.mode(). Without the refresh below, a reconfigure would leave
+  // the shell pacing to the new timing while the CRTC kept the old one.
+  if (modeset_) {
+    if (auto r = modeset_->set_mode(mode); !r) {
+      ihs::log::error("[DrmCompositor] Modeset::set_mode: {}",
+                      r.error().message());
+      ok = false;
+    }
+  }
+  if (scene_) {
+    {
+      const std::lock_guard<std::mutex> lock(scene_mu_);
+      auto report = scene_->rebind(out_.crtc_id(), out_.connector_id(), mode);
+      if (!report) {
+        // Documented as unrecoverable: a partially rebound scene must not be
+        // retried. Drop the plane path and let the GL fallback carry frames
+        // rather than commit through a scene in an unknown binding.
+        ihs::log::error(
+            "[DrmCompositor] LayerScene::rebind: {}; disabling the plane path",
+            report.error().message());
+        planes_available_ = false;
+        ok = false;
+      } else if (!report->empty()) {
+        // Advisory: the rebind completed. Flutter hands us a fresh layer list
+        // every present, so a flagged layer is replaced before the next commit
+        // anyway -- say so once rather than acting on it.
+        ihs::log::warn(
+            "[DrmCompositor] LayerScene::rebind flagged {} layer(s) as unfit "
+            "for "
+            "{}x{}; the next present rebuilds the list",
+            report->incompatibilities.size(), mode.hdisplay, mode.vdisplay);
+      }
+    }
+    AfterSceneUnlock();
+  }
+
+  // Whatever the next commit is, it has to carry ALLOW_MODESET for the new
+  // blob to reach the CRTC.
+  plane_mode_set_ = false;
+
+  if (!extent_changed) {
+    ihs::log::info(
+        "[DrmCompositor] mode changed to {}x{}@{}Hz, refresh period now {} ns",
+        mode.hdisplay, mode.vdisplay, mode.vrefresh, refresh_ns_);
+    return ok;
+  }
+
+  // Everything below is sized to the extent, so it has to go. The commit this
+  // compositor has outstanding is the one still sampling those buffers, and
+  // the backend's own flip wait does not cover it -- wait it out here and
+  // return what it displaced, which is the pair of steps the destructor takes
+  // before the same frees.
+  (void)WaitForPendingFlip();
+  DrainDeferredScanoutReleases();
+  ReleaseAllSlots();
+
+  // Flutter's own backing stores are keyed by (w, h, format) in
+  // CreateBackingStore, so the live ones retire on their own and the next
+  // frame's allocate fresh. The pool is what would otherwise sit on the old
+  // extent's memory for the rest of the session with nothing to match it.
+  for (auto& idle : store_pool_) {
+    if (idle) {
+      DestroyGbmStore(*idle);
+    }
+  }
+  store_pool_.clear();
+
+  // The composition buffers and the BG store are ours and are allocated at a
+  // fixed size, so they have to be rebuilt. BG is lazy (EnsureBgStore) on the
+  // direct-overlay path and eager on the framed path; clearing the flag covers
+  // both.
+  for (auto& comp_buf : comp_bufs_) {
+    DestroyGbmStore(comp_buf);
+  }
+  comp_bufs_valid_ = false;
+  comp_idx_ = 0;
+  if (bg_store_valid_) {
+    DestroyGbmStore(bg_store_);
+    bg_store_valid_ = false;
+  }
+
+  // Framing is the FB-vs-mode comparison, so an extent change can turn it on
+  // or off. InitFramedMode only picks planes it has not picked already, so
+  // re-running it on an already-framed output is a no-op.
+  framed_ = (out_.width() != out_.mode_width()) ||
+            (out_.height() != out_.mode_height());
+  if (framed_ && !InitFramedMode()) {
+    ihs::log::error(
+        "[DrmCompositor] extent change: framed-mode init failed; disabling the "
+        "plane path");
+    planes_available_ = false;
+    return false;
+  }
+
+  if (planes_available_ && !InitCompositionBuffers()) {
+    ihs::log::error(
+        "[DrmCompositor] extent change: composition buffer reallocation "
+        "failed; disabling the plane path");
+    planes_available_ = false;
+    return false;
+  }
+
   ihs::log::info(
-      "[DrmCompositor] mode changed to {}x{}@{}Hz, refresh period now {} ns",
-      mode.hdisplay, mode.vdisplay, mode.vrefresh, refresh_ns_);
+      "[DrmCompositor] extent changed to mode {}x{}@{}Hz fb {}x{} ({}), "
+      "refresh period now {} ns",
+      mode.hdisplay, mode.vdisplay, mode.vrefresh, out_.width(), out_.height(),
+      framed_ ? "framed" : "full-screen", refresh_ns_);
+  return ok;
+}
+
+// Hand every backing-store slot the release pipeline is tracking back to Free.
+// Used where the flips that would have freed them are never coming: a VT
+// switch-out dropped them, or the stores they index are about to be destroyed
+// and rebuilt at a new extent. The GbmBackingStore objects outlive their
+// contents, so the pointers these refs hold stay good either way.
+void DrmCompositor::ReleaseAllSlots() {
+  const std::lock_guard<std::mutex> lock(slot_pipeline_mu_);
+  for (auto& ref : scanning_slots_) {
+    ref.store->pool[ref.slot_idx].state = GbmBackingStore::Slot::State::Free;
+  }
+  scanning_slots_.clear();
+  while (!in_flight_slots_.empty()) {
+    for (auto& ref : in_flight_slots_.front()) {
+      ref.store->pool[ref.slot_idx].state = GbmBackingStore::Slot::State::Free;
+    }
+    in_flight_slots_.pop_front();
+  }
 }
 
 void DrmCompositor::SetPaused(const bool paused) {
@@ -5106,20 +5241,7 @@ void DrmCompositor::OnResume() {
   // Drain the BS-slot release pipeline — any flip events that would
   // have freed slots queued before pause never fired. Promote
   // everything to Free so the next render finds usable slots.
-  {
-    std::lock_guard<std::mutex> lock(slot_pipeline_mu_);
-    for (auto& ref : scanning_slots_) {
-      ref.store->pool[ref.slot_idx].state = GbmBackingStore::Slot::State::Free;
-    }
-    scanning_slots_.clear();
-    while (!in_flight_slots_.empty()) {
-      for (auto& ref : in_flight_slots_.front()) {
-        ref.store->pool[ref.slot_idx].state =
-            GbmBackingStore::Slot::State::Free;
-      }
-      in_flight_slots_.pop_front();
-    }
-  }
+  ReleaseAllSlots();
 
   ihs::log::info("[DrmCompositor] resumed — next commit will re-modeset");
 }
