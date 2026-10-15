@@ -2655,6 +2655,12 @@ bool WaylandVulkanBackend::InitDmabufRing(uint32_t w, uint32_t h) {
   // surface coordinates, so it takes no extent from here -- and the log says
   // which size it used, because that is a different number from the ring's on
   // any scaled output and "declared" alone cannot be checked.
+  //
+  // Consume the stale flag first: this claim reads the current size, so a flag
+  // still set afterwards would make the present path claim a second time in
+  // the same commit. A size written after this point re-sets it and gets its
+  // own re-assert, which is the case the flag exists for.
+  opaque_region_stale_.store(false, std::memory_order_release);
   const bool claimed = SetSurfaceOpaque(/*opaque=*/true);
   int32_t declared_w = 0;
   int32_t declared_h = 0;
