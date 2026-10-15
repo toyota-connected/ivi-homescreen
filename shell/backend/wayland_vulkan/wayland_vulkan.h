@@ -710,10 +710,15 @@ class WaylandVulkanBackend final : public Backend {
   // scale 1 they agree; above it, sizing from the buffer over-claims by the
   // scale factor (clamped to the surface, so still truthful but pointless) and
   // below it would under-claim and forfeit the plane.
-  // Returns true when a region was actually declared -- false when withdrawing,
-  // or when the window has not declared a surface size yet, which a caller
-  // logs rather than treats as failure.
-  bool SetSurfaceOpaque(bool opaque);
+  // Withdraw the surface's opaque region. Raster thread.
+  void WithdrawSurfaceOpaqueRegion();
+
+  // Declare the surface's opaque region covering @p size, in SURFACE
+  // coordinates -- not the dma-buf ring's extent, which is buffer pixels and
+  // a different number on any scaled output. Returns false when @p size is
+  // not yet known (the window has not declared a mapping), which a caller
+  // logs rather than treats as failure. Raster thread.
+  bool DeclareSurfaceOpaqueRegion(wl_vulkan::SurfaceSizeLatch::Size size);
 
   // |Backend| Record the surface size the window just declared and mark the
   // opaque region stale. The ring is built lazily in PresentLayersDmabuf, long

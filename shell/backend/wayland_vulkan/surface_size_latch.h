@@ -16,7 +16,6 @@
 
 #pragma once
 
-#include <atomic>
 #include <cstdint>
 #include <mutex>
 #include <optional>
@@ -31,77 +30,76 @@ namespace wl_vulkan {
  * The Wayland event thread learns the surface size (an output resize, a scale
  * change) while the raster thread is the only one allowed to issue requests on
  * the wl_surface. So the writer records and flags; the reader decides what to
- * do and when. Extracted from WaylandVulkanBackend so that decision sequence
- * is testable without a compositor -- the bug it exists to prevent was a
- * declaration issued from the wrong thread, which no unit test could have
- * caught while it lived inline.
+ * do and when. Extracted from WaylandVulkanBackend so that handoff is testable
+ * without a compositor -- the two defects it exists to prevent were a region
+ * sized in buffer rather than surface coordinates, and a declaration issued
+ * from the writer's thread, neither of which a unit test could reach while
+ * this lived inline.
  *
  * Sizes are in SURFACE coordinates, which is not the buffer extent on a scaled
  * output; see WaylandWindow::DeclareSurfaceMapping.
  *
- * Ordering, which is what the tests pin: Set() stores the size and then raises
- * the flag; TakeIfStale() lowers the flag and then reads the size. A Set()
- * landing between a reader's two steps therefore yields the newer size and
- * leaves the flag raised, costing one redundant re-read rather than a missed
- * one. Losing an update is the failure that matters here; a duplicate is free.
+ * Every method is one critical section, so there is no interleaving to reason
+ * about and no ordering contract for a caller to get wrong. An earlier version
+ * kept the flag in a separate atomic to keep the reader's check lock-free, and
+ * paid for it with a store-then-raise / lower-then-read rule that could not be
+ * tested: a mutant with the order reversed passed a 20000-write stress test
+ * 5/5, because losing an update needs the writer's last Set to land inside a
+ * nanosecond window. An uncontended lock once per present at 60Hz is tens of
+ * nanoseconds, so the trade was never worth it.
+ *
+ * There is deliberately no "read without clearing": that pairing -- read, then
+ * clear -- is exactly the lost-update order, and an API that offers it invites
+ * the bug back. A caller that needs the size takes it.
  */
 class SurfaceSizeLatch {
  public:
   using Size = std::pair<int32_t, int32_t>;
 
-  /// Record @p width x @p height. Raises the stale flag only when the size
-  /// actually moved, so an idempotent re-declaration costs the reader nothing.
-  /// Returns whether it moved.
+  /// Record @p width x @p height. Marks it unseen only when the size actually
+  /// moved, so an idempotent re-declaration costs the reader nothing. Returns
+  /// whether it moved.
   bool Set(const int32_t width, const int32_t height) {
-    {
-      const std::lock_guard<std::mutex> lock(mu_);
-      if (width == w_ && height == h_) {
-        return false;
-      }
-      w_ = width;
-      h_ = height;
+    const std::lock_guard<std::mutex> lock(mu_);
+    if (width == w_ && height == h_) {
+      return false;
     }
-    // After the store, so a reader that sees the flag sees at least this size.
-    stale_.store(true, std::memory_order_release);
+    w_ = width;
+    h_ = height;
+    stale_ = true;
     return true;
   }
 
-  /// The size if it has moved since the last take, else nullopt. Lowers the
-  /// flag. The lock-free check comes first: this runs once per present, and
-  /// the common answer is "nothing to do".
+  /// The size if it has moved since the last take, else nullopt. Clears the
+  /// flag. For a caller that acts only on a change -- the present path, which
+  /// asks every frame and normally has nothing to do.
   std::optional<Size> TakeIfStale() {
-    if (!stale_.exchange(false, std::memory_order_acq_rel)) {
+    const std::lock_guard<std::mutex> lock(mu_);
+    if (!stale_) {
       return std::nullopt;
     }
-    return Current();
+    stale_ = false;
+    return Size{w_, h_};
   }
 
-  /// The size regardless of the flag, for a caller that is about to use it
-  /// anyway. Does not lower the flag -- see ClearStale().
-  [[nodiscard]] Size Current() const {
+  /// The size, clearing the flag whatever its state. For a caller that is
+  /// about to apply the size regardless -- the ring's own claim -- so the
+  /// present path does not then apply it a second time in the same commit.
+  ///
+  /// Zero until the window has declared a mapping, which is not an error:
+  /// nothing can be declared before the surface is mapped, and the next Set
+  /// gives the reader its own delivery.
+  Size Take() {
     const std::lock_guard<std::mutex> lock(mu_);
-    return {w_, h_};
-  }
-
-  /// Lower the flag without reading. For a path that is about to apply the
-  /// current size itself, so the reader above does not then apply it twice.
-  void ClearStale() { stale_.store(false, std::memory_order_release); }
-
-  /// Whether a size has ever been recorded. Nothing can be declared before
-  /// the window has mapped the surface, and that is not an error.
-  [[nodiscard]] bool Valid() const {
-    const auto [w, h] = Current();
-    return w > 0 && h > 0;
+    stale_ = false;
+    return Size{w_, h_};
   }
 
  private:
-  mutable std::mutex mu_;
+  std::mutex mu_;
   int32_t w_{0};
   int32_t h_{0};
-  // Separate from the mutex so the per-present check stays lock-free. A mutex
-  // for the pair because it must be read consistently, and a packed atomic
-  // would hide a shift-and-mask error as a wrong-sized region.
-  std::atomic<bool> stale_{false};
+  bool stale_{false};
 };
 
 }  // namespace wl_vulkan
