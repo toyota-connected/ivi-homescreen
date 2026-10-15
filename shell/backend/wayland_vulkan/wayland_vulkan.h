@@ -46,6 +46,7 @@
 #include "vulkan/vulkan_wayland.h"
 
 #include "backend/backend.h"
+#include "backend/wayland_vulkan/surface_size_latch.h"
 #include "config/common.h"
 #include "third_party/flutter/shell/platform/embedder/embedder.h"
 
@@ -54,7 +55,6 @@
 #include <unordered_map>
 
 #include "backend/backing_store_pool.h"
-#include "backend/wayland_vulkan/surface_size_latch.h"
 #include "backend/wayland_vulkan/vulkan_backing_store.h"
 #include "view/compositor_surface_interface.h"
 #include "view/mutation_stack.h"
