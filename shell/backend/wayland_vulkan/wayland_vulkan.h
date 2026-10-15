@@ -46,6 +46,7 @@
 #include "vulkan/vulkan_wayland.h"
 
 #include "backend/backend.h"
+#include "backend/wayland_vulkan/surface_size_latch.h"
 #include "config/common.h"
 #include "third_party/flutter/shell/platform/embedder/embedder.h"
 
@@ -469,21 +470,12 @@ class WaylandVulkanBackend final : public Backend {
   // it to decide whether to create the WSI swapchain, which is compiled on
   // every configuration; it can only ever become true under BUILD_COMPOSITOR.
   bool dmabuf_present_active_{false};
-  // Surface size in surface coordinates, from the window. Zero until the
-  // window has declared a mapping; the opaque region is not claimed before
-  // then, and the next declaration re-asserts it.
-  //
-  // Guarded because the writer is the Wayland event thread and the reader is
-  // the raster thread, the same split that makes wl_surface_ atomic. A mutex
-  // rather than a packed atomic: the pair has to be read consistently, and a
-  // shift-and-mask that is wrong declares a wrong-sized region silently, with
-  // nothing to test it against short of a compositor. Contention is nil -- the
-  // writer runs on resize, and the reader only when the stale flag is set.
-  std::mutex surface_size_mu_;
-  int32_t surface_logical_w_{0};
-  int32_t surface_logical_h_{0};
-  // Read every present, so it stays a lock-free check.
-  std::atomic<bool> opaque_region_stale_{false};
+  // Surface size in surface coordinates, written by the Wayland event thread
+  // and consumed by the raster thread. Its own type so that handoff is
+  // testable without a compositor -- see surface_size_latch.h and
+  // test/unit_test/surface_size_latch-test. Zero until the window has declared
+  // a mapping; nothing is claimed before then.
+  wl_vulkan::SurfaceSizeLatch surface_size_;
 
 #if BUILD_COMPOSITOR
   bool dma_buf_export_ok_{false};
@@ -718,10 +710,15 @@ class WaylandVulkanBackend final : public Backend {
   // scale 1 they agree; above it, sizing from the buffer over-claims by the
   // scale factor (clamped to the surface, so still truthful but pointless) and
   // below it would under-claim and forfeit the plane.
-  // Returns true when a region was actually declared -- false when withdrawing,
-  // or when the window has not declared a surface size yet, which a caller
-  // logs rather than treats as failure.
-  bool SetSurfaceOpaque(bool opaque);
+  // Withdraw the surface's opaque region. Raster thread.
+  void WithdrawSurfaceOpaqueRegion();
+
+  // Declare the surface's opaque region covering @p size, in SURFACE
+  // coordinates -- not the dma-buf ring's extent, which is buffer pixels and
+  // a different number on any scaled output. Returns false when @p size is
+  // not yet known (the window has not declared a mapping), which a caller
+  // logs rather than treats as failure. Raster thread.
+  bool DeclareSurfaceOpaqueRegion(wl_vulkan::SurfaceSizeLatch::Size size);
 
   // |Backend| Record the surface size the window just declared and mark the
   // opaque region stale. The ring is built lazily in PresentLayersDmabuf, long

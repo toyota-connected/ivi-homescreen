@@ -2586,7 +2586,7 @@ bool WaylandVulkanBackend::InitDmabufRing(uint32_t w, uint32_t h) {
   // present path back to the WSI swapchain, whose alpha is whatever this region
   // says -- so a region left over from the previous extent would be a false
   // claim about buffers this surface no longer shows.
-  SetSurfaceOpaque(/*opaque=*/false);
+  WithdrawSurfaceOpaqueRegion();
   {
     std::lock_guard<std::mutex> queue_lock(queue_mutex_);
     d().vkQueueWaitIdle(queue_);
@@ -2652,29 +2652,21 @@ bool WaylandVulkanBackend::InitDmabufRing(uint32_t w, uint32_t h) {
   dmabuf_ring_h_ = h;
   dmabuf_frame_ = 0;
   // XRGB8888 has no alpha, so stop the compositor assuming it does. Sized in
-  // surface coordinates, so it takes no extent from here -- and the log says
-  // which size it used, because that is a different number from the ring's on
+  // surface coordinates, so it takes no extent from here -- and the log names
+  // the size it used, because that is a different number from the ring's on
   // any scaled output and "declared" alone cannot be checked.
   //
-  // Consume the stale flag first: this claim reads the current size, so a flag
-  // still set afterwards would make the present path claim a second time in
-  // the same commit. A size written after this point re-sets it and gets its
-  // own re-assert, which is the case the flag exists for.
-  opaque_region_stale_.store(false, std::memory_order_release);
-  const bool claimed = SetSurfaceOpaque(/*opaque=*/true);
-  int32_t declared_w = 0;
-  int32_t declared_h = 0;
-  {
-    const std::lock_guard<std::mutex> lock(surface_size_mu_);
-    declared_w = surface_logical_w_;
-    declared_h = surface_logical_h_;
-  }
+  // Take, not read: this claim applies the size itself, so the present path
+  // must not apply it again in the same commit. A size arriving after this
+  // point gets its own delivery, which is what the flag is for.
+  const auto declared = surface_size_.Take();
+  const bool claimed = DeclareSurfaceOpaqueRegion(declared);
   if (claimed) {
     ihs::log::info(
         "[WaylandVulkanBackend] dma-buf present ring: {} slots {}x{} modifier "
         "{:#018x}, opaque region {}x{} (surface coords)",
         dmabuf_slots_.size(), w, h, dmabuf_slots_.front().image->modifier(),
-        declared_w, declared_h);
+        declared.first, declared.second);
   } else {
     ihs::log::info(
         "[WaylandVulkanBackend] dma-buf present ring: {} slots {}x{} modifier "
@@ -2684,24 +2676,22 @@ bool WaylandVulkanBackend::InitDmabufRing(uint32_t w, uint32_t h) {
   return true;
 }
 
-bool WaylandVulkanBackend::SetSurfaceOpaque(const bool opaque) {
+void WaylandVulkanBackend::WithdrawSurfaceOpaqueRegion() {
+  auto* surface = wl_surface_.load(std::memory_order_acquire);
+  if (surface != nullptr) {
+    wl_surface_set_opaque_region(surface, nullptr);
+  }
+}
+
+bool WaylandVulkanBackend::DeclareSurfaceOpaqueRegion(
+    const wl_vulkan::SurfaceSizeLatch::Size size) {
   auto* surface = wl_surface_.load(std::memory_order_acquire);
   if (surface == nullptr || shell_display_ == nullptr) {
     return false;
   }
-  if (!opaque) {
-    wl_surface_set_opaque_region(surface, nullptr);
-    return false;
-  }
   // Nothing to claim until the window has declared a mapping. Not an error:
-  // the ring can come up first, and the next present re-asserts.
-  int32_t w = 0;
-  int32_t h = 0;
-  {
-    const std::lock_guard<std::mutex> lock(surface_size_mu_);
-    w = surface_logical_w_;
-    h = surface_logical_h_;
-  }
+  // the ring can come up first, and the next Set gives its own delivery.
+  const auto [w, h] = size;
   if (w <= 0 || h <= 0) {
     return false;
   }
@@ -2722,30 +2712,23 @@ bool WaylandVulkanBackend::SetSurfaceOpaque(const bool opaque) {
 
 void WaylandVulkanBackend::SetSurfaceLogicalSize(const int32_t width,
                                                  const int32_t height) {
-  {
-    const std::lock_guard<std::mutex> lock(surface_size_mu_);
-    if (width == surface_logical_w_ && height == surface_logical_h_) {
-      return;
-    }
-    surface_logical_w_ = width;
-    surface_logical_h_ = height;
-  }
-  // Flag only. This is the Wayland event thread (or the main thread at window
-  // construction); the raster thread owns the wl_surface, so it re-declares on
-  // its next present rather than this thread racing it on the same proxy.
-  // Reading dmabuf_present_active_ here would be the same cross-thread
-  // mistake, so the decision is left to the side that owns it.
-  opaque_region_stale_.store(true, std::memory_order_release);
+  // Store and flag, nothing more. This is the Wayland event thread
+  // (OnOutputResized) or the main thread at window construction; the raster
+  // thread owns the wl_surface, so it re-declares on its next present rather
+  // than this thread racing it on the same proxy. Deciding here whether a ring
+  // is live would be the same cross-thread mistake.
+  (void)surface_size_.Set(width, height);
 }
 
 void WaylandVulkanBackend::ReassertOpaqueRegionIfStale() {
-  if (!opaque_region_stale_.exchange(false, std::memory_order_acq_rel)) {
+  const auto moved = surface_size_.TakeIfStale();
+  if (!moved.has_value()) {
     return;
   }
-  // Only while a ring is live: otherwise the claim would outlive the buffers it
-  // describes, and InitDmabufRing withdraws before every rebuild anyway.
+  // Only while a ring is live: otherwise the claim would outlive the buffers
+  // it describes, and InitDmabufRing withdraws before every rebuild anyway.
   if (dmabuf_present_active_) {
-    (void)SetSurfaceOpaque(/*opaque=*/true);
+    (void)DeclareSurfaceOpaqueRegion(*moved);
   }
 }
 
