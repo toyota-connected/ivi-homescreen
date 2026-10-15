@@ -469,6 +469,11 @@ class WaylandVulkanBackend final : public Backend {
   // it to decide whether to create the WSI swapchain, which is compiled on
   // every configuration; it can only ever become true under BUILD_COMPOSITOR.
   bool dmabuf_present_active_{false};
+  // Surface size in surface coordinates, from the window. Zero until the
+  // window has declared a mapping; the opaque region is not claimed before
+  // then, and the next declaration re-asserts it.
+  int32_t surface_logical_w_{0};
+  int32_t surface_logical_h_{0};
 
 #if BUILD_COMPOSITOR
   bool dma_buf_export_ok_{false};
@@ -678,8 +683,8 @@ class WaylandVulkanBackend final : public Backend {
   // any allocation failure, so present falls back to the swapchain.
   bool InitDmabufRing(uint32_t w, uint32_t h);
 
-  // Declare (@p opaque true) or withdraw the surface's opaque region, sized to
-  // the dma-buf ring's extent.
+  // Declare (@p opaque true) or withdraw the surface's opaque region, sized in
+  // SURFACE coordinates from surface_logical_w_/h_.
   //
   // The ring's buffers are DRM_FORMAT_XRGB8888, which carries no alpha channel,
   // so this surface is opaque in fact. A wl_surface has no opaque region by
@@ -696,7 +701,24 @@ class WaylandVulkanBackend final : public Backend {
   //
   // Region state is double-buffered: it applies on the next wl_surface.commit,
   // which the present path does every frame.
-  void SetSurfaceOpaque(uint32_t w, uint32_t h, bool opaque);
+  //
+  // Sized from the surface size the window reports, NOT from the ring extent:
+  // the region is in surface coordinates, while the ring is in buffer pixels,
+  // and a viewport destination or buffer scale maps one onto the other. At
+  // scale 1 they agree; above it, sizing from the buffer over-claims by the
+  // scale factor (clamped to the surface, so still truthful but pointless) and
+  // below it would under-claim and forfeit the plane.
+  // Returns true when a region was actually declared -- false when withdrawing,
+  // or when the window has not declared a surface size yet, which a caller
+  // logs rather than treats as failure.
+  bool SetSurfaceOpaque(bool opaque);
+
+  // |Backend| Record the surface size the window just declared, and re-assert
+  // the opaque region when it has moved under a live ring. The ring is built
+  // lazily in PresentLayersDmabuf, long after the window first declares the
+  // mapping, so neither side can own this alone: the window knows the
+  // coordinates, the backend knows whether the content is opaque.
+  void SetSurfaceLogicalSize(int32_t width, int32_t height) override;
   // Composite the layers into the current slot and commit its wl_buffer on the
   // surface. Returns the present result like PresentLayersImpl.
   bool PresentLayersDmabuf(const FlutterLayer** layers, size_t count);

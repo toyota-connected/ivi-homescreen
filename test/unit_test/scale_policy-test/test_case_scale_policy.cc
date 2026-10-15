@@ -108,6 +108,43 @@ TEST(ScalePolicy, IntegerOutputScaleIsExactMultiple) {
   }
 }
 
+// A wl_surface declaration in SURFACE coordinates cannot be sized from the
+// buffer extent, because these two are the same number only at unity scale.
+// wl_surface.set_opaque_region is such a declaration, and sizing it from the
+// dma-buf ring's extent is the bug this pins: correct at scale 1, and
+// over-claiming by the scale factor above it.
+//
+// Here rather than in a backend test because this is the whole decidable part
+// -- the protocol call itself needs a compositor.
+TEST(ScalePolicy, SurfaceExtentDivergesFromBufferExtentAboveUnity) {
+  constexpr int32_t kLogical = 1280;
+
+  // Scale 1: buffer and surface agree, which is why the original sizing
+  // measured correct on an unscaled output and hid the error.
+  EXPECT_EQ(ScalePolicy::ScaledDim(kLogical, ScalePolicy::kUnityScale120),
+            kLogical);
+
+  // Above unity they diverge, and the buffer is the larger of the two -- so a
+  // region sized from it over-claims rather than under-claims. The compositor
+  // clamps that to the surface, which is why the error was harmless.
+  for (int32_t n = 2; n <= 4; ++n) {
+    const int32_t buffer = ScalePolicy::ScaledDim(kLogical, n * 120);
+    EXPECT_EQ(buffer, kLogical * n);
+    EXPECT_GT(buffer, kLogical);
+    // And the surface size is recoverable from the buffer for an integer
+    // scale, which is what the buffer-scale mapping path reports.
+    EXPECT_EQ(buffer / n, kLogical);
+  }
+
+  // A fractional scale is the case where buffer / round(scale) is NOT the
+  // logical size, so a caller on that path must report what it declared
+  // rather than assume the logical geometry. 1.5x: 1280 -> 1920, and
+  // 1920 / round(1.5) = 960, not 1280.
+  const int32_t frac_buffer = ScalePolicy::ScaledDim(kLogical, 180);
+  EXPECT_EQ(frac_buffer, 1920);
+  EXPECT_NE(frac_buffer / 2, kLogical);
+}
+
 TEST(ScalePolicy, UnityConstant) {
   EXPECT_EQ(ScalePolicy::kUnityScale120, 120);
   EXPECT_EQ(ScalePolicy::kUnityScale120, conf::kToBufferVectors[0].scale_120);

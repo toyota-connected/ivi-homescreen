@@ -310,10 +310,21 @@ void WaylandWindow::DeclareSurfaceMapping() const {
     wl_proxy_marshal(m_viewport,
                      viewporter::client::wp_viewport_traits::Op::SetDestination,
                      m_geometry.width, m_geometry.height);
+    // Surface coordinates are the destination we just declared.
+    if (m_backend != nullptr) {
+      m_backend->SetSurfaceLogicalSize(m_geometry.width, m_geometry.height);
+    }
   } else {
-    wl_surface_set_buffer_scale(
-        m_base_surface,
-        std::max(1, static_cast<int32_t>(std::lround(m_scale))));
+    const int32_t scale =
+        std::max(1, static_cast<int32_t>(std::lround(m_scale)));
+    wl_surface_set_buffer_scale(m_base_surface, scale);
+    // On this path the compositor derives the surface size as buffer / scale,
+    // so report that rather than m_geometry -- the two differ when m_scale is
+    // fractional, which is exactly why the viewport path is preferred.
+    if (m_backend != nullptr) {
+      m_backend->SetSurfaceLogicalSize(PhysWidth() / scale,
+                                       PhysHeight() / scale);
+    }
   }
 }
 
