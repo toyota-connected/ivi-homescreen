@@ -359,6 +359,21 @@ class Backend {
   virtual void SetPlatformTaskRunner(TaskRunner* /*runner*/) {}
 
   /**
+   * @brief The surface's size in SURFACE coordinates, as just declared to the
+   *        compositor.
+   *
+   * Distinct from the buffer size a backend allocates to: a viewport
+   * destination or a buffer scale maps one onto the other, so the two differ
+   * on any scaled output. A backend that speaks to the compositor in surface
+   * coordinates -- wl_surface.set_opaque_region is the one that does -- needs
+   * this rather than its own buffer extent. Called by the window from the
+   * single place that declares the mapping, so the two cannot disagree.
+   *
+   * The default ignores it; only a backend with such a declaration overrides.
+   */
+  virtual void SetSurfaceLogicalSize(int32_t /*width*/, int32_t /*height*/) {}
+
+  /**
    * @brief Tear down any vsync/event-loop monitor the backend started.
    *
    * Called from @c FlutterView::~FlutterView before the engine destructs

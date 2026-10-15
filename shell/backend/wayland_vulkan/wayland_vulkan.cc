@@ -2586,7 +2586,7 @@ bool WaylandVulkanBackend::InitDmabufRing(uint32_t w, uint32_t h) {
   // present path back to the WSI swapchain, whose alpha is whatever this region
   // says -- so a region left over from the previous extent would be a false
   // claim about buffers this surface no longer shows.
-  SetSurfaceOpaque(0, 0, /*opaque=*/false);
+  SetSurfaceOpaque(/*opaque=*/false);
   {
     std::lock_guard<std::mutex> queue_lock(queue_mutex_);
     d().vkQueueWaitIdle(queue_);
@@ -2651,38 +2651,67 @@ bool WaylandVulkanBackend::InitDmabufRing(uint32_t w, uint32_t h) {
   dmabuf_ring_w_ = w;
   dmabuf_ring_h_ = h;
   dmabuf_frame_ = 0;
-  // XRGB8888 has no alpha, so stop the compositor assuming it does.
-  SetSurfaceOpaque(w, h, true);
-  ihs::log::info(
-      "[WaylandVulkanBackend] dma-buf present ring: {} slots {}x{} modifier "
-      "{:#018x}, opaque region declared",
-      dmabuf_slots_.size(), w, h, dmabuf_slots_.front().image->modifier());
+  // XRGB8888 has no alpha, so stop the compositor assuming it does. Sized in
+  // surface coordinates, so it takes no extent from here -- and the log says
+  // which size it used, because that is a different number from the ring's on
+  // any scaled output and "declared" alone cannot be checked.
+  const bool claimed = SetSurfaceOpaque(/*opaque=*/true);
+  if (claimed) {
+    ihs::log::info(
+        "[WaylandVulkanBackend] dma-buf present ring: {} slots {}x{} modifier "
+        "{:#018x}, opaque region {}x{} (surface coords)",
+        dmabuf_slots_.size(), w, h, dmabuf_slots_.front().image->modifier(),
+        surface_logical_w_, surface_logical_h_);
+  } else {
+    ihs::log::info(
+        "[WaylandVulkanBackend] dma-buf present ring: {} slots {}x{} modifier "
+        "{:#018x}, opaque region deferred (no surface size declared yet)",
+        dmabuf_slots_.size(), w, h, dmabuf_slots_.front().image->modifier());
+  }
   return true;
 }
 
-void WaylandVulkanBackend::SetSurfaceOpaque(const uint32_t w,
-                                            const uint32_t h,
-                                            const bool opaque) {
+bool WaylandVulkanBackend::SetSurfaceOpaque(const bool opaque) {
   auto* surface = wl_surface_.load(std::memory_order_acquire);
   if (surface == nullptr || shell_display_ == nullptr) {
-    return;
+    return false;
   }
   if (!opaque) {
     wl_surface_set_opaque_region(surface, nullptr);
-    return;
+    return false;
+  }
+  // Nothing to claim until the window has declared a mapping. Not an error:
+  // the ring can come up first, and SetSurfaceLogicalSize re-asserts.
+  if (surface_logical_w_ <= 0 || surface_logical_h_ <= 0) {
+    return false;
   }
   wl_compositor* compositor = shell_display_->GetCompositor();
   if (compositor == nullptr) {
-    return;
+    return false;
   }
   wl_region* region = wl_compositor_create_region(compositor);
   if (region == nullptr) {
-    return;
+    return false;
   }
-  wl_region_add(region, 0, 0, static_cast<int32_t>(w), static_cast<int32_t>(h));
+  wl_region_add(region, 0, 0, surface_logical_w_, surface_logical_h_);
   wl_surface_set_opaque_region(surface, region);
   // The compositor copies the region on set; the proxy is ours to drop.
   wl_region_destroy(region);
+  return true;
+}
+
+void WaylandVulkanBackend::SetSurfaceLogicalSize(const int32_t width,
+                                                 const int32_t height) {
+  if (width == surface_logical_w_ && height == surface_logical_h_) {
+    return;
+  }
+  surface_logical_w_ = width;
+  surface_logical_h_ = height;
+  // Re-assert only while a ring is live. Otherwise the claim would outlive the
+  // buffers it describes, and InitDmabufRing withdraws before every rebuild.
+  if (dmabuf_present_active_) {
+    (void)SetSurfaceOpaque(/*opaque=*/true);
+  }
 }
 
 void WaylandVulkanBackend::WarnMissingPlatformView(
