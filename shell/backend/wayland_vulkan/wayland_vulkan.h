@@ -472,8 +472,18 @@ class WaylandVulkanBackend final : public Backend {
   // Surface size in surface coordinates, from the window. Zero until the
   // window has declared a mapping; the opaque region is not claimed before
   // then, and the next declaration re-asserts it.
+  //
+  // Guarded because the writer is the Wayland event thread and the reader is
+  // the raster thread, the same split that makes wl_surface_ atomic. A mutex
+  // rather than a packed atomic: the pair has to be read consistently, and a
+  // shift-and-mask that is wrong declares a wrong-sized region silently, with
+  // nothing to test it against short of a compositor. Contention is nil -- the
+  // writer runs on resize, and the reader only when the stale flag is set.
+  std::mutex surface_size_mu_;
   int32_t surface_logical_w_{0};
   int32_t surface_logical_h_{0};
+  // Read every present, so it stays a lock-free check.
+  std::atomic<bool> opaque_region_stale_{false};
 
 #if BUILD_COMPOSITOR
   bool dma_buf_export_ok_{false};
@@ -713,12 +723,22 @@ class WaylandVulkanBackend final : public Backend {
   // logs rather than treats as failure.
   bool SetSurfaceOpaque(bool opaque);
 
-  // |Backend| Record the surface size the window just declared, and re-assert
-  // the opaque region when it has moved under a live ring. The ring is built
-  // lazily in PresentLayersDmabuf, long after the window first declares the
-  // mapping, so neither side can own this alone: the window knows the
-  // coordinates, the backend knows whether the content is opaque.
+  // |Backend| Record the surface size the window just declared and mark the
+  // opaque region stale. The ring is built lazily in PresentLayersDmabuf, long
+  // after the window first declares the mapping, so neither side can own this
+  // alone: the window knows the coordinates, the backend knows whether the
+  // content is opaque.
+  //
+  // Stores and flags only. This runs on the Wayland event thread
+  // (OnOutputResized) and on the main thread (window construction), while the
+  // surface is driven from the raster thread -- so it must not touch the
+  // wl_surface itself, and the size it writes is read from that other thread.
   void SetSurfaceLogicalSize(int32_t width, int32_t height) override;
+
+  // Re-declare the opaque region if SetSurfaceLogicalSize marked it stale.
+  // Raster thread, from the present path, so every wl_surface request stays on
+  // the one thread that drives the surface.
+  void ReassertOpaqueRegionIfStale();
   // Composite the layers into the current slot and commit its wl_buffer on the
   // surface. Returns the present result like PresentLayersImpl.
   bool PresentLayersDmabuf(const FlutterLayer** layers, size_t count);

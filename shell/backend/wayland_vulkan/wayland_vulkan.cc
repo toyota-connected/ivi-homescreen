@@ -2656,12 +2656,19 @@ bool WaylandVulkanBackend::InitDmabufRing(uint32_t w, uint32_t h) {
   // which size it used, because that is a different number from the ring's on
   // any scaled output and "declared" alone cannot be checked.
   const bool claimed = SetSurfaceOpaque(/*opaque=*/true);
+  int32_t declared_w = 0;
+  int32_t declared_h = 0;
+  {
+    const std::lock_guard<std::mutex> lock(surface_size_mu_);
+    declared_w = surface_logical_w_;
+    declared_h = surface_logical_h_;
+  }
   if (claimed) {
     ihs::log::info(
         "[WaylandVulkanBackend] dma-buf present ring: {} slots {}x{} modifier "
         "{:#018x}, opaque region {}x{} (surface coords)",
         dmabuf_slots_.size(), w, h, dmabuf_slots_.front().image->modifier(),
-        surface_logical_w_, surface_logical_h_);
+        declared_w, declared_h);
   } else {
     ihs::log::info(
         "[WaylandVulkanBackend] dma-buf present ring: {} slots {}x{} modifier "
@@ -2681,8 +2688,15 @@ bool WaylandVulkanBackend::SetSurfaceOpaque(const bool opaque) {
     return false;
   }
   // Nothing to claim until the window has declared a mapping. Not an error:
-  // the ring can come up first, and SetSurfaceLogicalSize re-asserts.
-  if (surface_logical_w_ <= 0 || surface_logical_h_ <= 0) {
+  // the ring can come up first, and the next present re-asserts.
+  int32_t w = 0;
+  int32_t h = 0;
+  {
+    const std::lock_guard<std::mutex> lock(surface_size_mu_);
+    w = surface_logical_w_;
+    h = surface_logical_h_;
+  }
+  if (w <= 0 || h <= 0) {
     return false;
   }
   wl_compositor* compositor = shell_display_->GetCompositor();
@@ -2693,7 +2707,7 @@ bool WaylandVulkanBackend::SetSurfaceOpaque(const bool opaque) {
   if (region == nullptr) {
     return false;
   }
-  wl_region_add(region, 0, 0, surface_logical_w_, surface_logical_h_);
+  wl_region_add(region, 0, 0, w, h);
   wl_surface_set_opaque_region(surface, region);
   // The compositor copies the region on set; the proxy is ours to drop.
   wl_region_destroy(region);
@@ -2702,13 +2716,28 @@ bool WaylandVulkanBackend::SetSurfaceOpaque(const bool opaque) {
 
 void WaylandVulkanBackend::SetSurfaceLogicalSize(const int32_t width,
                                                  const int32_t height) {
-  if (width == surface_logical_w_ && height == surface_logical_h_) {
+  {
+    const std::lock_guard<std::mutex> lock(surface_size_mu_);
+    if (width == surface_logical_w_ && height == surface_logical_h_) {
+      return;
+    }
+    surface_logical_w_ = width;
+    surface_logical_h_ = height;
+  }
+  // Flag only. This is the Wayland event thread (or the main thread at window
+  // construction); the raster thread owns the wl_surface, so it re-declares on
+  // its next present rather than this thread racing it on the same proxy.
+  // Reading dmabuf_present_active_ here would be the same cross-thread
+  // mistake, so the decision is left to the side that owns it.
+  opaque_region_stale_.store(true, std::memory_order_release);
+}
+
+void WaylandVulkanBackend::ReassertOpaqueRegionIfStale() {
+  if (!opaque_region_stale_.exchange(false, std::memory_order_acq_rel)) {
     return;
   }
-  surface_logical_w_ = width;
-  surface_logical_h_ = height;
-  // Re-assert only while a ring is live. Otherwise the claim would outlive the
-  // buffers it describes, and InitDmabufRing withdraws before every rebuild.
+  // Only while a ring is live: otherwise the claim would outlive the buffers it
+  // describes, and InitDmabufRing withdraws before every rebuild anyway.
   if (dmabuf_present_active_) {
     (void)SetSurfaceOpaque(/*opaque=*/true);
   }
@@ -3570,6 +3599,10 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
     wl_callback_add_listener(frame_callback_, &kFrameListener, this);
     frame_ready_ = false;
   }
+  // A surface resize since the last present leaves the region describing the
+  // old extent. Re-declare here, on the thread that owns the surface, before
+  // the commit that would publish the stale one.
+  ReassertOpaqueRegionIfStale();
   auto* buffer = reinterpret_cast<wl_buffer*>(slot.buffer->proxy());
   wl_surface_attach(surface, buffer, 0, 0);
   // Damage the surface. wl_surface.damage_buffer (buffer coordinates) is a v4
