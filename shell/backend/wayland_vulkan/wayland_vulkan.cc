@@ -2660,15 +2660,9 @@ bool WaylandVulkanBackend::InitDmabufRing(uint32_t w, uint32_t h) {
   // still set afterwards would make the present path claim a second time in
   // the same commit. A size written after this point re-sets it and gets its
   // own re-assert, which is the case the flag exists for.
-  opaque_region_stale_.store(false, std::memory_order_release);
+  surface_size_.ClearStale();
   const bool claimed = SetSurfaceOpaque(/*opaque=*/true);
-  int32_t declared_w = 0;
-  int32_t declared_h = 0;
-  {
-    const std::lock_guard<std::mutex> lock(surface_size_mu_);
-    declared_w = surface_logical_w_;
-    declared_h = surface_logical_h_;
-  }
+  const auto [declared_w, declared_h] = surface_size_.Current();
   if (claimed) {
     ihs::log::info(
         "[WaylandVulkanBackend] dma-buf present ring: {} slots {}x{} modifier "
@@ -2695,13 +2689,7 @@ bool WaylandVulkanBackend::SetSurfaceOpaque(const bool opaque) {
   }
   // Nothing to claim until the window has declared a mapping. Not an error:
   // the ring can come up first, and the next present re-asserts.
-  int32_t w = 0;
-  int32_t h = 0;
-  {
-    const std::lock_guard<std::mutex> lock(surface_size_mu_);
-    w = surface_logical_w_;
-    h = surface_logical_h_;
-  }
+  const auto [w, h] = surface_size_.Current();
   if (w <= 0 || h <= 0) {
     return false;
   }
@@ -2722,24 +2710,16 @@ bool WaylandVulkanBackend::SetSurfaceOpaque(const bool opaque) {
 
 void WaylandVulkanBackend::SetSurfaceLogicalSize(const int32_t width,
                                                  const int32_t height) {
-  {
-    const std::lock_guard<std::mutex> lock(surface_size_mu_);
-    if (width == surface_logical_w_ && height == surface_logical_h_) {
-      return;
-    }
-    surface_logical_w_ = width;
-    surface_logical_h_ = height;
-  }
-  // Flag only. This is the Wayland event thread (or the main thread at window
-  // construction); the raster thread owns the wl_surface, so it re-declares on
-  // its next present rather than this thread racing it on the same proxy.
-  // Reading dmabuf_present_active_ here would be the same cross-thread
-  // mistake, so the decision is left to the side that owns it.
-  opaque_region_stale_.store(true, std::memory_order_release);
+  // Store and flag, nothing more. This is the Wayland event thread
+  // (OnOutputResized) or the main thread at window construction; the raster
+  // thread owns the wl_surface, so it re-declares on its next present rather
+  // than this thread racing it on the same proxy. Deciding here whether a ring
+  // is live would be the same cross-thread mistake.
+  (void)surface_size_.Set(width, height);
 }
 
 void WaylandVulkanBackend::ReassertOpaqueRegionIfStale() {
-  if (!opaque_region_stale_.exchange(false, std::memory_order_acq_rel)) {
+  if (!surface_size_.TakeIfStale().has_value()) {
     return;
   }
   // Only while a ring is live: otherwise the claim would outlive the buffers it
