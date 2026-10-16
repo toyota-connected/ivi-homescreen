@@ -18,12 +18,14 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <ctime>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <vector>
 
 // clang-format off
@@ -650,6 +652,11 @@ class WaylandVulkanBackend final : public Backend {
   uint32_t dmabuf_ring_w_{0};
   uint32_t dmabuf_ring_h_{0};
   size_t dmabuf_frame_{0};
+  // When the last dma-buf frame was committed; sets how early the next present
+  // may stop waiting on its frame callback. Guarded by frame_mu_.
+  std::optional<std::chrono::steady_clock::time_point> last_dmabuf_commit_;
+  // Whether the compositor is done with @p slot's buffer.
+  [[nodiscard]] bool SlotReleased(const DmabufSlot& slot) const;
 
   // Explicit sync via wp_linux_drm_syncobj: when the compositor advertises the
   // manager and the device supports timeline/external-semaphore-fd, the blit
@@ -671,10 +678,13 @@ class WaylandVulkanBackend final : public Backend {
   // when the surface is visible) and the next present's rasterizer thread waits
   // on it — the same backpressure FIFO gives the swapchain path. A bounded wait
   // degrades an occluded/unmapped surface (no callbacks) to free-running rather
-  // than a hang.
+  // than a hang, and a free ring slot shortens it; see
+  // wl_vulkan::FrameWaitDeadline.
   std::mutex frame_mu_;
   std::condition_variable frame_cv_;
   bool frame_ready_{true};  // guarded by frame_mu_; true = may present
+  // When any frame callback last fired; guarded by frame_mu_.
+  std::optional<std::chrono::steady_clock::time_point> last_frame_done_;
   wl_callback* frame_callback_{
       nullptr};  // in-flight, retired on the event thread
   // wl_surface.frame done handler (Display event thread).
