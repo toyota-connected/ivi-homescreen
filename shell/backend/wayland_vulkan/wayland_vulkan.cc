@@ -42,6 +42,7 @@
 #include <wayland-client.h>  // wl_surface_attach/damage_buffer/commit
 
 #include "backend/wayland_vulkan/dmabuf_feedback_start.h"
+#include "backend/wayland_vulkan/frame_wait.h"
 #include "backend/wayland_vulkan/wl_dmabuf_present.h"
 #include "backend/wayland_vulkan/wl_explicit_sync.h"
 #if BUILD_HUD
@@ -3318,9 +3319,19 @@ void WaylandVulkanBackend::OnFrameDone(void* data,
       self->frame_callback_ = nullptr;
       self->frame_ready_ = true;
     }
+    // Any callback, stale or not, shows the compositor is still sending them.
+    self->last_frame_done_ = std::chrono::steady_clock::now();
   }
   wl_callback_destroy(cb);
   self->frame_cv_.notify_one();
+}
+
+bool WaylandVulkanBackend::SlotReleased(const DmabufSlot& slot) const {
+  // On the explicit-sync path the compositor signals a release timeline instead
+  // of sending wl_buffer.release, so poll that; otherwise use the
+  // wl_buffer.release flag.
+  return explicit_sync_ ? explicit_sync_->SlotReleased(slot.release_point)
+                        : slot.buffer->released();
 }
 
 bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
@@ -3343,12 +3354,21 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
   // fired — the compositor signaling it is ready for the next frame — before
   // producing this one. This is the dma-buf path's backpressure; the swapchain
   // path gets the equivalent from vkQueuePresentKHR blocking at vblank under
-  // FIFO. Bounded so an occluded/unmapped surface (whose callbacks stop firing)
-  // degrades to ~10 fps free-running instead of hanging the rasterizer.
+  // FIFO. When a slot is already free the wait ends early, once the last
+  // commit is most of a refresh old; FrameWaitDeadline has the reasoning.
   {
+    // Sampled before the wait because it sizes the wait. The slot itself is
+    // chosen after the wait, below, so the choice uses fresher release state.
+    const bool slot_free =
+        std::any_of(dmabuf_slots_.begin(), dmabuf_slots_.end(),
+                    [this](const DmabufSlot& s) { return SlotReleased(s); });
+    const uint32_t refresh_ns =
+        vsync_ != nullptr ? vsync_->RefreshPeriodNs() : 0;
     std::unique_lock<std::mutex> lock(frame_mu_);
-    frame_cv_.wait_for(lock, std::chrono::milliseconds(100),
-                       [this] { return frame_ready_; });
+    const auto deadline = wl_vulkan::FrameWaitDeadline(
+        std::chrono::steady_clock::now(), slot_free, last_dmabuf_commit_,
+        last_frame_done_, refresh_ns);
+    frame_cv_.wait_until(lock, deadline, [this] { return frame_ready_; });
   }
   // Prefer a slot whose wl_buffer the compositor has released, so we don't
   // overwrite a buffer that is still being scanned out. Start at the
@@ -3358,14 +3378,7 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
   size_t idx = dmabuf_frame_ % dmabuf_slots_.size();
   for (size_t i = 0; i < dmabuf_slots_.size(); ++i) {
     const size_t cand = (dmabuf_frame_ + i) % dmabuf_slots_.size();
-    // On the explicit-sync path the compositor signals a release timeline
-    // instead of sending wl_buffer.release, so poll that; otherwise use the
-    // wl_buffer.release flag.
-    const bool released =
-        explicit_sync_
-            ? explicit_sync_->SlotReleased(dmabuf_slots_[cand].release_point)
-            : dmabuf_slots_[cand].buffer->released();
-    if (released) {
+    if (SlotReleased(dmabuf_slots_[cand])) {
       idx = cand;
       break;
     }
@@ -3617,6 +3630,10 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
   }
   wl_surface_commit(surface);
   wl_display_flush(wl_display_);
+  {
+    std::lock_guard<std::mutex> lock(frame_mu_);
+    last_dmabuf_commit_ = std::chrono::steady_clock::now();
+  }
   FinishPresentation(feedback, /*committed=*/true);
   slot.buffer->mark_in_use();
 

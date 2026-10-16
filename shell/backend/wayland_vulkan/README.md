@@ -259,6 +259,22 @@ dma-buf path removes that layer:
    destructor, which runs after `App::~App()` has already stopped Wayland event
    dispatch via `Display::StopEvents()`, so the retire cannot race `OnFrameDone`.
 
+   The callback is a late clock on a compositor that sends it after its repaint
+   finishes rather than when it can take the next buffer: the rasterizer then
+   waits out that repaint on top of the refresh. So when a ring slot is already
+   released, the wait also ends once ¾ of a refresh has passed since the last
+   commit (`FrameWaitDeadline` in `frame_wait.h`). Under ¾ but over ½ keeps two
+   commits out of one repaint, where the first would be discarded. It applies
+   only while callbacks are arriving (one within the last two refreshes): an
+   occluded surface gets none but still has released buffers, and must keep
+   degrading to the 100 ms cap. With no free slot, no recent callback, or
+   before the first presentation reports the refresh period, the wait is the
+   plain callback wait. On target hardware whose compositor sends
+   the callback late, a gesture workload's input-to-display p95 went from
+   56.9–59.4 ms to 50.8–51.4 ms (3.37–3.54 to 3.04–3.08 frames), with GPU busy
+   unchanged, every frame still zero-copy, and none discarded. On an output
+   where the callback is not late the change is neutral.
+
 Surface damage is version-driven: `wl_surface.damage_buffer` (buffer coords) on a
 v4+ surface, else `wl_surface.damage` (surface coords). ivi binds `wl_compositor`
 at v3 today, so it takes the v1 path — calling `damage_buffer` on a v3 surface is
