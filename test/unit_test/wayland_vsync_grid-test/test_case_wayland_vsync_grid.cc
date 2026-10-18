@@ -298,3 +298,74 @@ TEST_F(WaylandVsyncGrid, StopForgetsTheLatchLead) {
   vsync_.Stop();
   EXPECT_EQ(vsync_.LatchLeadNs(), 0U);
 }
+
+TEST_F(WaylandVsyncGrid, ANegativePhaseHandsFramesOutBeforeTheVblank) {
+  vsync_.SetHandOutPhase(-5 * kMs);
+  Present(kVblank);
+  ASSERT_TRUE(Request(kVblank + 1 * kMs)) << "idle: answered at once";
+  ASSERT_FALSE(Request(kVblank + 3 * kMs));
+  ASSERT_EQ(scheduled_.size(), 1U);
+  EXPECT_EQ(scheduled_[0], kVblank + kPeriod - 5 * kMs);
+  now_ = kVblank + kPeriod - 5 * kMs;
+  vsync_.FireDeferredForTest();
+  EXPECT_FALSE(vsync_.HasParkedBaton()) << "handed out before the vblank";
+  // No second frame for that refresh: the presentation ending it leaves the
+  // next baton for the next hand-out.
+  ASSERT_FALSE(Request(kVblank + kPeriod - 2 * kMs));
+  Present(kVblank + kPeriod);
+  EXPECT_TRUE(vsync_.HasParkedBaton());
+  EXPECT_EQ(scheduled_.back(), kVblank + 2 * kPeriod - 5 * kMs);
+}
+
+TEST_F(WaylandVsyncGrid, APositivePhaseHandsFramesOutAfterTheVblank) {
+  vsync_.SetHandOutPhase(2 * kMs);
+  Present(kVblank);
+  ASSERT_TRUE(Request(kVblank + 1 * kMs));
+  ASSERT_FALSE(Request(kVblank + 3 * kMs));
+  EXPECT_EQ(scheduled_.back(), kVblank + kPeriod + 2 * kMs);
+  // The presentation on the vblank comes before the hand-out time: the baton
+  // waits for it.
+  Present(kVblank + kPeriod);
+  EXPECT_TRUE(vsync_.HasParkedBaton());
+  now_ = kVblank + kPeriod + 2 * kMs;
+  vsync_.FireDeferredForTest();
+  EXPECT_FALSE(vsync_.HasParkedBaton());
+}
+
+TEST_F(WaylandVsyncGrid, TheStartWindowFollowsTheHandOutTime) {
+  vsync_.SetHandOutPhase(-5 * kMs);
+  Present(kVblank);
+  ASSERT_TRUE(Request(kVblank + 1 * kMs));
+  // A request 1 ms after the next refresh's hand-out, with no frame started
+  // for it, starts at once; the one after waits for the following hand-out.
+  EXPECT_TRUE(Request(kVblank + kPeriod - 4 * kMs));
+  EXPECT_FALSE(Request(kVblank + kPeriod - 1 * kMs));
+  EXPECT_EQ(scheduled_.back(), kVblank + 2 * kPeriod - 5 * kMs);
+}
+
+TEST_F(WaylandVsyncGrid, ARequestPastTheStartWindowWaitsForTheNextHandOut) {
+  vsync_.SetHandOutPhase(-5 * kMs);
+  Present(kVblank);
+  ASSERT_TRUE(Request(kVblank + 1 * kMs));
+  ASSERT_FALSE(Request(kVblank + kPeriod - 2 * kMs))
+      << "3 ms past the hand-out";
+  EXPECT_EQ(scheduled_.back(), kVblank + 2 * kPeriod - 5 * kMs);
+}
+
+TEST_F(WaylandVsyncGrid, ThePhaseIsClampedToEightMilliseconds) {
+  vsync_.SetHandOutPhase(-20 * kMs);
+  Present(kVblank);
+  ASSERT_TRUE(Request(kVblank + 1 * kMs));
+  ASSERT_FALSE(Request(kVblank + 3 * kMs));
+  EXPECT_EQ(scheduled_.back(),
+            kVblank + kPeriod - ivi::WaylandVsyncProvider::kMaxHandOutPhaseNs);
+}
+
+TEST_F(WaylandVsyncGrid, OffTheGridThePhaseDoesNotApply) {
+  vsync_.SetGridPacing(false);
+  vsync_.SetHandOutPhase(-5 * kMs);
+  EXPECT_EQ(vsync_.PaceHandOutPhaseNs(), 0);
+  vsync_.SetGridPacing(true);
+  Present(kVblank);  // the grid starts with the first refresh period
+  EXPECT_EQ(vsync_.PaceHandOutPhaseNs(), -5 * kMs);
+}

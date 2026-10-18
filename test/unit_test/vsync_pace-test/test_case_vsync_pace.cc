@@ -507,3 +507,28 @@ TEST(VsyncPaceTimer, AWaitStillArmedWhenTheRunnerGoesIsHarmless) {
   }  // the runner and its io_context go first, as on Wayland
   SUCCEED();
 }
+
+TEST_F(VsyncPace, AHandOutPhaseMovesTheDeferredDelivery) {
+  vsync_.SetPaceHandOutPhase(-3 * kMs);
+  Present(kVblank);
+  ASSERT_TRUE(Request(kVblank + 1 * kMs));
+  ASSERT_FALSE(Request(kVblank + 2 * kMs));
+  ASSERT_EQ(scheduled_.size(), 1U);
+  EXPECT_EQ(scheduled_[0], kVblank + kPeriod - 3 * kMs);
+  now_ = scheduled_[0];
+  vsync_.FireDeferredForTest();
+  EXPECT_FALSE(vsync_.HasParkedBaton());
+}
+
+TEST_F(VsyncPace, TheHandOutPhaseIsClampedToHalfAPeriod) {
+  vsync_.SetPaceHandOutPhase(-20 * kMs);
+  Present(kVblank);
+  ASSERT_TRUE(Request(kVblank + 1 * kMs));
+  ASSERT_FALSE(Request(kVblank + 2 * kMs));
+  EXPECT_EQ(scheduled_.back(), kVblank + kPeriod - kPeriod / 2);
+  vsync_.SetPaceHandOutPhase(20 * kMs);
+  now_ = kVblank + kPeriod + 1 * kMs;
+  vsync_.FireDeferredForTest();
+  ASSERT_FALSE(Request(kVblank + kPeriod + 2 * kMs));
+  EXPECT_EQ(scheduled_.back(), kVblank + 2 * kPeriod + kPeriod / 2);
+}

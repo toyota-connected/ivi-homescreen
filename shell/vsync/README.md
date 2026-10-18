@@ -21,6 +21,7 @@ shared baton class and the per-source providers.
 | Vblank pacing: at most one baton per refresh, on the vblank | ✓ | On for the DRM backends; `IVI_VSYNC_PACE=0` turns it off |
 | Wayland grid pacing: frames on the vblanks, up to 2 commits in flight | ✓ | On by default; `IVI_WL_VSYNC_GRID=0` turns it off; `IVI_WL_VSYNC_GRID_DEPTH=1` allows 1 |
 | Wayland start window: a frame asked for just after the vblank starts at once | ✓ | 2 ms on the grid; `IVI_WL_VSYNC_START_WINDOW_MS` sets it (0 to 8, 0 off) |
+| Wayland hand-out phase: frames handed out before or after the vblank, where the host takes commits | ✓ | 0 on the grid; `IVI_WL_VSYNC_PHASE_MS` (-8 to 8) |
 | Wayland latch lead: when the window samples platform views, before the vblank | ✓ | On by default; `IVI_WL_LATCH_LEAD=0` reports 0 |
 | Per-present cadence profiling (window + session summary) | ✓ | `IVI_VSYNC_PROFILE` |
 | `WaylandVsyncProvider` — `wp_presentation` → `OnVsync` | ✓ | `-DBUILD_BACKEND_WAYLAND_EGL=ON` or `-DBUILD_BACKEND_WAYLAND_VULKAN=ON` |
@@ -199,6 +200,21 @@ which can fall just before the real vblank when the reported period is off,
 and one handed out by a presentation that arrives after the next vblank. The
 next frame waits for the vblank after that refresh, counted from the latest
 presentation, so frame starts stay locked to it.
+
+A host's take may not sit where a frame started on the vblank can meet it. On
+target hardware, one output's host took commits only within about 1.5 ms after
+each vblank: a frame started on the vblank commits some 6 ms later, misses,
+and is shown two refreshes on. Another output's host took them about 7 ms
+before the vblank, where the same frame makes it with time to spare.
+`SetHandOutPhase` moves the hand-out off the vblank: the frame of the refresh
+beginning at a vblank is handed out that long after it, or before it for a
+negative phase, starts then, and still targets the next vblank. The start
+window and the flip-side hold-off follow the hand-out time, so no refresh gets
+a second frame. `IVI_WL_VSYNC_PHASE_MS` sets it (-8 to 8, fractions allowed;
+0, the default, keeps frames on the vblank), clamped to half the period. A
+negative phase moves the input cutoff earlier by the same amount, so it pays
+only where it gains a refresh; learning it from each commit's outcome is the
+follow-up.
 
 With grid pacing on, the motion-to-photon cutoff stamped on a commit's
 feedback is approximate: the next baton can go out before that frame commits.
