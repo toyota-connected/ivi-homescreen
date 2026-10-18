@@ -268,6 +268,14 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
     }
   }
 
+#if BUILD_COMPOSITOR
+  // Read before the pacing callback is retired below.
+  const bool compositor_answering = CompositorAnswering();
+#else
+  // Only the compositor path paces frames, so nothing here can tell.
+  const bool compositor_answering = true;
+#endif
+
   if (device_ != nullptr) {
     // Drain all in-flight GPU work before tearing anything down. Without this
     // the swapchain (and the WSI's wl_buffer proxies bound to its images) can
@@ -372,8 +380,17 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
       }
     }
     swapchain_image_views_.clear();
+    // Unless the compositor stopped answering: a WSI that waits for it
+    // (Adreno's) never returns from the destroy then, and the process hangs on
+    // its way out. The swapchain is left to process exit instead.
     if (swapchain_ != nullptr) {
-      d().vkDestroySwapchainKHR(device_, swapchain_, nullptr);
+      if (compositor_answering) {
+        d().vkDestroySwapchainKHR(device_, swapchain_, nullptr);
+      } else {
+        ihs::log::warn(
+            "[WaylandVulkanBackend] the compositor is not showing the surface; "
+            "swapchain left to process exit");
+      }
       swapchain_ = VK_NULL_HANDLE;
     }
     // The engine has been shut down and the queue drained
@@ -2302,6 +2319,16 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
     CompositorPipeliningInit();
   }
 
+  // No callback for the last commit means the compositor is not showing this
+  // surface, and it releases no buffers while it does not. Acquiring then
+  // relies on the WSI honoring its timeout, and Adreno's does not: it waits
+  // for a release that never comes, and engine shutdown waits on it. Skip the
+  // frame; the callback fires once the surface is shown again.
+  if (!WaitFrameReady()) {
+    FinishPresentation(0, /*committed=*/false);
+    return false;
+  }
+
   // Pick the slot for this frame and wait until its previous use has
   // completed on the GPU. This is the only CPU/GPU sync — the queue is
   // never asked to idle.
@@ -2564,14 +2591,19 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
   // Mint wp_presentation_feedback before the commit baked into
   // vkQueuePresentKHR. See PresentCallback for rationale.
   const uint64_t feedback = RequestPresentationFeedback();
+  // Likewise the pacing callback the next frame waits on.
+  ArmFrameCallback(wl_surface_.load(std::memory_order_acquire));
   VkResult result;
   {
     std::lock_guard<std::mutex> queue_lock(queue_mutex_);
     result = d().vkQueuePresentKHR(queue_, &present_info);
   }
   // SUBOPTIMAL still presented the image.
-  FinishPresentation(feedback,
-                     result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR);
+  const bool presented = result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR;
+  if (!presented) {
+    DisarmFrameCallback();
+  }
+  FinishPresentation(feedback, presented);
   if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR) {
     resize_pending_ = true;
   }
@@ -3334,6 +3366,42 @@ bool WaylandVulkanBackend::SlotReleased(const DmabufSlot& slot) const {
                         : slot.buffer->released();
 }
 
+void WaylandVulkanBackend::ArmFrameCallback(wl_surface* surface) {
+  // Request it before the commit it is paired with. A prior callback still in
+  // flight (that frame's wait timed out) is left to fire and self-retire in
+  // OnFrameDone; only the newest one advances pacing.
+  static const wl_callback_listener kFrameListener = {
+      &WaylandVulkanBackend::OnFrameDone};
+  std::lock_guard<std::mutex> lock(frame_mu_);
+  frame_callback_ = wl_surface_frame(surface);
+  wl_callback_add_listener(frame_callback_, &kFrameListener, this);
+  frame_ready_ = false;
+}
+
+void WaylandVulkanBackend::DisarmFrameCallback() {
+  std::lock_guard<std::mutex> lock(frame_mu_);
+  frame_callback_ = nullptr;
+  frame_ready_ = true;
+}
+
+bool WaylandVulkanBackend::WaitFrameReady() {
+  std::unique_lock<std::mutex> lock(frame_mu_);
+  return frame_cv_.wait_for(lock, std::chrono::milliseconds(100),
+                            [this] { return frame_ready_; });
+}
+
+bool WaylandVulkanBackend::CompositorAnswering() {
+  std::lock_guard<std::mutex> lock(frame_mu_);
+  // No callback outstanding: nothing was committed, or the last commit was
+  // answered. Otherwise a visible surface has had one within a refresh or so.
+  if (frame_callback_ == nullptr) {
+    return true;
+  }
+  return last_frame_done_.has_value() &&
+         std::chrono::steady_clock::now() - *last_frame_done_ <
+             std::chrono::seconds(1);
+}
+
 bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
                                                size_t count) {
   const uint32_t w = width_;
@@ -3590,17 +3658,8 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
 
   wl_surface* surface = wl_surface_.load(std::memory_order_acquire);
   // Arm the pacing callback for this commit, so the next frame's present waits
-  // on it. Request it before the commit it is paired with. A prior callback
-  // still in flight (this frame's wait timed out) is left to fire and self-
-  // retire in OnFrameDone; only the newest one advances pacing.
-  {
-    static const wl_callback_listener kFrameListener = {
-        &WaylandVulkanBackend::OnFrameDone};
-    std::lock_guard<std::mutex> lock(frame_mu_);
-    frame_callback_ = wl_surface_frame(surface);
-    wl_callback_add_listener(frame_callback_, &kFrameListener, this);
-    frame_ready_ = false;
-  }
+  // on it.
+  ArmFrameCallback(surface);
   // A surface resize since the last present leaves the region describing the
   // old extent. Re-declare here, on the thread that owns the surface, before
   // the commit that would publish the stale one.
