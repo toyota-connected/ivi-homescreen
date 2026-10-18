@@ -132,6 +132,16 @@ bool WaylandVsyncProvider::TryBindGlobal(wl_registry* registry,
     }
   }
   SetGridPacing(GridPacingEnabledByEnv());
+  if (const char* env = std::getenv("IVI_WL_VSYNC_PHASE_MS")) {
+    char* end = nullptr;
+    const double ms = std::strtod(env, &end);
+    if (end != env && *end == '\0' && ms >= -8.0 && ms <= 8.0) {
+      SetHandOutPhase(static_cast<int64_t>(ms * 1'000'000.0));
+    } else {
+      ihs::log::warn(
+          "[WaylandVsync] IVI_WL_VSYNC_PHASE_MS={} ignored (-8 to 8)", env);
+    }
+  }
   if (const char* env = std::getenv("IVI_WL_VSYNC_GRID_DEPTH")) {
     const unsigned long depth = std::strtoul(env, nullptr, 10);
     if (depth < 1 || depth > kGridInFlight) {
@@ -170,12 +180,23 @@ void WaylandVsyncProvider::ApplyGrid(const bool on) {
   SetPaceFlips(on);
   SetPaceKeepPhase(on);
   SetPaceStartWindow(on ? start_window_ns_.load(std::memory_order_acquire) : 0);
+  SetPaceHandOutPhase(on ? hand_out_phase_ns_.load(std::memory_order_acquire)
+                         : 0);
 }
 
 void WaylandVsyncProvider::SetStartWindow(const uint64_t window_ns) {
   start_window_ns_.store(window_ns, std::memory_order_release);
   if (grid_.load(std::memory_order_acquire)) {
     SetPaceStartWindow(window_ns);  // off the grid, ApplyGrid picks it up
+  }
+}
+
+void WaylandVsyncProvider::SetHandOutPhase(const int64_t phase_ns) {
+  const int64_t phase =
+      std::clamp(phase_ns, -kMaxHandOutPhaseNs, kMaxHandOutPhaseNs);
+  hand_out_phase_ns_.store(phase, std::memory_order_release);
+  if (grid_.load(std::memory_order_acquire)) {
+    SetPaceHandOutPhase(phase);  // off the grid, ApplyGrid picks it up
   }
 }
 

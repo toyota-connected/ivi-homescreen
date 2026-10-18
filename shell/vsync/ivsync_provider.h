@@ -192,6 +192,20 @@ class IVsyncProvider {
     pace_start_window_ns_.store(window_ns, std::memory_order_release);
   }
 
+  /// With SetPaceToVblank: hand frames out this long after the vblank that
+  /// begins their refresh (negative: before it), instead of on it. The frame
+  /// starts when it is handed out and still targets the next vblank, so a
+  /// host that takes commits right after each vblank gets the commit before
+  /// its take with a negative phase, and one that takes them late in the
+  /// refresh gets a later input cutoff with a positive one. Clamped to half
+  /// a period either way. 0 (the default) hands out on the vblank.
+  void SetPaceHandOutPhase(int64_t phase_ns) {
+    pace_phase_ns_.store(phase_ns, std::memory_order_release);
+  }
+  [[nodiscard]] int64_t PaceHandOutPhaseNs() const {
+    return pace_phase_ns_.load(std::memory_order_acquire);
+  }
+
   /// The DRM backends' default: paced unless IVI_VSYNC_PACE=0.
   [[nodiscard]] static bool PaceEnabledByEnv();
 
@@ -258,18 +272,26 @@ class IVsyncProvider {
   std::atomic<bool> parked_{false};
 
   // Marshal one OnVsync onto the runner's strand. No-op when the runner is not
-  // wired (the caller must leave the baton parked in that case).
+  // wired (the caller must leave the baton parked in that case). @p start_ns
+  // is the frame's start and input cutoff, @p target_ns the vblank it is for.
   void PostOnVsync(FLUTTER_API_SYMBOL(FlutterEngine) engine,
                    intptr_t baton,
-                   uint64_t now_ns);
+                   uint64_t start_ns,
+                   uint64_t target_ns);
   // Drain a parked baton inline (idle pipeline / runner-wired kick latch).
-  // Hands out a parked baton now. @p frame_start_ns is the frame start
-  // Flutter is given; 0 means the current time.
-  void DrainParkedBaton(uint64_t frame_start_ns = 0);
+  // Hands out a parked baton now. @p vblank_ns is the vblank that begins the
+  // frame's refresh; 0 means an unpaced frame starting at the current time.
+  void DrainParkedBaton(uint64_t vblank_ns = 0);
   // Exchange the parked baton out and marshal it (no profiling — the public
   // DeliverVsync/DeliverDiscard wrappers record the present/discard).
-  // @p on_vblank: @p now_ns is the vblank that began the refresh.
+  // @p on_vblank: @p now_ns is the vblank that begins the frame's refresh;
+  // the frame starts at that vblank plus the hand-out phase, or now if that
+  // is still to come.
   void DeliverBaton(uint64_t now_ns, bool on_vblank);
+  // The hand-out phase, clamped to half a period, and when the frame of the
+  // refresh beginning at @p vblank_ns is handed out.
+  [[nodiscard]] int64_t PhaseNs() const;
+  [[nodiscard]] uint64_t HandOutNs(uint64_t vblank_ns) const;
 
   // Pacing (SetPaceToVblank). The earliest time the next baton may go out,
   // set on every hand-out to the vblank after the refresh it went out in; the
@@ -289,6 +311,7 @@ class IVsyncProvider {
   std::atomic<bool> pace_flips_{false};
   std::atomic<bool> pace_keep_phase_{false};
   std::atomic<uint64_t> pace_start_window_ns_{0};
+  std::atomic<int64_t> pace_phase_ns_{0};
   std::atomic<uint64_t> last_vblank_ns_{0};
   std::atomic<uint64_t> next_allowed_ns_{0};
   std::atomic<uint64_t> deferred_due_ns_{0};

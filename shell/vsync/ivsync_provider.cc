@@ -76,6 +76,23 @@ uint64_t IVsyncProvider::NextVblankAfter(const uint64_t t_ns) const {
   return last + ((t_ns - last) / period + 1) * period;
 }
 
+int64_t IVsyncProvider::PhaseNs() const {
+  const auto half = static_cast<int64_t>(PeriodNs() / 2);
+  return std::clamp<int64_t>(pace_phase_ns_.load(std::memory_order_acquire),
+                             -half, half);
+}
+
+uint64_t IVsyncProvider::HandOutNs(const uint64_t vblank_ns) const {
+  if (vblank_ns == 0) {
+    return 0;  // no refresh yet: nothing to wait for
+  }
+  const int64_t phase = PhaseNs();
+  if (phase < 0 && vblank_ns < static_cast<uint64_t>(-phase)) {
+    return 0;
+  }
+  return vblank_ns + phase;
+}
+
 void IVsyncProvider::NoteHandOut(const uint64_t at_ns, const bool on_vblank) {
   if (!pace_.load(std::memory_order_acquire)) {
     return;
@@ -94,11 +111,14 @@ void IVsyncProvider::NoteHandOut(const uint64_t at_ns, const bool on_vblank) {
 }
 
 void IVsyncProvider::ScheduleDeferred(const uint64_t due_ns) {
+  // @p due_ns is the vblank that begins the frame's refresh; the delivery is
+  // at its hand-out time.
   if (deferred_due_ns_.exchange(due_ns, std::memory_order_acq_rel) == due_ns) {
     return;  // already armed for that vblank
   }
+  const uint64_t at_ns = HandOutNs(due_ns);
   if (schedule_for_test_) {
-    schedule_for_test_(due_ns);
+    schedule_for_test_(at_ns);
     return;
   }
   auto* runner = runner_.load(std::memory_order_acquire);
@@ -109,7 +129,7 @@ void IVsyncProvider::ScheduleDeferred(const uint64_t due_ns) {
   }
   auto state = pace_timer_;
   auto* io = runner->GetIoContext();
-  asio::post(*runner->GetStrandContext(), [state, io, due_ns]() {
+  asio::post(*runner->GetStrandContext(), [state, io, due_ns, at_ns]() {
     // A timer per wait, owned by its handler: it dies when the wait completes,
     // or with the io_context if that goes first. A wait superseded by a later
     // one is not canceled; it fires, and OnDeferredDue ignores a due time no
@@ -121,7 +141,7 @@ void IVsyncProvider::ScheduleDeferred(const uint64_t due_ns) {
     const uint64_t now = static_cast<uint64_t>(ts.tv_sec) * 1'000'000'000ULL +
                          static_cast<uint64_t>(ts.tv_nsec);
     timer->expires_after(
-        std::chrono::nanoseconds(due_ns > now ? due_ns - now : 0));
+        std::chrono::nanoseconds(at_ns > now ? at_ns - now : 0));
     timer->async_wait([state, timer, due_ns](const asio::error_code& ec) {
       if (ec) {
         return;  // shutting down
@@ -177,22 +197,30 @@ void IVsyncProvider::SubmitBaton(FLUTTER_API_SYMBOL(FlutterEngine) engine,
   // Paced: a baton already went out this refresh, so this one waits for the
   // next vblank rather than starting a second frame now.
   if (pace_.load(std::memory_order_acquire)) {
+    // The vblank beginning the next refresh a frame may be handed out for,
+    // and that frame's hand-out time: the vblank plus the hand-out phase.
     const uint64_t due = next_allowed_ns_.load(std::memory_order_acquire);
+    const uint64_t hand_out = HandOutNs(due);
     const uint64_t now = NowNs();
-    if (now < due) {
+    if (now < hand_out) {
       ScheduleDeferred(due);
       return;
     }
-    // Frames are still coming: start this one on the next vblank, not now,
-    // unless the refresh has only just begun (the start window). Then it
-    // starts now, from the vblank that began the refresh.
+    // Frames are still coming: start this one at the next hand-out, not now,
+    // unless its refresh's hand-out has only just passed (the start window).
+    // Then it starts now, for the refresh that hand-out was for.
     const uint64_t period = PeriodNs();
     if (pace_keep_phase_.load(std::memory_order_acquire) && due != 0 &&
-        now < due + period) {
+        now < hand_out + period) {
       const uint64_t window = std::min(
           pace_start_window_ns_.load(std::memory_order_acquire), period / 2);
-      if (now - due > window) {
-        ScheduleDeferred(NextVblankAfter(now));
+      if (now - hand_out > window) {
+        // The refresh whose hand-out is next: the first vblank whose hand-out
+        // time is still to come.
+        const int64_t phase = PhaseNs();
+        const uint64_t from = phase >= 0 ? now - static_cast<uint64_t>(phase)
+                                         : now + static_cast<uint64_t>(-phase);
+        ScheduleDeferred(NextVblankAfter(from));
         return;
       }
       DrainParkedBaton(due);
@@ -231,8 +259,8 @@ bool IVsyncProvider::DeferToPace() {
     return false;
   }
   const uint64_t due = next_allowed_ns_.load(std::memory_order_acquire);
-  if (NowNs() >= due) {
-    return false;  // a new refresh: deliver now
+  if (NowNs() >= HandOutNs(due)) {
+    return false;  // the next refresh's hand-out time has come: deliver now
   }
   // Pairs with SubmitBaton's fence: see a baton it parked, or it sees what
   // retired the present.
@@ -276,7 +304,8 @@ bool IVsyncProvider::DeliverParkedBaton() {
   NoteHandOut(NowNs(), /*on_vblank=*/false);
   auto* engine = engine_.load(std::memory_order_acquire);
   if (engine != nullptr) {
-    PostOnVsync(engine, baton, LibFlutterEngine->GetCurrentTime());
+    const uint64_t start = LibFlutterEngine->GetCurrentTime();
+    PostOnVsync(engine, baton, start, start + PeriodNs());
   }
   return true;
 }
@@ -305,11 +334,19 @@ void IVsyncProvider::DeliverBaton(const uint64_t now_ns, const bool on_vblank) {
   NoteHandOut(now_ns, on_vblank);
   auto* engine = engine_.load(std::memory_order_acquire);
   if (engine != nullptr) {
-    PostOnVsync(engine, baton, now_ns);
+    if (!on_vblank) {
+      PostOnVsync(engine, baton, now_ns, now_ns + PeriodNs());
+      return;
+    }
+    // The frame of the refresh beginning at @p now_ns: it starts at its
+    // hand-out time, or now when that is still to come (a presentation
+    // handing it out early), and is for the vblank ending that refresh.
+    const uint64_t start = std::min(HandOutNs(now_ns), NowNs());
+    PostOnVsync(engine, baton, start, now_ns + PeriodNs());
   }
 }
 
-void IVsyncProvider::DrainParkedBaton(const uint64_t frame_start_ns) {
+void IVsyncProvider::DrainParkedBaton(const uint64_t vblank_ns) {
   if (parked_.load(std::memory_order_acquire)) {
     // Parked. This is the inline kick SubmitBaton takes when no present is in
     // flight, so without this check a fresh request from the engine is served
@@ -325,20 +362,25 @@ void IVsyncProvider::DrainParkedBaton(const uint64_t frame_start_ns) {
   if (baton == 0) {
     return;
   }
-  // A frame start given is the vblank that began the refresh.
-  NoteHandOut(frame_start_ns != 0 ? frame_start_ns : NowNs(),
-              /*on_vblank=*/frame_start_ns != 0);
+  // A vblank given is the one beginning the frame's refresh.
+  NoteHandOut(vblank_ns != 0 ? vblank_ns : NowNs(),
+              /*on_vblank=*/vblank_ns != 0);
   auto* engine = engine_.load(std::memory_order_acquire);
   if (engine != nullptr) {
-    PostOnVsync(engine, baton,
-                frame_start_ns != 0 ? frame_start_ns
-                                    : LibFlutterEngine->GetCurrentTime());
+    if (vblank_ns != 0) {
+      PostOnVsync(engine, baton, std::min(HandOutNs(vblank_ns), NowNs()),
+                  vblank_ns + PeriodNs());
+    } else {
+      const uint64_t start = LibFlutterEngine->GetCurrentTime();
+      PostOnVsync(engine, baton, start, start + PeriodNs());
+    }
   }
 }
 
 void IVsyncProvider::PostOnVsync(FLUTTER_API_SYMBOL(FlutterEngine) engine,
                                  const intptr_t baton,
-                                 const uint64_t now_ns) {
+                                 const uint64_t start_ns,
+                                 const uint64_t target_ns) {
   if (engine == nullptr || baton == 0) {
     return;
   }
@@ -346,14 +388,14 @@ void IVsyncProvider::PostOnVsync(FLUTTER_API_SYMBOL(FlutterEngine) engine,
   if (runner == nullptr || runner->GetStrandContext() == nullptr) {
     return;  // runner not wired yet — caller leaves the baton parked
   }
-  const uint64_t period_ns = PeriodNs();
-  // Record now_ns as this frame's input cutoff (frame_start_time) before we
+  // Record start_ns as this frame's input cutoff (frame_start_time) before we
   // hand Flutter the baton — a source's presentation feedback reads it back to
   // attribute inputs to the frame that consumed them (motion-to-photon).
-  last_frame_start_ns_.store(now_ns, std::memory_order_release);
-  asio::post(*runner->GetStrandContext(), [engine, baton, now_ns, period_ns]() {
-    LibFlutterEngine->OnVsync(engine, baton, now_ns, now_ns + period_ns);
-  });
+  last_frame_start_ns_.store(start_ns, std::memory_order_release);
+  asio::post(*runner->GetStrandContext(),
+             [engine, baton, start_ns, target_ns]() {
+               LibFlutterEngine->OnVsync(engine, baton, start_ns, target_ns);
+             });
 }
 
 void IVsyncProvider::Stop() {

@@ -222,6 +222,16 @@ class WaylandVsyncProvider : public IVsyncProvider {
   static constexpr uint64_t kStartWindowNs = 2'000'000;
   void SetStartWindow(uint64_t window_ns);
 
+  /// On the grid, how long after each refresh's vblank its frame is handed
+  /// out, negative for before it (SetPaceHandOutPhase): 0 unless
+  /// IVI_WL_VSYNC_PHASE_MS says otherwise (-8 to 8, fractions allowed). A
+  /// host that takes commits right after each vblank shows a frame started on
+  /// the vblank two refreshes on; handed out a few milliseconds before the
+  /// vblank, its commit lands before the take and it is shown one refresh
+  /// sooner. Clamped to half the period.
+  static constexpr int64_t kMaxHandOutPhaseNs = 8'000'000;
+  void SetHandOutPhase(int64_t phase_ns);
+
   /// Test seam: the number of commits waiting to be shown, as RequestFeedback
   /// and RetireFeedback keep it, without a compositor.
   void SetInFlightForTest(size_t n) {
@@ -276,6 +286,7 @@ class WaylandVsyncProvider : public IVsyncProvider {
   void ApplyGrid(bool on);
   std::atomic<size_t> grid_depth_{kGridInFlight};
   std::atomic<uint64_t> start_window_ns_{kStartWindowNs};
+  std::atomic<int64_t> hand_out_phase_ns_{0};
 
   // NoteLatch / LatchLeadNs. The last presentation's time; under latch_mu_,
   // the last take counted and the period the lead was learned at; and the
