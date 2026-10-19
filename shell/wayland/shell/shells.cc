@@ -34,7 +34,8 @@
 namespace ivi {
 
 std::vector<std::unique_ptr<WaylandShell>> WaylandShell::Create(
-    const std::string_view selection) {
+    const std::string_view selection,
+    const bool wants_agl_extension) {
   const std::string_view sel = selection.empty() ? "auto" : selection;
   const bool is_auto = (sel == "auto");
   // Only referenced inside the ivi / simple opt-in blocks below, both of which
@@ -64,9 +65,19 @@ std::vector<std::unique_ptr<WaylandShell>> WaylandShell::Create(
   // xdg when agl_shell is absent, so it serves both "auto" and "agl". Explicit
   // "xdg" forces the plain xdg shell (no agl extension).
 #if ENABLE_AGL_SHELL_CLIENT
-  if (is_auto || sel == "agl") {
+  // Under "auto", take the agl extension only when a view actually needs it.
+  //
+  // AglShell degrades to plain xdg when agl_shell is absent, so selecting it
+  // unconditionally looks harmless and is not: a compositor admits one
+  // agl_shell client at a time. On a system where something else owns the
+  // screen, an ordinary application binding it leaves that one unable to.
+  // Before the shell layer was unified this was gated on the same question --
+  // Display only set bind_to_agl_shell when some view's window_type was not
+  // NORMAL -- and losing that gate is what put every "auto" client on
+  // agl_shell. Explicit "agl" still forces it.
+  if (sel == "agl" || (is_auto && wants_agl_extension)) {
     shells.push_back(std::make_unique<AglShell>());
-  } else if (sel == "xdg") {
+  } else if (is_auto || sel == "xdg") {
     shells.push_back(std::make_unique<XdgShell>());
   }
 #elif ENABLE_XDG_CLIENT
