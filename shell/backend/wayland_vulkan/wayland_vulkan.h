@@ -671,40 +671,6 @@ class WaylandVulkanBackend final : public Backend {
   // overlay is not erased to black. Null falls back to the blit path.
   std::unique_ptr<wl_vulkan::LayerCompositor> layer_compositor_;
 
-  // Refresh pacing. Each present arms a wl_surface.frame callback (fires on the
-  // Display event thread at ~refresh when the surface is visible) and the next
-  // present's rasterizer thread waits on it, bounded, so an occluded/unmapped
-  // surface (no callbacks) degrades instead of hanging.
-  //
-  // The dma-buf commit is non-blocking, so this is that path's backpressure;
-  // it presents anyway once the wait runs out, and a free ring slot shortens
-  // the wait (see wl_vulkan::FrameWaitDeadline). The swapchain path is paced by
-  // FIFO, but needs the callback for a different reason: a compositor that
-  // never shows the surface never releases its buffers, and a WSI that ignores
-  // the acquire timeout (Adreno's) then blocks the rasterizer for good, taking
-  // engine shutdown with it. It skips the frame instead of acquiring.
-  std::mutex frame_mu_;
-  std::condition_variable frame_cv_;
-  bool frame_ready_{true};  // guarded by frame_mu_; true = may present
-  // When any frame callback last fired; guarded by frame_mu_.
-  std::optional<std::chrono::steady_clock::time_point> last_frame_done_;
-  wl_callback* frame_callback_{
-      nullptr};  // in-flight, retired on the event thread
-  // wl_surface.frame done handler (Display event thread).
-  static void OnFrameDone(void* data, wl_callback* cb, uint32_t time);
-  // Arms the pacing callback for the commit about to be made on |surface|.
-  void ArmFrameCallback(wl_surface* surface);
-  // Drops the armed callback when its commit did not happen, so pacing does
-  // not wait on it. The callback still fires with the next commit and retires
-  // itself in OnFrameDone.
-  void DisarmFrameCallback();
-  // Waits, bounded, for the last armed callback. True if it fired.
-  bool WaitFrameReady();
-  // Whether the compositor still answers commits: no callback outstanding, or
-  // one fired within the last second. False when it is not showing the
-  // surface.
-  bool CompositorAnswering();
-
   // Build (or rebuild after a resize) the ring of dma-buf image+wl_buffer
   // slots at @p w x @p h. Returns false (and clears dmabuf_present_active_) on
   // any allocation failure, so present falls back to the swapchain.
@@ -771,6 +737,54 @@ class WaylandVulkanBackend final : public Backend {
   void CompositorPipeliningInit();
   void CompositorPipeliningCleanup();
 #endif
+
+  // Refresh pacing. Each present arms a wl_surface.frame callback (fires on the
+  // Display event thread at ~refresh when the surface is visible) and the next
+  // present's rasterizer thread waits on it, bounded, so an occluded/unmapped
+  // surface (no callbacks) degrades instead of hanging.
+  //
+  // The dma-buf commit is non-blocking, so this is that path's backpressure;
+  // it presents anyway once the wait runs out, and a free ring slot shortens
+  // the wait (see wl_vulkan::FrameWaitDeadline). The swapchain path is paced by
+  // FIFO, but needs the callback for a different reason: a compositor that
+  // never shows the surface never releases its buffers, and a WSI that ignores
+  // the acquire timeout (Adreno's) then blocks the rasterizer for good, taking
+  // engine shutdown with it. The compositor path skips the frame instead of
+  // acquiring; the root-surface path, which must hand the engine an image,
+  // hands it the scratch image below.
+  std::mutex frame_mu_;
+  std::condition_variable frame_cv_;
+  bool frame_ready_{true};  // guarded by frame_mu_; true = may present
+  // When any frame callback last fired; guarded by frame_mu_.
+  std::optional<std::chrono::steady_clock::time_point> last_frame_done_;
+  wl_callback* frame_callback_{
+      nullptr};  // in-flight, retired on the event thread
+  // wl_surface.frame done handler (Display event thread).
+  static void OnFrameDone(void* data, wl_callback* cb, uint32_t time);
+  // Arms the pacing callback for the commit about to be made on |surface|.
+  void ArmFrameCallback(wl_surface* surface);
+  // Drops the armed callback when its commit did not happen, so pacing does
+  // not wait on it. The callback still fires with the next commit and retires
+  // itself in OnFrameDone.
+  void DisarmFrameCallback();
+  // Waits, bounded, for the last armed callback. True if it fired.
+  bool WaitFrameReady();
+  // Whether the compositor still answers commits: no callback outstanding, or
+  // one fired within the last second. False when it is not showing the
+  // surface.
+  bool CompositorAnswering();
+
+  // Rendered into instead of a swapchain image when the root-surface path
+  // gets no frame callback; PresentCallback drops that frame. Made on first
+  // use, remade when the swapchain's extent or format changes.
+  VkImage scratch_image_{VK_NULL_HANDLE};
+  VkDeviceMemory scratch_memory_{VK_NULL_HANDLE};
+  VkExtent2D scratch_extent_{};
+  VkFormat scratch_format_{VK_FORMAT_UNDEFINED};
+  bool scratch_frame_{false};  // rasterizer thread only
+  // Makes the scratch image match the swapchain. False when it cannot.
+  bool EnsureScratchImage();
+  void DestroyScratchImage();
 
   // Per-frame cadence profile (IVI_VK_PROFILE=1). Inter-present interval
   // is sampled on CLOCK_MONOTONIC immediately after each successful
