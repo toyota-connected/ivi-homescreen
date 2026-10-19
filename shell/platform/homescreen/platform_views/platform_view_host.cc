@@ -17,6 +17,7 @@
 #include "platform_view_host.h"
 
 #include "config/common.h"  // BUILD_COMPOSITOR
+#include "engine.h"
 #include "flutter_desktop_engine_state.h"
 #include "logging/logging.h"
 #include "profiling/frame_profile.h"  // the IVI_PROFILE gate
@@ -233,6 +234,24 @@ Backend* BackendOf(void* user_data) {
   if (state != nullptr && state->view_controller != nullptr &&
       state->view_controller->view != nullptr) {
     return state->view_controller->view->GetBackend();
+  }
+  return nullptr;
+}
+
+// The platform task runner. The engine state is handed it only once the engine
+// is running, but the runner exists, and runs tasks, from the Engine's
+// construction -- and a plugin's Dart side runs on the UI thread from the
+// moment the engine starts, so it can ask in between. Ask the engine then.
+TaskRunner* PlatformRunnerOf(const FlutterDesktopEngineState* state) {
+  if (state == nullptr) {
+    return nullptr;
+  }
+  if (state->platform_task_runner != nullptr) {
+    return state->platform_task_runner;
+  }
+  if (state->view_controller != nullptr &&
+      state->view_controller->engine != nullptr) {
+    return state->view_controller->engine->GetPlatformTaskRunner();
   }
   return nullptr;
 }
@@ -3795,7 +3814,7 @@ int HostPostPlatformTask(void* user_data,
   if (state == nullptr) {
     return IHS_PV_ERR_NO_BACKEND;
   }
-  TaskRunner* runner = state->platform_task_runner;
+  TaskRunner* runner = PlatformRunnerOf(state);
   if (runner == nullptr || runner->GetStrandContext() == nullptr) {
     return IHS_PV_ERR_NO_BACKEND;  // before start-up or after teardown
   }
@@ -3805,11 +3824,12 @@ int HostPostPlatformTask(void* user_data,
 }
 
 int HostIsPlatformThread(void* user_data) {
-  const auto* state = static_cast<FlutterDesktopEngineState*>(user_data);
-  if (state == nullptr || state->platform_task_runner == nullptr) {
+  const TaskRunner* runner =
+      PlatformRunnerOf(static_cast<FlutterDesktopEngineState*>(user_data));
+  if (runner == nullptr) {
     return 0;
   }
-  return state->platform_task_runner->IsThreadEqual(pthread_self()) ? 1 : 0;
+  return runner->IsThreadEqual(pthread_self()) ? 1 : 0;
 }
 
 // The producer is done with the dma-buf `buffer_id` names. Drop its imports
