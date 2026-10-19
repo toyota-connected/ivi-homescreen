@@ -258,6 +258,11 @@ dma-buf path removes that layer:
    free-running instead of hanging. The callback proxy is retired in the backend
    destructor, which runs after `App::~App()` has already stopped Wayland event
    dispatch via `Display::StopEvents()`, so the retire cannot race `OnFrameDone`.
+   The swapchain compositor path arms the same callback before
+   `vkQueuePresentKHR`, but when the wait runs out it skips the frame rather
+   than acquiring: no callback means the compositor is not showing the surface
+   and will release no image, and a WSI that ignores the acquire timeout would
+   block there for good (see Known limitations).
 
    The callback is a late clock on a compositor that sends it after its repaint
    finishes rather than when it can take the next buffer: the rasterizer then
@@ -540,6 +545,19 @@ gives up backpressure for input latency — different operating point.
    `CollectBackingStore` predate this work. The lint CI doesn't
    catch them because the lint workflow's build dir uses the EGL
    backend; left for a separate cleanup PR.
+6. **Adreno's WSI ignores the acquire timeout.** On an SA8155P (Adreno 640,
+   Weston ivi-shell), `vkAcquireNextImageKHR` with all images held waits in
+   `wl_display_dispatch_queue` for a release well past its 1 s timeout, and
+   `vkDestroySwapchainKHR` waits on the compositor in the same way. An
+   ivi-shell surface not yet placed on a layer is never shown, so its images
+   never come back, and SIGINT used to hang shutdown in both places. The
+   compositor path now skips frames that get no frame callback (refresh
+   pacing above). Detaching the surface's buffer does not free the destroy:
+   the compositor releases it and the WSI still waits. So when the last commit
+   went unanswered and no frame callback has come in a second, the destructor
+   leaves the swapchain to process exit and logs it. The
+   root-surface path (`GetNextImageCallback`, non-compositor builds) still
+   acquires unconditionally, because the engine needs an image back.
 
 ---
 
