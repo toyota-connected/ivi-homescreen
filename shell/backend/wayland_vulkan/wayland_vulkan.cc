@@ -268,13 +268,8 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
     }
   }
 
-#if BUILD_COMPOSITOR
   // Read before the pacing callback is retired below.
   const bool compositor_answering = CompositorAnswering();
-#else
-  // Only the compositor path paces frames, so nothing here can tell.
-  const bool compositor_answering = true;
-#endif
 
   if (device_ != nullptr) {
     // Drain all in-flight GPU work before tearing anything down. Without this
@@ -290,8 +285,6 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
     // member destructor it would run after vkDestroyDevice below and fault.
     hud_.reset();
 #endif
-#if BUILD_COMPOSITOR
-    CompositorPipeliningCleanup();
     // Retire any in-flight pacing callback. Safe here: App::~App() has already
     // called Display::StopEvents() on every display, so the reactor is no
     // longer dispatching Wayland events and OnFrameDone cannot race this — but
@@ -305,6 +298,9 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
         frame_callback_ = nullptr;
       }
     }
+    DestroyScratchImage();
+#if BUILD_COMPOSITOR
+    CompositorPipeliningCleanup();
     // Tear down explicit sync before the device: it destroys its acquire
     // timeline VkSemaphore with device_ (safe after the vkDeviceWaitIdle above)
     // and its wp_linux_drm_syncobj proxies while the connection is still up.
@@ -1296,6 +1292,20 @@ FlutterVulkanImage WaylandVulkanBackend::GetNextImageCallback(
     b->InitializeSwapChain();
   }
 
+  // As in PresentLayersImpl: no callback for the last commit means the
+  // compositor is not showing the surface and releases no image, and a WSI
+  // that ignores the acquire timeout (Adreno's) would not come back from the
+  // acquire below. The engine needs an image regardless, so this frame goes
+  // into the scratch image, which PresentCallback drops.
+  b->scratch_frame_ = !b->WaitFrameReady() && b->EnsureScratchImage();
+  if (b->scratch_frame_) {
+    return {
+        .struct_size = sizeof(FlutterVulkanImage),
+        .image = reinterpret_cast<uint64_t>(b->scratch_image_),
+        .format = static_cast<uint32_t>(b->surface_format_.format),
+    };
+  }
+
   // The engine needs an image back, so keep asking. On a failed acquire the
   // fence is never signaled, and waiting on it would hang this thread for
   // good; a compositor that holds every image releases one eventually.
@@ -1332,6 +1342,10 @@ bool WaylandVulkanBackend::PresentCallback(
   const auto state = static_cast<FlutterDesktopEngineState*>(user_data);
   const auto b = reinterpret_cast<WaylandVulkanBackend*>(
       state->view_controller->view->GetBackend());
+  if (b->scratch_frame_) {
+    // Not a swapchain image: nothing to transition or present.
+    return true;
+  }
 
   // Ensure the layout transition happens after the render pass in the same
   // command buffer Record vkCmdPipelineBarrier at the end of your render pass
@@ -1370,10 +1384,15 @@ bool WaylandVulkanBackend::PresentCallback(
   // feedback object binds to the most recent surface request prior to
   // the commit.
   b->RequestPresentationFeedback();
+  // Likewise the pacing callback the next frame waits on.
+  b->ArmFrameCallback(b->wl_surface_.load(std::memory_order_acquire));
   VkResult result;
   {
     std::lock_guard<std::mutex> queue_lock(b->queue_mutex_);
     result = d().vkQueuePresentKHR(b->queue_, &present_info);
+  }
+  if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+    b->DisarmFrameCallback();
   }
 
   // If the swap chain is no longer compatible with the surface, defer
@@ -1741,6 +1760,140 @@ void WaylandVulkanBackend::StopVsyncMonitor() {
   if (vsync_ != nullptr) {
     vsync_->SetPresentationTracker(nullptr);
     vsync_->Stop();
+  }
+}
+
+void WaylandVulkanBackend::OnFrameDone(void* data,
+                                       wl_callback* cb,
+                                       uint32_t /*time*/) {
+  auto* self = static_cast<WaylandVulkanBackend*>(data);
+  {
+    std::lock_guard<std::mutex> lock(self->frame_mu_);
+    // Only the current in-flight callback advances pacing; a stale one (a prior
+    // frame whose callback fired after this frame's present timed out waiting)
+    // is still retired, just without touching state.
+    if (self->frame_callback_ == cb) {
+      self->frame_callback_ = nullptr;
+      self->frame_ready_ = true;
+    }
+    // Any callback, stale or not, shows the compositor is still sending them.
+    self->last_frame_done_ = std::chrono::steady_clock::now();
+  }
+  wl_callback_destroy(cb);
+  self->frame_cv_.notify_one();
+}
+
+void WaylandVulkanBackend::ArmFrameCallback(wl_surface* surface) {
+  // Request it before the commit it is paired with. A prior callback still in
+  // flight (that frame's wait timed out) is left to fire and self-retire in
+  // OnFrameDone; only the newest one advances pacing.
+  static const wl_callback_listener kFrameListener = {
+      &WaylandVulkanBackend::OnFrameDone};
+  std::lock_guard<std::mutex> lock(frame_mu_);
+  frame_callback_ = wl_surface_frame(surface);
+  wl_callback_add_listener(frame_callback_, &kFrameListener, this);
+  frame_ready_ = false;
+}
+
+void WaylandVulkanBackend::DisarmFrameCallback() {
+  std::lock_guard<std::mutex> lock(frame_mu_);
+  frame_callback_ = nullptr;
+  frame_ready_ = true;
+}
+
+bool WaylandVulkanBackend::WaitFrameReady() {
+  std::unique_lock<std::mutex> lock(frame_mu_);
+  return frame_cv_.wait_for(lock, std::chrono::milliseconds(100),
+                            [this] { return frame_ready_; });
+}
+
+bool WaylandVulkanBackend::CompositorAnswering() {
+  std::lock_guard<std::mutex> lock(frame_mu_);
+  // No callback outstanding: nothing was committed, or the last commit was
+  // answered. Otherwise a visible surface has had one within a refresh or so.
+  if (frame_callback_ == nullptr) {
+    return true;
+  }
+  return last_frame_done_.has_value() &&
+         std::chrono::steady_clock::now() - *last_frame_done_ <
+             std::chrono::seconds(1);
+}
+
+bool WaylandVulkanBackend::EnsureScratchImage() {
+  if (scratch_image_ != VK_NULL_HANDLE &&
+      scratch_extent_.width == swapchain_extent_.width &&
+      scratch_extent_.height == swapchain_extent_.height &&
+      scratch_format_ == surface_format_.format) {
+    return true;
+  }
+  DestroyScratchImage();
+
+  VkImageCreateInfo ic{};
+  ic.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+  ic.imageType = VK_IMAGE_TYPE_2D;
+  ic.format = surface_format_.format;
+  ic.extent = {swapchain_extent_.width, swapchain_extent_.height, 1};
+  ic.mipLevels = 1;
+  ic.arrayLayers = 1;
+  ic.samples = VK_SAMPLE_COUNT_1_BIT;
+  ic.tiling = VK_IMAGE_TILING_OPTIMAL;
+  // What the engine may do with a swapchain image, and then some.
+  ic.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+             VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+  ic.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+  ic.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  if (d().vkCreateImage(device_, &ic, nullptr, &scratch_image_) != VK_SUCCESS) {
+    scratch_image_ = VK_NULL_HANDLE;
+    ihs::log::error("[WaylandVulkanBackend] scratch image create failed");
+    return false;
+  }
+
+  VkMemoryRequirements req{};
+  d().vkGetImageMemoryRequirements(device_, scratch_image_, &req);
+  uint32_t type = UINT32_MAX;
+  for (uint32_t i = 0; i < physical_device_memory_properties_.memoryTypeCount;
+       ++i) {
+    if ((req.memoryTypeBits & (1U << i)) != 0 &&
+        (physical_device_memory_properties_.memoryTypes[i].propertyFlags &
+         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0) {
+      type = i;
+      break;
+    }
+  }
+  VkMemoryAllocateInfo mai{};
+  mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+  mai.allocationSize = req.size;
+  mai.memoryTypeIndex = type;
+  if (type == UINT32_MAX ||
+      d().vkAllocateMemory(device_, &mai, nullptr, &scratch_memory_) !=
+          VK_SUCCESS ||
+      d().vkBindImageMemory(device_, scratch_image_, scratch_memory_, 0) !=
+          VK_SUCCESS) {
+    ihs::log::error("[WaylandVulkanBackend] scratch image memory failed");
+    DestroyScratchImage();
+    return false;
+  }
+  scratch_extent_ = swapchain_extent_;
+  scratch_format_ = surface_format_.format;
+  return true;
+}
+
+void WaylandVulkanBackend::DestroyScratchImage() {
+  if (scratch_image_ == VK_NULL_HANDLE && scratch_memory_ == VK_NULL_HANDLE) {
+    return;
+  }
+  // A frame rendered into it may still be in flight.
+  {
+    std::lock_guard<std::mutex> queue_lock(queue_mutex_);
+    d().vkQueueWaitIdle(queue_);
+  }
+  if (scratch_image_ != VK_NULL_HANDLE) {
+    d().vkDestroyImage(device_, scratch_image_, nullptr);
+    scratch_image_ = VK_NULL_HANDLE;
+  }
+  if (scratch_memory_ != VK_NULL_HANDLE) {
+    d().vkFreeMemory(device_, scratch_memory_, nullptr);
+    scratch_memory_ = VK_NULL_HANDLE;
   }
 }
 
@@ -3338,68 +3491,12 @@ void WaylandVulkanBackend::BlitPlatformViewVulkan(VkCommandBuffer cmd,
   }
 }
 
-void WaylandVulkanBackend::OnFrameDone(void* data,
-                                       wl_callback* cb,
-                                       uint32_t /*time*/) {
-  auto* self = static_cast<WaylandVulkanBackend*>(data);
-  {
-    std::lock_guard<std::mutex> lock(self->frame_mu_);
-    // Only the current in-flight callback advances pacing; a stale one (a prior
-    // frame whose callback fired after this frame's present timed out waiting)
-    // is still retired, just without touching state.
-    if (self->frame_callback_ == cb) {
-      self->frame_callback_ = nullptr;
-      self->frame_ready_ = true;
-    }
-    // Any callback, stale or not, shows the compositor is still sending them.
-    self->last_frame_done_ = std::chrono::steady_clock::now();
-  }
-  wl_callback_destroy(cb);
-  self->frame_cv_.notify_one();
-}
-
 bool WaylandVulkanBackend::SlotReleased(const DmabufSlot& slot) const {
   // On the explicit-sync path the compositor signals a release timeline instead
   // of sending wl_buffer.release, so poll that; otherwise use the
   // wl_buffer.release flag.
   return explicit_sync_ ? explicit_sync_->SlotReleased(slot.release_point)
                         : slot.buffer->released();
-}
-
-void WaylandVulkanBackend::ArmFrameCallback(wl_surface* surface) {
-  // Request it before the commit it is paired with. A prior callback still in
-  // flight (that frame's wait timed out) is left to fire and self-retire in
-  // OnFrameDone; only the newest one advances pacing.
-  static const wl_callback_listener kFrameListener = {
-      &WaylandVulkanBackend::OnFrameDone};
-  std::lock_guard<std::mutex> lock(frame_mu_);
-  frame_callback_ = wl_surface_frame(surface);
-  wl_callback_add_listener(frame_callback_, &kFrameListener, this);
-  frame_ready_ = false;
-}
-
-void WaylandVulkanBackend::DisarmFrameCallback() {
-  std::lock_guard<std::mutex> lock(frame_mu_);
-  frame_callback_ = nullptr;
-  frame_ready_ = true;
-}
-
-bool WaylandVulkanBackend::WaitFrameReady() {
-  std::unique_lock<std::mutex> lock(frame_mu_);
-  return frame_cv_.wait_for(lock, std::chrono::milliseconds(100),
-                            [this] { return frame_ready_; });
-}
-
-bool WaylandVulkanBackend::CompositorAnswering() {
-  std::lock_guard<std::mutex> lock(frame_mu_);
-  // No callback outstanding: nothing was committed, or the last commit was
-  // answered. Otherwise a visible surface has had one within a refresh or so.
-  if (frame_callback_ == nullptr) {
-    return true;
-  }
-  return last_frame_done_.has_value() &&
-         std::chrono::steady_clock::now() - *last_frame_done_ <
-             std::chrono::seconds(1);
 }
 
 bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,

@@ -258,11 +258,13 @@ dma-buf path removes that layer:
    free-running instead of hanging. The callback proxy is retired in the backend
    destructor, which runs after `App::~App()` has already stopped Wayland event
    dispatch via `Display::StopEvents()`, so the retire cannot race `OnFrameDone`.
-   The swapchain compositor path arms the same callback before
-   `vkQueuePresentKHR`, but when the wait runs out it skips the frame rather
-   than acquiring: no callback means the compositor is not showing the surface
-   and will release no image, and a WSI that ignores the acquire timeout would
-   block there for good (see Known limitations).
+   Both swapchain paths arm the same callback before `vkQueuePresentKHR`, but
+   when the wait runs out they do not acquire: no callback means the compositor
+   is not showing the surface and will release no image, and a WSI that ignores
+   the acquire timeout would block there for good (see Known limitations). The
+   compositor path skips the frame. The root-surface path must hand the engine
+   an image, so it hands it a scratch image of the swapchain's format and
+   extent, and `PresentCallback` drops that frame.
 
    The callback is a late clock on a compositor that sends it after its repaint
    finishes rather than when it can take the next buffer: the rasterizer then
@@ -551,13 +553,11 @@ gives up backpressure for input latency — different operating point.
    `vkDestroySwapchainKHR` waits on the compositor in the same way. An
    ivi-shell surface not yet placed on a layer is never shown, so its images
    never come back, and SIGINT used to hang shutdown in both places. The
-   compositor path now skips frames that get no frame callback (refresh
-   pacing above). Detaching the surface's buffer does not free the destroy:
-   the compositor releases it and the WSI still waits. So when the last commit
-   went unanswered and no frame callback has come in a second, the destructor
-   leaves the swapchain to process exit and logs it. The
-   root-surface path (`GetNextImageCallback`, non-compositor builds) still
-   acquires unconditionally, because the engine needs an image back.
+   swapchain paths no longer acquire for a frame that gets no frame callback
+   (refresh pacing above). Detaching the surface's buffer does not free the
+   destroy: the compositor releases it and the WSI still waits. So when the
+   last commit went unanswered and no frame callback has come in a second, the
+   destructor leaves the swapchain to process exit and logs it.
 
 ---
 
