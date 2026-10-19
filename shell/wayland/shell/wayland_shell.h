@@ -179,9 +179,18 @@ class WaylandShell {
    * "auto" returns all enabled shells in priority order so the first to bind
    * wins; a named value returns just that shell. The Display picks the active
    * shell as the first one whose IsBound() is true after registry enumeration.
+   *
+   * @p wants_agl_extension says whether any view asked for a window type that
+   * only the agl extension can serve (anything other than NORMAL: BG, or one
+   * of the PANEL_* edges). Under "auto" it decides between AglShell and the
+   * plain XdgShell, because binding agl_shell is not free: a compositor
+   * admits one agl_shell client at a time, so an ordinary xdg application
+   * that binds it locks out the one that actually manages the screen.
+   * Explicit "agl" still forces it.
    */
   [[nodiscard]] static std::vector<std::unique_ptr<WaylandShell>> Create(
-      std::string_view selection);
+      std::string_view selection,
+      bool wants_agl_extension);
 
  protected:
   WaylandShell() = default;

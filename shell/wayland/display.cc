@@ -74,7 +74,17 @@ Display::Display(const bool enable_cursor,
   const std::string shell_sel =
       configs.empty() ? std::string("auto")
                       : configs.front().view.shell.value_or("auto");
-  shells_ = ivi::WaylandShell::Create(shell_sel);
+  // Whether any view wants a window type only the agl extension can serve.
+  // Same question Display used to ask before the shell layer was unified, and
+  // for the same reason: agl_shell admits one client at a time, so a view that
+  // is content with plain xdg must not take it. Any view decides for all of
+  // them -- the Wayland connection and its shells are shared.
+  const bool wants_agl_extension =
+      std::any_of(configs.begin(), configs.end(), [](const auto& cfg) {
+        return WaylandWindow::get_window_type(cfg.view.window_type) !=
+               WaylandWindow::WINDOW_NORMAL;
+      });
+  shells_ = ivi::WaylandShell::Create(shell_sel, wants_agl_extension);
 
   m_display = wl_display_connect(nullptr);
   if (m_display == nullptr) {
