@@ -21,6 +21,7 @@
 #include <vulkan/vulkan.hpp>
 
 #include "backend/headless_vulkan/headless_vulkan.h"
+#include "view/display_metadata.h"
 
 // The vulkan.hpp dynamic dispatcher needs its storage defined in exactly ONE TU
 // per binary. When the drm-kms-vulkan backend is compiled in, its
@@ -1319,7 +1320,7 @@ void HeadlessVulkanBackend::SendWindowMetrics(uint32_t width, uint32_t height) {
   metrics.height = height;
   // Headless has no display scale: logical == physical pixels (pixel_ratio 1).
   metrics.pixel_ratio = 1.0;
-  metrics.display_id = 0;
+  metrics.display_id = homescreen::kPrimaryDisplayId;
   metrics.view_id = 0;
   LibFlutterEngine->SendWindowMetricsEvent(engine_handle_, &metrics);
 }

@@ -732,8 +732,9 @@ bool FlutterView::Initialize() {
   if (auto* drm = dynamic_cast<DrmBackend*>(m_backend.get())) {
     const double pixel_ratio = m_flutter_engine->GetPixelRatio();
     for (const auto& v : drm->AdditionalViews()) {
-      const auto r = m_flutter_engine->AddView(v.view_id, v.width, v.height,
-                                               pixel_ratio, /*display_id=*/0);
+      const auto r =
+          m_flutter_engine->AddView(v.view_id, v.width, v.height, pixel_ratio,
+                                    homescreen::kPrimaryDisplayId);
       ihs::log::info("[FlutterView] AddView id={} {}x{} result={}", v.view_id,
                      v.width, v.height, static_cast<int>(r));
     }

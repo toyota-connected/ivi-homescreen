@@ -32,6 +32,7 @@
 #include "cache_dir.h"
 #include "config/common.h"
 #include "engine.h"
+#include "view/display_metadata.h"
 #if BUILD_ACCESSIBILITY && BUILD_MCP
 #include "ihs/ihs_mcp_registry.h"
 #include "ihs/ihs_mcp_semantics.h"
@@ -585,7 +586,7 @@ FlutterEngineResult Engine::SetWindowSize(const size_t height,
       .physical_view_inset_right = 0,
       .physical_view_inset_bottom = 0,
       .physical_view_inset_left = 0,
-      .display_id = 0,  // TODO display index
+      .display_id = homescreen::kPrimaryDisplayId,
       // Each bundle is a discrete engine whose implicit view is id 0. m_index
       // identifies the view within App, not within this engine -- sending it as
       // view_id targeted a non-existent view on every engine past the first, so
@@ -722,7 +723,7 @@ FlutterEngineResult Engine::SetPixelRatio(double pixel_ratio) {
       .physical_view_inset_right = 0,
       .physical_view_inset_bottom = 0,
       .physical_view_inset_left = 0,
-      .display_id = 0,  // TODO display index
+      .display_id = homescreen::kPrimaryDisplayId,
       // Each bundle is a discrete engine whose implicit view is id 0. m_index
       // identifies the view within App, not within this engine -- sending it as
       // view_id targeted a non-existent view on every engine past the first, so

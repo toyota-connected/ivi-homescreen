@@ -33,6 +33,27 @@ struct ViewExtent {
   double scale{1.0};
 };
 
+// The id of the one display this shell publishes.
+//
+// Every view's FlutterWindowMetricsEvent.display_id has to carry this same
+// value. dart:ui's FlutterView.display looks the view's display id up in the
+// map built from FlutterEngineNotifyDisplayUpdate and dereferences the result
+// with `!`:
+//
+//     return platformDispatcher._displays[_viewConfiguration.displayId]!;
+//
+// so a view pointing at an id that was never published throws "Null check
+// operator used on a null value" the first time anything asks that view for
+// its display -- its refresh rate, for instance. That is latent until some
+// package does ask: lottie 3.6.0 started scheduling frames at the composition
+// rate rather than every vsync, which made it the first thing to notice that
+// we published display 1 and told every view it was on display 0.
+//
+// Nothing in the embedder API reserves any value here; the two sides simply
+// have to agree, so they share this constant instead of each spelling out a
+// literal.
+inline constexpr FlutterEngineDisplayId kPrimaryDisplayId = 1;
+
 // The FlutterEngineDisplay a view reports to a running engine.
 //
 // @p backend_rate_hz is Backend::RefreshRateHz(): the rate the backend's own
@@ -50,7 +71,7 @@ struct ViewExtent {
     const double pixel_ratio) {
   FlutterEngineDisplay display{};
   display.struct_size = sizeof(FlutterEngineDisplay);
-  display.display_id = 1;
+  display.display_id = kPrimaryDisplayId;
   display.single_display = true;
   display.refresh_rate =
       backend_rate_hz > 0.0 ? backend_rate_hz : display_rate_hz;
