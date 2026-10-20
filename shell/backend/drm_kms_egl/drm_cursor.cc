@@ -24,6 +24,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -121,6 +122,15 @@ struct DrmCursor::Impl {
   bool staged{false};
   std::atomic<uint64_t> desired_pos{0};
   std::atomic<bool> have_pos{false};
+  // A position SetPosition recorded that no Stage has taken yet.
+  std::atomic<bool> dirty{false};
+  // A Stage has reported the plane's first enable, so later ones need no
+  // ALLOW_MODESET. Only read and written under the compositor's scene lock.
+  bool enabled{false};
+  // Under listener_mtx: the compositor clears it as it goes, while the seat
+  // thread may be calling it.
+  std::mutex listener_mtx;
+  std::function<void()> move_listener;
 
   // Sprite state. theme + theme_name + sprite_size let SetShape reload a named
   // cursor at runtime; pending_shape is written under shape_mtx by the platform
@@ -214,6 +224,20 @@ std::unique_ptr<DrmCursor> DrmCursor::Create(drm::Device& dev,
   rcfg.prefer_legacy =
       self_committing &&
       !(path_env != nullptr && std::string_view(path_env) == "atomic");
+  // IVI_DRM_CURSOR_PLANE=<plane id> puts the cursor on that plane (an
+  // overlay, say), so the overlay path can be run on hardware that has a
+  // cursor plane. Atomic commits then, whatever IVI_DRM_CURSOR says.
+  if (const char* plane_env = std::getenv("IVI_DRM_CURSOR_PLANE");
+      plane_env != nullptr) {
+    char* end = nullptr;
+    const unsigned long id = std::strtoul(plane_env, &end, 10);
+    if (end != plane_env && *end == '\0' && id != 0 && id <= UINT32_MAX) {
+      rcfg.forced_plane_id = static_cast<uint32_t>(id);
+    } else {
+      ihs::log::warn("[DrmCursor] IVI_DRM_CURSOR_PLANE={}: not a plane id",
+                     plane_env);
+    }
+  }
   // drm-cxx's cursor Rotation runs opposite to the primary plane's
   // DRM_MODE_ROTATE_* (k270 on a 270 raster points the sprite "down"), so apply
   // the inverse here to keep the sprite visually aligned with the content.
@@ -290,6 +314,19 @@ void DrmCursor::SetStagedMode(const bool enabled) {
   impl_->staged = enabled;
 }
 
+bool DrmCursor::commits_atomically() const {
+  return impl_->renderer.path() != drm::cursor::PlanePath::kLegacy;
+}
+
+void DrmCursor::SetMoveListener(std::function<void()> listener) {
+  const std::lock_guard<std::mutex> lock(impl_->listener_mtx);
+  impl_->move_listener = std::move(listener);
+}
+
+bool DrmCursor::dirty() const {
+  return impl_->dirty.load(std::memory_order_acquire);
+}
+
 void DrmCursor::Hide() {
   // In staged mode the compositor drives the plane; a self-commit here would
   // race it. Multi-display cursor coordination on staged drivers is a separate
@@ -318,6 +355,11 @@ void DrmCursor::SetPosition(const int fb_x, const int fb_y) {
   }
   impl_->desired_pos.store(PackPos(fb_x, fb_y), std::memory_order_release);
   impl_->have_pos.store(true, std::memory_order_release);
+  impl_->dirty.store(true, std::memory_order_release);
+  const std::lock_guard<std::mutex> lock(impl_->listener_mtx);
+  if (impl_->move_listener) {
+    impl_->move_listener();
+  }
 }
 
 bool DrmCursor::Stage(drm::AtomicRequest& req, bool* const needs_modeset) {
@@ -328,6 +370,9 @@ bool DrmCursor::Stage(drm::AtomicRequest& req, bool* const needs_modeset) {
   if (!impl_->have_pos.load(std::memory_order_acquire)) {
     return false;  // no pointer motion yet — keep the cursor plane off
   }
+  // Cleared before the position is read: a move after this sets it again,
+  // so it is never lost between the read and the clear.
+  impl_->dirty.store(false, std::memory_order_release);
   const uint64_t packed = impl_->desired_pos.load(std::memory_order_acquire);
   const int fb_x = static_cast<int32_t>(packed >> 32);
   const int fb_y = static_cast<int32_t>(packed & 0xffffffffU);
@@ -337,21 +382,21 @@ bool DrmCursor::Stage(drm::AtomicRequest& req, bool* const needs_modeset) {
   if (auto r = impl_->renderer.stage(req, crtc_x, crtc_y, first); !r) {
     ihs::log::warn("[DrmCursor] stage({}, {}): {}", crtc_x, crtc_y,
                    r.error().message());
+    impl_->dirty.store(true, std::memory_order_release);
     return false;
   }
+  impl_->enabled = true;
   if (needs_modeset != nullptr) {
     *needs_modeset = first;
   }
   return true;
 }
 
-void DrmCursor::CommitPending() {
-  if (!impl_->staged || !impl_->have_pos.load(std::memory_order_acquire)) {
-    return;
+bool DrmCursor::StageEnabled(drm::AtomicRequest& req) {
+  if (!impl_->enabled) {
+    return false;
   }
-  const uint64_t packed = impl_->desired_pos.load(std::memory_order_acquire);
-  Move(static_cast<int32_t>(packed >> 32),
-       static_cast<int32_t>(packed & 0xffffffffU));
+  return Stage(req, nullptr);
 }
 
 bool DrmCursor::SetShape(const char* const xcursor_name) {

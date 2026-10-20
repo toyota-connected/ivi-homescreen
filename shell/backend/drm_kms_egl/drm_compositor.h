@@ -18,6 +18,8 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <deque>
 #include <functional>
@@ -25,6 +27,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -221,13 +224,16 @@ class DrmCompositor : public IFlipSink {
   [[nodiscard]] bool ReconcileScanoutModifier(uint32_t fourcc,
                                               uint64_t* modifier);
 
-  // Give the compositor the HW cursor so it can stage the cursor plane
-  // into its own atomic commit (DrmCursor::Stage) instead of letting the
-  // cursor self-commit. Used on drivers (nvidia-drm) where a separate
-  // cursor commit starves the compositor's PAGE_FLIP_EVENT. nullptr (the
-  // default) keeps the self-committing path. The pointer is owned by
-  // DrmBackend and outlives the compositor.
-  void SetCursor(homescreen::DrmCursor* cursor) { cursor_ = cursor; }
+  // Give the compositor the HW cursor so it stages the cursor plane into its
+  // own atomic commits (DrmCursor::Stage) instead of the cursor committing each
+  // move itself. A move with no frame coming to carry it gets a commit of its
+  // own, from a cursor thread: never while a frame is presenting or a flip is
+  // in flight, so at most one per vblank and never in a frame's way. Used
+  // where a commit per move contends with the compositor's flips: nvidia-drm,
+  // and a cursor off the legacy path (DrmCursor::commits_atomically). nullptr
+  // (the default) keeps the self-committing path. The pointer is owned by
+  // DrmBackend and outlives the compositor. Once, before the first present.
+  void SetCursor(homescreen::DrmCursor* cursor);
 
   // Per-flip-complete work for the atomic plane path. Called by
   // DrmBackend::UnifiedPageFlipHandler on the platform task runner
@@ -711,6 +717,42 @@ class DrmCompositor : public IFlipSink {
   // Externally-owned HW cursor staged into each atomic commit (see
   // SetCursor). null = self-committing cursor path (the default).
   homescreen::DrmCursor* cursor_{nullptr};
+
+  // Stage the cursor into every real commit of scene_ (LayerScene's commit
+  // hook), once its plane is up. scene_mu_ held; no-op without both.
+  void InstallCursorHook();
+
+  // Completion of the cursor's own commits. A sink of their own: their flip
+  // only lifts the latch and hands back a baton Flutter parked behind it,
+  // where a frame's also rotates slots and reports what it presented.
+  class CursorFlipSink final : public IFlipSink {
+   public:
+    explicit CursorFlipSink(DrmCompositor& owner) : owner_(owner) {}
+    void OnFlipEvent(unsigned int sequence,
+                     unsigned int tv_sec,
+                     unsigned int tv_usec) override;
+
+   private:
+    DrmCompositor& owner_;
+  };
+  CursorFlipSink cursor_flip_sink_{*this};
+
+  // The cursor thread (SetCursor): commits a move no frame carried, each time
+  // it is kicked -- a move, a flip, a present letting go of the scene.
+  void CursorThread();
+  void KickCursor();
+  // One attempt at committing the pending move. Returns when to look again
+  // if a frame that should have carried it may not come; nullopt to wait for
+  // a kick.
+  std::optional<std::chrono::steady_clock::time_point> CommitCursorMove();
+  std::thread cursor_thread_;
+  std::mutex cursor_mu_;
+  std::condition_variable cursor_cv_;
+  bool cursor_kicked_{false};  // cursor_mu_
+  bool cursor_stop_{false};    // cursor_mu_
+  // When a frame last committed (CLOCK_MONOTONIC), to tell whether the frame
+  // Flutter was last handed a vsync for has come.
+  std::atomic<uint64_t> last_frame_commit_ns_{0};
 
   // Double-buffered composition buffer for layers that overflow HW planes.
   static constexpr int kNumCompBufs = 2;
