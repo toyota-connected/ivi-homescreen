@@ -36,10 +36,20 @@
 # was a platform device whose driver symlink read "vkms". Accept either. The
 # path survives the rename that made the driver name untrustworthy, because it
 # is named for the device rather than for the bus glue.
+#
+# Only the default instance is named "vkms", though. One made through configfs
+# (vkms_dual.sh's) is a faux device named after its configfs group, so
+# /sys/devices/faux/<group>, with <group> under /sys/kernel/config/vkms/. Accept
+# that pair too: a faux device alone is not proof, and the group directory is
+# what says vkms made it.
 ihs_is_vkms_card() {  # ihs_is_vkms_card <cardN>
-    local card="$1" dev drv
+    local card="$1" dev drv name
     dev="$(readlink -f "/sys/class/drm/${card}/device" 2>/dev/null)" || return 1
-    [ -n "$dev" ] && [ "$(basename "$dev")" = "vkms" ] && return 0
+    [ -n "$dev" ] || return 1
+    name="$(basename "$dev")"
+    [ "$name" = "vkms" ] && return 0
+    [ "$(dirname "$dev")" = "/sys/devices/faux" ] &&
+        [ -d "/sys/kernel/config/vkms/${name}" ] && return 0
     drv="$(basename "$(readlink -f "/sys/class/drm/${card}/device/driver" \
            2>/dev/null)" 2>/dev/null)"
     [ "$drv" = "vkms" ]
