@@ -387,6 +387,21 @@ DrmCompositor::~DrmCompositor() {
   if (FallbackTraceEnabled()) {
     LogGlFallbackSites("final");
   }
+  // No cursor commit after this, so the wait below covers the last of them.
+  // The cursor is the backend's and outlives this: no more kicks from it.
+#if HAVE_DRM_CURSOR
+  if (cursor_ != nullptr) {
+    cursor_->SetMoveListener({});
+  }
+#endif
+  if (cursor_thread_.joinable()) {
+    {
+      const std::lock_guard<std::mutex> lock(cursor_mu_);
+      cursor_stop_ = true;
+    }
+    cursor_cv_.notify_one();
+    cursor_thread_.join();
+  }
   (void)WaitForPendingFlip();
   // The final flip is done, so anything held for its post-flip release is now
   // off the plane -- return it so producers aren't left blocked on a ring slot.
@@ -691,6 +706,11 @@ bool DrmCompositor::ReleaseDisplacedLocked() {
 }
 
 void DrmCompositor::AfterSceneUnlock() {
+  // A move that came while the scene was held, and that this present did not
+  // carry (it skipped its commit, or took the GL fallback).
+  if (cursor_ != nullptr) {
+    KickCursor();
+  }
   if (!displaced_pending_.load(std::memory_order_acquire)) {
     return;
   }
@@ -995,6 +1015,7 @@ bool DrmCompositor::InitPlaneAllocator() {
       }
       scene_ = std::move(*scene);
       ApplyCursorReservation();
+      InstallCursorHook();
       ihs::log::info(
           "[DrmCompositor] LayerScene constructed (crtc={} connector={})",
           scene_cfg.crtc_id, scene_cfg.connector_id);
@@ -1479,6 +1500,10 @@ void DrmCompositor::OnFlipEvent(const unsigned int sequence,
   if (drives_vsync_) {
     backend_->DeliverVsyncFromFlip(tv_sec, tv_usec);
   }
+  // A move during the flip waited for it.
+  if (cursor_ != nullptr) {
+    KickCursor();
+  }
 }
 
 void DrmCompositor::OnLegacyFlipPresented(const uint64_t serial,
@@ -1534,6 +1559,7 @@ void DrmCompositor::SettlePresentation(const uint64_t serial,
   // counts inside DrmBackend::Present. One counter across both, so a session
   // that latches the fallback mid-way still reads as one series.
   backend_->LogPresentedFrame();
+  last_frame_commit_ns_.store(NowTime().ust_ns, std::memory_order_release);
   if (blocking) {
     // A blocking commit has taken effect when it returns and sends no event.
     presentation_.Presented(serial, NowTime());
@@ -2005,6 +2031,143 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
 }
 
 // ─── Cursor staging + shared commit settle ──────────────────────────────
+
+void DrmCompositor::SetCursor(homescreen::DrmCursor* const cursor) {
+  cursor_ = cursor;
+#if HAVE_DRM_CURSOR
+  if (cursor_ == nullptr) {
+    return;
+  }
+  {
+    const std::lock_guard<std::mutex> lock(scene_mu_);
+    InstallCursorHook();
+  }
+  cursor_->SetMoveListener([this] { KickCursor(); });
+  cursor_thread_ = std::thread([this] { CursorThread(); });
+  ihs::log::info(
+      "[DrmCompositor] HW cursor staged: moves ride the frames' commits, or "
+      "one of their own when no frame is coming");
+#endif
+}
+
+void DrmCompositor::InstallCursorHook() {
+#if HAVE_DRM_CURSOR
+  if (!scene_ || cursor_ == nullptr) {
+    return;
+  }
+  // The scene's commit is NONBLOCK in steady state, so it cannot carry the
+  // plane's first enable: that is left to a commit of the cursor's own.
+  scene_->set_commit_hook(
+      [this](drm::AtomicRequest& req) -> drm::expected<void, std::error_code> {
+        (void)cursor_->StageEnabled(req);
+        return {};
+      });
+#endif
+}
+
+void DrmCompositor::KickCursor() {
+  {
+    const std::lock_guard<std::mutex> lock(cursor_mu_);
+    cursor_kicked_ = true;
+  }
+  cursor_cv_.notify_one();
+}
+
+void DrmCompositor::CursorThread() {
+  std::optional<std::chrono::steady_clock::time_point> again;
+  std::unique_lock<std::mutex> lock(cursor_mu_);
+  while (!cursor_stop_) {
+    const auto woken = [this] { return cursor_stop_ || cursor_kicked_; };
+    if (again) {
+      cursor_cv_.wait_until(lock, *again, woken);
+    } else {
+      cursor_cv_.wait(lock, woken);
+    }
+    if (cursor_stop_) {
+      break;
+    }
+    cursor_kicked_ = false;
+    lock.unlock();
+    again = CommitCursorMove();
+    lock.lock();
+  }
+}
+
+std::optional<std::chrono::steady_clock::time_point>
+DrmCompositor::CommitCursorMove() {
+#if HAVE_DRM_CURSOR
+  if (!cursor_->dirty()) {
+    return std::nullopt;
+  }
+  // A present holds the scene: it stages the move, or kicks on letting go.
+  const std::unique_lock<std::mutex> lock(scene_mu_, std::try_to_lock);
+  if (!lock.owns_lock()) {
+    return std::nullopt;
+  }
+  // Before the first frame's modeset, paused, or on the GL fallback's legacy
+  // flips, there is nothing a commit of the cursor's own can go with. A flip
+  // in flight kicks on completing.
+  if (!plane_mode_set_ || fallback_latched_ || !planes_available_ ||
+      paused_.load(std::memory_order_acquire) ||
+      flip_pending_.load(std::memory_order_acquire)) {
+    return std::nullopt;
+  }
+  // A frame on its way carries the move, and a commit now would take the
+  // vblank it is aiming for. One is coming while Flutter waits for a vsync,
+  // or for two refreshes after it was handed one with no frame since; a
+  // framework with nothing to draw sends none, so look again after that.
+  auto& vsync = backend_->vsync_;
+  const uint64_t period = refresh_ns_ != 0 ? refresh_ns_ : 16'666'667;
+  const uint64_t now = NowTime().ust_ns;
+  const auto in = [](const uint64_t ns) {
+    return std::chrono::steady_clock::now() + std::chrono::nanoseconds(ns);
+  };
+  if (vsync.HasParkedBaton()) {
+    return in(period);
+  }
+  const uint64_t started = vsync.LastDeliveredFrameStartNs();
+  if (started > last_frame_commit_ns_.load(std::memory_order_acquire) &&
+      now < started + 2 * period) {
+    return in(started + 2 * period - now);
+  }
+
+  drm::AtomicRequest req(backend_->device());
+  bool needs_modeset = false;
+  if (!req.valid() || !cursor_->Stage(req, &needs_modeset)) {
+    return std::nullopt;
+  }
+  // The plane's first enable is a blocking ALLOW_MODESET with no event, as
+  // a frame's is (StageCursorInto).
+  ScopedFlipArm arm(flip_pending_, vsync, !needs_modeset, drives_vsync_,
+                    /*mirror_source_pending=*/false);
+  const uint32_t flags =
+      needs_modeset ? DRM_MODE_ATOMIC_ALLOW_MODESET
+                    : (DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK);
+  if (auto r = req.commit(flags, static_cast<IFlipSink*>(&cursor_flip_sink_));
+      !r) {
+    static std::atomic<bool> warned{false};
+    if (!warned.exchange(true)) {
+      ihs::log::warn("[DrmCompositor] cursor commit: {} (logged once)",
+                     r.error().message());
+    }
+    return std::nullopt;
+  }
+  arm.Commit();
+#endif
+  return std::nullopt;
+}
+
+void DrmCompositor::CursorFlipSink::OnFlipEvent(
+    const unsigned int /*sequence*/,
+    const unsigned int /*tv_sec*/,
+    const unsigned int /*tv_usec*/) {
+  owner_.flip_pending_.store(false, std::memory_order_release);
+  // A baton Flutter asked for during the flip waited for it.
+  if (owner_.drives_vsync_) {
+    (void)owner_.backend_->vsync_.DeliverParkedBaton();
+  }
+  owner_.KickCursor();
+}
 
 bool DrmCompositor::StageCursorInto(drm::AtomicRequest& req) {
 #if HAVE_DRM_CURSOR
@@ -4299,19 +4462,6 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   } else {
     arm.Commit();
   }
-
-  // LayerScene owns its commit and can't accept a staged cursor plane, so
-  // (in staged mode) self-commit the cursor here to keep it visible. The
-  // scene already reserves the cursor's plane (set_external_reserved_planes
-  // via ApplyCursorReservation). TODO: a LayerScene API that takes the
-  // cursor plane in its own commit would avoid this separate commit (which
-  // reintroduces the flip contention on nvidia-drm in fullscreen scene
-  // mode). No-op when no cursor is staged.
-#if HAVE_DRM_CURSOR
-  if (cursor_ != nullptr) {
-    cursor_->CommitPending();
-  }
-#endif
 
   // Rotate every BS pool that participated. Same slot-pipeline
   // bookkeeping as the legacy path — the scene path does not touch

@@ -508,6 +508,7 @@ Pacing and scheduling are separate problems and both have to be right — see
 | `IVI_DRM_HOTPLUG` | (on) | `0` disables the udev hotplug monitor |
 | `IVI_DRM_KEY_REPEAT` | (on) | `0` disables auto-repeat for held keys |
 | `IVI_DRM_CURSOR` | (on) | `0` disables the KMS HW cursor |
+| `IVI_DRM_CURSOR_PLANE` | (unset) | A plane id: the HW cursor goes on that plane (an overlay, to run the overlay path where there is a cursor plane) |
 | `IVI_DRM_CAPTURE` | (off) | `1` arms the SIGUSR1 snapshot handler |
 | `IVI_DRM_VSYNC` | (on) | `0` falls back from Flutter `vsync_callback` (PAGE_FLIP_EVENT-locked) to the engine's internal wall-clock scheduler |
 | `IVI_VSYNC_PACE` | (on) | `0` answers every vsync request at once rather than at most one per refresh |

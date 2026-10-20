@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string_view>
 
@@ -46,9 +47,10 @@ namespace homescreen {
 // DrmDisplay/DrmSeat are handed a raw pointer for the seat-thread
 // HandlePointerMotion path.
 //
-// Single-thread by ownership: Move/SetPosition/Stage/CommitPending must be
-// called from the seat dispatch / raster thread. The compositor's atomic
-// commits race harmlessly against the cursor's own atomic commits at the
+// Single-thread by ownership: Move/SetPosition/Stage must be called from the
+// seat dispatch / raster thread; in staged mode the compositor calls Stage
+// with its scene lock held, which is what serializes it. The compositor's
+// atomic commits race harmlessly against the cursor's own atomic commits at the
 // kernel boundary (the kernel serializes), but the Renderer itself is not
 // thread-safe. SetShape is the exception: it is called from the platform
 // thread (ActivateSystemCursor) and only records the requested shape under a
@@ -128,12 +130,28 @@ class DrmCursor final : public ICursorShapeSink {
                 int32_t hot_y) override;
 
   // Enable staged mode. In staged mode the cursor plane is driven by the
-  // compositor via Stage() instead of self-committing — used on drivers
-  // (nvidia-drm) where a separate cursor commit on the CRTC starves the
-  // compositor's PAGE_FLIP_EVENT. Must be set before the first
-  // SetPosition. The compositor must also be handed this cursor via
-  // DrmCompositor::SetCursor.
+  // compositor via Stage() instead of self-committing: each move rides the
+  // compositor's next commit, or one of the cursor's own when no frame is
+  // coming (DrmCompositor::SetCursor). Used where a separate cursor commit
+  // per move contends with the compositor's flips -- nvidia-drm, and any
+  // cursor not on the legacy path (commits_atomically). Must be set before
+  // the first SetPosition.
   void SetStagedMode(bool enabled);
+
+  // True when Move() makes a blocking atomic commit -- an overlay, or the
+  // cursor plane driven atomically -- rather than the legacy ioctls' async
+  // update. One such commit per move costs the scanout vblanks, so such a
+  // cursor is staged.
+  [[nodiscard]] bool commits_atomically() const;
+
+  // Staged mode: called by SetPosition, on the seat thread, once it has
+  // recorded a position, so the compositor can commit it when no frame is
+  // coming to carry it. Set before the first SetPosition; an empty one,
+  // set from any thread, means no call into the old one follows.
+  void SetMoveListener(std::function<void()> listener);
+
+  // Staged mode: a position recorded since the last Stage().
+  [[nodiscard]] bool dirty() const;
 
   // Record the desired pointer position in framebuffer coordinates. In
   // staged mode this only stores the position (an atomic, no DRM commit)
@@ -151,14 +169,10 @@ class DrmCursor final : public ICursorShapeSink {
   // (compositor commit) thread.
   [[nodiscard]] bool Stage(drm::AtomicRequest& req, bool* needs_modeset);
 
-  // Self-commit the recorded position. Used by present paths that own
-  // their commit and can't accept a staged plane (the LayerScene
-  // path) so the cursor stays visible in staged mode. No-op
-  // outside staged mode or before the first SetPosition. Raster-thread
-  // only. NOTE: this is a separate cursor commit on the CRTC and so
-  // reintroduces the flip contention on nvidia-drm — a proper fix needs
-  // LayerScene to accept the cursor plane in its own commit.
-  void CommitPending();
+  // Stage() for a commit that cannot carry the first plane-enable's
+  // ALLOW_MODESET (LayerScene's commit hook): false, staging nothing, until
+  // the plane has been enabled by a commit that could.
+  [[nodiscard]] bool StageEnabled(drm::AtomicRequest& req);
 
   // Detach / re-attach the sprite from its cursor plane without destroying
   // state, so a multi-display seat can show exactly one cursor: hide the

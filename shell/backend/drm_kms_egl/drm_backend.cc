@@ -235,13 +235,13 @@ std::unique_ptr<DrmBackend> DrmBackend::Create(const DrmConfig& cfg,
 #if HAVE_DRM_CURSOR
 #if BUILD_COMPOSITOR
   // Decide whether to stage the cursor into the compositor's own atomic commit
-  // or let it self-commit. Staging is only a win on nvidia-drm, where a
-  // separate cursor commit on the CRTC starves the compositor's
-  // PAGE_FLIP_EVENT (the cursor's blocking commit swallows the pending flip's
-  // completion, freezing content on pointer motion). Everywhere else staging
-  // couples cursor motion to Flutter frame production, so the cursor stalls
-  // while the UI is idle — the self-committing cursor is smoother. kAuto (the
-  // default) therefore stages only on nvidia-drm; yes/no force the choice.
+  // or let it self-commit. On nvidia-drm a separate cursor commit on the CRTC
+  // starves the compositor's PAGE_FLIP_EVENT (the cursor's blocking commit
+  // swallows the pending flip's completion, freezing content on pointer
+  // motion). On the legacy cursor path the moves are async plane updates
+  // that wait for nothing, which beats staging, so kAuto (the default) stages
+  // nvidia-drm here and, below, a cursor that commits atomically; yes/no
+  // force the choice.
   //
   // The raster drain (IVI_DRM_RASTER_DRAIN, on by default) removes the very
   // PAGE_FLIP_EVENT starvation that made staging necessary on nvidia-drm: the
@@ -272,7 +272,13 @@ std::unique_ptr<DrmBackend> DrmBackend::Create(const DrmConfig& cfg,
   // motion) -- the legacy ioctls drive that plane too. plane_id()==0 (no
   // plane to name) is a no-op in the compositor.
   if (backend->cursor_ && backend->compositor_) {
-    if (stage_cursor) {
+    // Off the legacy path -- an overlay on a CRTC with no cursor plane, or
+    // the cursor plane driven atomically (IVI_DRM_CURSOR=atomic) -- each
+    // self-committed move is a blocking commit that takes the scanout's
+    // vblanks (half its rate on vc4 with the pointer moving): staged too.
+    if (stage_cursor ||
+        (backend->cfg_.stage_cursor != drm_config::TriState::kNo &&
+         backend->cursor_->commits_atomically())) {
       backend->cursor_->SetStagedMode(true);
       backend->compositor_->SetCursor(backend->cursor_.get());
     }
