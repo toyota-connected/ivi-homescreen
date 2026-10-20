@@ -205,9 +205,12 @@ endif ()
 if (BUILD_COMPOSITOR AND (BUILD_BACKEND_WAYLAND_VULKAN OR BUILD_BACKEND_DRM_KMS_VULKAN))
     add_subdirectory(layer_draw_vk-test)
 endif ()
-# VulkanBackingStore belongs to the wayland-vulkan backend.
-if (BUILD_BACKEND_WAYLAND_VULKAN)
+# VulkanBackingStore belongs to the wayland-vulkan backend, and is only built
+# with the compositor.
+if (BUILD_BACKEND_WAYLAND_VULKAN AND BUILD_COMPOSITOR)
     add_subdirectory(vk_store_dmabuf-test)
+endif ()
+if (BUILD_BACKEND_WAYLAND_VULKAN)
     add_subdirectory(dmabuf_feedback_start-test)
     add_subdirectory(surface_size_latch-test)
     add_subdirectory(frame_wait-test)
