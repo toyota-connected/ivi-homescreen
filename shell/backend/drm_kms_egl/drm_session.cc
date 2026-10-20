@@ -28,6 +28,8 @@
 #include <utility>
 
 #include "logging.h"
+#include "main_loop_waker.h"
+#include "shutdown_flag.h"
 
 namespace homescreen {
 
@@ -218,8 +220,24 @@ void DrmSession::DispatchLoop() {
         waker_.Drain();
       }
       if ((pfds[seat_idx].revents & kErr) != 0) {
-        ihs::log::error("[DrmSession] seat fd error (revents={:#x}); exiting",
-                        static_cast<unsigned>(pfds[seat_idx].revents));
+        // The seat backend went away (seatd exited; with libseat's builtin
+        // backend that is our own forked child). No more pause/resume, so
+        // shut the shell down rather than run on without a session. Not at
+        // teardown, where the seat closing under us is expected.
+        //
+        // Clear the run flag directly rather than raise(SIGTERM): the session
+        // opens while App is being constructed, before main() installs the
+        // shutdown handlers, and SIGTERM's default action there would end the
+        // process without restoring the CRTC or the VT. Run() sees the flag
+        // whenever it gets to it.
+        if (stop_.load(std::memory_order_acquire)) {
+          break;
+        }
+        ihs::log::error(
+            "[DrmSession] seat fd error (revents={:#x}); shutting down",
+            static_cast<unsigned>(pfds[seat_idx].revents));
+        running = 0;
+        MainLoopWaker::SignalWake();
         break;
       }
       if ((pfds[seat_idx].revents & POLLIN) != 0) {
