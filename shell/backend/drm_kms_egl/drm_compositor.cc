@@ -3728,7 +3728,15 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
           if (planes_available_ && !surface->HasContent()) {
             continue;
           }
-          return PresentViaGlFallback(layers, layer_count);
+          // What it already has, and only that. The composite waits for the
+          // flip and the repaint window first, and a frame the producer
+          // submits meanwhile belongs to the present it nudged. Importing it
+          // here leaves that present no new frame either, and so on: every
+          // present composited, none on a plane.
+          surface->HoldGlFrames(true);
+          const bool presented = PresentViaGlFallback(layers, layer_count);
+          surface->HoldGlFrames(false);
+          return presented;
         }
         ICompositorSurface::Dmabuf& db = ld.dmabuf;
         // A new frame no plane scans out in its format goes to composition;

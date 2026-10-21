@@ -688,6 +688,8 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
   mutable PendingEglFrame pending_egl;
   mutable std::map<uint32_t, EglDmabufImporter::ImportedTexture> buffers_egl;
   mutable EglDmabufImporter::ImportedTexture* current_egl{nullptr};
+  // HoldGlFrames: GL texture reads import nothing newer than what is bound.
+  bool gl_held{false};
   // Producer buffer_id of the frame current_egl was imported from, for
   // GetGlTextureBufferId. The GL path has no scanout retire to key a release
   // off, so the compositor tells one bound frame from the next by this.
@@ -1455,6 +1457,15 @@ class IhsPluginView final : public PlatformView, public ICompositorSurface {
     return !extra_order.empty();
   }
 
+  void HoldGlFrames(const bool hold) override {
+#if IVI_HAVE_EGL
+    const std::lock_guard<std::mutex> lock(mutex);
+    gl_held = hold;
+#else
+    (void)hold;
+#endif
+  }
+
   // Close out the outstanding offer for `buffer_id`, whether it was placed or
   // given back -- both mean the frame will not be offered again. Offers are
   // per layer, and a buffer is offered by at most one layer at a time (see
@@ -2154,6 +2165,10 @@ void IhsPluginView::ImportPendingEglLocked(std::unique_lock<std::mutex>& lock,
 
 uint32_t IhsPluginView::GetGlTextureName() const {
   std::unique_lock<std::mutex> lock(mutex);
+  if (gl_held && current_egl != nullptr) {
+    ShmSampledLocked(current_egl_buffer_id);
+    return current_egl->texture;
+  }
   // Importing a newer frame for layer 0 means any open offer of an older one
   // was abandoned.
   if (pending_egl.valid) {
@@ -2198,12 +2213,17 @@ ICompositorSurface::GlLayerTexture IhsPluginView::GetLayerGlTexture(
     return out;
   }
   const uint32_t layer_id = extra_order[index - 1];
-  if (const auto it = extra_layers.find(layer_id);
-      it != extra_layers.end() && it->second.pending.valid) {
-    AbandonStaleOfferLocked(it->second.offer,
-                            it->second.pending.frame.buffer_id);
+  const auto held = extra_layers.find(layer_id);
+  const bool take_new = !gl_held || held == extra_layers.end() ||
+                        held->second.current_egl == nullptr;
+  if (take_new && held != extra_layers.end() && held->second.pending.valid) {
+    AbandonStaleOfferLocked(held->second.offer,
+                            held->second.pending.frame.buffer_id);
   }
-  ImportPendingEglLocked(lock, [this, layer_id](EglSlot* s) {
+  ImportPendingEglLocked(lock, [this, layer_id, take_new](EglSlot* s) {
+    if (!take_new) {
+      return false;
+    }
     const auto it = extra_layers.find(layer_id);
     if (it == extra_layers.end()) {
       return false;

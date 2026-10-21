@@ -376,11 +376,15 @@ class FakeDmabufPlatformView : public ICompositorSurface {
   }
   bool OnPresent(const FlutterLayer*) override {
     presents_++;
+    if (gl_held_) {
+      held_presents_++;
+    }
     return true;
   }
   [[nodiscard]] FlutterPlatformViewIdentifier GetIdentifier() const override {
     return id_;
   }
+  void HoldGlFrames(bool hold) override { gl_held_ = hold; }
 
   // Deliver-once, like the real producer: a frame reaches the scanout path at
   // most once, and a present with nothing new says so rather than handing the
@@ -497,6 +501,10 @@ class FakeDmabufPlatformView : public ICompositorSurface {
   }
 
   [[nodiscard]] int presents() const { return presents_; }
+  // Presents composited while held to the frame already bound, and whether
+  // the hold is still on.
+  [[nodiscard]] int held_presents() const { return held_presents_; }
+  [[nodiscard]] bool gl_held() const { return gl_held_; }
   // Times the plane path asked for a frame, fresh or not.
   [[nodiscard]] int polls() const {
     const std::lock_guard<std::mutex> lock(mu_);
@@ -530,6 +538,8 @@ class FakeDmabufPlatformView : public ICompositorSurface {
   const GbmSolidBuffer* buffer_;
   uint32_t buffer_id_;
   int presents_{0};
+  int held_presents_{0};
+  bool gl_held_{false};
   mutable std::mutex mu_;
   mutable bool fresh_{true};
   mutable bool had_content_{false};
@@ -1266,6 +1276,34 @@ TEST_F(DrmBackendVkmsScene, AnIdleViewWithContentIsStillComposited) {
          "static producer blanks";
 
   compositor_->UnregisterSurface(33);
+}
+
+// The idle view above is composited from the frame it already has, not from
+// one that lands while that present waits out the flip: that frame belongs to
+// the present it nudged, which can put it on a plane. Taking it instead left
+// that present nothing new either, and a client on a Pi 5 composited on every
+// present at 40 fps, none of them on a plane.
+TEST_F(DrmBackendVkmsScene, AnIdleViewIsCompositedFromTheFrameItHas) {
+  GbmSolidBuffer buffer;
+  ASSERT_TRUE(buffer.Create(backend_->device().fd(), content_w_, content_h_,
+                            0xFF1E7A46u));
+
+  auto view = std::make_shared<FakeDmabufPlatformView>(34, buffer, 3);
+  view->set_offers_unimportable_frame(true);
+  layer_w_ = content_w_;
+  layer_h_ = content_h_;
+  compositor_->RegisterSurface(34, view);
+
+  ASSERT_TRUE(PresentPlatformView(34));
+  EXPECT_EQ(view->held_presents(), 0)
+      << "a present with a new frame held the view to its old one";
+
+  // No new frame: composited, held to what it has.
+  ASSERT_TRUE(PresentPlatformView(34));
+  EXPECT_EQ(view->held_presents(), 1);
+  EXPECT_FALSE(view->gl_held()) << "the hold outlived its present";
+
+  compositor_->UnregisterSurface(34);
 }
 
 // The release fence (#513). Same displacement as the case above, but the

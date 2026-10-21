@@ -511,6 +511,17 @@ class ICompositorSurface {
   [[nodiscard]] virtual bool HasContent() const { return false; }
 
   /**
+   * @brief Keep the GL textures on the frames already bound.
+   *
+   * While held, @c GetGlTextureName and @c GetLayerGlTexture import nothing
+   * newer; a frame submitted since stays on offer to the plane path. For a
+   * composite with no new frame for this surface: a frame landing while it
+   * composites belongs to the present it nudged, which can put it on a plane.
+   * A layer with nothing bound still imports. Raster thread.
+   */
+  virtual void HoldGlFrames(bool /* hold */) {}
+
+  /**
    * @brief The producer's @c buffer_id for the frame @c GetGlTextureName last
    * bound, or 0 when nothing is bound or the surface does not track it.
    *
