@@ -322,9 +322,10 @@ class DrmCompositor : public IFlipSink {
   bool EnsureDrmFbId(GbmBackingStore& store) const;
 
   // Composite @p src_tex into @p target_fbo at the given destination rect.
-  // Pass @p src_fbo (the FBO that owns @p src_tex as its color attachment)
-  // to enable the blit fast-path; pass 0 when the source is a raw texture
-  // with no backing FBO — the quad path will be used instead.
+  // Always a textured quad, never glBlitFramebuffer: a backing store here is
+  // a linear scanout BO, and a GPU that renders tiled may copy one on the CPU
+  // to blit from it. v3d does whenever the blit flips or drops alpha, which
+  // one to FBO 0 or with flip_y always does: 8-10 ms a frame on a Pi 5.
   //
   // @p flip_y must be true whenever the destination FBO is an EGLImage-
   // backed GBM BO scanned out directly by KMS (e.g. @c comp_bufs_): KMS
@@ -333,7 +334,6 @@ class DrmCompositor : public IFlipSink {
   // Leave false for gbm_surface FBO 0 where Mesa already matches NDC y=-1
   // to screen-bottom.
   void CompositeLayerIntoFbo(GLuint target_fbo,
-                             GLuint src_fbo,
                              GLuint src_tex,
                              GLsizei src_w,
                              GLsizei src_h,
@@ -827,11 +827,20 @@ class DrmCompositor : public IFlipSink {
   std::atomic<uint64_t> last_flip_ns_{0};
   std::atomic<uint64_t> repaint_window_ns_{0};
   // The window's floor and whether it adapts (both fixed at construction), and
-  // the vblank the present latching now is meant for (raster writes, the flip
-  // thread reads; 0 = none), so the flip can tell whether its commit missed.
+  // the vblank the flip in flight is meant for (raster writes, the flip thread
+  // reads; 0 = none), so the flip can tell whether its commit missed.
   uint64_t repaint_window_base_ns_{0};
   bool repaint_window_adapts_{true};
   std::atomic<uint64_t> commit_target_ns_{0};
+  // The vblank the present in progress waited for (raster thread only; 0 =
+  // none). Becomes commit_target_ns_ when its flip is armed, not before: the
+  // next present starts while this flip is still in flight, and must not
+  // replace the target that flip is judged against.
+  uint64_t window_target_ns_{0};
+  void ArmCommitTarget() {
+    commit_target_ns_.store(std::exchange(window_target_ns_, 0),
+                            std::memory_order_release);
+  }
   // After a flip shown at @shown_ns: widen or ease the window.
   void AdaptRepaintWindow(uint64_t shown_ns);
   // LatchLeadNs(), worked out on the raster thread from state only it touches.
@@ -986,6 +995,10 @@ class DrmCompositor : public IFlipSink {
   /// slot is now accounted for, so the next render reuses a live buffer.
   [[nodiscard]] uint64_t SlotGateMissesForTest() const {
     return slot_gate_misses_;
+  }
+  /// The repaint window now, as missed and on-time flips have adapted it.
+  [[nodiscard]] uint64_t RepaintWindowNsForTest() const {
+    return repaint_window_ns_.load(std::memory_order_relaxed);
   }
   /// Slots rotated, so a test can assert it reached the rotate at all.
   [[nodiscard]] uint64_t SlotRotationsForTest() const {

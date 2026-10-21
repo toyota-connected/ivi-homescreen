@@ -1806,16 +1806,13 @@ void DrmCompositor::WaitForRepaintWindow() {
   // Every present path latches and commits straight after this: the vblank it
   // is judged against, so a composite that overruns it counts as a miss. 0 for
   // a present that arrived after its window opened, which a wider window would
-  // not have helped.
-  commit_target_ns_.store(
-      JudgedTargetNs(arrival, last_flip, refresh_ns_, window),
-      std::memory_order_release);
+  // not have helped. Armed with the flip (ArmCommitTarget).
+  window_target_ns_ = JudgedTargetNs(arrival, last_flip, refresh_ns_, window);
 }
 
 // ─── GL compositing helpers ──────────────────────────────────────────────
 
 void DrmCompositor::CompositeLayerIntoFbo(GLuint target_fbo,
-                                          GLuint src_fbo,
                                           GLuint src_tex,
                                           GLsizei src_w,
                                           GLsizei src_h,
@@ -1826,9 +1823,9 @@ void DrmCompositor::CompositeLayerIntoFbo(GLuint target_fbo,
                                           bool blend,
                                           bool flip_y,
                                           bool external) const {
-  gl_compositor_->CompositeToFbo(target_fbo, src_fbo, src_tex, src_w, src_h,
-                                 dst_x, dst_y, dst_w, dst_h, blend, flip_y,
-                                 external);
+  gl_compositor_->CompositeToFbo(target_fbo, /*src_fbo=*/0, src_tex, src_w,
+                                 src_h, dst_x, dst_y, dst_w, dst_h, blend,
+                                 flip_y, external);
 }
 
 // ─── GL fallback (no plane allocator) ────────────────────────────────────
@@ -1946,9 +1943,10 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
       auto* baton = static_cast<StoreBaton*>(layer->backing_store->user_data);
       if (baton && baton->store) {
         const auto* s = baton->store;
+        // A quad, not a blit: see CompositeLayerIntoFbo.
         gl_compositor_->CompositeToDefault(
-            s->fbo, s->active().color_tex, static_cast<GLsizei>(s->width),
-            static_cast<GLsizei>(s->height),
+            /*src_fbo=*/0, s->active().color_tex,
+            static_cast<GLsizei>(s->width), static_cast<GLsizei>(s->height),
             static_cast<GLint>(layer->offset.x),
             static_cast<GLint>(layer->offset.y),
             static_cast<GLsizei>(layer->size.width),
@@ -2003,6 +2001,7 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
   }
 
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  ArmCommitTarget();
   const bool presented = backend_->Present();
   // Once the flip that turned the overlays off has landed, nothing the scene
   // holds is on screen.
@@ -2275,7 +2274,7 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
               i, s->width, s->height, layer->offset.x, layer->offset.y,
               layer->size.width, layer->size.height, blend);
         }
-        CompositeLayerIntoFbo(comp.fbo, s->fbo, s->active().color_tex,
+        CompositeLayerIntoFbo(comp.fbo, s->active().color_tex,
                               static_cast<GLsizei>(s->width),
                               static_cast<GLsizei>(s->height),
                               static_cast<GLint>(layer->offset.x),
@@ -2363,8 +2362,7 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
                 flip_y, surface_sp->TextureIsTopFirst(),
                 surface_sp->TextureIsExternalOes());
           }
-          CompositeLayerIntoFbo(comp.fbo, /*src_fbo=*/0, tex,
-                                surface_sp->GetGlTextureWidth(),
+          CompositeLayerIntoFbo(comp.fbo, tex, surface_sp->GetGlTextureWidth(),
                                 surface_sp->GetGlTextureHeight(),
                                 static_cast<GLint>(layer->offset.x),
                                 static_cast<GLint>(layer->offset.y),
@@ -2415,8 +2413,8 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
   if (const unsigned int hud_tex =
           backend_->RenderHudTexture(out_.width(), out_.height())) {
     glBindFramebuffer(GL_FRAMEBUFFER, comp.fbo);
-    CompositeLayerIntoFbo(comp.fbo, /*src_fbo=*/0, hud_tex, comp_w, comp_h, 0,
-                          0, comp_w, comp_h, /*blend=*/true, /*flip_y=*/true);
+    CompositeLayerIntoFbo(comp.fbo, hud_tex, comp_w, comp_h, 0, 0, comp_w,
+                          comp_h, /*blend=*/true, /*flip_y=*/true);
   }
 #endif
 
@@ -2633,6 +2631,7 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
   // that does not reach SettleAtomicCommit.
   ScopedFlipArm arm(flip_pending_, backend_->vsync_, !blocking, drives_vsync_,
                     /*mirror_source_pending=*/false);
+  ArmCommitTarget();
   // Staged before the ioctl for the same reason as the latch: an early
   // event reads atomic_serial_ to name what it showed.
   ScopedPresentation pres(*this, blocking);
@@ -2843,7 +2842,9 @@ bool DrmCompositor::PresentLayersLocked(const FlutterLayer** layers,
                                         const size_t layer_count) {
   // A present that stopped short of its commit left its target behind; this
   // one sets its own, or none (the GL fallback at depth 2 waits for no window).
-  commit_target_ns_.store(0, std::memory_order_release);
+  // Not commit_target_ns_: the previous flip may still be in flight, and is
+  // judged against that.
+  window_target_ns_ = 0;
   // A disposed platform view's GL imports, freed with this present's context
   // current. Freed on the platform thread instead, with no context, the
   // textures stayed, and the driver kept each one's dma-buf open.
@@ -3159,7 +3160,7 @@ bool DrmCompositor::PresentLayersLocked(const FlutterLayer** layers,
       }
       const bool blend = any_composited;
       if (store) {
-        CompositeLayerIntoFbo(comp.fbo, store->fbo, store->active().color_tex,
+        CompositeLayerIntoFbo(comp.fbo, store->active().color_tex,
                               static_cast<GLsizei>(store->width),
                               static_cast<GLsizei>(store->height),
                               static_cast<GLint>(flutter->offset.x),
@@ -3193,7 +3194,7 @@ bool DrmCompositor::PresentLayersLocked(const FlutterLayer** layers,
             // branch.
             const bool flip_y = !surface_sp->TextureIsTopFirst();
             CompositeLayerIntoFbo(
-                comp.fbo, /*src_fbo=*/0, tex, surface_sp->GetGlTextureWidth(),
+                comp.fbo, tex, surface_sp->GetGlTextureWidth(),
                 surface_sp->GetGlTextureHeight(),
                 static_cast<GLint>(flutter->offset.x),
                 static_cast<GLint>(flutter->offset.y),
@@ -3214,11 +3215,11 @@ bool DrmCompositor::PresentLayersLocked(const FlutterLayer** layers,
     // app layers use, since comp.fbo is KMS-inverted.
     if (const unsigned int hud_tex = backend_->RenderHudTexture(fb_w, fb_h)) {
       glBindFramebuffer(GL_FRAMEBUFFER, comp.fbo);
-      CompositeLayerIntoFbo(
-          comp.fbo, /*src_fbo=*/0, hud_tex, static_cast<GLsizei>(fb_w),
-          static_cast<GLsizei>(fb_h), 0, 0, static_cast<GLsizei>(fb_w),
-          static_cast<GLsizei>(fb_h), /*blend=*/true,
-          /*flip_y=*/true);
+      CompositeLayerIntoFbo(comp.fbo, hud_tex, static_cast<GLsizei>(fb_w),
+                            static_cast<GLsizei>(fb_h), 0, 0,
+                            static_cast<GLsizei>(fb_w),
+                            static_cast<GLsizei>(fb_h), /*blend=*/true,
+                            /*flip_y=*/true);
     }
 #endif
 
@@ -3331,6 +3332,7 @@ bool DrmCompositor::PresentLayersLocked(const FlutterLayer** layers,
 
   ScopedFlipArm arm(flip_pending_, backend_->vsync_, !blocking, drives_vsync_,
                     /*mirror_source_pending=*/false);
+  ArmCommitTarget();
   // Staged before the ioctl for the same reason as the latch: an early
   // event reads atomic_serial_ to name what it showed.
   ScopedPresentation pres(*this, blocking);
@@ -3729,7 +3731,15 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
           if (planes_available_ && !surface->HasContent()) {
             continue;
           }
-          return PresentViaGlFallback(layers, layer_count);
+          // What it already has, and only that. The composite waits for the
+          // flip and the repaint window first, and a frame the producer
+          // submits meanwhile belongs to the present it nudged. Importing it
+          // here leaves that present no new frame either, and so on: every
+          // present composited, none on a plane.
+          surface->HoldGlFrames(true);
+          const bool presented = PresentViaGlFallback(layers, layer_count);
+          surface->HoldGlFrames(false);
+          return presented;
         }
         ICompositorSurface::Dmabuf& db = ld.dmabuf;
         // A new frame no plane scans out in its format goes to composition;
@@ -4348,6 +4358,7 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
 
   ScopedFlipArm arm(flip_pending_, backend_->vsync_, !blocking_modeset,
                     drives_vsync_, /*mirror_source_pending=*/false);
+  ArmCommitTarget();
   // Staged before the ioctl for the same reason as the latch: an early
   // event reads atomic_serial_ to name what it showed.
   ScopedPresentation pres(*this, blocking_modeset);
@@ -4940,6 +4951,7 @@ bool DrmCompositor::PresentDirectOverlay(const FlutterLayer** layers,
 
   ScopedFlipArm arm(flip_pending_, backend_->vsync_, !blocking, drives_vsync_,
                     /*mirror_source_pending=*/false);
+  ArmCommitTarget();
   // Staged before the ioctl for the same reason as the latch: an early
   // event reads atomic_serial_ to name what it showed.
   ScopedPresentation pres(*this, blocking);
