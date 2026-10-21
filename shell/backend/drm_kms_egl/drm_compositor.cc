@@ -1815,7 +1815,6 @@ void DrmCompositor::WaitForRepaintWindow() {
 // ─── GL compositing helpers ──────────────────────────────────────────────
 
 void DrmCompositor::CompositeLayerIntoFbo(GLuint target_fbo,
-                                          GLuint src_fbo,
                                           GLuint src_tex,
                                           GLsizei src_w,
                                           GLsizei src_h,
@@ -1826,9 +1825,9 @@ void DrmCompositor::CompositeLayerIntoFbo(GLuint target_fbo,
                                           bool blend,
                                           bool flip_y,
                                           bool external) const {
-  gl_compositor_->CompositeToFbo(target_fbo, src_fbo, src_tex, src_w, src_h,
-                                 dst_x, dst_y, dst_w, dst_h, blend, flip_y,
-                                 external);
+  gl_compositor_->CompositeToFbo(target_fbo, /*src_fbo=*/0, src_tex, src_w,
+                                 src_h, dst_x, dst_y, dst_w, dst_h, blend,
+                                 flip_y, external);
 }
 
 // ─── GL fallback (no plane allocator) ────────────────────────────────────
@@ -1946,9 +1945,10 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
       auto* baton = static_cast<StoreBaton*>(layer->backing_store->user_data);
       if (baton && baton->store) {
         const auto* s = baton->store;
+        // A quad, not a blit: see CompositeLayerIntoFbo.
         gl_compositor_->CompositeToDefault(
-            s->fbo, s->active().color_tex, static_cast<GLsizei>(s->width),
-            static_cast<GLsizei>(s->height),
+            /*src_fbo=*/0, s->active().color_tex,
+            static_cast<GLsizei>(s->width), static_cast<GLsizei>(s->height),
             static_cast<GLint>(layer->offset.x),
             static_cast<GLint>(layer->offset.y),
             static_cast<GLsizei>(layer->size.width),
@@ -2275,7 +2275,7 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
               i, s->width, s->height, layer->offset.x, layer->offset.y,
               layer->size.width, layer->size.height, blend);
         }
-        CompositeLayerIntoFbo(comp.fbo, s->fbo, s->active().color_tex,
+        CompositeLayerIntoFbo(comp.fbo, s->active().color_tex,
                               static_cast<GLsizei>(s->width),
                               static_cast<GLsizei>(s->height),
                               static_cast<GLint>(layer->offset.x),
@@ -2363,8 +2363,7 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
                 flip_y, surface_sp->TextureIsTopFirst(),
                 surface_sp->TextureIsExternalOes());
           }
-          CompositeLayerIntoFbo(comp.fbo, /*src_fbo=*/0, tex,
-                                surface_sp->GetGlTextureWidth(),
+          CompositeLayerIntoFbo(comp.fbo, tex, surface_sp->GetGlTextureWidth(),
                                 surface_sp->GetGlTextureHeight(),
                                 static_cast<GLint>(layer->offset.x),
                                 static_cast<GLint>(layer->offset.y),
@@ -2415,8 +2414,8 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
   if (const unsigned int hud_tex =
           backend_->RenderHudTexture(out_.width(), out_.height())) {
     glBindFramebuffer(GL_FRAMEBUFFER, comp.fbo);
-    CompositeLayerIntoFbo(comp.fbo, /*src_fbo=*/0, hud_tex, comp_w, comp_h, 0,
-                          0, comp_w, comp_h, /*blend=*/true, /*flip_y=*/true);
+    CompositeLayerIntoFbo(comp.fbo, hud_tex, comp_w, comp_h, 0, 0, comp_w,
+                          comp_h, /*blend=*/true, /*flip_y=*/true);
   }
 #endif
 
@@ -3159,7 +3158,7 @@ bool DrmCompositor::PresentLayersLocked(const FlutterLayer** layers,
       }
       const bool blend = any_composited;
       if (store) {
-        CompositeLayerIntoFbo(comp.fbo, store->fbo, store->active().color_tex,
+        CompositeLayerIntoFbo(comp.fbo, store->active().color_tex,
                               static_cast<GLsizei>(store->width),
                               static_cast<GLsizei>(store->height),
                               static_cast<GLint>(flutter->offset.x),
@@ -3193,7 +3192,7 @@ bool DrmCompositor::PresentLayersLocked(const FlutterLayer** layers,
             // branch.
             const bool flip_y = !surface_sp->TextureIsTopFirst();
             CompositeLayerIntoFbo(
-                comp.fbo, /*src_fbo=*/0, tex, surface_sp->GetGlTextureWidth(),
+                comp.fbo, tex, surface_sp->GetGlTextureWidth(),
                 surface_sp->GetGlTextureHeight(),
                 static_cast<GLint>(flutter->offset.x),
                 static_cast<GLint>(flutter->offset.y),
@@ -3214,11 +3213,11 @@ bool DrmCompositor::PresentLayersLocked(const FlutterLayer** layers,
     // app layers use, since comp.fbo is KMS-inverted.
     if (const unsigned int hud_tex = backend_->RenderHudTexture(fb_w, fb_h)) {
       glBindFramebuffer(GL_FRAMEBUFFER, comp.fbo);
-      CompositeLayerIntoFbo(
-          comp.fbo, /*src_fbo=*/0, hud_tex, static_cast<GLsizei>(fb_w),
-          static_cast<GLsizei>(fb_h), 0, 0, static_cast<GLsizei>(fb_w),
-          static_cast<GLsizei>(fb_h), /*blend=*/true,
-          /*flip_y=*/true);
+      CompositeLayerIntoFbo(comp.fbo, hud_tex, static_cast<GLsizei>(fb_w),
+                            static_cast<GLsizei>(fb_h), 0, 0,
+                            static_cast<GLsizei>(fb_w),
+                            static_cast<GLsizei>(fb_h), /*blend=*/true,
+                            /*flip_y=*/true);
     }
 #endif
 

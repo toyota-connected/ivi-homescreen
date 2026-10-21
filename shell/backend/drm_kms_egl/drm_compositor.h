@@ -322,9 +322,10 @@ class DrmCompositor : public IFlipSink {
   bool EnsureDrmFbId(GbmBackingStore& store) const;
 
   // Composite @p src_tex into @p target_fbo at the given destination rect.
-  // Pass @p src_fbo (the FBO that owns @p src_tex as its color attachment)
-  // to enable the blit fast-path; pass 0 when the source is a raw texture
-  // with no backing FBO — the quad path will be used instead.
+  // Always a textured quad, never glBlitFramebuffer: a backing store here is
+  // a linear scanout BO, and a GPU that renders tiled may copy one on the CPU
+  // to blit from it. v3d does whenever the blit flips or drops alpha, which
+  // one to FBO 0 or with flip_y always does: 8-10 ms a frame on a Pi 5.
   //
   // @p flip_y must be true whenever the destination FBO is an EGLImage-
   // backed GBM BO scanned out directly by KMS (e.g. @c comp_bufs_): KMS
@@ -333,7 +334,6 @@ class DrmCompositor : public IFlipSink {
   // Leave false for gbm_surface FBO 0 where Mesa already matches NDC y=-1
   // to screen-bottom.
   void CompositeLayerIntoFbo(GLuint target_fbo,
-                             GLuint src_fbo,
                              GLuint src_tex,
                              GLsizei src_w,
                              GLsizei src_h,
