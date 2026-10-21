@@ -1806,10 +1806,8 @@ void DrmCompositor::WaitForRepaintWindow() {
   // Every present path latches and commits straight after this: the vblank it
   // is judged against, so a composite that overruns it counts as a miss. 0 for
   // a present that arrived after its window opened, which a wider window would
-  // not have helped.
-  commit_target_ns_.store(
-      JudgedTargetNs(arrival, last_flip, refresh_ns_, window),
-      std::memory_order_release);
+  // not have helped. Armed with the flip (ArmCommitTarget).
+  window_target_ns_ = JudgedTargetNs(arrival, last_flip, refresh_ns_, window);
 }
 
 // ─── GL compositing helpers ──────────────────────────────────────────────
@@ -2003,6 +2001,7 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
   }
 
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  ArmCommitTarget();
   const bool presented = backend_->Present();
   // Once the flip that turned the overlays off has landed, nothing the scene
   // holds is on screen.
@@ -2632,6 +2631,7 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
   // that does not reach SettleAtomicCommit.
   ScopedFlipArm arm(flip_pending_, backend_->vsync_, !blocking, drives_vsync_,
                     /*mirror_source_pending=*/false);
+  ArmCommitTarget();
   // Staged before the ioctl for the same reason as the latch: an early
   // event reads atomic_serial_ to name what it showed.
   ScopedPresentation pres(*this, blocking);
@@ -2842,7 +2842,9 @@ bool DrmCompositor::PresentLayersLocked(const FlutterLayer** layers,
                                         const size_t layer_count) {
   // A present that stopped short of its commit left its target behind; this
   // one sets its own, or none (the GL fallback at depth 2 waits for no window).
-  commit_target_ns_.store(0, std::memory_order_release);
+  // Not commit_target_ns_: the previous flip may still be in flight, and is
+  // judged against that.
+  window_target_ns_ = 0;
   // A disposed platform view's GL imports, freed with this present's context
   // current. Freed on the platform thread instead, with no context, the
   // textures stayed, and the driver kept each one's dma-buf open.
@@ -3330,6 +3332,7 @@ bool DrmCompositor::PresentLayersLocked(const FlutterLayer** layers,
 
   ScopedFlipArm arm(flip_pending_, backend_->vsync_, !blocking, drives_vsync_,
                     /*mirror_source_pending=*/false);
+  ArmCommitTarget();
   // Staged before the ioctl for the same reason as the latch: an early
   // event reads atomic_serial_ to name what it showed.
   ScopedPresentation pres(*this, blocking);
@@ -4355,6 +4358,7 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
 
   ScopedFlipArm arm(flip_pending_, backend_->vsync_, !blocking_modeset,
                     drives_vsync_, /*mirror_source_pending=*/false);
+  ArmCommitTarget();
   // Staged before the ioctl for the same reason as the latch: an early
   // event reads atomic_serial_ to name what it showed.
   ScopedPresentation pres(*this, blocking_modeset);
@@ -4947,6 +4951,7 @@ bool DrmCompositor::PresentDirectOverlay(const FlutterLayer** layers,
 
   ScopedFlipArm arm(flip_pending_, backend_->vsync_, !blocking, drives_vsync_,
                     /*mirror_source_pending=*/false);
+  ArmCommitTarget();
   // Staged before the ioctl for the same reason as the latch: an early
   // event reads atomic_serial_ to name what it showed.
   ScopedPresentation pres(*this, blocking);

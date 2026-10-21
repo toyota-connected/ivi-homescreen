@@ -793,6 +793,17 @@ class DrmBackendVkms : public DrmBackendVkmsBase {
   }
 };
 
+// The GL compositor with a 1 us repaint window: every composite starts too
+// late for its vblank.
+class DrmBackendVkmsTightWindow : public DrmBackendVkms {
+ protected:
+  void SetUp() override {
+    setenv("IVI_DRM_REPAINT_WINDOW_US", "1", 1);
+    DrmBackendVkms::SetUp();
+    unsetenv("IVI_DRM_REPAINT_WINDOW_US");
+  }
+};
+
 // The plane compositor with a framebuffer smaller than the mode, which is what
 // puts every present through PresentFramed -- the path #530 was found on, and
 // the one the GL fixture above cannot reach. Needs a card with overlay planes;
@@ -2985,6 +2996,25 @@ TEST_F(DrmBackendVkms, AnEarlyFlipCompletionLeavesNoStaleLatch) {
          "flight -- a latch left up here parks the next baton forever (#649)";
 
   compositor_->UnregisterSurface(11);
+}
+
+// A window too tight for the composite widens. Each flip is judged against the
+// vblank its present waited for, which the next present used to clear on its
+// way in -- before that flip had landed -- so no flip was ever judged, the
+// window never moved, and a GL composite slower than it ran at 20 Hz for good.
+TEST_F(DrmBackendVkmsTightWindow, AWindowTooTightForTheCompositeWidens) {
+  auto view = std::make_shared<FakePlatformView>(12);
+  view->set_texture(tex_);
+  compositor_->RegisterSurface(12, view);
+
+  const uint64_t base = compositor_->RepaintWindowNsForTest();
+  for (int i = 0; i < 10; ++i) {
+    ASSERT_TRUE(PresentPlatformView(12)) << "present " << i;
+  }
+  EXPECT_GT(compositor_->RepaintWindowNsForTest(), base)
+      << "missed vblanks did not widen the window";
+
+  compositor_->UnregisterSurface(12);
 }
 
 // An early flip completion must not strand a slot generation.
