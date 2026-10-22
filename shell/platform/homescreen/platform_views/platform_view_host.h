@@ -29,6 +29,13 @@ struct FlutterDesktopEngineState;
 // re-point the process-global host at a different engine (last wins).
 void InstallPlatformViewHost(FlutterDesktopEngineState* engine_state);
 
+// Removes the host if it is installed for @engine_state, so a plugin calling
+// ihs_pv_* after the engine has stopped gets IHS_PV_ERR_NO_REGISTRY rather
+// than reaching into an engine state that is about to be freed. Call once no
+// engine thread runs and before @engine_state goes; a no-op without
+// BUILD_COMPOSITOR or when the host was re-pointed at another engine.
+void UninstallPlatformViewHost(const FlutterDesktopEngineState* engine_state);
+
 // Frees the imports the host keeps for reuse across views, and stops keeping
 // them. Call once no engine thread runs and before the backend's device goes;
 // a view torn down after this frees its imports outright.

@@ -397,6 +397,12 @@ FlutterView::~FlutterView() {
     m_flutter_engine->Shutdown();
   }
 #if BUILD_COMPOSITOR
+  // Plugin threads (a game engine's, say) can outlive the Flutter engine and
+  // keep calling ihs_pv_*; once the engine state below is freed those calls
+  // would reach into it. Platform views were disposed in the shutdown above.
+  if (m_state != nullptr) {
+    UninstallPlatformViewHost(m_state->engine_state);
+  }
   // Imports kept for reuse belong to the backend's device, which outlives
   // this body; free them while it is alive. No frame binds them.
   ReleasePlatformViewImports();

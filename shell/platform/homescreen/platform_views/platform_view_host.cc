@@ -3962,6 +3962,14 @@ void InstallPlatformViewHost(FlutterDesktopEngineState* engine_state) {
 #endif
 }
 
+void UninstallPlatformViewHost(const FlutterDesktopEngineState* engine_state) {
+  if (engine_state == nullptr || g_host.user_data != engine_state) {
+    return;
+  }
+  ihs_pv_set_host(nullptr);
+  ihs::log::debug("[ihs_pv] platform-view host removed");
+}
+
 void ReleasePlatformViewImports() {
 #if IVI_HAVE_VULKAN
   g_importer.DrainPool();
@@ -3979,6 +3987,9 @@ size_t PooledPlatformViewImports() {
 #else  // !BUILD_COMPOSITOR
 
 void InstallPlatformViewHost(FlutterDesktopEngineState* /*engine_state*/) {}
+
+void UninstallPlatformViewHost(
+    const FlutterDesktopEngineState* /*engine_state*/) {}
 
 void ReleasePlatformViewImports() {}
 
