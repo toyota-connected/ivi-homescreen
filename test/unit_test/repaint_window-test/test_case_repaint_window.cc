@@ -60,10 +60,21 @@ TEST(RepaintWindow, AFlipTooLongAgoIsNotCountedFrom) {
             0U);
 }
 
+// The flip's event arrives at the start of the vblank and its stamp is the
+// end (vc4: ~1 ms later). A present between the two was composited at once,
+// as if there were no flip to count from, and the window did nothing.
+TEST(RepaintWindow, APresentBeforeTheFlipStampWaitsForTheWindow) {
+  EXPECT_EQ(RepaintDelayNs(kFlip - kMs, kFlip, kPeriod, kWindow),
+            kPeriod - kWindow + kMs);
+  EXPECT_EQ(TargetVblankNs(kFlip - kMs, kFlip, kPeriod), kFlip + kPeriod);
+  EXPECT_EQ(JudgedTargetNs(kFlip - kMs, kFlip, kPeriod, kWindow),
+            kFlip + kPeriod);
+}
+
 TEST(RepaintWindow, NothingToCountFromGoesAtOnce) {
   EXPECT_EQ(RepaintDelayNs(kFlip, 0, kPeriod, kWindow), 0U) << "no flip yet";
-  EXPECT_EQ(RepaintDelayNs(kFlip - kMs, kFlip, kPeriod, kWindow), 0U)
-      << "a flip stamped after now";
+  EXPECT_EQ(RepaintDelayNs(kFlip - kPeriod, kFlip, kPeriod, kWindow), 0U)
+      << "a flip stamped a refresh after now";
   EXPECT_EQ(RepaintDelayNs(kFlip + kMs, kFlip, 0, kWindow), 0U) << "no period";
 }
 
@@ -90,6 +101,8 @@ TEST(RepaintWindow, ACommitIsMeantForTheFirstVblankAfterIt) {
   EXPECT_EQ(TargetVblankNs(kFlip + kPeriod + kMs, kFlip, kPeriod),
             kFlip + 2 * kPeriod);
   EXPECT_EQ(TargetVblankNs(kFlip, 0, kPeriod), 0U) << "no flip yet";
+  EXPECT_EQ(TargetVblankNs(kFlip - kPeriod, kFlip, kPeriod), 0U)
+      << "a flip stamped a refresh after the commit";
   EXPECT_EQ(TargetVblankNs(kFlip + 9 * kPeriod, kFlip, kPeriod), 0U)
       << "too long since the last flip to count from";
 }
