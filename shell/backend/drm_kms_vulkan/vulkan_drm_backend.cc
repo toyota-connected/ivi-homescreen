@@ -764,6 +764,17 @@ struct VulkanDrmBackend::CompositorState {
         d().vkDestroySemaphore(vk_device, s, nullptr);
       }
     }
+    // Imported producer acquire semaphores are otherwise only freed when their
+    // ring slot comes round again, so the last kSyncRing frames' are still
+    // held here.
+    for (const auto& waits : acquire_waits) {
+      for (VkSemaphore s : waits) {
+        d().vkDestroySemaphore(vk_device, s, nullptr);
+      }
+    }
+    for (VkSemaphore s : pending_acquire_waits) {
+      d().vkDestroySemaphore(vk_device, s, nullptr);
+    }
     for (const auto& frame_scratch : sample_scratch) {
       for (const SampleScratch& s : frame_scratch) {
         if (s.image != VK_NULL_HANDLE) {
