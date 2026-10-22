@@ -31,45 +31,50 @@
 // producer's buffer to land in.
 inline constexpr uint64_t kDefaultRepaintWindowNs = 5'000'000;
 
-// How long to wait before compositing, given the time now, the last flip's
-// vblank timestamp, the refresh period and the window (all nanoseconds,
-// CLOCK_MONOTONIC). Zero means go now: the window is off, no flip has been
-// seen, the window is already open, or the last flip is too old to count
-// vblanks from (the period is rounded, so its phase drifts).
-[[nodiscard]] constexpr uint64_t RepaintDelayNs(const uint64_t now_ns,
-                                                const uint64_t last_flip_ns,
-                                                const uint64_t period_ns,
-                                                const uint64_t window_ns) {
-  constexpr uint64_t kMaxPeriodsExtrapolated = 8;
-  if (window_ns == 0 || period_ns == 0 || last_flip_ns == 0 ||
-      now_ns < last_flip_ns || window_ns >= period_ns) {
-    return 0;
-  }
-  const uint64_t since = now_ns - last_flip_ns;
-  if (since >= kMaxPeriodsExtrapolated * period_ns) {
-    return 0;
-  }
-  const uint64_t next_vblank =
-      last_flip_ns + (since / period_ns + 1) * period_ns;
-  const uint64_t opens = next_vblank - window_ns;
-  return now_ns < opens ? opens - now_ns : 0;
-}
-
 // The vblank a commit made at @commit_ns is meant for: the first after it,
-// counted from the last flip. 0 when there is nothing to count from (see
-// RepaintDelayNs).
+// counted from the last flip's vblank timestamp (all nanoseconds,
+// CLOCK_MONOTONIC). 0 when there is nothing to count from: no flip has been
+// seen, or the last one is too old (the period is rounded, so its phase
+// drifts).
+//
+// A flip is stamped when its frame starts to scan out, at the end of the
+// vblank, and its event can arrive at the start (vc4: ~1 ms earlier). A commit
+// made between the two comes before the stamp; less than a refresh before it,
+// that commit is meant for the vblank after the flip.
 [[nodiscard]] constexpr uint64_t TargetVblankNs(const uint64_t commit_ns,
                                                 const uint64_t last_flip_ns,
                                                 const uint64_t period_ns) {
   constexpr uint64_t kMaxPeriodsExtrapolated = 8;
-  if (period_ns == 0 || last_flip_ns == 0 || commit_ns < last_flip_ns) {
+  if (period_ns == 0 || last_flip_ns == 0) {
     return 0;
+  }
+  if (commit_ns < last_flip_ns) {
+    return last_flip_ns - commit_ns < period_ns ? last_flip_ns + period_ns : 0;
   }
   const uint64_t since = commit_ns - last_flip_ns;
   if (since >= kMaxPeriodsExtrapolated * period_ns) {
     return 0;
   }
   return last_flip_ns + (since / period_ns + 1) * period_ns;
+}
+
+// How long to wait before compositing, given the time now, the last flip's
+// vblank timestamp, the refresh period and the window. Zero means go now: the
+// window is off, the window is already open, or there is no vblank to count
+// to (see TargetVblankNs).
+[[nodiscard]] constexpr uint64_t RepaintDelayNs(const uint64_t now_ns,
+                                                const uint64_t last_flip_ns,
+                                                const uint64_t period_ns,
+                                                const uint64_t window_ns) {
+  if (window_ns == 0 || window_ns >= period_ns) {
+    return 0;
+  }
+  const uint64_t next_vblank = TargetVblankNs(now_ns, last_flip_ns, period_ns);
+  if (next_vblank == 0) {
+    return 0;
+  }
+  const uint64_t opens = next_vblank - window_ns;
+  return now_ns < opens ? opens - now_ns : 0;
 }
 
 // Whether a flip shown at @shown_ns missed the vblank @target_ns its commit was
