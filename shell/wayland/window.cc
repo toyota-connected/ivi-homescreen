@@ -22,6 +22,7 @@
 #include "display.h"
 #include "engine.h"
 #include "fractional_scale_v1_client.hpp"
+#include "shutdown_flag.h"
 #include "view/flutter_view.h"
 #include "viewporter_client.hpp"
 
@@ -182,7 +183,7 @@ WaylandWindow::WaylandWindow(const size_t index,
     m_backend->Resize(m_index, m_flutter_engine.get(), PhysWidth(),
                       PhysHeight());
   };
-  cfg.on_close = [this]() { m_running = false; };
+  cfg.on_close = [this]() { HandleCompositorClose(m_index); };
 
   auto& shell = m_display->ActiveShell();
   m_shell_surface = shell.CreateSurface(m_base_surface, cfg);
@@ -493,4 +494,9 @@ WaylandWindow::window_type WaylandWindow::get_window_type(
     return WINDOW_PANEL_RIGHT;
   }
   return WINDOW_NORMAL;
+}
+
+void WaylandWindow::HandleCompositorClose(const size_t index) {
+  ihs::log::info("({}) compositor closed the window; shutting down", index);
+  RequestShutdown();
 }
