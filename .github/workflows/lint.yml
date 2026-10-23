@@ -59,6 +59,7 @@ jobs:
         uses: ./.github/actions/apt-packages
         with:
           packages: ninja-build libwayland-dev wayland-protocols libxkbcommon-dev mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils libglib2.0-dev libpugixml-dev ${{ matrix.extra_pkgs }}
+          options: --no-install-recommends
 
       - name: Configure
         env:
@@ -91,6 +92,7 @@ jobs:
         uses: ./.github/actions/apt-packages
         with:
           packages: ninja-build libwayland-dev wayland-protocols libxkbcommon-dev mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils libglib2.0-dev libpugixml-dev libdrm-dev libgbm-dev libinput-dev libudev-dev libseat-dev libxcursor-dev clang-19 clang-tidy-19 clang-format-19 llvm-19 lld-19 libc++-19-dev libc++abi-19-dev
+          options: --no-install-recommends
 
       - name: Setup libdisplay-info (system or from-source)
         uses: ./.github/actions/setup-libdisplay-info
@@ -154,6 +156,7 @@ jobs:
         uses: ./.github/actions/apt-packages
         with:
           packages: ninja-build clang-format-19
+          options: --no-install-recommends
 
       - name: clang-format
         run: scripts/format.sh --check
@@ -196,6 +199,7 @@ jobs:
         uses: ./.github/actions/apt-packages
         with:
           packages: ninja-build libwayland-dev wayland-protocols libxkbcommon-dev mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils libglib2.0-dev libpugixml-dev libdrm-dev libgbm-dev libinput-dev libudev-dev libseat-dev libxcursor-dev clang-19 clang-tidy-19 clang-format-19 llvm-19 lld-19 libc++-19-dev libc++abi-19-dev
+          options: --no-install-recommends
 
       - name: Download build artifacts
         uses: actions/download-artifact@v8
