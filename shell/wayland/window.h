@@ -125,6 +125,14 @@ class WaylandWindow {
   static window_type get_window_type(const std::string& type);
 
   /**
+   * @brief The compositor asked window @p index to close (xdg_toplevel.close).
+   *
+   * Ends the shell. A window is a view of the one engine, so there is no
+   * closing one and keeping the rest.
+   */
+  static void HandleCompositorClose(size_t index);
+
+  /**
    * @brief GetSize
    * @retval std::pair<int32_t, int32_t> width, height
    * @relation
@@ -221,7 +229,6 @@ class WaylandWindow {
   bool m_maximized{};
   bool m_resize{};
   bool m_activated{};
-  bool m_running{};
   struct {
     int32_t width;
     int32_t height;

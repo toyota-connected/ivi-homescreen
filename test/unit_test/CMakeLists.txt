@@ -171,6 +171,10 @@ add_subdirectory(vk_external_texture-test)
 add_subdirectory(touch_frame-test)
 # Watchdog shutdown latency (the systemctl stop hang).
 add_subdirectory(watchdog_shutdown-test)
+# xdg_toplevel.close ends the shell; mock compositor, no GPU.
+if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN)
+    add_subdirectory(toplevel_close-test)
+endif ()
 # flutter_view-test and app-test require a live Wayland compositor connection
 # (Display::Display calls wl_display_connect / App::BuildDisplays).  They have
 # been moved to test/integration/ and are not run by the unit-test-coverage job.

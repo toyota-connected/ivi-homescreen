@@ -63,11 +63,7 @@ namespace {
 // restore the saved CRTC, and DrmSeat would never restore the VT keyboard
 // mode from K_OFF — leaving the TTY both blank and deaf to keystrokes.
 extern "C" void HandleShutdownSignal(int /*sig*/) {
-  running = 0;
-  // Break the main loop out of an idle block so it re-checks `running`
-  // immediately instead of waiting for the next heartbeat. write() to the
-  // waker eventfd is async-signal-safe.
-  MainLoopWaker::SignalWake();
+  RequestShutdown();
 }
 
 void InstallShutdownHandlers() {

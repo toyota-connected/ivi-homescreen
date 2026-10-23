@@ -28,7 +28,6 @@
 #include <utility>
 
 #include "logging.h"
-#include "main_loop_waker.h"
 #include "shutdown_flag.h"
 
 namespace homescreen {
@@ -236,8 +235,7 @@ void DrmSession::DispatchLoop() {
         ihs::log::error(
             "[DrmSession] seat fd error (revents={:#x}); shutting down",
             static_cast<unsigned>(pfds[seat_idx].revents));
-        running = 0;
-        MainLoopWaker::SignalWake();
+        RequestShutdown();
         break;
       }
       if ((pfds[seat_idx].revents & POLLIN) != 0) {

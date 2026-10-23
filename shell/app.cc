@@ -63,6 +63,11 @@
 // (woken via the MainLoopWaker eventfd).
 volatile sig_atomic_t running = 1;
 
+void RequestShutdown() {
+  running = 0;
+  MainLoopWaker::SignalWake();
+}
+
 #include "backend/backend_registry.h"
 #include "backend/register_backends.h"
 

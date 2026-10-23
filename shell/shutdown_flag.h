@@ -27,3 +27,8 @@
 // self-contained: the app unit test links app.cc without main.cc and must be
 // able to resolve `running`.
 extern volatile sig_atomic_t running;
+
+// Clear `running` and wake the main loop: the one way to end the shell, from a
+// signal handler, the DRM seat thread or a compositor's close. Async-signal-
+// safe -- a sig_atomic_t store and an eventfd write.
+void RequestShutdown();
