@@ -87,14 +87,13 @@ target_compile_options(toolchain INTERFACE -stdlib=${STDLIB} -isystem"${LLVM_INC
 
 if (ENABLE_STATIC_LINK)
     if (STDLIB STREQUAL "libc++")
-        # Statically link libc++ and libc++abi using the linker's -Bstatic/-Bdynamic
-        # scoping, then restore dynamic linking for all other libraries.
-        # -static-libstdc++ / -static-libgcc must NOT be used here: -static-libgcc
-        # pulls in libgcc_eh.a which embeds _Unwind_* symbols that conflict with
-        # LLVM libunwind inside libsentry.so.
+        # -Wl,-Bstatic,-lc++,-lc++abi,-Bdynamic does not link statically: the
+        # driver appends its own -lc++ after all user options, where the restored
+        # -Bdynamic applies to it. -Wl,--as-needed hides that in Release.
+        # -static-libstdc++ would work, but this file bans it with -static-libgcc.
+        # -stdlib= is not repeated here; -nostdlib++ leaves it nothing to select.
         target_link_options(toolchain INTERFACE
-            -stdlib=${STDLIB}
-            -Wl,-Bstatic,-lc++,-lc++abi,-Bdynamic
+            -nostdlib++ -l:libc++.a -l:libc++abi.a
             -lc -fuse-ld=lld -v)
     else ()
         target_link_options(toolchain INTERFACE -static-libstdc++ -static-libgcc -stdlib=${STDLIB} -lc -fuse-ld=lld -v)

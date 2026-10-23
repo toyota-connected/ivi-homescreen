@@ -643,4 +643,8 @@ target_link_directories(${PROJECT_NAME} PRIVATE
 
 add_sanitizers(${PROJECT_NAME})
 
+# Reads the linked shell back: ENABLE_STATIC_LINK asks for the C++ runtime to be
+# carried, and nothing used to check that it was.
+ihs_static_libcxx_guard(${PROJECT_NAME})
+
 install(TARGETS ${PROJECT_NAME} DESTINATION bin)
