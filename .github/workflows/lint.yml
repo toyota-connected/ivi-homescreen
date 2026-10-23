@@ -59,6 +59,7 @@ jobs:
         uses: ./.github/actions/apt-packages
         with:
           packages: ninja-build libwayland-dev wayland-protocols libxkbcommon-dev mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils libglib2.0-dev libpugixml-dev ${{ matrix.extra_pkgs }}
+          options: --no-install-recommends
 
       - name: Configure
         env:
@@ -91,6 +92,7 @@ jobs:
         uses: ./.github/actions/apt-packages
         with:
           packages: ninja-build libwayland-dev wayland-protocols libxkbcommon-dev mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils libglib2.0-dev libpugixml-dev libdrm-dev libgbm-dev libinput-dev libudev-dev libseat-dev libxcursor-dev clang-19 clang-tidy-19 clang-format-19 llvm-19 lld-19 libc++-19-dev libc++abi-19-dev
+          options: --no-install-recommends
 
       - name: Setup libdisplay-info (system or from-source)
         uses: ./.github/actions/setup-libdisplay-info
@@ -154,6 +156,7 @@ jobs:
         uses: ./.github/actions/apt-packages
         with:
           packages: ninja-build clang-format-19
+          options: --no-install-recommends
 
       - name: clang-format
         run: scripts/format.sh --check
@@ -196,6 +199,7 @@ jobs:
         uses: ./.github/actions/apt-packages
         with:
           packages: ninja-build libwayland-dev wayland-protocols libxkbcommon-dev mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils libglib2.0-dev libpugixml-dev libdrm-dev libgbm-dev libinput-dev libudev-dev libseat-dev libxcursor-dev clang-19 clang-tidy-19 clang-format-19 llvm-19 lld-19 libc++-19-dev libc++abi-19-dev
+          options: --no-install-recommends
 
       - name: Download build artifacts
         uses: actions/download-artifact@v8
@@ -265,12 +269,6 @@ jobs:
         with:
             name: ctcache-shard-*
 
-      # Delete the uploaded build artifacts even if the job fails, so they don't accumulate in the workflow's artifact storage.
-      - name: Cleanup build artifacts
-        if: ${{ always() }} 
-        uses: geekyeggo/delete-artifact@v6
-        with:
-            name: lint_build-${{ github.run_id }}
       - name: Check that all shards passed
         run: |
           lint_passed="${{ needs.lint-tidy-shard.result == 'success' && needs.lint-format.result == 'success' && needs.build.result == 'success' }}"
@@ -281,4 +279,15 @@ jobs:
           else
             echo "All lint checks passed."
           fi
+
+      # After the gate on purpose, so it runs only on a green run. The step
+      # above exits non-zero when a shard failed, which skips this one and
+      # keeps the artifact that "Re-run failed jobs" needs: lint-tidy-shard
+      # installs its dependencies first and only then downloads the artifact,
+      # so a deleted one fails the rerun ten minutes in. The upload sets
+      # retention-days: 1, so a kept artifact still expires on its own.
+      - name: Cleanup build artifacts
+        uses: geekyeggo/delete-artifact@v6
+        with:
+            name: lint_build-${{ github.run_id }}
     
