@@ -356,12 +356,10 @@ int main(const int argc, char** argv) {
     return active.list_modes(list_modes_dev) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
   }
 
-  // Scoped so ~App runs before logging is stopped below. Shutdown is where a
+  // Scoped so ~App runs before the logging flush below. Shutdown is where a
   // backend reports what the session did -- the motion-to-photon and vsync
   // summaries, the DRM CRTC restore, the VT keyboard mode being handed back --
-  // and all of it is emitted from destructors. Left to run at `return`, after
-  // ihs_log_stop(), every one of those lines is written to a logging system
-  // that has already gone away, and the operator sees a log that simply stops.
+  // and all of it is emitted from destructors.
   {
     // Construct the App. It populates the runtime backend registry and resolves
     // the active backend from its configs on first display creation, so it is
@@ -473,8 +471,11 @@ int main(const int argc, char** argv) {
 #endif
   }
 
+  // Logging is not stopped here: the bridge stops itself from the atexit
+  // handler it registered when it started. Exit handlers registered after
+  // that -- a plugin's, which may still be shutting down a thread of its own
+  // -- run first, while their lines can still be logged.
   IHS_LOGGING_FLUSH();
-  IHS_LOGGING_STOP();
 
 #if BUILD_WATCHDOG
   Watchdog::getInstance().shutdown();
