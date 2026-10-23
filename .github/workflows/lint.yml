@@ -265,12 +265,6 @@ jobs:
         with:
             name: ctcache-shard-*
 
-      # Delete the uploaded build artifacts even if the job fails, so they don't accumulate in the workflow's artifact storage.
-      - name: Cleanup build artifacts
-        if: ${{ always() }} 
-        uses: geekyeggo/delete-artifact@v6
-        with:
-            name: lint_build-${{ github.run_id }}
       - name: Check that all shards passed
         run: |
           lint_passed="${{ needs.lint-tidy-shard.result == 'success' && needs.lint-format.result == 'success' && needs.build.result == 'success' }}"
@@ -281,4 +275,15 @@ jobs:
           else
             echo "All lint checks passed."
           fi
+
+      # After the gate on purpose, so it runs only on a green run. The step
+      # above exits non-zero when a shard failed, which skips this one and
+      # keeps the artifact that "Re-run failed jobs" needs: lint-tidy-shard
+      # installs its dependencies first and only then downloads the artifact,
+      # so a deleted one fails the rerun ten minutes in. The upload sets
+      # retention-days: 1, so a kept artifact still expires on its own.
+      - name: Cleanup build artifacts
+        uses: geekyeggo/delete-artifact@v6
+        with:
+            name: lint_build-${{ github.run_id }}
     
