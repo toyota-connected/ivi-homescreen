@@ -51,7 +51,90 @@ BUNDLE="${BUNDLE:-}"
 SECONDS_RUN="${SECONDS_RUN:-25}"
 OUT_DIR="${OUT_DIR:-$PWD/wayland-smoke-out}"
 CHECK_ONLY=0
+FRAME_ONLY=""
 [ "${1:-}" = "--check" ] && CHECK_ONLY=1
+# --frame <png> runs the content check alone, against a stored capture. That is
+# how the check itself is tested: a frame whose client area drew nothing must
+# fail it even when compositor chrome fills the edges.
+[ "${1:-}" = "--frame" ] && FRAME_ONLY="${2:-}"
+
+check_frame() {
+python3 - "$1" <<'PY'
+import sys, zlib, struct
+
+path = sys.argv[1]
+with open(path, 'rb') as fh:
+    data = fh.read()
+
+# Minimal PNG reader: no Pillow on a bare runner. Only 8-bit RGB/RGBA from
+# grim is expected, which is the one case this needs to handle.
+pos, width, height, depth, color = 8, 0, 0, 0, 0
+idat = bytearray()
+while pos < len(data):
+    (length,) = struct.unpack('>I', data[pos:pos + 4])
+    kind = data[pos + 4:pos + 8]
+    body = data[pos + 8:pos + 8 + length]
+    if kind == b'IHDR':
+        width, height, depth, color = struct.unpack('>IIBB', body[:10])
+    elif kind == b'IDAT':
+        idat += body
+    elif kind == b'IEND':
+        break
+    pos += 12 + length
+
+if depth != 8 or color not in (2, 6):
+    print(f'unexpected PNG format: depth={depth} color={color}')
+    sys.exit(1)
+
+channels = 3 if color == 2 else 4
+raw = zlib.decompress(bytes(idat))
+stride = width * channels
+# Only the middle counts. Compositor chrome lives at the edges, and an
+# antialiased title bar is hundreds of distinct colors over a client area that
+# drew nothing -- which is the hollow pass this guards against, seen on a real
+# capture during the bring-up this job came from.
+x0, x1 = width // 4, (width * 3) // 4
+y0, y1 = height // 4, (height * 3) // 4
+
+prev = bytearray(stride)
+colors = set()
+off = 0
+for y in range(height):
+    ft = raw[off]
+    line = bytearray(raw[off + 1:off + 1 + stride])
+    off += 1 + stride
+    for i in range(stride):
+        a = line[i - channels] if i >= channels else 0
+        b = prev[i]
+        c = prev[i - channels] if i >= channels else 0
+        if ft == 1:
+            line[i] = (line[i] + a) & 0xFF
+        elif ft == 2:
+            line[i] = (line[i] + b) & 0xFF
+        elif ft == 3:
+            line[i] = (line[i] + ((a + b) >> 1)) & 0xFF
+        elif ft == 4:
+            p = a + b - c
+            pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+            pr = a if (pa <= pb and pa <= pc) else (b if pb <= pc else c)
+            line[i] = (line[i] + pr) & 0xFF
+    if y0 <= y < y1:
+        for x in range(x0 * channels, x1 * channels, channels):
+            colors.add(bytes(line[x:x + 3]))
+    prev = line
+
+print(f'{width}x{height}, centre {x1 - x0}x{y1 - y0}, distinct colors: {len(colors)}')
+if len(colors) <= 1:
+    print('FAIL: the client area is a single flat color, nothing was presented')
+    sys.exit(1)
+print('PASS: the client area has content')
+PY
+}
+
+if [ -n "$FRAME_ONLY" ]; then
+  check_frame "$FRAME_ONLY"
+  exit $?
+fi
 
 missing=0
 need() {
@@ -90,7 +173,12 @@ ls "$XDG_RUNTIME_DIR"/wayland-* 2>/dev/null | sort > "$OUT_DIR/sockets.before" |
 unset WAYLAND_DISPLAY || true
 
 SWAY_CFG="$OUT_DIR/sway.conf"
-echo "exec_always true" > "$SWAY_CFG"
+{
+  echo "exec_always true"
+  # No title bar and no border, so what is captured is client area rather than
+  # compositor chrome.
+  echo "default_border none"
+} > "$SWAY_CFG"
 WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1 WLR_LIBINPUT_NO_DEVICES=1 \
   WLR_RENDERER=pixman \
   sway -c "$SWAY_CFG" > "$OUT_DIR/sway.log" 2>&1 &
@@ -131,69 +219,4 @@ if ! WAYLAND_DISPLAY="$DISPLAY_NAME" grim "$SHOT" 2>"$OUT_DIR/grim.log"; then
 fi
 wait "$SHELL_PID" 2>/dev/null || true
 
-python3 - "$SHOT" <<'PY'
-import sys, zlib, struct
-
-path = sys.argv[1]
-with open(path, 'rb') as fh:
-    data = fh.read()
-
-# Minimal PNG reader: no Pillow on a bare runner. Only 8-bit RGB/RGBA from
-# grim is expected, which is the one case this needs to handle.
-pos, width, height, depth, color = 8, 0, 0, 0, 0
-idat = bytearray()
-while pos < len(data):
-    (length,) = struct.unpack('>I', data[pos:pos + 4])
-    kind = data[pos + 4:pos + 8]
-    body = data[pos + 8:pos + 8 + length]
-    if kind == b'IHDR':
-        width, height, depth, color = struct.unpack('>IIBB', body[:10])
-    elif kind == b'IDAT':
-        idat += body
-    elif kind == b'IEND':
-        break
-    pos += 12 + length
-
-if depth != 8 or color not in (2, 6):
-    print(f'unexpected PNG format: depth={depth} color={color}')
-    sys.exit(1)
-
-channels = 3 if color == 2 else 4
-raw = zlib.decompress(bytes(idat))
-stride = width * channels
-prev = bytearray(stride)
-colors = set()
-off = 0
-for _ in range(height):
-    ft = raw[off]
-    line = bytearray(raw[off + 1:off + 1 + stride])
-    off += 1 + stride
-    for i in range(stride):
-        a = line[i - channels] if i >= channels else 0
-        b = prev[i]
-        c = prev[i - channels] if i >= channels else 0
-        if ft == 1:
-            line[i] = (line[i] + a) & 0xFF
-        elif ft == 2:
-            line[i] = (line[i] + b) & 0xFF
-        elif ft == 3:
-            line[i] = (line[i] + ((a + b) >> 1)) & 0xFF
-        elif ft == 4:
-            p = a + b - c
-            pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
-            pr = a if (pa <= pb and pa <= pc) else (b if pb <= pc else c)
-            line[i] = (line[i] + pr) & 0xFF
-    for x in range(0, stride, channels):
-        colors.add(bytes(line[x:x + 3]))
-        if len(colors) > 8:
-            break
-    prev = line
-    if len(colors) > 8:
-        break
-
-print(f'{width}x{height}, distinct colors (capped): {len(colors)}')
-if len(colors) <= 1:
-    print('FAIL: the frame is a single flat color, so nothing was presented')
-    sys.exit(1)
-print('PASS: the frame has content')
-PY
+check_frame "$SHOT"
