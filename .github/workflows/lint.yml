@@ -44,8 +44,18 @@ jobs:
             cc: clang-20
             cxx: clang++-20
             extra_pkgs: clang-20 llvm-20 lld-20 libc++-20-dev libc++abi-20-dev
+          # ENABLE_STATIC_LINK was not built anywhere, so neither the link nor
+          # the guard that reads it back had cover. clang-19 because the guard
+          # only applies where the runtime is libc++, which clang picks from 14.
+          - compiler: clang
+            version: '19'
+            cc: clang-19
+            cxx: clang++-19
+            extra_pkgs: clang-19 llvm-19 lld-19 libc++-19-dev libc++abi-19-dev
+            static_link: true
+            name_suffix: -static-libc++
 
-    name: ${{ matrix.compiler }}-${{ matrix.version }}
+    name: ${{ matrix.compiler }}-${{ matrix.version }}${{ matrix.name_suffix }}
     permissions:
       contents: read
 
@@ -65,15 +75,30 @@ jobs:
         env:
           CC: ${{ matrix.cc }}
           CXX: ${{ matrix.cxx }}
+          CMAKE_OPTS: ${{ matrix.static_link && '-D ENABLE_STATIC_LINK=ON' || '' }}
         run: |
           cmake -GNinja \
             -B ${{github.workspace}}/build \
             -D CMAKE_BUILD_TYPE=Debug \
             -D CMAKE_EXPORT_COMPILE_COMMANDS=ON \
-            -D BUILD_NUMBER=${GITHUB_RUN_ID}
+            -D BUILD_NUMBER=${GITHUB_RUN_ID} \
+            ${CMAKE_OPTS}
 
       - name: Build
         run: ninja -C ${{github.workspace}}/build
+
+      # Read back rather than trust the in-build guard: that one only warns when
+      # cmake found no readelf, so a leg which skipped its own check would still
+      # pass. Same four sonames the guard looks for.
+      - name: Verify the C++ runtime is carried
+        if: ${{ matrix.static_link }}
+        run: |
+          bin="${{github.workspace}}/build/shell/homescreen"
+          if readelf -d "$bin" | grep -E 'NEEDED.*(libc\+\+|libstdc\+\+|libunwind)'; then
+            echo "ENABLE_STATIC_LINK is on but the runtime is still dynamic" >&2
+            exit 1
+          fi
+          echo "no C++ runtime in DT_NEEDED"
 
   lint-build:
     if: ${{ github.server_url == 'https://github.com' }}
