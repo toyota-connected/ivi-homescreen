@@ -1,9 +1,10 @@
 ---
 name: wayland-smoke
 
+# Push and manual only. The job builds flutter, a bundle and the shell before
+# it can capture a frame, which is too long to spend on every push to every
+# PR; v3.0 and workflow_dispatch are where it earns its time.
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
   push:
     branches: [v3.0]
   workflow_dispatch:
