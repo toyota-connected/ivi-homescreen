@@ -202,17 +202,19 @@ WaylandWindow::WaylandWindow(const size_t index,
         wm->SetBackground(m_base_surface, m_output_index);
         // The activation area is the region the compositor reserves for app
         // content on the background; the AGL shell wants it set before `ready`.
-        // An unset (0x0) area defaults to the full view extent so the whole
-        // surface is usable rather than a zero-size region the compositor
-        // ignores.
-        const auto aw = m_activation_area.width != 0
-                            ? m_activation_area.width
-                            : static_cast<uint32_t>(m_geometry.width);
-        const auto ah = m_activation_area.height != 0
-                            ? m_activation_area.height
-                            : static_cast<uint32_t>(m_geometry.height);
-        wm->SetActivationArea(m_activation_area.x, m_activation_area.y, aw, ah,
-                              m_output_index);
+        //
+        // Only sent when one was configured. agl-compositor accepts an area
+        // only while it is strictly smaller than the output, so substituting
+        // the full view extent for an unset area asks for something it always
+        // refuses -- it logs "Invalid activation-area position" and falls back
+        // to its own default. All-zero is how the protocol says "unset", and
+        // that default is the thing the substitution was reaching for anyway.
+        if (m_activation_area.x != 0 || m_activation_area.y != 0 ||
+            m_activation_area.width != 0 || m_activation_area.height != 0) {
+          wm->SetActivationArea(m_activation_area.x, m_activation_area.y,
+                                m_activation_area.width,
+                                m_activation_area.height, m_output_index);
+        }
         break;
       }
       case WINDOW_PANEL_TOP:
