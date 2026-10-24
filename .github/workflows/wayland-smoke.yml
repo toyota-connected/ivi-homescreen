@@ -1,0 +1,95 @@
+---
+name: wayland-smoke
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [v3.0]
+  workflow_dispatch:
+
+jobs:
+  # The first job that renders. Everything else either compiles the Wayland
+  # backends without running them, or runs the DRM harness in --check, which
+  # stops before it launches anything. A compositor defect that only exists at
+  # run time -- a composite that never lands, a surface that never maps -- has
+  # had no job that could see it.
+  wayland-egl-smoke:
+    if: ${{ github.server_url == 'https://github.com' }}
+    runs-on: ubuntu-24.04
+    name: wayland-egl headless
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        uses: ./.github/actions/apt-packages
+        with:
+          packages: >-
+            ninja-build
+            libwayland-dev wayland-protocols libxkbcommon-dev
+            mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev
+            libglib2.0-dev libpugixml-dev libdrm-dev libgbm-dev
+            clang-19 lld-19 libc++-19-dev libc++abi-19-dev
+            sway grim
+          options: --no-install-recommends
+
+      - name: Harness pre-flight (--check)
+        run: test/wayland_headless_smoke.sh --check
+
+      - name: Restore emb engine artifacts
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/emb/store/engine
+          key: emb-engine-x86_64
+          restore-keys: |
+            emb-engine-x86_64-
+
+      - name: Build the bundle
+        run: |
+          eval "$(./emb_cli/bootstrap.sh --shellenv)"
+          emb flutter --flutter-version "$(cat .flutter-version)"
+          source ./setup_env.sh
+          eval "$(./emb_cli/bootstrap.sh --shellenv)"
+          cd test/integration/scroll_bench
+          flutter build bundle
+          echo "BUNDLE=$PWD/build/flutter_assets" >> "$GITHUB_ENV"
+
+      # BUILD_EGL_ENABLE_MULTISAMPLE stays OFF here. ON does not present at all
+      # (#824): the invalid blit it caused is fixed, and the frame is still a
+      # flat color, so a second defect is still open. Add a second leg with it
+      # ON when #824 closes -- that leg is the regression test for this.
+      - name: Configure
+        env:
+          CC: clang-19
+          CXX: clang++-19
+        run: |
+          cmake -GNinja \
+            -B ${{github.workspace}}/build \
+            -D CMAKE_BUILD_TYPE=Debug \
+            -D BUILD_NUMBER=${GITHUB_RUN_ID} \
+            -D BUILD_COMPOSITOR=ON \
+            -D BUILD_BACKEND_WAYLAND_EGL=ON \
+            -D BUILD_EGL_ENABLE_MULTISAMPLE=OFF \
+            -D DISABLE_PLUGINS=ON
+
+      - name: Build
+        run: ninja -C ${{github.workspace}}/build
+
+      - name: Smoke (headless sway, llvmpipe, capture)
+        env:
+          HOMESCREEN: ${{github.workspace}}/build/shell/homescreen
+          OUT_DIR: ${{github.workspace}}/wayland-smoke-out
+        run: test/wayland_headless_smoke.sh
+
+      # The capture is the evidence for a red run; on green it says nothing a
+      # log does not.
+      - name: Upload the capture
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: wayland-smoke-capture
+          path: ${{github.workspace}}/wayland-smoke-out
+          retention-days: 3
