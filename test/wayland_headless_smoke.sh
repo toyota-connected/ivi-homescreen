@@ -123,7 +123,7 @@ for y in range(height):
             colors.add(bytes(line[x:x + 3]))
     prev = line
 
-print(f'{width}x{height}, centre {x1 - x0}x{y1 - y0}, distinct colors: {len(colors)}')
+print(f'{width}x{height}, center {x1 - x0}x{y1 - y0}, distinct colors: {len(colors)}')
 if len(colors) <= 1:
     print('FAIL: the client area is a single flat color, nothing was presented')
     sys.exit(1)
