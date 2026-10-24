@@ -18,7 +18,14 @@ jobs:
   wayland-egl-smoke:
     if: ${{ github.server_url == 'https://github.com' }}
     runs-on: ubuntu-24.04
-    name: wayland-egl headless
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both, because the pair is what the defect lived in: the compositor
+        # path with multisample on presented nothing until the store learned to
+        # resolve itself, and neither leg alone would have shown it.
+        multisample: ["OFF", "ON"]
+    name: wayland-egl headless (msaa=${{ matrix.multisample }})
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -62,10 +69,6 @@ jobs:
           flutter build bundle
           echo "BUNDLE=$PWD/build/flutter_assets" >> "$GITHUB_ENV"
 
-      # BUILD_EGL_ENABLE_MULTISAMPLE stays OFF here. ON does not present at all
-      # (#824): the invalid blit it caused is fixed, and the frame is still a
-      # flat color, so a second defect is still open. Add a second leg with it
-      # ON when #824 closes -- that leg is the regression test for this.
       - name: Configure
         env:
           CC: clang-19
@@ -77,7 +80,7 @@ jobs:
             -D BUILD_NUMBER=${GITHUB_RUN_ID} \
             -D BUILD_COMPOSITOR=ON \
             -D BUILD_BACKEND_WAYLAND_EGL=ON \
-            -D BUILD_EGL_ENABLE_MULTISAMPLE=OFF \
+            -D BUILD_EGL_ENABLE_MULTISAMPLE=${{ matrix.multisample }} \
             -D DISABLE_PLUGINS=ON
 
       - name: Build
@@ -95,6 +98,6 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: wayland-smoke-capture
+          name: wayland-smoke-capture-msaa-${{ matrix.multisample }}
           path: ${{github.workspace}}/wayland-smoke-out
           retention-days: 3
