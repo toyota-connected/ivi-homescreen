@@ -1007,7 +1007,22 @@ void WaylandEglBackend::CompositeLayer(const FlutterBackingStore* store,
 
   if (baton->kind == StoreKind::Fbo) {
     auto* fbo = baton->fbo_store;
-    m_gl_compositor->CompositeToDefault(fbo->Framebuffer(), fbo->ColorTexture(),
+    // A multisample store cannot be sampled and cannot be blitted into a
+    // multisampled window, so resolve it into its color texture first. Before
+    // this existed the blit was the only thing that resolved, and it was
+    // invalid as soon as the window carried samples too.
+    GLuint src_fbo = fbo->Framebuffer();
+    if (fbo->IsMultisampled()) {
+      if (fbo->ResolveToTexture(&m_gl_caps)) {
+        src_fbo = 0;  // the texture is the source now; take the quad path
+      } else {
+        ihs::log::error(
+            "WaylandEglBackend: multisample resolve unavailable; the frame "
+            "cannot be composited");
+        return;
+      }
+    }
+    m_gl_compositor->CompositeToDefault(src_fbo, fbo->ColorTexture(),
                                         fbo->Width(), fbo->Height(), dst_x,
                                         dst_y, dst_w, dst_h, blend);
     return;
