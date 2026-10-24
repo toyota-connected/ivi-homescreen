@@ -63,6 +63,12 @@ void GlCaps::Probe() {
   }
   is_es3 = (context_major >= 3);
 
+  // Read with framebuffer 0 bound: Probe() runs with the window surface
+  // current, and GL_SAMPLES reports the bound framebuffer's count. Core since
+  // ES2, so no extension gate.
+  default_fb_samples = 0;
+  glGetIntegerv(GL_SAMPLES, &default_fb_samples);
+
   const char* exts = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
 
   has_rgb8_rgba8 =
@@ -109,8 +115,8 @@ void GlCaps::Probe() {
   }
   has_multisampled_renderbuffer = (renderbuffer_storage_multisample != nullptr);
 
-  ihs::log::debug("GlCaps: ES{}.{} rgb8={} packed_ds={} blit={} msaa_rb={}",
-                  context_major, context_minor, has_rgb8_rgba8,
-                  has_packed_depth_stencil, has_blit_framebuffer,
-                  has_multisampled_renderbuffer);
+  ihs::log::debug(
+      "GlCaps: ES{}.{} rgb8={} packed_ds={} blit={} msaa_rb={} fb0_samples={}",
+      context_major, context_minor, has_rgb8_rgba8, has_packed_depth_stencil,
+      has_blit_framebuffer, has_multisampled_renderbuffer, default_fb_samples);
 }

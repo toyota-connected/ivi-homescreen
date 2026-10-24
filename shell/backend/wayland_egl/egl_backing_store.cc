@@ -145,6 +145,51 @@ EglFboBackingStore::~EglFboBackingStore() {
   if (color_rb_msaa_) {
     glDeleteRenderbuffers(1, &color_rb_msaa_);
   }
+  if (resolve_fbo_) {
+    glDeleteFramebuffers(1, &resolve_fbo_);
+  }
+}
+
+namespace {
+// GL_READ_FRAMEBUFFER / GL_DRAW_FRAMEBUFFER are ES3 core, and this file
+// compiles against the ES2 headers; same values, same reason as
+// gl_compositor.cc.
+constexpr GLenum kReadFramebuffer = 0x8CA8;
+constexpr GLenum kDrawFramebuffer = 0x8CA9;
+}  // namespace
+
+bool EglFboBackingStore::ResolveToTexture(const GlCaps* caps) {
+  if (color_rb_msaa_ == 0) {
+    return true;  // not multisampled: the texture is the attachment already
+  }
+  if (caps == nullptr || caps->blit_framebuffer == nullptr) {
+    return false;
+  }
+
+  // One FBO for the life of the store, with the color texture attached. The
+  // multisample renderbuffer is the read side, this is the draw side, and the
+  // blit between them is the resolve -- single-sampled, so it is legal
+  // whatever the window's sample count is.
+  if (resolve_fbo_ == 0) {
+    glGenFramebuffers(1, &resolve_fbo_);
+    glBindFramebuffer(GL_FRAMEBUFFER, resolve_fbo_);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                           color_texture_, 0);
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+      ihs::log::error("EglFboBackingStore: resolve target incomplete");
+      glBindFramebuffer(GL_FRAMEBUFFER, 0);
+      glDeleteFramebuffers(1, &resolve_fbo_);
+      resolve_fbo_ = 0;
+      return false;
+    }
+  }
+
+  glBindFramebuffer(kReadFramebuffer, framebuffer_);
+  glBindFramebuffer(kDrawFramebuffer, resolve_fbo_);
+  caps->blit_framebuffer(0, 0, width_, height_, 0, 0, width_, height_,
+                         GL_COLOR_BUFFER_BIT, GL_NEAREST);
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  return true;
 }
 
 EglTextureBackingStore::EglTextureBackingStore(int32_t width,

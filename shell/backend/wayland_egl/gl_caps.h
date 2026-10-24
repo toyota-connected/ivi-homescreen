@@ -40,6 +40,12 @@ struct GlCaps {
   bool has_blit_framebuffer{false};
   bool has_multisampled_renderbuffer{false};
 
+  // Samples the default framebuffer was created with. glBlitFramebuffer is
+  // only a resolve -- multisample read to single-sample draw -- so a blit
+  // whose destination is framebuffer 0 is invalid once the EGL config asks
+  // for samples (BUILD_EGL_ENABLE_MULTISAMPLE).
+  GLint default_fb_samples{0};
+
   // Resolved entry points. Signatures match ES3 core; the NV / ANGLE
   // extensions are ABI-compatible, so the same pointer type is used.
   using BlitFramebufferFn = void(GL_APIENTRY*)(GLint srcX0,

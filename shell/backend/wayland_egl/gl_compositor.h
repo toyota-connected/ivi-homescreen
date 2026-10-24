@@ -24,7 +24,7 @@
 #include "view/compositor_surface_interface.h"
 #include "view/layer_geometry.h"
 
-struct GlCaps;
+#include "gl_caps.h"
 
 /**
  * @brief Composites a backing store onto the default framebuffer.
@@ -140,6 +140,29 @@ class GlCompositor {
       const std::function<void(const ICompositorSurface::GlLayerTexture&)>&
           on_drawn = nullptr,
       const ICompositorSurface::GlLayerTexture* layer0 = nullptr);
+
+  /**
+   * @brief Whether CompositeToFbo may take the glBlitFramebuffer path.
+   *
+   * Blit cannot blend, cannot read a layer with no FBO behind it, and is a
+   * resolve only: ES3 makes a blit into a multisampled draw framebuffer
+   * GL_INVALID_OPERATION. Framebuffer 0 carries samples whenever the EGL
+   * config asked for them (BUILD_EGL_ENABLE_MULTISAMPLE), so that case takes
+   * the quad path instead. Static so it is testable without a GL context.
+   */
+  static bool CanBlit(const GlCaps& caps,
+                      bool external,
+                      bool blend,
+                      GLuint src_fbo,
+                      GLuint dst_fbo) {
+    if (external || blend || src_fbo == 0) {
+      return false;
+    }
+    if (!caps.has_blit_framebuffer || caps.blit_framebuffer == nullptr) {
+      return false;
+    }
+    return dst_fbo != 0 || caps.default_fb_samples <= 1;
+  }
 
   // Thin wrapper: composite into the default framebuffer (FBO 0).
   void CompositeToDefault(GLuint src_fbo,

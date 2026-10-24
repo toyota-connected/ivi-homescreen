@@ -57,6 +57,27 @@ class EglFboBackingStore {
   [[nodiscard]] GLuint Framebuffer() const { return framebuffer_; }
   [[nodiscard]] GLuint ColorTexture() const { return color_texture_; }
 
+  /**
+   * @brief Whether the color attachment is a multisample renderbuffer.
+   *
+   * True only under BUILD_EGL_ENABLE_MULTISAMPLE, and only where the caps
+   * probe found the entry point. A store in that state cannot be sampled and
+   * has to be resolved first.
+   */
+  [[nodiscard]] bool IsMultisampled() const { return color_rb_msaa_ != 0; }
+
+  /**
+   * @brief Resolve the multisample color attachment into the color texture.
+   *
+   * No-op when the store is not multisampled. The texture is what every
+   * composite path reads -- the quad path samples it, and the blit path needs
+   * a single-sampled source whenever the destination is multisampled too --
+   * so without this the texture is never written and the frame is black.
+   * Needs @c GlCaps::blit_framebuffer; returns false when it is unavailable,
+   * which leaves the caller to fall back.
+   */
+  bool ResolveToTexture(const GlCaps* caps);
+
  private:
   int32_t width_{0};
   int32_t height_{0};
@@ -64,6 +85,7 @@ class EglFboBackingStore {
   GLuint color_texture_{0};
   GLuint depth_stencil_rb_{0};
   GLuint color_rb_msaa_{0};  // used only when MSAA is enabled
+  GLuint resolve_fbo_{0};    // draw side of the MSAA resolve
 };
 
 /**
