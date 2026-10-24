@@ -47,6 +47,10 @@ jobs:
           restore-keys: |
             emb-engine-x86_64-
 
+      # emb is not vendored; drm-kms.yml clones it the same way.
+      - name: Fetch emb
+        run: git clone --depth 1 https://github.com/toyota-connected/emb_cli.git emb_cli
+
       - name: Build the bundle
         run: |
           eval "$(./emb_cli/bootstrap.sh --shellenv)"
