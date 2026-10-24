@@ -525,8 +525,7 @@ void GlCompositor::CompositeToFbo(GLuint dst_fbo,
   // GL-native-origin sources that need to land top-down.
   // An external texture has no FBO to read from and must go through its own
   // sampler, so it never takes the blit path.
-  if (!external && !blend && src_fbo != 0 && caps_ &&
-      caps_->has_blit_framebuffer && caps_->blit_framebuffer) {
+  if (caps_ && CanBlit(*caps_, external, blend, src_fbo, dst_fbo)) {
     glBindFramebuffer(kReadFramebuffer, src_fbo);
     glBindFramebuffer(kDrawFramebuffer, dst_fbo);
     const GLint dst_y0 = flip_y ? dst_y + dst_h : dst_y;
