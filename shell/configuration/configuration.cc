@@ -649,17 +649,12 @@ std::vector<Configuration::Config> Configuration::parse_config(
       cfg.app_id = kDefaultAppId;
     }
 
-    // An omitted/zero activation area covers the full view extent. TOML has no
-    // value references, so "same as the view" is resolved here rather than in
-    // the file. x/y already default to 0.
-    const uint32_t view_w = cfg.view.width.value_or(kDefaultViewWidth);
-    const uint32_t view_h = cfg.view.height.value_or(kDefaultViewHeight);
-    if (cfg.view.activation_area_width == 0) {
-      cfg.view.activation_area_width = view_w;
-    }
-    if (cfg.view.activation_area_height == 0) {
-      cfg.view.activation_area_height = view_h;
-    }
+    // An omitted activation area stays zero, which is how the protocol says
+    // "unset" -- the compositor then picks its own area. Filling it with the
+    // view extent instead asks for the whole output, and agl-compositor takes
+    // an area only while it is strictly smaller than the output, so that
+    // request is always refused: it logs "Invalid activation-area position"
+    // and falls back to the default the substitution was reaching for.
 
     res.emplace_back(cfg);
   }

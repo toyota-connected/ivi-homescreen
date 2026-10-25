@@ -281,12 +281,15 @@ TEST(HomescreenConfigurationParseConfig, MultiView) {
   EXPECT_EQ(1920, configs[0].view.activation_area_width);
   EXPECT_EQ(1020, configs[0].view.activation_area_height);
 
-  // view B: omitted activation area -> full view extent (1280x720).
+  // view B: an omitted activation area stays zero, which is how the protocol
+  // says unset. Filling it with the view extent asked agl-compositor for the
+  // whole output, which it refuses -- it takes an area only while that area is
+  // strictly smaller than the output -- so the request could only ever fail.
   EXPECT_EQ("cluster-suite", configs[1].app_id);
   EXPECT_EQ(0, configs[1].view.activation_area_x);
   EXPECT_EQ(0, configs[1].view.activation_area_y);
-  EXPECT_EQ(1280, configs[1].view.activation_area_width);
-  EXPECT_EQ(720, configs[1].view.activation_area_height);
+  EXPECT_EQ(0, configs[1].view.activation_area_width);
+  EXPECT_EQ(0, configs[1].view.activation_area_height);
 
   // The whole point: per-view areas differ rather than sharing one global rect.
   EXPECT_NE(configs[0].view.activation_area_height,
