@@ -254,6 +254,31 @@ class VulkanDrmBackend final : public Backend {
   // DrmBackend::RefreshPeriodNs for why not the vsync provider (#732).
   // Latched from the mode's timings rather than its vrefresh, which the
   // kernel rounds (#762); SetupCompositor does the arithmetic.
+  // What a re-resolved mode differs by, if anything. Free of DRM so the rule
+  // can be tested without a card.
+  enum class ModeDivergence : uint8_t {
+    kNone,
+    kRefresh,  // same extent, different timing
+    kExtent,   // different extent, with or without a timing change
+  };
+  static ModeDivergence ClassifyDivergence(uint32_t old_w,
+                                           uint32_t old_h,
+                                           uint32_t old_period_ns,
+                                           uint32_t new_w,
+                                           uint32_t new_h,
+                                           uint32_t new_period_ns) {
+    if (new_w != old_w || new_h != old_h) {
+      return ModeDivergence::kExtent;
+    }
+    return new_period_ns != old_period_ns ? ModeDivergence::kRefresh
+                                          : ModeDivergence::kNone;
+  }
+
+  // |Backend| Re-resolve the connector's mode and say whether it moved. This
+  // tier does not adopt the change -- see scanout_mode_ -- so it always
+  // returns false; the point is that a mode change stops being silent.
+  bool OnOutputReconfigured() override;
+
   [[nodiscard]] uint32_t RefreshPeriodNs() const override {
     return mode_period_ns_;
   }
@@ -436,6 +461,15 @@ class VulkanDrmBackend final : public Backend {
 
   // Scanout mode selector ("<W>x<H>[@<R>]"); empty = connector preferred mode.
   std::string mode_spec_;
+  // What SetupCompositor selected, kept so a reconfigure can be compared
+  // against it. The mode itself is not re-committed: this tier reports a
+  // divergence and keeps driving what it has (#765). drm-kms-egl adopts a
+  // refresh-only change; doing the same here needs the flip reader quiesced
+  // and the swapchain reallocated, which is why the two tiers differ for now.
+  drmModeModeInfo scanout_mode_{};
+  uint32_t scanout_fourcc_{0};
+  uint32_t scanout_connector_id_{0};
+
   // The selected mode's exact refresh period in ns, latched by
   // SetupCompositor; 0 until a mode is set. Reported to the engine via
   // RefreshPeriodNs (#732) and derived from the timings, not vrefresh (#762).
