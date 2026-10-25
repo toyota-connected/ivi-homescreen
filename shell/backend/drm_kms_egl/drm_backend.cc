@@ -1181,6 +1181,15 @@ uint32_t DrmBackend::AddFb(gbm_bo* bo) const {
         height, format, std::strerror(errno));
     return 0;
   }
+  if (!scanout_modifier_logged_.exchange(true)) {
+    ihs::log::info(
+        "[DrmBackend] scanout buffer: fmt={} mod=0x{:016x} ({}), {} plane(s)",
+        drm::format_name(format), modifier,
+        modifier == DRM_FORMAT_MOD_INVALID  ? "invalid"
+        : modifier == DRM_FORMAT_MOD_LINEAR ? "linear"
+                                            : "tiled or compressed",
+        plane_count);
+  }
   if (cfg_.debug_backend) {
     ihs::log::debug(
         "[DrmBackend] AddFb fb_id={} {}x{} fmt=0x{:08x} mod=0x{:016x} "

@@ -1308,6 +1308,15 @@ bool DrmCompositor::CreateGbmStore(GbmBackingStore& store,
       return false;
     }
 
+    if (!pv_modifier_logged_) {
+      pv_modifier_logged_ = true;
+      ihs::log::info(
+          "[DrmCompositor] platform-view import: fourcc={} mod=0x{:016x} ({})",
+          drm::format_name(format), modifier,
+          modifier == DRM_FORMAT_MOD_INVALID  ? "invalid"
+          : modifier == DRM_FORMAT_MOD_LINEAR ? "linear"
+                                              : "tiled or compressed");
+    }
     glGenTextures(1, &slot.color_tex);
     glBindTexture(GL_TEXTURE_2D, slot.color_tex);
     glEGLImageTargetTexture2DOES_(GL_TEXTURE_2D,
