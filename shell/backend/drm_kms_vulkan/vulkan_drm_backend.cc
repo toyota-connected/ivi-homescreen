@@ -1360,6 +1360,10 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   // two cannot disagree -- the invariant #758 built.
   mode_period_ns_ = ModeRefreshPeriodNs(target.mode.clock, target.mode.htotal,
                                         target.mode.vtotal);
+  // Kept so a later reconfigure has something to compare against (#765).
+  scanout_mode_ = target.mode;
+  scanout_fourcc_ = scanout_fourcc;
+  scanout_connector_id_ = target.connector_id;
   const uint32_t period_ns =
       mode_period_ns_ > 0 ? mode_period_ns_ : 16'666'667U;
   compositor_->period_ns = period_ns;
@@ -4470,4 +4474,55 @@ FlutterCompositor VulkanDrmBackend::GetCompositorConfig() {
       "the root surface. Platform-view layers will not reach a KMS plane.");
 #endif
   return compositor;
+}
+
+bool VulkanDrmBackend::OnOutputReconfigured() {
+  if (scanout_mode_.clock == 0) {
+    return false;  // nothing latched yet, so nothing to compare
+  }
+
+  drm_kms_vulkan::ScanoutTarget target{};
+  std::string err;
+  const bool discovered = injected_fd_ >= 0
+                              ? drm_kms_vulkan::DiscoverScanoutTarget(
+                                    injected_fd_, scanout_fourcc_, mode_spec_,
+                                    scanout_connector_id_, target, err)
+                              : drm_kms_vulkan::DiscoverScanoutTarget(
+                                    drm_device_, scanout_fourcc_, mode_spec_,
+                                    connector_name_, target, err);
+  if (!discovered) {
+    ihs::log::warn(
+        "[VulkanDrmBackend] reconfigure: cannot re-resolve connector {}: {}; "
+        "keeping {}x{}",
+        scanout_connector_id_, err, scanout_mode_.hdisplay,
+        scanout_mode_.vdisplay);
+    return false;
+  }
+
+  const uint32_t now_ns = ModeRefreshPeriodNs(
+      target.mode.clock, target.mode.htotal, target.mode.vtotal);
+  const ModeDivergence diverged = ClassifyDivergence(
+      scanout_mode_.hdisplay, scanout_mode_.vdisplay, mode_period_ns_,
+      target.mode.hdisplay, target.mode.vdisplay, now_ns);
+
+  if (diverged == ModeDivergence::kNone) {
+    ihs::log::debug(
+        "[VulkanDrmBackend] reconfigure: connector {} still {}x{}@{}ns",
+        scanout_connector_id_, scanout_mode_.hdisplay, scanout_mode_.vdisplay,
+        mode_period_ns_);
+    return false;
+  }
+
+  // Said once per divergence and not adopted. drm-kms-egl takes a
+  // refresh-only change; here the flip reader is running and the swapchain is
+  // sized to the old extent, so adopting one means quiescing both. Whether
+  // that is worth building is what these lines are here to answer (#765).
+  ihs::log::warn(
+      "[VulkanDrmBackend] connector {} reports {}x{} at {} ns, we are driving "
+      "{}x{} at {} ns ({} changed); not adopted, still scanning out the mode "
+      "picked at startup",
+      scanout_connector_id_, target.mode.hdisplay, target.mode.vdisplay, now_ns,
+      scanout_mode_.hdisplay, scanout_mode_.vdisplay, mode_period_ns_,
+      diverged == ModeDivergence::kExtent ? "extent" : "refresh");
+  return false;
 }
