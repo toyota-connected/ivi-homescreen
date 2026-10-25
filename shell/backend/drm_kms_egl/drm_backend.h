@@ -663,6 +663,12 @@ class DrmBackend : public Backend, public IFlipSink {
   // frame. The gate itself lives in cfg_.lease_revoked.
   std::atomic<bool> lease_revoked_logged_{false};
 
+  // Same shape, for the modifier the scanout buffer actually came back with.
+  // The per-framebuffer line below it is debug and gated on --debug-backend;
+  // this one says once, at info, what was negotiated -- which is the question
+  // asked of a board whose planes advertise only one modifier.
+  mutable std::atomic<bool> scanout_modifier_logged_{false};
+
   // EGL
   EGLDisplay egl_display_ = EGL_NO_DISPLAY;
   EGLConfig egl_config_ = nullptr;

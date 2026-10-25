@@ -536,6 +536,11 @@ class DrmCompositor : public IFlipSink {
 
   GlCaps gl_caps_{};
   bool gl_caps_probed_{false};
+
+  // Says once, at info, which modifier a platform-view buffer imported with.
+  // The producer allocates independently of the primary plane, so this is
+  // where a tiled buffer meets a display that can only scan out linear.
+  mutable bool pv_modifier_logged_{false};
   std::unique_ptr<GlCompositor> gl_compositor_;
 
   std::unordered_map<StoreBaton*, std::unique_ptr<GbmBackingStore>> stores_;
