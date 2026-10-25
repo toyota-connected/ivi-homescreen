@@ -175,6 +175,26 @@ class WaylandWindow {
   FlutterView* m_view;
   struct wl_surface* m_base_surface{};
 
+  // A one-shot shm buffer committed on the background surface before the
+  // engine has rendered anything, so the surface maps early. agl-compositor
+  // marks an output ready from ivi_background_init() only if the background
+  // has already mapped by then; a background whose first buffer arrives with
+  // the first engine frame misses that and depends on the compositor's
+  // flutter-embedder-quirk, which defaults off. Released once a real frame
+  // replaces it.
+  struct wl_buffer* m_placeholder_buffer{};
+  void* m_placeholder_data{};
+  size_t m_placeholder_size{};
+
+  // Commit an opaque black buffer at the current geometry so the compositor
+  // maps the surface now. No-op without wl_shm or on a failed allocation --
+  // the quirk path still covers that, so a failure here costs nothing it did
+  // not already cost.
+  void MapBackgroundEarly();
+  void ReleasePlaceholder();
+  static void OnPlaceholderRelease(void* data, struct wl_buffer* buffer);
+  static const struct wl_buffer_listener kPlaceholderListener;
+
   // --- surface scaling -------------------------------------------------
   // Current scale in 1/120 units — the source of truth (wp_fractional_scale
   // delivers it directly; integer wl_output.scale N maps to N*120). Buffer
