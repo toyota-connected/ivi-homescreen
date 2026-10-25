@@ -243,6 +243,9 @@ class Display : public IDisplay,
    * @relation
    * wayland
    */
+  // GetShm() asserts, so a caller that can do without shm asks first.
+  [[nodiscard]] bool HasShm() const { return m_shm != nullptr; }
+
   [[nodiscard]] wl_shm* GetShm() const {
     assert(m_shm);
     return m_shm;

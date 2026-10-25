@@ -17,6 +17,11 @@
 
 #include <utility>
 
+#include <sys/mman.h>
+#include <unistd.h>
+
+#include <cstring>
+
 #include <cmath>
 
 #include "display.h"
@@ -247,6 +252,15 @@ WaylandWindow::WaylandWindow(const size_t index,
     /* wait until xdg_surface::configure ACKs the new dimensions */
     if (m_wait_for_configure)
       continue;
+  }
+
+  // Now, and not before: xdg-shell kills a client that attaches a buffer to an
+  // xdg_surface it has not seen configured ("xdg_surface has never been
+  // configured"), and the role has to be set first or agl-compositor drops the
+  // surface as roleless. After the first configure is both the earliest legal
+  // point and still well ahead of the engine's first frame.
+  if (m_type == WINDOW_BG) {
+    MapBackgroundEarly();
   }
 
   DeclareSurfaceMapping();
@@ -501,4 +515,82 @@ WaylandWindow::window_type WaylandWindow::get_window_type(
 void WaylandWindow::HandleCompositorClose(const size_t index) {
   ihs::log::info("({}) compositor closed the window; shutting down", index);
   RequestShutdown();
+}
+
+const wl_buffer_listener WaylandWindow::kPlaceholderListener = {
+    WaylandWindow::OnPlaceholderRelease};
+
+void WaylandWindow::OnPlaceholderRelease(void* data, wl_buffer* /* buffer */) {
+  static_cast<WaylandWindow*>(data)->ReleasePlaceholder();
+}
+
+void WaylandWindow::MapBackgroundEarly() {
+  if (m_placeholder_buffer != nullptr) {
+    return;
+  }
+  if (!m_display->HasShm()) {
+    return;
+  }
+  wl_shm* shm = m_display->GetShm();
+  const int32_t w = m_geometry.width > 0 ? m_geometry.width : 1;
+  const int32_t h = m_geometry.height > 0 ? m_geometry.height : 1;
+  const size_t stride = static_cast<size_t>(w) * 4;
+  const size_t needed = stride * static_cast<size_t>(h);
+
+  const int fd = memfd_create("ihs-bg-placeholder", MFD_CLOEXEC);
+  if (fd < 0) {
+    return;
+  }
+  if (ftruncate(fd, static_cast<off_t>(needed)) < 0) {
+    close(fd);
+    return;
+  }
+  void* data = mmap(nullptr, needed, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+  if (data == MAP_FAILED) {
+    close(fd);
+    return;
+  }
+  // Opaque black. The screen is black at this point anyway, so this shows
+  // nothing new; it exists to give the surface a buffer.
+  std::memset(data, 0, needed);
+  for (size_t i = 3; i < needed; i += 4) {
+    static_cast<unsigned char*>(data)[i] = 0xFF;
+  }
+
+  wl_shm_pool* pool = wl_shm_create_pool(shm, fd, static_cast<int32_t>(needed));
+  close(fd);
+  if (pool == nullptr) {
+    munmap(data, needed);
+    return;
+  }
+  wl_buffer* buffer = wl_shm_pool_create_buffer(
+      pool, 0, w, h, static_cast<int32_t>(stride), WL_SHM_FORMAT_ARGB8888);
+  wl_shm_pool_destroy(pool);
+  if (buffer == nullptr) {
+    munmap(data, needed);
+    return;
+  }
+
+  m_placeholder_buffer = buffer;
+  m_placeholder_data = data;
+  m_placeholder_size = needed;
+  wl_buffer_add_listener(buffer, &kPlaceholderListener, this);
+
+  wl_surface_attach(m_base_surface, buffer, 0, 0);
+  wl_surface_damage(m_base_surface, 0, 0, w, h);
+  wl_surface_commit(m_base_surface);
+  ihs::log::debug(
+      "[WaylandWindow] background mapped early with a {}x{} placeholder", w, h);
+}
+
+void WaylandWindow::ReleasePlaceholder() {
+  if (m_placeholder_buffer != nullptr) {
+    wl_buffer_destroy(m_placeholder_buffer);
+    m_placeholder_buffer = nullptr;
+  }
+  if (m_placeholder_data != nullptr) {
+    munmap(m_placeholder_data, m_placeholder_size);
+    m_placeholder_data = nullptr;
+    m_placeholder_size = 0;
+  }
 }
