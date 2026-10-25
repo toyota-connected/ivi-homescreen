@@ -24,12 +24,15 @@ endif ()
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/third_party/sanitizers-cmake/cmake)
 
+# Which CI run produced a given binary. Kept out of the project version: the
+# version says which release this is, the build number says which build of it,
+# and folding the two left the project reporting 1.0.<run id> on a 3.0 branch.
 if (NOT BUILD_NUMBER)
     set(BUILD_NUMBER 0)
 endif ()
 
 project(ivi-homescreen
-        VERSION "1.0.${BUILD_NUMBER}"
+        VERSION 3.0.0
         DESCRIPTION "IVI Flutter Shell"
         LANGUAGES CXX C
 )
@@ -92,7 +95,7 @@ if (NOT (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN OR
 endif ()
 
 message(STATUS "Project ................ ${PROJECT_NAME}")
-message(STATUS "Version ................ ${PROJECT_VERSION}")
+message(STATUS "Version ................ ${PROJECT_VERSION} (build ${BUILD_NUMBER})")
 message(STATUS "Generator .............. ${CMAKE_GENERATOR}")
 message(STATUS "Build Type ............. ${CMAKE_BUILD_TYPE}")
 
