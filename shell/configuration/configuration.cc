@@ -663,7 +663,11 @@ std::vector<Configuration::Config> Configuration::parse_config(
 }
 
 void Configuration::PrintConfig(const Config& config) {
-  ihs::log::info("{} @ {}", kGitBranch, kGitCommitHash);
+  // Version first: it is what a release is reported by. The branch and hash
+  // stay because they are what a developer build is reported by, and the hash
+  // carries "-dirty" when the tree was modified.
+  ihs::log::info("{} {} (build {}) -- {} @ {}", kProjectName, kProjectVersion,
+                 kBuildNumber, kGitBranch, kGitCommitHash);
 
   ihs::log::info("**********");
   ihs::log::info("* Global *");
