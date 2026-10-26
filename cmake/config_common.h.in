@@ -130,6 +130,13 @@ static constexpr char kCrashpadBinaryPath[] = "@CRASHPAD_RUNTIME_PATH@";
 #cmakedefine01 BUILD_UNIT_TESTS
 #cmakedefine01 UNIT_TEST_SAVE_GOLDENS
 
+// Release identity. The git stamp below says which tree; this says which
+// release. A build from a tagged release and one from a branch at the same
+// commit are otherwise indistinguishable in a bug report.
+constexpr char kProjectName[] = "@PROJECT_NAME@";
+constexpr char kProjectVersion[] = "@PROJECT_VERSION@";
+constexpr char kBuildNumber[] = "@BUILD_NUMBER@";
+
 // GIT
 constexpr char kGitBranch[] = "@GIT_BRANCH@";
 constexpr char kGitCommitHash[] = "@GIT_COMMIT_HASH@";

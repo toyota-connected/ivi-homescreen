@@ -63,5 +63,11 @@ compiled in, the active one resolved per view at runtime.
 -the project version is `3.0.0`. `BUILD_NUMBER` is separate and identifies the
  CI run that produced a binary, where before the two were folded together and
  a 3.0 branch reported `1.0.<run id>`
+-the startup banner reports it: `ivi-homescreen 3.0.0 (build N) -- <branch> @
+ <hash>`, where before it named a branch and a hash alone. the build number is
+ only there when CI supplied one, so a local build reads
+ `ivi-homescreen 3.0.0 -- <branch> @ <hash>`. the hash still carries `-dirty`
+ for a build from a modified tree, so a release build and a developer build at
+ the same commit are told apart
 -`--backend` selects among whatever was compiled in, so a package can ship one
  binary for several targets
