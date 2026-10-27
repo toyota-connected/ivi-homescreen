@@ -3,7 +3,8 @@
 set(TESTCASE_NAME "homescreen_configuration_ut_test_driver")
 set(TESTCASE_CC test_case_configuration.cc;
                 test_case_configuration_getCliOverrides.cc;
-                test_case_configuration_PrintConfig.cc;)
+                test_case_configuration_PrintConfig.cc;
+                test_case_configuration_msaa.cc;)
 
 add_executable(${TESTCASE_NAME} ${TESTCASE_CC})
 add_sanitizers(${TESTCASE_NAME})

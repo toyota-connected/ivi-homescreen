@@ -70,8 +70,9 @@ WaylandEglBackend::WaylandEglBackend(Display* shell_display,
                                      const uint32_t initial_height,
                                      const bool debug_backend,
                                      const bool enable_impeller,
+                                     const std::optional<uint32_t> msaa_samples,
                                      const int buffer_size)
-    : Egl(display, buffer_size, debug_backend),
+    : Egl(display, buffer_size, debug_backend, msaa_samples),
       Backend(),
       m_initial_width(initial_width),
       m_initial_height(initial_height),
@@ -929,7 +930,10 @@ bool WaylandEglBackend::CreateBackingStore(
   // for overlays that typically don't need it, and the texture name is
   // directly sampleable by plugins that want to effect the overlay).
   if (IsRootSize(w, h)) {
-    auto store = m_fbo_pool.Acquire(w, h, &m_gl_caps);
+    // MsaaSamples() is what the chosen EGLConfig actually granted, which is
+    // what the multisample renderbuffers must match. Constant for the process
+    // lifetime, so the pool's {width,height} key stays sufficient.
+    auto store = m_fbo_pool.Acquire(w, h, &m_gl_caps, MsaaSamples());
     auto* baton = new StoreBaton{this, StoreKind::Fbo, {}};
     baton->fbo_store = store.get();
 

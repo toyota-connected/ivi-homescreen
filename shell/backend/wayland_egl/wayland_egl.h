@@ -75,12 +75,16 @@ class WaylandEglBackend : public Egl, public Backend {
   // (via the --enable-impeller switch). When true the backend disables its
   // partial-repaint path and reports full-surface damage, since that path is
   // only correct under the Skia OpenGL renderer.
+  /// @param msaa_samples Requested MSAA sample count, or std::nullopt for the
+  ///        built-in default. Forwarded to Egl, which negotiates the count the
+  ///        driver can actually provide.
   WaylandEglBackend(Display* shell_display,
                     struct wl_display* display,
                     uint32_t initial_width,
                     uint32_t initial_height,
                     bool debug_backend,
                     bool enable_impeller,
+                    std::optional<uint32_t> msaa_samples = std::nullopt,
                     int buffer_size = kEglBufferSize);
 
   // Out-of-line so the GlHud unique_ptr (incomplete here) is destroyed where

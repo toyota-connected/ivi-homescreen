@@ -46,7 +46,14 @@ struct GlCaps;
  */
 class EglFboBackingStore {
  public:
-  EglFboBackingStore(int32_t width, int32_t height, const GlCaps* caps);
+  /// @param msaa_samples Sample count for the multisample renderbuffers. 0
+  ///        disables MSAA for this store. Comes from the EGLConfig the backend
+  ///        negotiated (Egl::MsaaSamples()), not from a compile-time constant,
+  ///        so --msaa-samples / [global].msaa_samples take effect.
+  EglFboBackingStore(int32_t width,
+                     int32_t height,
+                     const GlCaps* caps,
+                     uint32_t msaa_samples);
   ~EglFboBackingStore();
 
   EglFboBackingStore(const EglFboBackingStore&) = delete;

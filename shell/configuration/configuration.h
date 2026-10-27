@@ -34,6 +34,18 @@ class Configuration {
     std::optional<bool> debug_backend;
     std::vector<std::string> bundle_paths;
 
+    // [global] msaa_samples: multisample anti-aliasing sample count for the
+    // rendering surface -- 0, 2, 4 or 8, where 0 disables MSAA. Unset means
+    // "whatever the embedder was built with" (BUILD_EGL_ENABLE_MULTISAMPLE),
+    // which keeps the compiled default for anyone not setting it.
+    //
+    // Runtime-configurable because MSAA renderbuffers are typically the single
+    // largest GPU allocation, and on memory-constrained devices turning it down
+    // or off has to be possible without a rebuild.
+    //
+    // EGL backends only; the Vulkan backend ignores it.
+    std::optional<uint32_t> msaa_samples;
+
     // [global] enable_mcp: serve the MCP surface, which lets an external agent
     // read the UI and drive it. Off unless asked for, and asking takes both a
     // build that included the surface (BUILD_MCP) and this key -- the double

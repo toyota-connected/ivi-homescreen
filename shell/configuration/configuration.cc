@@ -16,6 +16,9 @@
 #include "configuration.h"
 #include "logging/logging.h"
 
+#include <algorithm>
+#include <array>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -27,6 +30,18 @@
 #include "utils.h"
 
 namespace {
+
+/// Sample counts accepted for MSAA. 0 disables it. Impeller models only
+/// single- and 4x-sampling internally, so 2 and 8 are honoured by the EGL
+/// surface but seen as 4x by the engine.
+constexpr std::array<int64_t, 4> kMsaaSampleCounts = {0, 2, 4, 8};
+constexpr char kMsaaSampleCountsDescription[] = "0, 2, 4 or 8";
+
+bool IsValidMsaaSampleCount(const int64_t samples) {
+  return std::find(kMsaaSampleCounts.begin(), kMsaaSampleCounts.end(),
+                   samples) != kMsaaSampleCounts.end();
+}
+
 // Resolve the view tables of a parsed document. Accepts both the
 // array-of-tables form `[[view]]` (one element per view) and a singular
 // `[view]` table (treated as a one-element list) so per-bundle files can keep
@@ -69,6 +84,18 @@ void Configuration::get_global_parameters(toml::table* root, Config& instance) {
   if (root->at_path("global.debug_backend").is_boolean()) {
     instance.debug_backend =
         root->at_path("global.debug_backend").value<bool>().value();
+  }
+  if (root->at_path("global.msaa_samples").is_integer()) {
+    const auto samples =
+        root->at_path("global.msaa_samples").value<int64_t>().value();
+    if (IsValidMsaaSampleCount(samples)) {
+      instance.msaa_samples = static_cast<uint32_t>(samples);
+    } else {
+      ihs::log::error(
+          "global.msaa_samples must be one of {}; ignoring the configured "
+          "value {}",
+          kMsaaSampleCountsDescription, samples);
+    }
   }
   if (root->at_path("global.enable_mcp").is_boolean()) {
     instance.enable_mcp =
@@ -451,8 +478,9 @@ void Configuration::get_cli_override(const std::string& bundle_path,
   if (cli.enable_mcp.has_value()) {
     instance.enable_mcp = cli.enable_mcp.value();
   }
-  // The two argument lists are the one exception to "CLI replaces TOML": they
-  // append, so a bundle's own engine/Dart args survive alongside the CLI's.
+  if (cli.msaa_samples.has_value()) {
+    instance.msaa_samples = cli.msaa_samples.value();
+  }
   if (!cli.view.engine_args.empty()) {
     for (auto const& arg : cli.view.engine_args) {
       instance.view.engine_args.emplace_back(arg);
@@ -697,6 +725,12 @@ void Configuration::PrintConfig(const Config& config) {
                  (config.debug_backend.value_or(false) ? "true" : "false"));
   ihs::log::info("MCP Surface: ........... {}",
                  (config.enable_mcp.value_or(false) ? "true" : "false"));
+  // Report the resolved value, including what "unset" resolves to, so the log
+  // answers "how much MSAA am I actually getting" without knowing the build
+  // flags. The EGL backend logs the count the driver actually granted.
+  ihs::log::info("MSAA Samples: .......... {}",
+                 config.msaa_samples.value_or(
+                     BUILD_EGL_ENABLE_MULTISAMPLE ? kDefaultMsaaSamples : 0u));
   ihs::log::info("********");
   ihs::log::info("* View *");
   ihs::log::info("********");
@@ -803,7 +837,12 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
         "enable-mcp",
         "Serve the MCP surface, letting an external agent read and drive the "
         "UI (requires a build configured with BUILD_MCP)",
-        cxxopts::value<bool>()->implicit_value("true"));
+        cxxopts::value<bool>()->implicit_value("true"))(
+        "msaa-samples",
+        "Number of samples used for multisample anti-aliasing of the "
+        "rendering surface: 0, 2, 4 or 8. 0 disables MSAA. Unset = the "
+        "value the embedder was built with. EGL backends only.",
+        cxxopts::value<int64_t>());
 
     // [[view]] (geometry / Flutter)
     allocated->add_options("View")("w,width", "View width in px",
@@ -1046,6 +1085,18 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
     }
     if (result.count("enable-mcp")) {
       config.enable_mcp = result["enable-mcp"].as<bool>();
+    }
+    // Unlike the TOML path, a bad value here is fatal: on the command line it
+    // is an operator typo, and silently rendering at a different quality (or
+    // memory cost) than asked for is worse than refusing to start.
+    if (result.count("msaa-samples")) {
+      const auto samples = result["msaa-samples"].as<int64_t>();
+      if (!IsValidMsaaSampleCount(samples)) {
+        ihs::log::critical("--msaa-samples must be {}, got {}.",
+                           kMsaaSampleCountsDescription, samples);
+        exit(EXIT_FAILURE);
+      }
+      config.msaa_samples = static_cast<uint32_t>(samples);
     }
     if (result.count("fullscreen")) {
       config.view.fullscreen = result["fullscreen"].as<bool>();
