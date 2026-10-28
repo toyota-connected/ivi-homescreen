@@ -25,10 +25,6 @@
 
 namespace {
 
-#if BUILD_EGL_ENABLE_MULTISAMPLE
-constexpr GLsizei kMsaaSamples = 4;
-#endif
-
 // Sized color internal formats are ES3 core and ES2 via OES_rgb8_rgba8.
 // When unavailable we fall back to unsized GL_RGBA / GL_RGB, which is
 // universally supported but may be implementation-defined width.
@@ -55,10 +51,16 @@ ColorFormat PickColorFormat(const GlCaps* caps) {
 
 EglFboBackingStore::EglFboBackingStore(int32_t width,
                                        int32_t height,
-                                       const GlCaps* caps)
+                                       const GlCaps* caps,
+                                       const uint32_t msaa_samples)
     : width_(width), height_(height) {
   const ColorFormat color = PickColorFormat(caps);
-  const bool msaa_ok = caps && caps->has_multisampled_renderbuffer &&
+  const auto msaa = static_cast<GLsizei>(msaa_samples);
+  // The sample count is now a runtime value, so it has to be part of the
+  // decision: 0 (or 1) means the caller asked for no multisampling and the
+  // store must use a plain texture attachment, not a 1-sample renderbuffer.
+  const bool msaa_ok = msaa > 1 && caps &&
+                       caps->has_multisampled_renderbuffer &&
                        caps->renderbuffer_storage_multisample != nullptr;
 
   glGenFramebuffers(1, &framebuffer_);
@@ -80,18 +82,25 @@ EglFboBackingStore::EglFboBackingStore(int32_t width,
     glGenRenderbuffers(1, &color_rb_msaa_);
     glBindRenderbuffer(GL_RENDERBUFFER, color_rb_msaa_);
     caps->renderbuffer_storage_multisample(
-        GL_RENDERBUFFER, kMsaaSamples, color.internal_format, width_, height_);
+        GL_RENDERBUFFER, msaa, color.internal_format, width_, height_);
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
                               GL_RENDERBUFFER, color_rb_msaa_);
   } else {
-    ihs::log::warn(
-        "EglFboBackingStore: BUILD_EGL_ENABLE_MULTISAMPLE set but no "
-        "multisample renderbuffer support; dropping MSAA.");
+    // Only a complaint when MSAA was actually wanted. msaa <= 1 is the
+    // configured-off case (--msaa-samples 0, or an EGLConfig that granted no
+    // samples), which is a deliberate choice and not worth a warning.
+    if (msaa > 1) {
+      ihs::log::warn(
+          "EglFboBackingStore: {} MSAA sample(s) requested but no multisample "
+          "renderbuffer support; dropping MSAA.",
+          msaa);
+    }
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
                            color_texture_, 0);
   }
 #else
   (void)msaa_ok;
+  (void)msaa;
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
                          color_texture_, 0);
 #endif
@@ -104,8 +113,8 @@ EglFboBackingStore::EglFboBackingStore(int32_t width,
       packed_ds ? GL_DEPTH24_STENCIL8_OES : GL_DEPTH_COMPONENT16;
 #if BUILD_EGL_ENABLE_MULTISAMPLE
   if (msaa_ok) {
-    caps->renderbuffer_storage_multisample(GL_RENDERBUFFER, kMsaaSamples,
-                                           ds_format, width_, height_);
+    caps->renderbuffer_storage_multisample(GL_RENDERBUFFER, msaa, ds_format,
+                                           width_, height_);
   } else {
     glRenderbufferStorage(GL_RENDERBUFFER, ds_format, width_, height_);
   }

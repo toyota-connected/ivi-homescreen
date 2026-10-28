@@ -17,13 +17,60 @@
 #include "egl.h"
 #include "logging/logging.h"
 
+#include <array>
 #include <cassert>
 #include <cstring>
+#include <optional>
 #include <sstream>
+#include <vector>
 
 #include <GLES2/gl2.h>
 
 #include "logging.h"
+
+namespace {
+
+/// Returns |base| with its EGL_SAMPLE_BUFFERS / EGL_SAMPLES entries rewritten
+/// to request |samples|. Arrays without those keys (the relaxed fallback set)
+/// come back unchanged, which is what we want: the fallback exists to find
+/// *any* usable config.
+template <std::size_t N>
+std::array<EGLint, N> ConfigAttribsWithSamples(
+    const std::array<EGLint, N>& base,
+    const uint32_t samples) {
+  auto attribs = base;
+  for (std::size_t i = 0; i + 1 < attribs.size(); i += 2) {
+    if (attribs[i] == EGL_SAMPLE_BUFFERS) {
+      attribs[i + 1] = samples > 0 ? 1 : 0;
+    } else if (attribs[i] == EGL_SAMPLES) {
+      attribs[i + 1] = static_cast<EGLint>(samples);
+    }
+  }
+  return attribs;
+}
+
+/// Sample counts to try, in descending order, starting at |requested|.
+///
+/// EGL treats EGL_SAMPLES as a *minimum*, so a request the driver cannot meet
+/// matches no config at all. Stepping down finds the best the driver can
+/// actually do instead of dropping straight to no multisampling -- asking for
+/// more anti-aliasing than the hardware supports should not turn it off.
+/// Always ends at 0 so there is a guaranteed final attempt.
+std::vector<uint32_t> SampleCountLadder(const uint32_t requested) {
+  static constexpr std::array<uint32_t, 4> kCounts = {8, 4, 2, 0};
+  std::vector<uint32_t> ladder;
+  for (const auto count : kCounts) {
+    if (count <= requested) {
+      ladder.push_back(count);
+    }
+  }
+  if (ladder.empty() || ladder.back() != 0) {
+    ladder.push_back(0);
+  }
+  return ladder;
+}
+
+}  // namespace
 
 // Brings up the EGL display for |native_display| and the GLES contexts the
 // renderer needs. The sequence is: initialize the display and bind the GLES
@@ -33,7 +80,10 @@
 // damage-region / buffer-age extensions used by the swap path. A failure to
 // create a context leaves the object partially constructed and is logged
 // rather than fatal. |debug| additionally dumps the GLES/EGL attributes.
-Egl::Egl(void* native_display, const int buffer_size, const bool debug)
+Egl::Egl(void* native_display,
+         const int buffer_size,
+         const bool debug,
+         const std::optional<uint32_t> msaa_samples)
     : m_buffer_size(buffer_size),
       m_dpy(eglGetDisplay(static_cast<EGLNativeDisplayType>(native_display))) {
   assert(m_dpy);
@@ -51,14 +101,52 @@ Egl::Egl(void* native_display, const int buffer_size, const bool debug)
   }
 
   std::vector<EGLConfig> configs;
-  if (!GetConfig(kEglConfigAttribs.data(), configs)) {
+  const auto requested_samples = msaa_samples.value_or(
+      BUILD_EGL_ENABLE_MULTISAMPLE ? kDefaultMsaaSamples : 0u);
+
+  // The sample count actually used. Walk the ladder down until the driver
+  // matches, and carry the result into the fallback attempt so an explicit
+  // --msaa-samples=0 is never silently upgraded to a multisampled config.
+  uint32_t effective_samples = 0;
+  bool have_config = false;
+
+  for (const auto samples : SampleCountLadder(requested_samples)) {
+    effective_samples = samples;
+    if (GetConfig(ConfigAttribsWithSamples(kEglConfigAttribs, samples).data(),
+                  configs)) {
+      have_config = true;
+      break;
+    }
+    if (samples > 0) {
+      ihs::log::warn(
+          "No EGLConfig with at least {} MSAA sample(s); trying fewer.",
+          samples);
+    }
+  }
+
+  if (!have_config) {
     ihs::log::warn("Could not use default EGLConfig trying with fallback.");
     // try with the fallback one
-    if (!GetConfig(kEglConfigAttribsFallBack.data(), configs)) {
-      ihs::log::critical("did not find config with buffer size {}",
-                         m_buffer_size);
-      abort();
-    }
+    have_config = GetConfig(
+        ConfigAttribsWithSamples(kEglConfigAttribsFallBack, effective_samples)
+            .data(),
+        configs);
+  }
+
+  if (!have_config) {
+    ihs::log::critical("did not find config with buffer size {}",
+                       m_buffer_size);
+    abort();
+  }
+
+  // EGL_SAMPLES is a minimum, so read back what the chosen config actually
+  // provides rather than assuming the request was honoured exactly.
+  {
+    EGLint chosen_samples = 0;
+    eglGetConfigAttrib(m_dpy, m_config, EGL_SAMPLES, &chosen_samples);
+    m_msaa_samples = static_cast<uint32_t>(chosen_samples);
+    ihs::log::info("MSAA: requested {} sample(s), EGLConfig provides {}.",
+                   requested_samples, chosen_samples);
   }
 
   configs.clear();

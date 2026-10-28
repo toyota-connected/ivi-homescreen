@@ -17,6 +17,7 @@
 #pragma once
 
 #include <array>
+#include <optional>
 #include <vector>
 
 #include <EGL/egl.h>
@@ -27,7 +28,14 @@
 
 class Egl {
  public:
-  Egl(void* native_display, int buffer_size, bool debug);
+  /// @param msaa_samples Requested MSAA sample count (0, 2, 4 or 8), or
+  ///        std::nullopt to use the count the embedder was built with. EGL
+  ///        treats EGL_SAMPLES as a minimum, so the count finally granted by
+  ///        the driver may be lower -- see MsaaSamples().
+  Egl(void* native_display,
+      int buffer_size,
+      bool debug,
+      std::optional<uint32_t> msaa_samples = std::nullopt);
 
   ~Egl();
 
@@ -146,6 +154,11 @@ class Egl {
 
   [[nodiscard]] EGLConfig GetConfig() const { return m_config; }
 
+  /// Sample count of the EGLConfig actually chosen, which is what the
+  /// framebuffer's multisample renderbuffers must be allocated with. 0 when
+  /// multisampling is off or unavailable. Only meaningful after construction.
+  [[nodiscard]] uint32_t MsaaSamples() const { return m_msaa_samples; }
+
   [[nodiscard]] EGLContext GetTextureContext() const {
     return m_texture_context;
   }
@@ -165,6 +178,9 @@ class Egl {
  private:
   EGLConfig m_config{};
   EGLContext m_texture_context{};
+
+  /// EGL_SAMPLES of the chosen config (see MsaaSamples()).
+  uint32_t m_msaa_samples{0};
 
   int m_buffer_size{};
 
