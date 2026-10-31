@@ -215,6 +215,8 @@ class GlCompositor {
   bool persistent_state_emitted_{false};
   bool blend_enabled_{false};
   GLuint bound_tex_{0};
+  // The sampler found on unit 0 when the persistent quad state was emitted.
+  GLuint saved_sampler0_{0};
 
   bool EnsureQuad();
   // Links the samplerExternalOES variant of the quad program, used for YUV
