@@ -557,7 +557,12 @@ gives up backpressure for input latency — different operating point.
    (refresh pacing above). Detaching the surface's buffer does not free the
    destroy: the compositor releases it and the WSI still waits. So when the
    last commit went unanswered and no frame callback has come in a second, the
-   destructor leaves the swapchain to process exit and logs it.
+   destructor leaves the swapchain to process exit and logs it. Its device,
+   surface and instance are left with it: destroying any of them while the
+   swapchain lives is invalid usage, which validation reports as
+   `VUID-vkDestroyDevice-device-05137` for the swapchain and its images
+   (#842). Everything else is still destroyed, since the queue was drained
+   first.
 
 ---
 
