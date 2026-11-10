@@ -172,6 +172,9 @@ Usage:
   -d, --debug-backend           Enable backend debug logging
       --wayland-event-mask arg  Wayland input events to mask (e.g. 
                                 pointer-axis,keyboard)
+      --enable-mcp              Serve the MCP surface, letting an external 
+                                agent read and drive the UI (requires a build 
+                                configured with BUILD_MCP)
 
  View options:
   -w, --width arg               View width in px
@@ -212,6 +215,11 @@ Usage:
       --drm-device arg          DRM device path (e.g. /dev/dri/card0)
       --drm-connector arg       DRM connector to drive (e.g. eDP-1, HDMI-A-1); 
                                 default rank-picks
+      --drm-pipeline-depth arg  DRM frames in flight: 1 waits for the page flip 
+                                before swapping (default, lowest latency), 2 
+                                queues the frame and commits it from the flip 
+                                handler (one frame of headroom, up to one of 
+                                latency)
       --drm-mode arg            DRM mode <WxH@R> (e.g. 1920x1080@120); default 
                                 = preferred mode
       --drm-rotation arg        DRM scanout rotation in degrees: 0|90|180|270 
@@ -260,6 +268,16 @@ Usage:
                               compositor defer the DRM fd until it regains DRM 
                               master, so this is what stops a VT-switched-away 
                               compositor hanging startup.
+      --lease-input arg       wayland-leased-drm: whether to read input from 
+                              raw evdev. A leased client has no wl_surface, so 
+                              libinput on /dev/input/event* is its only input 
+                              source, and it is ungrabbed -- on a host with a 
+                              live Wayland session that duplicates every 
+                              keystroke into this process and the session 
+                              compositor. auto (default) = read evdev on an 
+                              embedded target but disable it when a Wayland 
+                              session is detected; on = always read evdev; off 
+                              = never.
 ```
 
 <!-- END CLI-REFERENCE -->
