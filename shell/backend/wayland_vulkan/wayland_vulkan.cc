@@ -927,10 +927,50 @@ void WaylandVulkanBackend::createLogicalDevice() {
 #endif
 }
 
+bool WaylandVulkanBackend::SurfaceQueryOk(const char* call,
+                                          const VkResult result) {
+  if (result == VK_SUCCESS) {
+    return true;
+  }
+  if (!swapchain_built_) {
+    CHECK_VK_RESULT(result);
+    return false;
+  }
+  // A rebuild at runtime. The old swapchain is already gone, so whatever
+  // happens here the frame has nothing to present to; skip it rather than
+  // abort. A lost surface usually means the compositor went away.
+  if (result == VK_ERROR_SURFACE_LOST_KHR) {
+    surface_lost_ = true;
+  }
+  ihs::log::warn(
+      "[WaylandVulkanBackend] {} failed rebuilding the swapchain: {}; {}", call,
+      vk::to_string(static_cast<vk::Result>(result)),
+      surface_lost_ ? "the surface is lost, no more frames"
+                    : "retrying on the next frame");
+  return false;
+}
+
+bool WaylandVulkanBackend::EnsureSwapChain() {
+  if (surface_lost_) {
+    return false;
+  }
+  // No swapchain without a pending resize means the last rebuild failed
+  // after the old one was destroyed; try again.
+  if (resize_pending_ || swapchain_ == VK_NULL_HANDLE) {
+    return InitializeSwapChain();
+  }
+  return true;
+}
+
 bool WaylandVulkanBackend::InitializeSwapChain() {
   if (resize_pending_) {
     resize_pending_ = false;
     d().vkDestroySwapchainKHR(device_, swapchain_, nullptr);
+    // Nothing may use the destroyed handle or its images: if the rebuild below
+    // fails, the next frame must see no swapchain rather than a dead one
+    // (#844).
+    swapchain_ = VK_NULL_HANDLE;
+    swapchain_images_.clear();
 
     {
       std::lock_guard<std::mutex> queue_lock(queue_mutex_);
@@ -980,20 +1020,28 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
   // as VK_ERROR_SURFACE_LOST_KHR on this call — that's the root cause when
   // the compositor was launched without dmabuf support. Soft-fail rather
   // than asserting so CreateSurface can exit cleanly with a clear message.
-  if (const auto r =
-          static_cast<vk::Result>(d().vkGetPhysicalDeviceSurfaceFormatsKHR(
-              physical_device_, surface_, &format_count, nullptr));
-      r != vk::Result::eSuccess) {
+  // On a rebuild the same error means the surface went away instead (the
+  // compositor exited), which SurfaceQueryOk reports.
+  if (const VkResult r = d().vkGetPhysicalDeviceSurfaceFormatsKHR(
+          physical_device_, surface_, &format_count, nullptr);
+      r != VK_SUCCESS) {
+    if (swapchain_built_) {
+      return SurfaceQueryOk("vkGetPhysicalDeviceSurfaceFormatsKHR", r);
+    }
     ihs::log::critical(
         "vkGetPhysicalDeviceSurfaceFormatsKHR failed: {}. On Wayland this "
         "usually means the compositor exposes neither zwp_linux_dmabuf_v1 "
         "nor wl_drm — Mesa Vulkan WSI cannot back the swapchain.",
-        vk::to_string(r));
+        vk::to_string(static_cast<vk::Result>(r)));
     return false;
   }
   std::vector<VkSurfaceFormatKHR> formats(format_count);
-  CHECK_VK_RESULT(d().vkGetPhysicalDeviceSurfaceFormatsKHR(
-      physical_device_, surface_, &format_count, formats.data()));
+  if (!SurfaceQueryOk(
+          "vkGetPhysicalDeviceSurfaceFormatsKHR",
+          d().vkGetPhysicalDeviceSurfaceFormatsKHR(
+              physical_device_, surface_, &format_count, formats.data()))) {
+    return false;
+  }
 
   surface_format_ = formats[0];
   for (const auto& format : formats) {
@@ -1012,8 +1060,11 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
   VkExtent2D clientSize;
 
   VkSurfaceCapabilitiesKHR surface_capabilities;
-  CHECK_VK_RESULT(d().vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
-      physical_device_, surface_, &surface_capabilities));
+  if (!SurfaceQueryOk("vkGetPhysicalDeviceSurfaceCapabilitiesKHR",
+                      d().vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+                          physical_device_, surface_, &surface_capabilities))) {
+    return false;
+  }
 
   if (surface_capabilities.currentExtent.width != UINT32_MAX) {
     // If the surface reports a specific extent, we must use it.
@@ -1055,11 +1106,18 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
   // --------------------------------------------------------------------------
 
   uint32_t mode_count;
-  CHECK_VK_RESULT(d().vkGetPhysicalDeviceSurfacePresentModesKHR(
-      physical_device_, surface_, &mode_count, nullptr));
+  if (!SurfaceQueryOk("vkGetPhysicalDeviceSurfacePresentModesKHR",
+                      d().vkGetPhysicalDeviceSurfacePresentModesKHR(
+                          physical_device_, surface_, &mode_count, nullptr))) {
+    return false;
+  }
   std::vector<VkPresentModeKHR> modes(mode_count);
-  CHECK_VK_RESULT(d().vkGetPhysicalDeviceSurfacePresentModesKHR(
-      physical_device_, surface_, &mode_count, modes.data()));
+  if (!SurfaceQueryOk(
+          "vkGetPhysicalDeviceSurfacePresentModesKHR",
+          d().vkGetPhysicalDeviceSurfacePresentModesKHR(
+              physical_device_, surface_, &mode_count, modes.data()))) {
+    return false;
+  }
   assert(!formats.empty());  // Shouldn't be possible.
 
   // Default = FIFO (strict vblank gating, the spec-mandated mode). Env
@@ -1145,9 +1203,9 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
   info.clipped = VK_TRUE;
 
   auto result = d().vkCreateSwapchainKHR(device_, &info, VKALLOC, &swapchain_);
-  CHECK_VK_RESULT(result);
   if (result != VK_SUCCESS) {
-    return false;
+    swapchain_ = VK_NULL_HANDLE;
+    return SurfaceQueryOk("vkCreateSwapchainKHR", result);
   }
 
   // --------------------------------------------------------------------------
@@ -1241,6 +1299,7 @@ bool WaylandVulkanBackend::InitializeSwapChain() {
   CompositorPipeliningInit();
 #endif
 
+  swapchain_built_ = true;
   return true;
 }
 
@@ -1297,22 +1356,38 @@ FlutterVulkanImage WaylandVulkanBackend::GetNextImageCallback(
   const auto state = static_cast<FlutterDesktopEngineState*>(user_data);
   const auto b = reinterpret_cast<WaylandVulkanBackend*>(
       state->view_controller->view->GetBackend());
-  if (b->resize_pending_) {
-    b->InitializeSwapChain();
+  // The frame goes into the scratch image, which PresentCallback drops. It is
+  // made at the last swapchain's extent and format, so it can still be made
+  // when a rebuild has failed and there is no swapchain.
+  const auto scratch = [b]() -> FlutterVulkanImage {
+    b->scratch_frame_ = true;  // PresentCallback must not present it
+    if (!b->EnsureScratchImage()) {
+      ihs::log::error(
+          "[WaylandVulkanBackend] no image to render into; frame dropped");
+      return {
+          .struct_size = sizeof(FlutterVulkanImage), .image = 0, .format = 0};
+    }
+    return {
+        .struct_size = sizeof(FlutterVulkanImage),
+        .image = reinterpret_cast<uint64_t>(b->scratch_image_),
+        .format = static_cast<uint32_t>(b->surface_format_.format),
+    };
+  };
+
+  // No swapchain to acquire from: a rebuild failed (#844), and acquiring from
+  // the old handle or a null one is invalid usage.
+  if (!b->EnsureSwapChain()) {
+    return scratch();
   }
 
   // As in PresentLayersImpl: no callback for the last commit means the
   // compositor is not showing the surface and releases no image, and a WSI
   // that ignores the acquire timeout (Adreno's) would not come back from the
   // acquire below. The engine needs an image regardless, so this frame goes
-  // into the scratch image, which PresentCallback drops.
+  // into the scratch image.
   b->scratch_frame_ = !b->WaitFrameReady() && b->EnsureScratchImage();
   if (b->scratch_frame_) {
-    return {
-        .struct_size = sizeof(FlutterVulkanImage),
-        .image = reinterpret_cast<uint64_t>(b->scratch_image_),
-        .format = static_cast<uint32_t>(b->surface_format_.format),
-    };
+    return scratch();
   }
 
   // The engine needs an image back, so keep asking. On a failed acquire the
@@ -1327,7 +1402,13 @@ FlutterVulkanImage WaylandVulkanBackend::GetNextImageCallback(
     }
     b->NoteAcquireFailure(acquired);
     if (acquired == VK_ERROR_OUT_OF_DATE_KHR) {
-      b->InitializeSwapChain();
+      // Through the resize path, so the old swapchain is destroyed before its
+      // replacement is created on the same surface rather than left alive
+      // beside it.
+      b->resize_pending_ = true;
+      if (!b->EnsureSwapChain()) {
+        return scratch();
+      }
     } else if (acquired != VK_TIMEOUT && acquired != VK_NOT_READY) {
       CHECK_VK_RESULT(acquired);
     }
@@ -2474,8 +2555,11 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
   if (dmabuf_present_active_) {
     return PresentLayersDmabuf(layers, count);
   }
-  if (resize_pending_) {
-    InitializeSwapChain();
+  // No swapchain to acquire from: a rebuild failed (#844), and acquiring from
+  // the old handle or a null one is invalid usage. Skip the frame.
+  if (!EnsureSwapChain()) {
+    FinishPresentation(0, /*committed=*/false);
+    return false;
   }
   if (m_compositor_slots_.empty()) {
     CompositorPipeliningInit();
