@@ -146,6 +146,13 @@ jobs:
       - name: Build (generate compile_commands.json)
         run: ninja -C ${{github.workspace}}/build
 
+      # The CLI half of the config reference needs a built homescreen to run
+      # --help against, so it is checked here rather than in lint-format, which
+      # has no binary and can only check the parser table. --require-cli makes
+      # a missing or broken binary fail the step instead of skipping it.
+      - name: config reference (--help in sync)
+        run: python3 scripts/gen_config_reference.py --check --require-cli
+
       # Pack into a tar before upload. actions/upload-artifact dereferences
       # symlinks (turning them into real copies), which breaks the build tree:
       # third_party/drm-cxx exposes its src/ headers under a drm-cxx/ prefix via
@@ -186,7 +193,9 @@ jobs:
       - name: clang-format
         run: scripts/format.sh --check
 
-      - name: config reference (parser table + --help in sync)
+      # Parser table only: there is no binary here, so the CLI block is
+      # skipped (lint-build checks it).
+      - name: config reference (parser table)
         run: python3 scripts/gen_config_reference.py --check
 
       # US English, as a gate rather than a habit: review kept missing it.
