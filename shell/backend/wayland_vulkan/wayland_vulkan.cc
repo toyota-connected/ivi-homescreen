@@ -270,6 +270,12 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
 
   // Read before the pacing callback is retired below.
   const bool compositor_answering = CompositorAnswering();
+  // Set when the swapchain is left to process exit below. Its device, surface
+  // and instance then have to be left too: destroying a parent with a live
+  // child is invalid usage (VUID-vkDestroyDevice-device-05137,
+  // VUID-vkDestroyInstance-instance-00629), the very next call after a skip
+  // made to avoid a hang (#842).
+  bool left_to_process_exit = false;
 
   if (device_ != nullptr) {
     // Drain all in-flight GPU work before tearing anything down. Without this
@@ -383,9 +389,10 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
       if (compositor_answering) {
         d().vkDestroySwapchainKHR(device_, swapchain_, nullptr);
       } else {
+        left_to_process_exit = true;
         ihs::log::warn(
             "[WaylandVulkanBackend] the compositor is not showing the surface; "
-            "swapchain left to process exit");
+            "swapchain, device, surface and instance left to process exit");
       }
       swapchain_ = VK_NULL_HANDLE;
     }
@@ -395,9 +402,11 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
     // stale-handle call after this point (there should be none) passes
     // through unlocked rather than dereferencing a dead mutex mapping.
     ihs::vulkan::QueueInterposer::UnregisterQueue(queue_);
-    d().vkDestroyDevice(device_, nullptr);
+    if (!left_to_process_exit) {
+      d().vkDestroyDevice(device_, nullptr);
+    }
   }
-  if (surface_ != nullptr) {
+  if (surface_ != nullptr && !left_to_process_exit) {
     d().vkDestroySurfaceKHR(instance_, surface_, nullptr);
   }
   if (enable_validation_layers_) {
@@ -408,7 +417,7 @@ WaylandVulkanBackend::~WaylandVulkanBackend() {
       d().vkDestroyDebugUtilsMessengerEXT(instance_, mDebugMessenger, VKALLOC);
     }
   }
-  if (instance_ != nullptr) {
+  if (instance_ != nullptr && !left_to_process_exit) {
     d().vkDestroyInstance(instance_, nullptr);
   }
   if (!enabled_instance_extensions_.empty()) {
