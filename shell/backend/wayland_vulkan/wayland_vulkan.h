@@ -280,6 +280,13 @@ class WaylandVulkanBackend final : public Backend {
   uint32_t last_image_index_{};
 
   bool resize_pending_;
+  // Rasterizer thread only, like the swapchain they describe. Once a swapchain
+  // has been built, failing to build another is a rebuild failing at runtime,
+  // which skips frames rather than ending the process. A lost surface stays
+  // lost (VK_ERROR_SURFACE_LOST_KHR is permanent for a VkSurfaceKHR), so after
+  // one no rebuild is tried again.
+  bool swapchain_built_{false};
+  bool surface_lost_{false};
 
   wl_display* wl_display_;
   uint32_t width_;
@@ -326,6 +333,24 @@ class WaylandVulkanBackend final : public Backend {
    * wayland
    */
   bool InitializeSwapChain();
+
+  /**
+   * @brief Rebuild the swapchain if a resize is pending or the last rebuild
+   * failed
+   * @return false when there is no swapchain to present to; the caller skips
+   * the frame
+   */
+  bool EnsureSwapChain();
+
+  /**
+   * @brief Check a surface query made while building the swapchain
+   * @param[in] call Name of the Vulkan call, for the log
+   * @param[in] result Its result
+   * @return true on success. On the first build a failure aborts as before; on
+   * a rebuild it is logged, a lost surface is remembered, and false is
+   * returned
+   */
+  bool SurfaceQueryOk(const char* call, VkResult result);
 
   /**
    * @brief Callback to get the next Vulkan image
