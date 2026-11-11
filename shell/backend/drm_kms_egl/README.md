@@ -510,7 +510,8 @@ way a plane's `rotation` property would, so a config means the same thing here
 and on drm-kms-vulkan. This backend never asks a plane to rotate. The GL
 composite draws each layer turned onto the panel, so it works on a display whose
 planes have no `rotation` property at all (Renesas rcar-du on Sparrow Hawk, for
-one), which drm-kms-vulkan refuses.
+one). drm-kms-vulkan uses a plane where one can rotate and turns on the GPU
+where none can.
 
 - **Extent.** The CRTC keeps its mode and the scanout surface is the whole
   mode. Flutter renders at the turned extent: 90/270 swap the mode's width and

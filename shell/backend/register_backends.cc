@@ -95,8 +95,9 @@ static bool ResolveLeasedInputEnabled(const Configuration::Config& config);
 
 namespace {
 
-// --drm-rotation is applied by the DRM backends: on a plane by the Vulkan ones
-// (#838), on the GPU by the EGL ones (#848). A backend that scans out itself
+// --drm-rotation is applied by the DRM backends: by the Vulkan ones on a plane
+// where one can (#838) and on the GPU where none can, by the EGL ones always on
+// the GPU (#848). A backend that scans out itself
 // but does not rotate refuses it: the angle would parse, validate and then be
 // dropped, leaving the picture the wrong way round with nothing said. True
 // when it refused.

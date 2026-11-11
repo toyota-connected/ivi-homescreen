@@ -395,6 +395,9 @@ class VulkanDrmBackend final : public Backend {
   /// rotates by the requested angle. False before that frame, or when it did
   /// not. Defined out of line for the same reason.
   [[nodiscard]] bool RotationOnPlaneForTest() const;
+  /// Whether --drm-rotation is turned on the GPU rather than by a plane
+  /// (#848). Defined out of line for the same reason.
+  [[nodiscard]] bool TurnedOnGpuForTest() const;
   /// The presentation serial the next flip event will report. Defined out of
   /// line for the same reason.
   [[nodiscard]] uint64_t PresentationSerialForTest() const;
@@ -483,7 +486,7 @@ class VulkanDrmBackend final : public Backend {
   std::string connector_name_;
   // DRM scanout rotation in degrees (0|90|180|270). 90/270 swap the render /
   // viewport extent against the CRTC mode; lowered to the plane rotation
-  // property at present time.
+  // property at present time, or turned on the GPU where no plane can.
   int rotation_ = 0;
   // --drm-explicit-sync. Read once in SetupCompositor: kNo forces the CPU-fence
   // scanout path, kYes refuses to start when the device cannot export a SYNC_FD
@@ -694,6 +697,19 @@ class VulkanDrmBackend final : public Backend {
   // been negotiated. kPreserve: the base layer is already in the target.
   std::unique_ptr<wl_vulkan::LayerCompositor> layer_compositor_;
   bool layer_compositor_failed_{false};
+
+  // The GPU turn's draw (#848): the finished frame, sampled whole, into a
+  // panel-sized turn target. kClear, since every pixel is written. Built
+  // lazily for the same reason as layer_compositor_.
+  std::unique_ptr<wl_vulkan::LayerCompositor> turn_compositor_;
+  bool turn_compositor_failed_{false};
+
+  // Draw @p image -- the slot this present scans out, finished: overlays,
+  // platform views and HUD already in it, left in GENERAL -- turned into
+  // c.turn_targets[c.turn_target], and make that visible to scanout. Leaves
+  // @p image in GENERAL again. Records into @p cmd, so the present's fence
+  // covers it. False when nothing was drawn. Raster thread.
+  bool RecordTurn(CompositorState& c, VkCommandBuffer cmd, VkImage image);
 
   // Blend every layer above the base backing store into @p target_view.
   //
