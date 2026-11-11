@@ -45,6 +45,7 @@
 #include "backend/backend.h"
 #include "backend/drm_kms_egl/drm_output_context.h"
 #include "backend/drm_kms_egl/flip_sink.h"
+#include "view/display_rotation.h"
 #include "view/presentation.h"
 #include "vsync/ivsync_provider.h"
 
@@ -59,6 +60,7 @@ namespace homescreen {
 class DrmCapture;
 class DrmCursor;
 class GlCursor;
+class GlTurn;
 class ICursorPositionSink;
 class DrmSession;
 }  // namespace homescreen
@@ -312,6 +314,11 @@ class DrmBackend : public Backend, public IFlipSink {
   bool ClearCurrent() const;
   bool MakeResourceCurrent() const;
   bool Present();
+#if !BUILD_COMPOSITOR
+  // Sets @p gl up to turn --drm-rotation without a compositor: the engine's
+  // surface_transformation where the engine honors it, GlTurn otherwise.
+  void ConfigureTurn(FlutterOpenGLRendererConfig& gl);
+#endif
 
   // Make the next Present() flip also hand the CRTC back from the plane
   // compositor: @p primary at ROTATE_0 showing the new frame, @p overlays off.
@@ -429,6 +436,13 @@ class DrmBackend : public Backend, public IFlipSink {
   [[nodiscard]] uint32_t height() const { return render_h_; }
   // The configured --drm-rotation, in degrees.
   [[nodiscard]] int rotation() const { return cfg_.rotation; }
+  // The configured rotation from the render extent onto the panel (the
+  // window surface, at the full mode once rotated).
+  [[nodiscard]] DisplayRotation panel_rotation() const {
+    return {cfg_.rotation, static_cast<int32_t>(render_w_),
+            static_cast<int32_t>(render_h_), static_cast<int32_t>(fb_w_),
+            static_cast<int32_t>(fb_h_)};
+  }
   // CRTC mode size — what the display is actually driven at.
   [[nodiscard]] uint32_t mode_width() const { return mode_.hdisplay; }
   [[nodiscard]] uint32_t mode_height() const { return mode_.vdisplay; }
@@ -812,6 +826,14 @@ class DrmBackend : public Backend, public IFlipSink {
     return flip_pending_.load(std::memory_order_acquire);
   }
 
+#if !BUILD_COMPOSITOR
+  /// The framebuffer the engine renders into when --drm-rotation is turned at
+  /// present, built at the current render extent. 0 when nothing turns it
+  /// there: no rotation, or the engine turns the picture itself. Call after
+  /// GetRenderConfig, with the context current.
+  [[nodiscard]] uint32_t TurnFramebufferForTest();
+#endif
+
  private:
 #endif
 
@@ -847,6 +869,13 @@ class DrmBackend : public Backend, public IFlipSink {
   // available (this display controller has none) and the cursor isn't
   // disabled. Drawn into FBO 0 each Present.
   std::unique_ptr<homescreen::GlCursor> gl_cursor_{};
+#if !BUILD_COMPOSITOR
+  // --drm-rotation with nothing to turn it but present (#848): the engine
+  // renders upright into this one's framebuffer and Present() draws it turned
+  // onto FBO 0. Null when the engine turns the picture itself, or there is no
+  // rotation. See GetRenderConfig.
+  std::unique_ptr<homescreen::GlTurn> gl_turn_{};
+#endif
 #if HAVE_DRM_CAPTURE
   std::unique_ptr<homescreen::DrmCapture> capture_;
 #endif

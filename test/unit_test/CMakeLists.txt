@@ -289,6 +289,11 @@ endif ()
 if (BUILD_BACKEND_DRM_KMS_EGL AND BUILD_COMPOSITOR)
     add_subdirectory(drm_backend_vkms-test)
 endif ()
+# The other half of --drm-rotation on drm-kms-egl (#848): no compositor, so
+# the picture is turned at present. Needs the capture module to read it back.
+if (BUILD_BACKEND_DRM_KMS_EGL AND NOT BUILD_COMPOSITOR AND IVI_DRM_HAVE_CAPTURE)
+    add_subdirectory(drm_backend_vkms_turn-test)
+endif ()
 # The software-renderer opt-in lives in the Vulkan backend's device_caps, so the
 # test has nothing to link against without it.
 if (BUILD_BACKEND_DRM_KMS_VULKAN)
