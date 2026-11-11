@@ -37,8 +37,10 @@
 #include "backend/drm_kms_egl/drm_backend.h"
 #include "backend/drm_kms_egl/drm_compositor.h"
 #include "backend/register_backends.h"
+#include "config/common.h"
 #include "configuration/configuration.h"
 #include "display/drm_display.h"
+#include "display/drm_mode_list.h"
 #include "logging/logger.hpp"
 #include "platform/homescreen/flutter_desktop_engine_state.h"
 #include "platform/homescreen/flutter_desktop_view_controller_state.h"
@@ -1214,10 +1216,319 @@ TEST_P(DrmBackendVkmsRotated, AFlutterFrameIsTurnedOnThePanel) {
 
   compositor_->CollectBackingStore(&bs);
 }
+
+#if BUILD_HUD
+// The debug HUD turns with the picture. It sits at the picture's top-left, so
+// on the panel it has to be in the quadrant that holds that corner once
+// turned: bottom-left at 90, where an unturned HUD would be top-left.
+TEST_P(DrmBackendVkmsRotated, TheHudIsTurnedWithThePicture) {
+  // Read once, on the backend's first present.
+  ::setenv("IVI_HUD", "1", 1);
+  struct Unset {
+    ~Unset() { ::unsetenv("IVI_HUD"); }
+  } unset;
+
+  FlutterBackingStoreConfig cfg{};
+  cfg.struct_size = sizeof(FlutterBackingStoreConfig);
+  cfg.size = FlutterSize{static_cast<double>(content_w_),
+                         static_cast<double>(content_h_)};
+  FlutterBackingStore bs{};
+  ASSERT_TRUE(compositor_->CreateBackingStore(&cfg, &bs));
+  // A black frame, so whatever is not black is the HUD.
+  ASSERT_TRUE(backend_->MakeCurrent());
+  glBindFramebuffer(GL_FRAMEBUFFER, bs.open_gl.framebuffer.name);
+  glClearColor(0.0F, 0.0F, 0.0F, 1.0F);
+  glClear(GL_COLOR_BUFFER_BIT);
+  glFinish();
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  ASSERT_EQ(glGetError(), static_cast<GLenum>(GL_NO_ERROR));
+
+  FlutterLayer layer{};
+  layer.struct_size = sizeof(FlutterLayer);
+  layer.type = kFlutterLayerContentTypeBackingStore;
+  layer.backing_store = &bs;
+  layer.size = cfg.size;
+  const FlutterLayer* layers[] = {&layer};
+  // Twice: imgui lays its window out on the first frame and draws it from the
+  // second.
+  ASSERT_TRUE(compositor_->PresentLayers(layers, 1));
+  ASSERT_TRUE(compositor_->PresentLayers(layers, 1));
+
+  const drm::capture::Image image =
+      Snapshot(("rotated_hud_" + std::to_string(GetParam())).c_str());
+  ASSERT_FALSE(image.empty());
+  const uint32_t w = image.width();
+  const uint32_t h = image.height();
+  // The panel quadrant holding the picture's top-left corner, counter-
+  // clockwise as DRM_MODE_ROTATE_* turns a plane.
+  uint32_t qx = 0;
+  uint32_t qy = 0;
+  switch (GetParam()) {
+    case 90:
+      qy = h / 2;
+      break;
+    case 180:
+      qx = w / 2;
+      qy = h / 2;
+      break;
+    case 270:
+      qx = w / 2;
+      break;
+    default:
+      break;
+  }
+  size_t inside = 0;
+  size_t outside = 0;
+  for (uint32_t y = 0; y < h; ++y) {
+    for (uint32_t x = 0; x < w; ++x) {
+      if ((image.pixels()[static_cast<size_t>(y) * w + x] & 0x00FFFFFFu) == 0) {
+        continue;
+      }
+      const bool in = x >= qx && x < qx + w / 2 && y >= qy && y < qy + h / 2;
+      ++(in ? inside : outside);
+    }
+  }
+  EXPECT_GT(inside, 1000u) << "no HUD where the picture's top-left landed";
+  EXPECT_EQ(outside, 0u) << "HUD pixels outside that quadrant";
+
+  compositor_->CollectBackingStore(&bs);
+}
+#endif  // BUILD_HUD
 #endif  // IHS_TEST_HAVE_CAPTURE
 
 INSTANTIATE_TEST_SUITE_P(Angles,
                          DrmBackendVkmsRotated,
+                         ::testing::Values(0, 90, 180, 270),
+                         [](const ::testing::TestParamInfo<int>& info) {
+                           return "Rotate" + std::to_string(info.param);
+                         });
+
+// An additional output (a second [[view.output]]) on its own CRTC, rotated by
+// its own setting (#848). A secondary has no window surface: when its frame
+// takes the GL composite it is drawn, turned, into its own scanout buffers and
+// committed on its own CRTC. Needs a vkms card with two connected outputs:
+// third_party/drm-cxx/scripts/vkms_dual.sh up (root, Linux >= 6.11).
+struct VkmsDualCard {
+  std::string path;
+  std::string connectors[2];
+  uint32_t mode_w[2]{};
+  uint32_t mode_h[2]{};
+};
+
+VkmsDualCard FindVkmsDual() {
+  for (int i = 0; i < 8; ++i) {
+    const std::string path = "/dev/dri/card" + std::to_string(i);
+    const int fd = ::open(path.c_str(), O_RDWR | O_CLOEXEC);
+    if (fd < 0) {
+      continue;
+    }
+    drmVersionPtr v = drmGetVersion(fd);
+    const bool is_vkms =
+        v != nullptr && v->name != nullptr && std::string(v->name) == "vkms";
+    if (v != nullptr) {
+      drmFreeVersion(v);
+    }
+    VkmsDualCard out;
+    int found = 0;
+    if (is_vkms) {
+      if (drmModeRes* res = drmModeGetResources(fd); res != nullptr) {
+        for (int c = 0; c < res->count_connectors && found < 2; ++c) {
+          drmModeConnector* conn = drmModeGetConnector(fd, res->connectors[c]);
+          if (conn == nullptr) {
+            continue;
+          }
+          if (conn->connection == DRM_MODE_CONNECTED && conn->count_modes > 0) {
+            out.connectors[found] =
+                std::string(ConnectorTypeName(conn->connector_type)) + "-" +
+                std::to_string(conn->connector_type_id);
+            out.mode_w[found] = conn->modes[0].hdisplay;
+            out.mode_h[found] = conn->modes[0].vdisplay;
+            ++found;
+          }
+          drmModeFreeConnector(conn);
+        }
+        drmModeFreeResources(res);
+      }
+    }
+    ::close(fd);
+    if (found == 2) {
+      out.path = path;
+      return out;
+    }
+  }
+  return {};
+}
+
+class DrmBackendVkmsDual : public ::testing::TestWithParam<int> {
+ protected:
+  void SetUp() override {
+    card_ = FindVkmsDual();
+    if (card_.path.empty()) {
+      GTEST_SKIP() << "no vkms card with two connected outputs "
+                      "(sudo third_party/drm-cxx/scripts/vkms_dual.sh up)";
+    }
+    display_ = std::make_unique<DrmDisplay>(0, 0, 0.0, card_.path,
+                                            /*no_seat=*/true);
+    drm::Device* dev = display_->SharedDevice();
+    if (dev == nullptr) {
+      GTEST_SKIP() << "no DRM master on " << card_.path;
+    }
+    DrmConfig cfg{card_.path, std::nullopt, std::nullopt,
+                  /*debug_backend=*/false};
+    cfg.no_seat = true;
+    cfg.disable_cursor = true;
+    cfg.connector_name = card_.connectors[0];
+    backend_ =
+        DrmBackend::Create(cfg, display_->session(), dev, display_.get());
+    ASSERT_NE(backend_, nullptr) << "DrmBackend::Create failed on vkms";
+    display_->SetFlipHandler(&DrmBackend::UnifiedPageFlipHandler);
+    display_->StartFlipReader();
+
+    ASSERT_TRUE(backend_->AddOutput(card_.connectors[1], 1, GetParam()))
+        << "AddOutput(" << card_.connectors[1] << ") refused";
+    secondary_ = backend_->CompositorForViewForTest(1);
+    ASSERT_NE(secondary_, backend_->compositor());
+    const bool swap = GetParam() == 90 || GetParam() == 270;
+    render_w_ = swap ? card_.mode_h[1] : card_.mode_w[1];
+    render_h_ = swap ? card_.mode_w[1] : card_.mode_h[1];
+  }
+
+  void TearDown() override {
+    backend_.reset();
+    display_.reset();
+  }
+
+  VkmsDualCard card_;
+  std::unique_ptr<DrmDisplay> display_;
+  std::unique_ptr<DrmBackend> backend_;
+  DrmCompositor* secondary_{nullptr};
+  uint32_t render_w_{0};
+  uint32_t render_h_{0};
+};
+
+// The view is laid out at the secondary's mode, turned.
+TEST_P(DrmBackendVkmsDual, TheViewRendersAtItsTurnedExtent) {
+  const auto views = backend_->AdditionalViews();
+  ASSERT_EQ(views.size(), 1u);
+  EXPECT_EQ(views[0].view_id, 1);
+  EXPECT_EQ(views[0].width, render_w_);
+  EXPECT_EQ(views[0].height, render_h_);
+}
+
+TEST(DrmBackendVkmsDualRefusal, AnAngleThatIsNotAQuarterTurnIsRefused) {
+  const VkmsDualCard card = FindVkmsDual();
+  if (card.path.empty()) {
+    GTEST_SKIP() << "no vkms card with two connected outputs";
+  }
+  auto display =
+      std::make_unique<DrmDisplay>(0, 0, 0.0, card.path, /*no_seat=*/true);
+  drm::Device* dev = display->SharedDevice();
+  if (dev == nullptr) {
+    GTEST_SKIP() << "no DRM master on " << card.path;
+  }
+  DrmConfig cfg{card.path, std::nullopt, std::nullopt, false};
+  cfg.no_seat = true;
+  cfg.disable_cursor = true;
+  cfg.connector_name = card.connectors[0];
+  auto backend =
+      DrmBackend::Create(cfg, display->session(), dev, display.get());
+  ASSERT_NE(backend, nullptr);
+  EXPECT_FALSE(backend->AddOutput(card.connectors[1], 1, 45));
+  EXPECT_TRUE(backend->AdditionalViews().empty());
+}
+
+#if IHS_TEST_HAVE_CAPTURE
+// A Flutter frame presented on the secondary reaches its own CRTC, turned:
+// red, green, blue, white quadrants as Flutter drew them land where
+// DRM_MODE_ROTATE_* would put them. The commit is at ROTATE_0, so the
+// readback (blind to a plane's rotation property) sees what the panel shows.
+TEST_P(DrmBackendVkmsDual, AFrameReachesTheSecondaryTurned) {
+  FlutterBackingStoreConfig cfg{};
+  cfg.struct_size = sizeof(FlutterBackingStoreConfig);
+  cfg.size = FlutterSize{static_cast<double>(render_w_),
+                         static_cast<double>(render_h_)};
+  FlutterBackingStore bs{};
+  ASSERT_TRUE(backend_->MakeCurrent());
+  ASSERT_TRUE(secondary_->CreateBackingStore(&cfg, &bs));
+
+  constexpr uint32_t kRed = 0x00FF0000u;
+  constexpr uint32_t kGreen = 0x0000FF00u;
+  constexpr uint32_t kBlue = 0x000000FFu;
+  constexpr uint32_t kWhite = 0x00FFFFFFu;
+  // As Flutter renders: GL's y = 0 is the bottom row.
+  glBindFramebuffer(GL_FRAMEBUFFER, bs.open_gl.framebuffer.name);
+  glEnable(GL_SCISSOR_TEST);
+  const auto hw = static_cast<GLsizei>(render_w_ / 2);
+  const auto hh = static_cast<GLsizei>(render_h_ / 2);
+  const struct {
+    GLint x;
+    GLint y;
+    uint32_t rgb;
+  } fills[] = {{0, hh, kRed}, {hw, hh, kGreen}, {0, 0, kBlue}, {hw, 0, kWhite}};
+  for (const auto& f : fills) {
+    glScissor(f.x, f.y, hw, hh);
+    glClearColor(static_cast<float>((f.rgb >> 16U) & 0xFFU) / 255.0F,
+                 static_cast<float>((f.rgb >> 8U) & 0xFFU) / 255.0F,
+                 static_cast<float>(f.rgb & 0xFFU) / 255.0F, 1.0F);
+    glClear(GL_COLOR_BUFFER_BIT);
+  }
+  glDisable(GL_SCISSOR_TEST);
+  glFinish();
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  ASSERT_EQ(glGetError(), static_cast<GLenum>(GL_NO_ERROR));
+
+  FlutterLayer layer{};
+  layer.struct_size = sizeof(FlutterLayer);
+  layer.type = kFlutterLayerContentTypeBackingStore;
+  layer.backing_store = &bs;
+  layer.size = cfg.size;
+  const FlutterLayer* layers[] = {&layer};
+  ASSERT_TRUE(secondary_->PresentLayers(layers, 1));
+
+  auto shot = drm::capture::snapshot(backend_->device(),
+                                     secondary_->OutputForTest().crtc_id());
+  ASSERT_TRUE(shot) << "snapshot failed: " << shot.error().message();
+  const drm::capture::Image image = std::move(shot.value());
+  if (const char* dir = std::getenv("IHS_TEST_CAPTURE_DIR"); dir != nullptr) {
+    (void)drm::capture::write_png(
+        image,
+        std::string(dir) + "/secondary_" + std::to_string(GetParam()) + ".png");
+  }
+  ASSERT_EQ(image.width(), card_.mode_w[1]);
+  ASSERT_EQ(image.height(), card_.mode_h[1]);
+  const auto at = [&image](uint32_t x, uint32_t y) {
+    return image.pixels()[static_cast<size_t>(y) * image.width() + x] &
+           0x00FFFFFFu;
+  };
+  // Written out per angle, as DrmBackendVkmsRotated does, so it does not share
+  // a mistake with the code under test.
+  std::array<uint32_t, 4> want{kRed, kGreen, kBlue, kWhite};
+  switch (GetParam()) {
+    case 90:
+      want = {kGreen, kWhite, kRed, kBlue};
+      break;
+    case 180:
+      want = {kWhite, kBlue, kGreen, kRed};
+      break;
+    case 270:
+      want = {kBlue, kRed, kWhite, kGreen};
+      break;
+    default:
+      break;
+  }
+  const uint32_t w = image.width();
+  const uint32_t h = image.height();
+  EXPECT_EQ(at(w / 4, h / 4), want[0]) << "top-left";
+  EXPECT_EQ(at(3 * w / 4, h / 4), want[1]) << "top-right";
+  EXPECT_EQ(at(w / 4, 3 * h / 4), want[2]) << "bottom-left";
+  EXPECT_EQ(at(3 * w / 4, 3 * h / 4), want[3]) << "bottom-right";
+
+  secondary_->CollectBackingStore(&bs);
+}
+#endif  // IHS_TEST_HAVE_CAPTURE
+
+INSTANTIATE_TEST_SUITE_P(Angles,
+                         DrmBackendVkmsDual,
                          ::testing::Values(0, 90, 180, 270),
                          [](const ::testing::TestParamInfo<int>& info) {
                            return "Rotate" + std::to_string(info.param);

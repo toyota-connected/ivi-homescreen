@@ -228,9 +228,10 @@ std::unique_ptr<DrmBackend> DrmBackend::Create(const DrmConfig& cfg,
   // EGL/GBM.
   backend->compositor_ = std::make_unique<DrmCompositor>(
       backend.get(),
-      DrmOutputContext(backend->crtc_id_, backend->crtc_index_,
-                       backend->connector_id_, backend->mode_, backend->fb_w_,
-                       backend->fb_h_, &backend->resolved()));
+      DrmOutputContext(
+          backend->crtc_id_, backend->crtc_index_, backend->connector_id_,
+          backend->mode_, backend->fb_w_, backend->fb_h_, &backend->resolved(),
+          backend->cfg_.rotation, backend->render_w_, backend->render_h_));
   // The implicit view (id 0) scans out on this backend's own CRTC.
   backend->view_outputs_[0] = backend->compositor_.get();
   // Claim the primary CRTC so additional outputs (AddOutput) pick distinct
@@ -462,10 +463,16 @@ DrmBackend::~DrmBackend() {
 #endif
 
 #if BUILD_COMPOSITOR
-  // Release compositor GL resources while the context is still current.
+  // Release compositor GL resources while the context is still current: the
+  // additional outputs' too, which hold buffers of their own. Left to member
+  // destruction they would outlive the EGL display torn down below.
   if (egl_display_ != EGL_NO_DISPLAY && egl_context_ != EGL_NO_CONTEXT) {
     eglMakeCurrent(egl_display_, egl_surface_, egl_surface_, egl_context_);
   }
+  for (const auto& extra : extra_outputs_) {
+    view_outputs_.erase(extra.view_id);
+  }
+  extra_outputs_.clear();
   compositor_.reset();
 #endif
 
@@ -1499,7 +1506,7 @@ DrmBackend::ModeChange DrmBackend::RequestModeChange(
 
 #if BUILD_COMPOSITOR
   if (compositor_ != nullptr &&
-      !compositor_->OnModeChanged(mode_, fb_w_, fb_h_)) {
+      !compositor_->OnModeChanged(mode_, fb_w_, fb_h_, render_w_, render_h_)) {
     ihs::log::error(
         "[DrmBackend] reconfigure: compositor rebind failed; the plane path "
         "will keep committing the old timing");
@@ -1599,7 +1606,7 @@ void DrmBackend::FinishScanoutRebuild() {
   mode_set_ = false;
 #if BUILD_COMPOSITOR
   if (compositor_ != nullptr &&
-      !compositor_->OnModeChanged(mode_, fb_w_, fb_h_)) {
+      !compositor_->OnModeChanged(mode_, fb_w_, fb_h_, render_w_, render_h_)) {
     ihs::log::error(
         "[DrmBackend] scanout rebuild: compositor rebuild failed; the plane "
         "path is no longer usable at this mode");
@@ -2335,8 +2342,12 @@ bool DrmBackend::Present() {
 #if BUILD_HUD
   // Draw the debug HUD over FBO 0 before the swap. This is the GL-swap path;
   // the plane-compositor path is not covered. No layer list here, so per-view
-  // rows are omitted (stats + histogram still show).
-  MaybeRenderHud(nullptr, 0);
+  // rows are omitted (stats + histogram still show). Rotated, FBO 0 is the
+  // panel and the HUD has to turn with the picture, so the GL composite draws
+  // it instead (DrmCompositor::PresentViaGlFallback).
+  if (cfg_.rotation == 0) {
+    MaybeRenderHud(nullptr, 0);
+  }
 #endif
 
   const int64_t t_waited = present_trace ? now_us() : 0;
@@ -2754,6 +2765,7 @@ void DrmBackend::RegisterViewOutput(const int64_t view_id,
 }
 
 bool DrmBackend::ResolveOutputContext(const std::string& connector_name,
+                                      const int rotation,
                                       DrmOutputContext& out) {
   drmModeRes* res = drmModeGetResources(drm_dev_->fd());
   if (res == nullptr) {
@@ -2830,37 +2842,41 @@ bool DrmBackend::ResolveOutputContext(const std::string& connector_name,
     return false;
   }
   used_crtcs_.push_back(crtc_id);
-  out = DrmOutputContext(crtc_id, crtc_index, connector_id, mode, mode.hdisplay,
-                         mode.vdisplay, &resolved());
+  // The whole mode, turned when rotated, as the primary renders when it is
+  // not given a size.
+  const Extents ext =
+      ExtentsForMode(std::nullopt, std::nullopt, rotation, mode);
+  out = DrmOutputContext(crtc_id, crtc_index, connector_id, mode, ext.fb_w,
+                         ext.fb_h, &resolved(), rotation, ext.render_w,
+                         ext.render_h);
   ihs::log::info(
-      "[DrmBackend] additional output '{}': connector={} crtc={} mode={}x{}@{}",
+      "[DrmBackend] additional output '{}': connector={} crtc={} mode={}x{}@{} "
+      "rotation={}",
       connector_name, connector_id, crtc_id, mode.hdisplay, mode.vdisplay,
-      mode.vrefresh);
+      mode.vrefresh, rotation);
   return true;
 }
 
 bool DrmBackend::AddOutput(const std::string& connector_name,
-                           const int64_t view_id) {
-  // An additional output has no GL composite of its own to turn the picture
-  // in (PresentViaGlFallback drops its frames), and the rotation is set for
-  // the backend, not per output.
-  if (cfg_.rotation != 0) {
+                           const int64_t view_id,
+                           const int rotation) {
+  if (rotation != 0 && rotation != 90 && rotation != 180 && rotation != 270) {
     ihs::log::error(
-        "[DrmBackend] output {} not added: --drm-rotation {} is served on the "
-        "primary output only",
-        connector_name, cfg_.rotation);
+        "[DrmBackend] output {} not added: rotation {} is not 0, 90, 180 or "
+        "270",
+        connector_name, rotation);
     return false;
   }
   DrmOutputContext ctx;
-  if (!ResolveOutputContext(connector_name, ctx)) {
+  if (!ResolveOutputContext(connector_name, rotation, ctx)) {
     return false;
   }
   auto compositor = std::make_unique<DrmCompositor>(this, ctx);
   // Additional outputs do not drive the engine's single vsync (view 0 does).
   compositor->SetDrivesVsync(false);
   DrmCompositor* raw = compositor.get();
-  extra_outputs_.push_back(
-      ExtraOutput{view_id, std::move(compositor), ctx.width(), ctx.height()});
+  extra_outputs_.push_back(ExtraOutput{
+      view_id, std::move(compositor), ctx.render_width(), ctx.render_height()});
   view_outputs_[view_id] = raw;
   return true;
 }
@@ -2875,7 +2891,8 @@ std::vector<DrmBackend::ViewOutputSpec> DrmBackend::AdditionalViews() const {
 }
 #else
 bool DrmBackend::AddOutput(const std::string& /*connector_name*/,
-                           int64_t /*view_id*/) {
+                           int64_t /*view_id*/,
+                           int /*rotation*/) {
   return false;
 }
 

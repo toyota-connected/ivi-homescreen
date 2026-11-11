@@ -275,7 +275,13 @@ class DrmBackend : public Backend, public IFlipSink {
   // to view_id (which becomes an added Flutter view). Returns false if the
   // connector isn't connected or no free CRTC remains. No-op / false when
   // BUILD_COMPOSITOR is off.
-  bool AddOutput(const std::string& connector_name, int64_t view_id);
+  //
+  // @p rotation turns this output's picture on the GPU, counter-clockwise in
+  // degrees, as --drm-rotation turns the primary's (#848): the view is laid
+  // out at the turned extent. Anything but 0/90/180/270 is refused.
+  bool AddOutput(const std::string& connector_name,
+                 int64_t view_id,
+                 int rotation = 0);
 
   // Geometry FlutterView needs to FlutterEngineAddView each additional output.
   struct ViewOutputSpec {
@@ -833,6 +839,14 @@ class DrmBackend : public Backend, public IFlipSink {
   /// GetRenderConfig, with the context current.
   [[nodiscard]] uint32_t TurnFramebufferForTest();
 #endif
+#if BUILD_COMPOSITOR
+  /// The compositor scanning view @p view_id out: 0 is the primary, an
+  /// AddOutput view its own. An unknown view gets the primary's.
+  [[nodiscard]] DrmCompositor* CompositorForViewForTest(
+      const int64_t view_id) const {
+    return CompositorForView(view_id);
+  }
+#endif
 
  private:
 #endif
@@ -852,6 +866,7 @@ class DrmBackend : public Backend, public IFlipSink {
   struct ExtraOutput {
     int64_t view_id;
     std::unique_ptr<DrmCompositor> compositor;
+    // The extent the view renders at: the mode, turned by the rotation.
     uint32_t width;
     uint32_t height;
   };
@@ -860,6 +875,7 @@ class DrmBackend : public Backend, public IFlipSink {
   // a distinct one. Seeded with the primary CRTC after InitDrm.
   std::vector<uint32_t> used_crtcs_;
   bool ResolveOutputContext(const std::string& connector_name,
+                            int rotation,
                             DrmOutputContext& out);
 #endif
 #if HAVE_DRM_CURSOR

@@ -532,9 +532,24 @@ a plane where one can rotate and turns on the GPU where none can.
   at present`.
 - **Input.** The shared DRM seat turns touch and the HW cursor exactly as for
   drm-kms-vulkan (see that README's "Input on a rotated display"). The
-  GL-composited cursor is turned with the picture.
-- **Limits.** The primary output only: an additional `[[view.output]]` is not
-  added while a rotation is set. The debug HUD is drawn on the panel unturned.
+  GL-composited cursor and the debug HUD are turned with the picture.
+- **Additional outputs.** `--drm-rotation` turns the first `[[view.output]]`.
+  Each additional one is turned by its own `rotation` key (0/90/180/270,
+  default 0), independently of the first, and its view is laid out at its
+  mode turned. Whenever an additional output's frame takes the GL composite
+  -- always, when it is rotated -- the frame is drawn into scanout buffers of
+  that output's own and committed on its CRTC's primary plane. An additional
+  output has no cursor and no HUD, and touch and pointer input are not routed
+  to it yet.
+
+```toml
+[[view.output]]
+name = "HDMI-A-1"   # turned by --drm-rotation / backend.drm.rotation
+
+[[view.output]]
+name = "HDMI-A-2"
+rotation = 90
+```
 
 ### Env vars for runtime toggles
 

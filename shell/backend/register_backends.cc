@@ -597,7 +597,8 @@ std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
             "skipping");
         continue;
       }
-      if (drm_backend->AddOutput(connector, next_view_id)) {
+      if (drm_backend->AddOutput(connector, next_view_id,
+                                 extra.rotation.value_or(0))) {
         ++next_view_id;
       }
     }

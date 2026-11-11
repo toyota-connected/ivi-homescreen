@@ -1,0 +1,22 @@
+# Per-output rotation (#848): each additional [[view.output]] carries its own,
+# and one outside 0/90/180/270 is dropped rather than applied.
+[global]
+app_id = 'gallery'
+
+[view]
+width = 1920
+height = 1080
+
+  [[view.output]]
+  name = 'DP-1'
+
+  [[view.output]]
+  name = 'HDMI-A-1'
+  rotation = 90
+
+  [[view.output]]
+  name = 'HDMI-A-2'
+
+  [[view.output]]
+  name = 'HDMI-A-3'
+  rotation = 45

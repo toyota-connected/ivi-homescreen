@@ -232,6 +232,10 @@
   # type=bool default=false values=true|false applies=all
   preload =
 
+  # Rotation of an additional [[view.output]] (entries 2..N), counter-clockwise, turned on the GPU like backend.drm.rotation turns the first. drm-kms-egl only; the first entry is turned by backend.drm.rotation.
+  # type=int default=0 values=0|90|180|270 applies=drm
+  rotation =
+
   # DRM: refine the match to this EDID serial when it is unique.
   # type=string default=(none) values=EDID serial applies=drm
   serial =

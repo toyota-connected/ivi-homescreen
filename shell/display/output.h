@@ -100,6 +100,13 @@ struct OutputMatch {
   // excluded from empty().
   std::optional<std::string> touch_device;
 
+  // Rotation of an additional output ([[view.output]] entries 2..N) in
+  // degrees, counter-clockwise: 0, 90, 180 or 270, turned on the GPU as
+  // --drm-rotation turns the primary (#848). drm-kms-egl only. Unset is 0.
+  // The first entry's output is rotated by --drm-rotation /
+  // backend.drm.rotation instead. Not a match field -- excluded from empty().
+  std::optional<int> rotation;
+
   // True when no match field is set: the bundle binds to the primary output
   // immediately (preserves single-view behavior). Layout position is not a
   // match constraint, so it does not affect this.
