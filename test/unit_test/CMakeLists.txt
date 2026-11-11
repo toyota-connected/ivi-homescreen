@@ -321,6 +321,8 @@ if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN)
 endif ()
 if (BUILD_BACKEND_DRM_KMS_VULKAN)
     add_subdirectory(drm_mode_divergence-test)
+    # What --drm-rotation needs from a display (#838); pure, no display needed.
+    add_subdirectory(drm_rotation_caps-test)
 endif ()
 add_subdirectory(compositor_registry-test)
 add_subdirectory(platform_view_registry-test)
