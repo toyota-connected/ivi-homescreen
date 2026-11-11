@@ -21,10 +21,11 @@
 #include <string_view>
 #include <vector>
 
-// What --drm-rotation needs from the display, decided before the first commit
-// so an angle the hardware cannot do refuses at startup instead of scanning out
-// unrotated (#838). Pure functions over plane rotation bits, modifiers and the
-// KMS driver name, so they are testable without a display.
+// What --drm-rotation needs from the display to rotate on a plane, decided
+// before the first commit so an angle the hardware cannot do is turned on the
+// GPU (#848) instead of scanning out unrotated (#838). Pure functions over
+// plane rotation bits, modifiers and the KMS driver name, so they are testable
+// without a display.
 namespace drm_kms_vulkan {
 
 // DRM_MODE_ROTATE_* for a rotation in degrees (validated to 0|90|180|270 at

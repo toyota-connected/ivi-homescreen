@@ -101,7 +101,7 @@ META = {
     "backend.drm.connector": ("(rank-pick)", "e.g. eDP-1, HDMI-A-1", "drm/sw", "Connector to drive."),
     "backend.drm.mode": ("(preferred)", "<W>x<H>@<R>", "drm/sw", "Mode; unset = preferred from EDID."),
     "backend.drm.pipeline_depth": ("1", "1|2", "drm", "Frames in flight in the EGL present path. 1 waits for the page flip before swapping (lowest latency); 2 queues the frame and commits it from the flip handler, giving the raster thread a frame of headroom."),
-    "backend.drm.rotation": ("0", "0|90|180|270", "drm", "Scanout rotation in degrees, counter-clockwise. The Vulkan DRM backends rotate on a hardware plane and refuse an angle no plane can do; the EGL DRM backends turn the picture on the GPU, on any display. Refused by the software backends; ignored on Wayland, where the compositor rotates."),
+    "backend.drm.rotation": ("0", "0|90|180|270", "drm", "Scanout rotation in degrees, counter-clockwise. The Vulkan DRM backends rotate on a hardware plane where one offers the angle and turn the picture on the GPU where none does; the EGL DRM backends always turn it on the GPU. Refused by the software backends; ignored on Wayland, where the compositor rotates."),
     "backend.drm.compositor": ("auto", "auto|planes|gl", "drm", "Compositor strategy."),
     "backend.drm.modeset": ("auto", "auto|legacy|atomic", "drm", "Modeset API."),
     "backend.drm.allow_nonblock_modeset": ("auto", "auto|yes|no", "drm", "Allow NONBLOCK|ALLOW_MODESET commits."),

@@ -178,7 +178,7 @@
   # type=string default=auto values=auto|xrgb8888|xbgr8888|argb8888|abgr8888|rgb565 applies=drm
   primary_format =
 
-  # Scanout rotation in degrees, counter-clockwise. The Vulkan DRM backends rotate on a hardware plane and refuse an angle no plane can do; the EGL DRM backends turn the picture on the GPU, on any display. Refused by the software backends; ignored on Wayland, where the compositor rotates.
+  # Scanout rotation in degrees, counter-clockwise. The Vulkan DRM backends rotate on a hardware plane where one offers the angle and turn the picture on the GPU where none does; the EGL DRM backends always turn it on the GPU. Refused by the software backends; ignored on Wayland, where the compositor rotates.
   # type=int default=0 values=0|90|180|270 applies=drm
   rotation =
 

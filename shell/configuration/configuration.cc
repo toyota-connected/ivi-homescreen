@@ -905,10 +905,10 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
         cxxopts::value<std::string>())(
         "drm-rotation",
         "DRM scanout rotation in degrees, counter-clockwise: 0|90|180|270 "
-        "(default 0). drm-kms-vulkan rotates on a hardware plane and refuses "
-        "an angle no plane can do; drm-kms-egl turns the picture on the GPU, "
-        "on any display. Refused by the software backends; ignored on "
-        "Wayland, where the compositor rotates",
+        "(default 0). drm-kms-vulkan rotates on a hardware plane where one "
+        "offers the angle and turns the picture on the GPU where none does; "
+        "drm-kms-egl always turns it on the GPU. Refused by the software "
+        "backends; ignored on Wayland, where the compositor rotates",
         cxxopts::value<int>())("drm-compositor",
                                "DRM compositor strategy: auto|planes|gl",
                                cxxopts::value<std::string>())(

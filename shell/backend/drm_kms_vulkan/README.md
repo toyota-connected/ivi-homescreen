@@ -23,7 +23,7 @@ compositor's `CreateBackingStore` / `PresentLayers` callbacks.
 | Page-flip-locked Flutter vsync | ✓ | `IVI_DRMVK_VSYNC=0` for wall-clock fallback |
 | At most one vsync per refresh, on the vblank | ✓ | `IVI_VSYNC_PACE=0` turns it off; see [`shell/vsync`](../../vsync/README.md#pacing-to-the-vblank) |
 | Repaint window: composite and commit shortly before the vblank, adapting to missed vblanks | ✓ | `IVI_DRM_REPAINT_WINDOW_US` (default 5000; `0` composites at once); `IVI_DRM_REPAINT_WINDOW_ADAPT=0` keeps it fixed |
-| Scanout rotation (0/90/180/270) | ✓ | `--drm-rotation`, on a plane that supports the angle; refused at startup otherwise |
+| Scanout rotation (0/90/180/270) | ✓ | `--drm-rotation`, on a plane that supports the angle; turned on the GPU otherwise (see Rotation) |
 | Rotation-aware touch + HW cursor; per-device pointer transform | ✓ | `--input-transform` (shared DRM seat) |
 | KMS HW cursor (drm-cxx / xcursor) | ✓ | Requires libxcursor (`HAVE_DRM_CURSOR`); `--disable-cursor` |
 | libseat session, with direct-master fallback | ✓ | `LIBSEAT_BACKEND=seatd` forces the fallback |
@@ -387,6 +387,7 @@ and each submit timed to the vblank that shows it.
 | `IVI_DRM_REPAINT_WINDOW_ADAPT` | (on) | `0` keeps the repaint window fixed instead of widening it after a missed vblank |
 | `IVI_DRMVK_PROFILE` | (off) | Enables per-frame cadence profiling (also enabled by the `IVI_PROFILE` umbrella) |
 | `IVI_DRMVK_NO_EXPLICIT_SYNC` | (off) | Set to force the CPU-fence fallback instead of the explicit-sync (`IN_FENCE_FD`) scanout hand-off |
+| `IVI_DRMVK_GPU_ROTATION` | (off) | Set to turn `--drm-rotation` on the GPU even where a plane could rotate (see Rotation) |
 | `IVI_HUD` | (off) | Enable the debug HUD (also honored via `[hud].enable`); `BUILD_HUD` builds only |
 | `LIBSEAT_BACKEND` | — | `seatd` (with no seatd daemon running) forces the direct-master fallback path |
 
@@ -559,35 +560,43 @@ is the decisive test.
 
 `--drm-rotation <0|90|180|270>` rotates the scanout. The CRTC keeps its native
 mode; for 90/270 the **render extent** (Flutter viewport + backing stores) is
-swapped, the buffer is scanned out through the plane's `rotation` property, and
-`drm_kms_vulkan_probe` / `--drm-list-modes` report which planes can rotate.
+swapped, and `drm_kms_vulkan_probe` / `--drm-list-modes` report which planes
+can rotate.
 
-The rotation happens on a hardware plane and nowhere else: a layer no plane can
-take is composited, and composition does not rotate. So the backend checks what
-it needs before the first commit and **refuses to start** when the display
-cannot do the angle, rather than scanning out the wrong way round:
+A plane does the rotation where it can, and the GPU where it cannot (#848).
+The backend decides before the first commit:
 
-- **A plane that rotates by the angle.** Some plane on the CRTC that scans out
-  the format must list the angle in its `rotation` property. A display with no
-  rotation property at all (Renesas rcar-du on Sparrow Hawk, for one) serves
-  only 0.
-- **A buffer layout the driver can rotate, for 90/270.** A tiled modifier the
-  driver can rotate is used when the negotiated set has one; otherwise LINEAR,
-  which most drivers rotate (vkms does, at any angle). amdgpu does not rotate
-  LINEAR and never rotates DCC, so on amdgpu 90/270 needs a tiled non-DCC
-  modifier, and so does the contiguous-heap scanout path (LINEAR only) there.
-  0/180 stay LINEAR everywhere.
+- **On a plane** when some plane on the CRTC that scans out the format lists
+  the angle in its `rotation` property and, for 90/270, the driver can rotate a
+  buffer layout the GPU exports. A tiled modifier the driver can rotate is used
+  when the negotiated set has one; otherwise LINEAR, which most drivers rotate
+  (vkms does, at any angle). amdgpu does not rotate LINEAR and never rotates
+  DCC, so on amdgpu 90/270 needs a tiled non-DCC modifier. After the first
+  rotated commit the backend checks the plane it was actually given, and logs
+  an error once if the layer was composited or landed on a plane without the
+  angle.
+- **On the GPU** otherwise: a display with no `rotation` property at all
+  (Renesas rcar-du on Sparrow Hawk), one that rotates only by 180 (vc4 on the
+  Raspberry Pi), amdgpu with nothing rotatable, or the LINEAR-only
+  contiguous-heap scanout on a driver that does not rotate LINEAR. Each present
+  draws the finished frame (overlays, platform views and the HUD already in it)
+  turned into one of three panel-sized LINEAR scanout buffers, in the same
+  submit as the scanout barrier, so the plane's in-fence covers it. The plane
+  scans that out unrotated. The engine's buffers never reach a plane, so they
+  are allocated against every modifier the GPU exports rather than the plane's
+  set, which gives a sampleable tiled layout where the plane offers none.
+  `IVI_DRMVK_GPU_ROTATION=1` takes this path even where a plane could rotate,
+  for comparing the two. The cost is one full-panel draw per frame;
+  `IVI_DRMVK_PLANE_LAYERS` is ignored while it is in use.
 
-After the first rotated commit the backend also checks the plane it was
-actually given, and logs an error once if the scanout layer was composited or
-landed on a plane without the angle.
+The startup log says which: `rotation rotate-90 on plane N` for a plane, and
+`rotation 90 turned on the GPU: <why>` for the GPU.
 
-`--drm-rotation` is applied by this backend and `wayland-leased-drm-vulkan` on
-a plane. drm-kms-egl and wayland-leased-drm-egl turn the picture on the GPU
-instead, which also works on a display whose planes cannot rotate (see that
-backend's README). The software backends refuse it at startup. The Wayland and
-headless backends ignore it with a warning: on Wayland the compositor rotates
-the output (e.g. `weston.ini` `transform=rotate-90`).
+`--drm-rotation` is applied by this backend and `wayland-leased-drm-vulkan`,
+as above. drm-kms-egl and wayland-leased-drm-egl always turn the picture on the
+GPU (see that backend's README). The software backends refuse it at startup.
+The Wayland and headless backends ignore it with a warning: on Wayland the
+compositor rotates the output (e.g. `weston.ini` `transform=rotate-90`).
 
 ### Input on a rotated display
 
