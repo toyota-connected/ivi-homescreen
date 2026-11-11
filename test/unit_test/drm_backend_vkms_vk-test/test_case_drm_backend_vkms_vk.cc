@@ -175,7 +175,7 @@ class VulkanDrmVkms : public ::testing::Test {
     backend_ = VulkanDrmBackend::Create(
         card_.path, /*enable_validation=*/false, /*session=*/nullptr,
         /*shared_device=*/nullptr, /*mode_spec=*/"", /*connector_name=*/"",
-        /*rotation=*/0);
+        Rotation());
     if (backend_ == nullptr) {
       // No Vulkan loader, or no device that can import dma-buf at all. A skip,
       // not a failure: the host simply cannot run this backend.
@@ -193,14 +193,19 @@ class VulkanDrmVkms : public ::testing::Test {
     }
   }
 
+  // The --drm-rotation the backend is created with. The rotation fixture below
+  // overrides it.
+  [[nodiscard]] virtual int Rotation() const { return 0; }
+
   // One frame: take a store, present it as the single layer. The engine would
   // render into it first; nothing here needs its contents, only that a real
-  // buffer reaches a real commit.
+  // buffer reaches a real commit. Sized to the backend's render extent, which
+  // a 90/270 rotation swaps against the mode.
   bool PresentOneFrame() {
     FlutterBackingStoreConfig cfg{};
     cfg.struct_size = sizeof(FlutterBackingStoreConfig);
-    cfg.size = FlutterSize{static_cast<double>(card_.mode_w),
-                           static_cast<double>(card_.mode_h)};
+    cfg.size = FlutterSize{static_cast<double>(backend_->width()),
+                           static_cast<double>(backend_->height())};
     FlutterBackingStore bs{};
     if (!backend_->CreateBackingStoreForTest(&cfg, &bs)) {
       return false;
@@ -249,6 +254,43 @@ TEST_F(VulkanDrmVkms, APresentedFrameReachesTheDisplay) {
   EXPECT_GE(backend_->PresentedFramesForTest(), 5u)
       << "five presents returned true but the backend committed fewer frames";
 }
+
+// --drm-rotation on a display that can do it. vkms rotates every plane by any
+// angle but scans out LINEAR only, which is the case a blanket "90/270 needs a
+// tiled modifier" rule gets wrong (#838): the rotation has to come up, swap the
+// render extent for 90/270, and have its frames reach the display.
+class VulkanDrmVkmsRotation : public VulkanDrmVkms,
+                              public ::testing::WithParamInterface<int> {
+ protected:
+  [[nodiscard]] int Rotation() const override { return GetParam(); }
+};
+
+TEST_P(VulkanDrmVkmsRotation, ARotatedFrameReachesTheDisplay) {
+  ASSERT_NE(backend_, nullptr);
+  EXPECT_EQ(backend_->rotation(), GetParam());
+  const bool swap = GetParam() == 90 || GetParam() == 270;
+  EXPECT_EQ(backend_->width(), swap ? card_.mode_h : card_.mode_w);
+  EXPECT_EQ(backend_->height(), swap ? card_.mode_w : card_.mode_h);
+
+  ASSERT_TRUE(PresentOneFrame()) << "the first present is the blocking modeset";
+  for (int i = 0; i < 4; ++i) {
+    EXPECT_TRUE(PresentOneFrame()) << "frame " << i << " was not presented";
+  }
+  EXPECT_GE(backend_->PresentedFramesForTest(), 5u)
+      << "five rotated presents returned true but fewer frames committed";
+  // Committed is not the same as rotated: a layer composited instead of placed
+  // on a plane commits fine and comes out unrotated.
+  EXPECT_TRUE(backend_->RotationOnPlaneForTest())
+      << "the scanout layer did not land on a plane that rotates by "
+      << GetParam();
+}
+
+INSTANTIATE_TEST_SUITE_P(Angles,
+                         VulkanDrmVkmsRotation,
+                         ::testing::Values(90, 180, 270),
+                         [](const ::testing::TestParamInfo<int>& info) {
+                           return "Rotate" + std::to_string(info.param);
+                         });
 
 // The serial a flip event will report must already name this frame by the time
 // the commit is in flight.

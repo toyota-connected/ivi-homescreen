@@ -904,7 +904,11 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
         "DRM mode <WxH@R> (e.g. 1920x1080@120); default = preferred mode",
         cxxopts::value<std::string>())(
         "drm-rotation",
-        "DRM scanout rotation in degrees: 0|90|180|270 (default 0)",
+        "DRM scanout rotation in degrees: 0|90|180|270 (default 0). Applied "
+        "on a hardware plane by drm-kms-vulkan and wayland-leased-drm-vulkan "
+        "only; refused at startup where no plane can do the angle, and by the "
+        "other DRM and software backends. Ignored on Wayland, where the "
+        "compositor rotates",
         cxxopts::value<int>())("drm-compositor",
                                "DRM compositor strategy: auto|planes|gl",
                                cxxopts::value<std::string>())(

@@ -391,6 +391,10 @@ class VulkanDrmBackend final : public Backend {
   /// rather than passing on a return value alone. Defined out of line:
   /// CompositorState is only complete inside the implementation.
   [[nodiscard]] uint64_t PresentedFramesForTest() const;
+  /// Whether a rotated backend's first committed frame landed on a plane that
+  /// rotates by the requested angle. False before that frame, or when it did
+  /// not. Defined out of line for the same reason.
+  [[nodiscard]] bool RotationOnPlaneForTest() const;
   /// The presentation serial the next flip event will report. Defined out of
   /// line for the same reason.
   [[nodiscard]] uint64_t PresentationSerialForTest() const;

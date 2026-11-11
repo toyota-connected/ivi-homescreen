@@ -95,6 +95,44 @@ static bool ResolveLeasedInputEnabled(const Configuration::Config& config);
 
 namespace {
 
+// --drm-rotation is applied by the Vulkan DRM backends only (#838). A backend
+// that scans out itself but does not rotate refuses it: the angle would parse,
+// validate and then be dropped, leaving the picture the wrong way round with
+// nothing said. True when it refused.
+[[maybe_unused]] bool RefuseDrmRotation(const Configuration::Config& config,
+                                        const std::string_view backend) {
+  const int rotation = config.view.drm_rotation.value_or(0);
+  if (rotation == 0) {
+    return false;
+  }
+  ihs::log::error(
+      "[FlutterView] --drm-rotation {} is not supported on {}; "
+      "drm-kms-vulkan and wayland-leased-drm-vulkan apply it. Use one of "
+      "those, or drop --drm-rotation",
+      rotation, backend);
+  return true;
+}
+
+// A backend with no scanout of its own to rotate only says the angle is
+// ignored. On Wayland the compositor owns rotation, so a config shared with a
+// DRM deployment still starts there.
+[[maybe_unused]] void WarnDrmRotationIgnored(
+    const Configuration::Config& config,
+    const std::string_view backend,
+    const std::string_view instead) {
+  if (const int rotation = config.view.drm_rotation.value_or(0);
+      rotation != 0) {
+    ihs::log::warn("[FlutterView] --drm-rotation {} is ignored on {}: {}",
+                   rotation, backend, instead);
+  }
+}
+
+[[maybe_unused]] constexpr std::string_view kWaylandRotates =
+    "the Wayland compositor rotates the output (e.g. weston.ini "
+    "transform=rotate-90)";
+[[maybe_unused]] constexpr std::string_view kHeadlessRotates =
+    "there is no display to rotate";
+
 #if BUILD_BACKEND_DRM_KMS_EGL || BUILD_BACKEND_DRM_KMS_VULKAN
 // Parse a yes/no/auto knob. File scope because both DRM backends read the same
 // spellings from the same config fields, and the Vulkan one cannot reach a
@@ -364,6 +402,9 @@ std::shared_ptr<IDisplay> MakeLeasedSoftwareDisplay(
 #if BUILD_BACKEND_DRM_KMS_EGL
 std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
                                            IDisplay* display) {
+  if (RefuseDrmRotation(config, "the EGL DRM backends")) {
+    return nullptr;
+  }
   std::shared_ptr<Backend> m_backend;
   auto parse_tri = [](const std::optional<std::string>& s,
                       drm_config::TriState def = drm_config::TriState::kAuto) {
@@ -649,6 +690,7 @@ std::shared_ptr<Backend> MakeWaylandEglBackend(
     IDisplay* display) {
   auto* wl = dynamic_cast<Display*>(display);
   assert(wl != nullptr);
+  WarnDrmRotationIgnored(config, "wayland-egl", kWaylandRotates);
   return std::make_shared<WaylandEglBackend>(
       wl, wl->GetDisplay(), config.view.width.value_or(kDefaultViewWidth),
       config.view.height.value_or(kDefaultViewHeight),
@@ -663,6 +705,7 @@ std::shared_ptr<Backend> MakeWaylandVulkanBackend(
     IDisplay* display) {
   auto* wl = dynamic_cast<Display*>(display);
   assert(wl != nullptr);
+  WarnDrmRotationIgnored(config, "wayland-vulkan", kWaylandRotates);
   // Mesa's Vulkan WSI on Wayland needs zwp_linux_dmabuf_v1 (modern) or
   // wl_drm (legacy) to allocate GPU buffers; warn loudly if absent.
   if (!wl->HasLinuxDmabuf() && !wl->HasWlDrm()) {
@@ -689,6 +732,10 @@ std::shared_ptr<Backend> MakeSoftwareBackend(
   auto* sw_display = dynamic_cast<SoftwareDisplay*>(display);
   assert(sw_display != nullptr);
   (void)sw_display;
+  // Its drm-dumb sink scans out unrotated, the same silent drop as drm-kms-egl.
+  if (RefuseDrmRotation(config, "the software backend")) {
+    return nullptr;
+  }
   // Sink is picked at startup from IVI_SW_SINK. Default 'none' just
   // discards frames; 'memory' keeps the latest in-process; 'file:
   // <pattern>' writes PAM-format snapshots to disk.
@@ -716,6 +763,7 @@ std::shared_ptr<IDisplay> MakeHeadlessEglDisplay(
 std::shared_ptr<Backend> MakeHeadlessEglBackend(
     const Configuration::Config& config,
     IDisplay* /*display*/) {
+  WarnDrmRotationIgnored(config, "headless-egl", kHeadlessRotates);
   // Consumer picked at startup from IVI_ENC_SINK (the part after "encoder:"):
   // file:<path> (default) or webrtc:<host>:<port>.
   const char* spec = std::getenv("IVI_ENC_SINK");
@@ -740,6 +788,7 @@ std::shared_ptr<IDisplay> MakeHeadlessVulkanDisplay(
 std::shared_ptr<Backend> MakeHeadlessVulkanBackend(
     const Configuration::Config& config,
     IDisplay* /*display*/) {
+  WarnDrmRotationIgnored(config, "headless-vulkan", kHeadlessRotates);
   return std::make_shared<HeadlessVulkanBackend>(
       config.view.width.value_or(kDefaultViewWidth),
       config.view.height.value_or(kDefaultViewHeight));
@@ -753,6 +802,9 @@ std::shared_ptr<Backend> MakeLeasedSoftwareBackend(
     IDisplay* display) {
   auto* sw_display = dynamic_cast<SoftwareDisplay*>(display);
   assert(sw_display != nullptr);
+  if (RefuseDrmRotation(config, "wayland-leased-drm-software")) {
+    return nullptr;
+  }
   const auto& scanout = sw_display->leased_scanout();
   // make_display fail-fasts when the lease cannot be had, so reaching here
   // without one is programmer error, not an operator mistake.

@@ -68,6 +68,7 @@
 #include "backend/drm_kms_vulkan/device_caps.h"
 #include "backend/drm_kms_vulkan/drm_scanout_target.h"
 #include "backend/drm_kms_vulkan/modifier_format.h"
+#include "backend/drm_kms_vulkan/rotation_caps.h"
 #include "backend/drm_kms_vulkan/vulkan_backing_store.h"
 #include "engine.h"
 #include "engine_switches.h"
@@ -131,40 +132,6 @@ class ScopedFd {
  private:
   int fd_{-1};
 };
-
-// Map a rotation in degrees (validated to 0|90|180|270 at config time) to the
-// KMS plane rotation bitflag. drm-cxx lowers DisplayParams::rotation to the
-// plane's `rotation` property (or software pre-rotation if the plane lacks it).
-uint64_t RotationToDrmFlag(const int degrees) {
-  switch (degrees) {
-    case 90:
-      return DRM_MODE_ROTATE_90;
-    case 180:
-      return DRM_MODE_ROTATE_180;
-    case 270:
-      return DRM_MODE_ROTATE_270;
-    default:
-      return DRM_MODE_ROTATE_0;
-  }
-}
-
-// Whether the display can scan out a buffer with this modifier under a 90/270
-// rotation. amdgpu rejects both LINEAR (the rotated fetch needs a tiled read
-// pattern) and DCC (delta-color compression is incompatible with the rotated
-// read) for 90/270, so keep only tiled, non-DCC modifiers. Non-AMD tiled
-// modifiers are assumed rotatable (the kernel still validates at AddFB/commit).
-bool RotationCompatible(const uint64_t mod) {
-  if (mod == DRM_FORMAT_MOD_LINEAR) {
-    return false;
-  }
-#ifdef AMD_FMT_MOD
-  if (static_cast<uint8_t>(mod >> 56) == DRM_FORMAT_MOD_VENDOR_AMD &&
-      AMD_FMT_MOD_GET(DCC, mod) != 0U) {
-    return false;
-  }
-#endif
-  return true;
-}
 
 // Device extensions required for zero-copy dma-buf scanout and explicit
 // synchronization. Most dependencies of VK_EXT_image_drm_format_modifier
@@ -464,6 +431,48 @@ void WaitForFlip(const int drm_fd, drmEventContext& evctx) {
   if (::poll(&pfd, 1, 100) > 0 && (pfd.revents & POLLIN) != 0) {
     drmHandleEvent(drm_fd, &evctx);
   }
+}
+
+// Whether the scanout layer of a committed frame landed on a plane that rotates
+// by `rotation`. The startup check asks whether any plane on the CRTC can; this
+// is the plane the allocator actually bound. A layer it composited instead is
+// drawn unrotated, since composition does not rotate (#838), so that is said
+// at error level rather than left to whoever looks at the screen.
+bool RotationReachedPlane(const std::optional<drm::scene::LayerHandle>& layer,
+                          const uint64_t rotation,
+                          const drm::scene::CommitReport& report) {
+  const std::string angle = drm_kms_vulkan::DescribeRotationBits(rotation);
+  if (layer.has_value()) {
+    for (const auto& p : report.placements) {
+      if (!(p.handle == *layer)) {
+        continue;
+      }
+      if (p.placement != drm::scene::LayerPlacement::AssignedToPlane) {
+        ihs::log::error(
+            "[VulkanDrmBackend] --drm-rotation dropped: the scanout layer was "
+            "composited rather than placed on a plane, and composition does "
+            "not rotate ({} requested); the picture is unrotated",
+            angle);
+        return false;
+      }
+      if (!drm_kms_vulkan::RotationSupported(p.plane_rotation_bits, rotation)) {
+        ihs::log::error(
+            "[VulkanDrmBackend] --drm-rotation dropped: plane {} took the "
+            "scanout layer but offers only {} ({} requested)",
+            p.plane_id,
+            drm_kms_vulkan::DescribeRotationBits(p.plane_rotation_bits), angle);
+        return false;
+      }
+      ihs::log::info("[VulkanDrmBackend] rotation {} on plane {}", angle,
+                     p.plane_id);
+      return true;
+    }
+  }
+  ihs::log::error(
+      "[VulkanDrmBackend] --drm-rotation unconfirmed: the commit report does "
+      "not place the scanout layer ({} requested)",
+      angle);
+  return false;
 }
 
 }  // namespace
@@ -808,9 +817,14 @@ struct VulkanDrmBackend::CompositorState {
   uint32_t crtc_height = 0;
   // Plane rotation (DRM_MODE_ROTATE_*) applied to the scanned-out buffer.
   uint64_t rotation = 0;
+  // Whether the first committed frame's placement has been checked against
+  // the rotation (RotationReachedPlane), and what it found. Raster thread only.
+  bool rotation_checked = false;
+  bool rotation_on_plane = false;
   // Modifiers the backing stores allocate against. LINEAR for an unrotated
-  // scanout (simple, universally importable); tiled non-DCC for 90/270 (amdgpu
-  // requires a tiled layout to rotate, and rejects DCC + rotation).
+  // scanout (simple, universally importable). For 90/270, see
+  // RotatedScanoutModifiers: tiled where the driver has one it can rotate,
+  // else LINEAR where the driver rotates that (amdgpu does not).
   std::vector<uint64_t> scanout_modifiers;
   // Set only when the display cannot import what the GPU exports, and the
   // buffers therefore come from a contiguous heap instead. Null means the
@@ -1075,34 +1089,40 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   const bool swap = (rotation_ == 90 || rotation_ == 270);
   state->width = swap ? target.mode_height : target.mode_width;
   state->height = swap ? target.mode_width : target.mode_height;
-  state->rotation = RotationToDrmFlag(rotation_);
+  state->rotation = drm_kms_vulkan::RotationToDrmFlag(rotation_);
+
+  // The KMS driver, not the Vulkan one: whether a LINEAR buffer can be scanned
+  // out rotated is the display's question.
+  std::string kms_driver;
+  if (drmVersionPtr v = drmGetVersion(state->device.fd()); v != nullptr) {
+    if (v->name != nullptr) {
+      kms_driver = v->name;
+    }
+    drmFreeVersion(v);
+  }
 
   // Pick the backing-store modifiers. Unrotated: LINEAR (simple, importable
-  // everywhere). 90/270: a tiled non-DCC modifier from the negotiated set —
-  // amdgpu needs tiling to rotate and rejects DCC + rotation. If the filter
-  // empties (no tiled scanout modifier), fall back to LINEAR so allocation
-  // still succeeds; the rotated commit then fails loudly rather than silently.
+  // everywhere). 90/270: a tiled modifier the driver can rotate when there is
+  // one, else LINEAR where the driver rotates that (#838) -- amdgpu does not,
+  // and never DCC. Nothing rotatable is an angle this display cannot serve,
+  // refused here rather than discovered at the first commit.
   if (swap) {
-    for (const auto m : allowed) {
-      if (RotationCompatible(m)) {
-        state->scanout_modifiers.push_back(m);
-      }
-    }
+    state->scanout_modifiers =
+        drm_kms_vulkan::RotatedScanoutModifiers(allowed, kms_driver);
     if (state->scanout_modifiers.empty()) {
-      ihs::log::warn(
-          "[VulkanDrmBackend] no tiled non-DCC modifier available for a "
-          "{}-degree rotation; the rotated scanout will not commit",
-          rotation_);
-      state->scanout_modifiers.push_back(DRM_FORMAT_MOD_LINEAR);
-    } else {
-      std::string picked;
-      for (const auto m : state->scanout_modifiers) {
-        picked += " " + drm_kms_vulkan::DescribeModifier(m);
-      }
-      ihs::log::info(
-          "[VulkanDrmBackend] rotation {} backing-store modifiers:{}",
-          rotation_, picked);
+      err = fmt::format(
+          "--drm-rotation {} needs a scanout modifier {} can rotate, and none "
+          "of the negotiated ones is ({}: no tiled non-DCC modifier, and it "
+          "does not rotate LINEAR)",
+          rotation_, kms_driver, kms_driver);
+      return false;
     }
+    std::string picked;
+    for (const auto m : state->scanout_modifiers) {
+      picked += " " + drm_kms_vulkan::DescribeModifier(m);
+    }
+    ihs::log::info("[VulkanDrmBackend] rotation {} backing-store modifiers:{}",
+                   rotation_, picked);
   } else {
     state->scanout_modifiers.push_back(DRM_FORMAT_MOD_LINEAR);
   }
@@ -1117,6 +1137,21 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
     return false;
   }
   state->scene = std::move(scene_exp.value());
+
+  // The angle has to land on a plane: the rotation is the plane's `rotation`
+  // property, and a layer no plane can take is composited, which does not
+  // rotate -- the picture would come out the wrong way round with no error
+  // (#838). Ask before the first commit, across every plane on this CRTC that
+  // scans out the format, and refuse an angle none of them offers.
+  if (const uint64_t bits = state->scene->candidate_rotation(state->fourcc);
+      !drm_kms_vulkan::RotationSupported(bits, state->rotation)) {
+    err = fmt::format(
+        "--drm-rotation {} cannot be served on crtc {}: no plane that scans "
+        "out this format supports it (they offer: {}), and there is no "
+        "software rotation to fall back to",
+        rotation_, target.crtc_id, drm_kms_vulkan::DescribeRotationBits(bits));
+    return false;
+  }
 
   if (plane_layers_) {
     // Bias every overlay's zpos by the primary's own. A raw zpos of 1 sits
@@ -1211,15 +1246,15 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
           "[VulkanDrmBackend] the display cannot import the GPU's exported "
           "buffers; scanning out of the '{}' contiguous heap instead",
           contiguous->name());
-      // Linear is the only layout a contiguous heap allocation has, so a
-      // rotation that needed a tiled modifier cannot be served this way. 0/180
-      // never did, so only the swapping rotations lose anything here.
-      if (swap) {
-        ihs::log::warn(
-            "[VulkanDrmBackend] rotation {} needs a tiled modifier, which the "
-            "contiguous scanout path cannot provide; the rotated commit will "
-            "fail",
-            rotation_);
+      // Linear is the only layout a contiguous heap allocation has, so a 90/270
+      // rotation is served this way only where the driver rotates LINEAR.
+      // 0/180 never needed more.
+      if (swap && !drm_kms_vulkan::LinearRotates(kms_driver)) {
+        err = fmt::format(
+            "--drm-rotation {} needs a tiled scanout buffer on {}, and the "
+            "contiguous heap this display needs allocates LINEAR only",
+            rotation_, kms_driver);
+        return false;
       }
       state->scanout_modifiers.assign(1, DRM_FORMAT_MOD_LINEAR);
       state->contiguous = std::move(contiguous);
@@ -1696,6 +1731,10 @@ void VulkanDrmBackend::ArmFlipRead() {
 #if defined(UNIT_TEST)
 uint64_t VulkanDrmBackend::PresentedFramesForTest() const {
   return compositor_ ? compositor_->frame : 0;
+}
+
+bool VulkanDrmBackend::RotationOnPlaneForTest() const {
+  return compositor_ && compositor_->rotation_on_plane;
 }
 
 uint64_t VulkanDrmBackend::LastFlipNsForTest() const {
@@ -3760,7 +3799,8 @@ bool VulkanDrmBackend::PresentSlot(const size_t slot,
   c.commit_target_ns.store(ring_modeset ? 0 : judged_target,
                            std::memory_order_release);
   // Pass `this` as the flip user_data so the event routes to OnFlipEvent.
-  if (auto report = c.scene->commit(flags, this); !report) {
+  auto report = c.scene->commit(flags, this);
+  if (!report) {
     c.commit_target_ns.store(0, std::memory_order_release);
     // EACCES is how a VT switch-out actually reaches us: master is revoked and
     // the commit already in flight fails before libseat's pause callback
@@ -3790,6 +3830,10 @@ bool VulkanDrmBackend::PresentSlot(const size_t slot,
   }
 #endif
   pres.Commit();
+  if (!c.rotation_checked && c.rotation != DRM_MODE_ROTATE_0) {
+    c.rotation_checked = true;
+    c.rotation_on_plane = RotationReachedPlane(c.layer, c.rotation, *report);
+  }
   if (c.first_commit) {
     // Blocking modeset: no flip event. Leave the source not-pending so the
     // provider drains the next baton inline and the async loop starts.

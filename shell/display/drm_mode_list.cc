@@ -136,10 +136,12 @@ void PrintPlaneRotation(const int fd) {
   std::printf(
       "\nNote: rotation is a per-plane hardware capability, not a per-mode "
       "one.\n"
-      "90/270 additionally requires a tiled scanout buffer on some GPUs (e.g.\n"
-      "amdgpu rejects 90/270 on a LINEAR framebuffer); --drm-rotation sets "
-      "the\n"
-      "plane property, but the buffer's modifier must also be compatible.\n");
+      "--drm-rotation sets the plane's rotation property (drm-kms-vulkan and\n"
+      "wayland-leased-drm-vulkan only). An angle no plane above lists is "
+      "refused\n"
+      "at startup: there is no software rotation to fall back to. On amdgpu,\n"
+      "90/270 also needs a tiled non-DCC scanout buffer (it does not rotate\n"
+      "LINEAR).\n");
 }
 
 }  // namespace

@@ -23,7 +23,7 @@ compositor's `CreateBackingStore` / `PresentLayers` callbacks.
 | Page-flip-locked Flutter vsync | ✓ | `IVI_DRMVK_VSYNC=0` for wall-clock fallback |
 | At most one vsync per refresh, on the vblank | ✓ | `IVI_VSYNC_PACE=0` turns it off; see [`shell/vsync`](../../vsync/README.md#pacing-to-the-vblank) |
 | Repaint window: composite and commit shortly before the vblank, adapting to missed vblanks | ✓ | `IVI_DRM_REPAINT_WINDOW_US` (default 5000; `0` composites at once); `IVI_DRM_REPAINT_WINDOW_ADAPT=0` keeps it fixed |
-| Scanout rotation (0/90/180/270) | ✓ | `--drm-rotation`; 90/270 use a tiled non-DCC modifier |
+| Scanout rotation (0/90/180/270) | ✓ | `--drm-rotation`, on a plane that supports the angle; refused at startup otherwise |
 | Rotation-aware touch + HW cursor; per-device pointer transform | ✓ | `--input-transform` (shared DRM seat) |
 | KMS HW cursor (drm-cxx / xcursor) | ✓ | Requires libxcursor (`HAVE_DRM_CURSOR`); `--disable-cursor` |
 | libseat session, with direct-master fallback | ✓ | `LIBSEAT_BACKEND=seatd` forces the fallback |
@@ -562,11 +562,30 @@ mode; for 90/270 the **render extent** (Flutter viewport + backing stores) is
 swapped, the buffer is scanned out through the plane's `rotation` property, and
 `drm_kms_vulkan_probe` / `--drm-list-modes` report which planes can rotate.
 
-A 90/270 rotation needs a **tiled, non-DCC** scanout buffer — amdgpu rejects
-both LINEAR and DCC under rotation — so the backend allocates a tiled non-DCC
-modifier (filtered from the negotiated set) for those angles, while 0/180 stay
-LINEAR. If no tiled modifier is available the rotated commit will not succeed
-and the backend says so.
+The rotation happens on a hardware plane and nowhere else: a layer no plane can
+take is composited, and composition does not rotate. So the backend checks what
+it needs before the first commit and **refuses to start** when the display
+cannot do the angle, rather than scanning out the wrong way round:
+
+- **A plane that rotates by the angle.** Some plane on the CRTC that scans out
+  the format must list the angle in its `rotation` property. A display with no
+  rotation property at all (Renesas rcar-du on Sparrow Hawk, for one) serves
+  only 0.
+- **A buffer layout the driver can rotate, for 90/270.** A tiled modifier the
+  driver can rotate is used when the negotiated set has one; otherwise LINEAR,
+  which most drivers rotate (vkms does, at any angle). amdgpu does not rotate
+  LINEAR and never rotates DCC, so on amdgpu 90/270 needs a tiled non-DCC
+  modifier, and so does the contiguous-heap scanout path (LINEAR only) there.
+  0/180 stay LINEAR everywhere.
+
+After the first rotated commit the backend also checks the plane it was
+actually given, and logs an error once if the scanout layer was composited or
+landed on a plane without the angle.
+
+`--drm-rotation` is applied by this backend and `wayland-leased-drm-vulkan`
+only. drm-kms-egl, wayland-leased-drm-egl and the software backends refuse it at
+startup. The Wayland and headless backends ignore it with a warning: on Wayland
+the compositor rotates the output (e.g. `weston.ini` `transform=rotate-90`).
 
 ### Input on a rotated display
 
