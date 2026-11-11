@@ -44,14 +44,20 @@ class DrmOutputContext {
                    const drmModeModeInfo& mode,
                    uint32_t fb_w,
                    uint32_t fb_h,
-                   const homescreen::driver_probe::Resolved* resolved)
+                   const homescreen::driver_probe::Resolved* resolved,
+                   int rotation = 0,
+                   uint32_t render_w = 0,
+                   uint32_t render_h = 0)
       : crtc_id_(crtc_id),
         crtc_index_(crtc_index),
         connector_id_(connector_id),
         mode_(mode),
         fb_w_(fb_w),
         fb_h_(fb_h),
-        resolved_(resolved) {}
+        resolved_(resolved),
+        rotation_(rotation),
+        render_w_(render_w != 0 ? render_w : fb_w),
+        render_h_(render_h != 0 ? render_h : fb_h) {}
 
   [[nodiscard]] uint32_t crtc_id() const { return crtc_id_; }
   [[nodiscard]] uint32_t crtc_index() const { return crtc_index_; }
@@ -65,6 +71,12 @@ class DrmOutputContext {
   [[nodiscard]] const homescreen::driver_probe::Resolved& resolved() const {
     return *resolved_;
   }
+  // --drm-rotation for this output, counter-clockwise in degrees (#848). The
+  // picture is turned on the GPU from the render extent, what Flutter lays
+  // out at, onto the framebuffer. Unrotated, the two are the same.
+  [[nodiscard]] int rotation() const { return rotation_; }
+  [[nodiscard]] uint32_t render_width() const { return render_w_; }
+  [[nodiscard]] uint32_t render_height() const { return render_h_; }
 
  private:
   uint32_t crtc_id_ = 0;
@@ -74,4 +86,7 @@ class DrmOutputContext {
   uint32_t fb_w_ = 0;
   uint32_t fb_h_ = 0;
   const homescreen::driver_probe::Resolved* resolved_ = nullptr;
+  int rotation_ = 0;
+  uint32_t render_w_ = 0;
+  uint32_t render_h_ = 0;
 };

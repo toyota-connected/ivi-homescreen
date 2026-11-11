@@ -198,9 +198,13 @@ class DrmCompositor : public IFlipSink {
   // Raster thread, and the caller owns the flip quiesce. Returns false when
   // the plane path can no longer be driven at this mode; the GL fallback is
   // unaffected either way.
+  // @p render_w x @p render_h is the extent Flutter renders at, which a
+  // rotation turns onto @p fb_w x @p fb_h; the rotation itself is kept.
   [[nodiscard]] bool OnModeChanged(const drmModeModeInfo& mode,
                                    uint32_t fb_w,
-                                   uint32_t fb_h);
+                                   uint32_t fb_h,
+                                   uint32_t render_w,
+                                   uint32_t render_h);
 
   void SetPaused(bool paused);
   void OnResume();
@@ -446,6 +450,38 @@ class DrmCompositor : public IFlipSink {
   bool PresentViaGlFallback(const FlutterLayer** layers,
                             size_t count,
                             int from_line = __builtin_LINE());
+
+  // A secondary output's GL composite. PresentViaGlFallback's target, FBO 0,
+  // is the primary output's window surface, so a secondary used to drop the
+  // frame there. It draws every layer, turned when the output is rotated,
+  // into comp_bufs_ and commits that on its own CRTC's primary plane.
+  bool PresentOwnComposite(const FlutterLayer** layers, size_t count);
+  // Builds what PresentOwnComposite needs on first use: the plane registry,
+  // the modeset, the primary plane's properties and scanout-capable
+  // composition buffers. False when this CRTC cannot be driven that way.
+  bool EnsureOwnComposite();
+
+  // Draws @p layers into @p fbo, @p target_h rows tall, each turned by @p rot
+  // from render space onto it. @p top_first: the target is stored top row
+  // first, as a buffer KMS scans out directly is; FBO 0 of the window
+  // surface is not. Returns whether anything was drawn.
+  bool CompositeLayersTurned(GLuint fbo,
+                             GLint target_h,
+                             bool top_first,
+                             const DisplayRotation& rot,
+                             const FlutterLayer** layers,
+                             size_t count);
+  // One texture across render rect @p dst, turned onto @p fbo. @p uv maps the
+  // rect to the texture (see UvAffine).
+  void DrawTurned(GLuint fbo,
+                  GLint target_h,
+                  bool top_first,
+                  const DisplayRotation& rot,
+                  GLuint tex,
+                  const RectI& dst,
+                  UvAffine uv,
+                  bool blend,
+                  bool external);
 
   // Tally one GL-fallback entry against its call site, and every
   // kFallbackTraceWindow entries log the running distribution. No-op unless
@@ -800,6 +836,13 @@ class DrmCompositor : public IFlipSink {
   uint64_t framed_overlay_zpos_{0};
   drm::PropertyStore framed_props_;
 
+  // PresentOwnComposite's primary plane and its cached properties (with the
+  // other planes' on this CRTC, which each commit disables).
+  uint32_t own_primary_id_{0};
+  drm::PropertyStore own_props_;
+  bool own_composite_ready_{false};
+  bool own_composite_failed_{false};
+
   // ── Direct-overlay mode (zero-copy scene present) ─────────────────
   // For non-framed configs on hardware whose PRIMARY plane lacks
   // REFLECT_Y (amdgpu DC, RPi5 vc4) but whose overlays support it: pin
@@ -1022,6 +1065,8 @@ class DrmCompositor : public IFlipSink {
   /// dispatched. A test blocks here to force that order. Never set outside
   /// tests.
   std::function<void()> on_commit_returned_;
+  /// The output this compositor scans out on.
+  [[nodiscard]] const DrmOutputContext& OutputForTest() const { return out_; }
 
  private:
 #endif

@@ -357,6 +357,7 @@ file see
 | `[view.output]` | `on_disconnect` | `string` | `suspend` | `suspend\|teardown` | all |
 | `[view.output]` | `output_id` | `string` | `(none)` | `role name from a udev rule` | drm |
 | `[view.output]` | `preload` | `bool` | `false` | `true\|false` | all |
+| `[view.output]` | `rotation` | `int` | `0` | `0\|90\|180\|270` | drm |
 | `[view.output]` | `serial` | `string` | `(none)` | `EDID serial` | drm |
 | `[view.output]` | `touch_device` | `string` | `(primary)` | `device-name substring` | all |
 | `[view.output]` | `wl_name` | `string` | `(none)` | `e.g. DP-1` | wayland |
