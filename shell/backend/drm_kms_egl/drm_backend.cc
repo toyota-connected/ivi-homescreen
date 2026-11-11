@@ -1712,6 +1712,11 @@ void DrmBackend::OnSessionPaused() {
   if (compositor_) {
     compositor_->SetPaused(true);
   }
+  // Each additional output commits on its own CRTC with the same revoked
+  // master, so each is gated the same way (#856).
+  for (const auto& extra : extra_outputs_) {
+    extra.compositor->SetPaused(true);
+  }
 #endif
   // Drop the legacy-path flip latch too. PAGE_FLIP_EVENT won't come for
   // a commit submitted before the revoke; the next Present after resume
@@ -1741,6 +1746,12 @@ void DrmBackend::OnSessionResumed(const int new_fd) {
 #if BUILD_COMPOSITOR
   if (compositor_) {
     compositor_->OnResume();
+  }
+  // Whoever held the card meanwhile may have reprogrammed these CRTCs too;
+  // each re-modesets on its next commit. The frame scheduled below is every
+  // view's.
+  for (const auto& extra : extra_outputs_) {
+    extra.compositor->OnResume();
   }
 #endif
   mode_set_ = false;
@@ -2764,6 +2775,21 @@ void DrmBackend::RegisterViewOutput(const int64_t view_id,
   view_outputs_[view_id] = compositor;
 }
 
+namespace {
+
+// An additional output's mode: the connector's preferred one, else its first.
+// No --drm-mode for these; the [[view.output]] entry names a connector only.
+drmModeModeInfo PreferredMode(const drmModeConnector* connector) {
+  for (int i = 0; i < connector->count_modes; ++i) {
+    if ((connector->modes[i].type & DRM_MODE_TYPE_PREFERRED) != 0) {
+      return connector->modes[i];
+    }
+  }
+  return connector->modes[0];
+}
+
+}  // namespace
+
 bool DrmBackend::ResolveOutputContext(const std::string& connector_name,
                                       const int rotation,
                                       DrmOutputContext& out) {
@@ -2800,16 +2826,7 @@ bool DrmBackend::ResolveOutputContext(const std::string& connector_name,
     return false;
   }
 
-  drmModeModeInfo mode{};
-  for (int i = 0; i < connector->count_modes; ++i) {
-    if ((connector->modes[i].type & DRM_MODE_TYPE_PREFERRED) != 0) {
-      mode = connector->modes[i];
-      break;
-    }
-  }
-  if (mode.clock == 0) {
-    mode = connector->modes[0];
-  }
+  const drmModeModeInfo mode = PreferredMode(connector);
 
   // Pick a CRTC this connector can drive that no other output has claimed.
   uint32_t crtc_id = 0;
@@ -2876,9 +2893,62 @@ bool DrmBackend::AddOutput(const std::string& connector_name,
   compositor->SetDrivesVsync(false);
   DrmCompositor* raw = compositor.get();
   extra_outputs_.push_back(ExtraOutput{
-      view_id, std::move(compositor), ctx.render_width(), ctx.render_height()});
+      view_id, std::move(compositor), ctx.render_width(), ctx.render_height(),
+      connector_name, ctx.connector_id(), rotation, ctx.mode()});
   view_outputs_[view_id] = raw;
   return true;
+}
+
+std::optional<DrmBackend::ViewOutputSpec>
+DrmBackend::OnAdditionalOutputReconfigured(
+    const std::string_view connector_name) {
+  const auto it = std::find_if(
+      extra_outputs_.begin(), extra_outputs_.end(),
+      [&](const ExtraOutput& o) { return o.connector_name == connector_name; });
+  if (it == extra_outputs_.end() || drm_dev_ == nullptr) {
+    return std::nullopt;
+  }
+  drmModeConnector* connector =
+      drmModeGetConnector(drm_dev_->fd(), it->connector_id);
+  if (connector == nullptr || connector->connection != DRM_MODE_CONNECTED ||
+      connector->count_modes == 0) {
+    // Gone or empty: keep driving what we have, as the primary does.
+    if (connector != nullptr) {
+      drmModeFreeConnector(connector);
+    }
+    return std::nullopt;
+  }
+  const drmModeModeInfo mode = PreferredMode(connector);
+  drmModeFreeConnector(connector);
+  return RequestAdditionalOutputMode(it->view_id, mode);
+}
+
+std::optional<DrmBackend::ViewOutputSpec>
+DrmBackend::RequestAdditionalOutputMode(const int64_t view_id,
+                                        const drmModeModeInfo& mode) {
+  const auto it = std::find_if(
+      extra_outputs_.begin(), extra_outputs_.end(),
+      [view_id](const ExtraOutput& o) { return o.view_id == view_id; });
+  if (it == extra_outputs_.end() ||
+      ClassifyModeChange(mode, it->mode) == ModeChange::kNone) {
+    return std::nullopt;
+  }
+  const Extents ext =
+      ExtentsForMode(std::nullopt, std::nullopt, it->rotation, mode);
+  ihs::log::info(
+      "[DrmBackend] output '{}' (view {}) mode {}x{}@{}Hz -> {}x{}@{}Hz; "
+      "adopting on its next present",
+      it->connector_name, view_id, it->mode.hdisplay, it->mode.vdisplay,
+      it->mode.vrefresh, mode.hdisplay, mode.vdisplay, mode.vrefresh);
+  it->compositor->RequestOutputMode(mode, ext.fb_w, ext.fb_h, ext.render_w,
+                                    ext.render_h);
+  it->mode = mode;
+  it->width = ext.render_w;
+  it->height = ext.render_h;
+  // A refresh-only change resizes nothing, so the engine may have no reason to
+  // draw the frame that carries it.
+  KickFrameForModeChange();
+  return ViewOutputSpec{view_id, it->width, it->height};
 }
 
 std::vector<DrmBackend::ViewOutputSpec> DrmBackend::AdditionalViews() const {
@@ -2894,6 +2964,18 @@ bool DrmBackend::AddOutput(const std::string& /*connector_name*/,
                            int64_t /*view_id*/,
                            int /*rotation*/) {
   return false;
+}
+
+std::optional<DrmBackend::ViewOutputSpec>
+DrmBackend::OnAdditionalOutputReconfigured(
+    std::string_view /*connector_name*/) {
+  return std::nullopt;
+}
+
+std::optional<DrmBackend::ViewOutputSpec>
+DrmBackend::RequestAdditionalOutputMode(int64_t /*view_id*/,
+                                        const drmModeModeInfo& /*mode*/) {
+  return std::nullopt;
 }
 
 std::vector<DrmBackend::ViewOutputSpec> DrmBackend::AdditionalViews() const {

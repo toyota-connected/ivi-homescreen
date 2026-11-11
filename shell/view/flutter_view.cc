@@ -813,6 +813,28 @@ bool FlutterView::OnOutputReconfigured() const {
   return m_backend != nullptr && m_backend->OnOutputReconfigured();
 }
 
+void FlutterView::OnAdditionalOutputChanged(
+    [[maybe_unused]] const std::string_view output_name) const {
+#if BUILD_BACKEND_DRM_KMS_EGL
+  auto* drm = dynamic_cast<DrmBackend*>(m_backend.get());
+  if (drm == nullptr || !m_flutter_engine || !m_flutter_engine->IsRunning()) {
+    return;
+  }
+  const auto spec = drm->OnAdditionalOutputReconfigured(output_name);
+  if (!spec.has_value()) {
+    return;
+  }
+  const auto r = m_flutter_engine->SetViewSize(
+      spec->view_id, spec->width, spec->height,
+      m_flutter_engine->GetPixelRatio(), homescreen::kPrimaryDisplayId);
+  ihs::log::info(
+      "[FlutterView] view {} on '{}': SendWindowMetrics {}x{} "
+      "result={}",
+      spec->view_id, output_name, spec->width, spec->height,
+      static_cast<int>(r));
+#endif
+}
+
 void FlutterView::UpdateDisplayMetadata() const {
   if (!m_flutter_engine || !m_flutter_engine->IsRunning()) {
     return;

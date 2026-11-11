@@ -21,6 +21,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include "configuration/configuration.h"
 #include "display/idisplay.h"
@@ -155,6 +156,12 @@ class FlutterView {
   // its mode. True when it adopted a change, so the caller knows whether
   // re-reporting display metadata says anything new (#765).
   [[nodiscard]] bool OnOutputReconfigured() const;
+
+  // An output this view's engine drives as an additional view (a second
+  // [[view.output]]) appeared or was reconfigured: let the backend re-pick its
+  // mode and, when it moved, re-send that view's window metrics (#856). A no-op
+  // for any other output.
+  void OnAdditionalOutputChanged(std::string_view output_name) const;
 
   void UpdateDisplayMetadata() const;
 

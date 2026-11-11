@@ -208,6 +208,22 @@ class DrmCompositor : public IFlipSink {
 
   void SetPaused(bool paused);
   void OnResume();
+  [[nodiscard]] bool paused() const {
+    return paused_.load(std::memory_order_acquire);
+  }
+
+  // An additional output's connector now reports @p mode: adopt it, at the
+  // extents given (as OnModeChanged takes them), at this compositor's next
+  // present. Latched rather than applied because adopting an extent frees the
+  // buffers the raster thread composites into, and the caller -- the hotplug
+  // listener -- is on the platform thread. A second request before that
+  // present replaces the first. Not for the primary, whose backend rebuilds
+  // its own scanout surfaces and calls OnModeChanged itself (#856).
+  void RequestOutputMode(const drmModeModeInfo& mode,
+                         uint32_t fb_w,
+                         uint32_t fb_h,
+                         uint32_t render_w,
+                         uint32_t render_h);
 
   // Tell the compositor which DRM plane an externally-managed cursor
   // (drm::cursor::Renderer) is armed on, so the scene allocator never
@@ -459,7 +475,11 @@ class DrmCompositor : public IFlipSink {
   // Builds what PresentOwnComposite needs on first use: the plane registry,
   // the modeset, the primary plane's properties and scanout-capable
   // composition buffers. False when this CRTC cannot be driven that way.
+  // After an extent change freed the buffers, rebuilds those alone.
   bool EnsureOwnComposite();
+  // comp_bufs_ at the output's extent, scanout-capable with FB ids. A no-op
+  // while they are valid.
+  bool CreateOwnCompositeBuffers();
 
   // Draws @p layers into @p fbo, @p target_h rows tall, each turned by @p rot
   // from render space onto it. @p top_first: the target is stored top row
@@ -1123,6 +1143,19 @@ class DrmCompositor : public IFlipSink {
   // by the Present* entry points on the rasterizer thread; written on
   // DrmSession's dispatch thread — must be atomic.
   std::atomic<bool> paused_{false};
+
+  // RequestOutputMode's latch, consumed at the top of PresentLayers.
+  struct PendingOutputMode {
+    drmModeModeInfo mode;
+    uint32_t fb_w;
+    uint32_t fb_h;
+    uint32_t render_w;
+    uint32_t render_h;
+  };
+  std::mutex pending_mode_mu_;
+  std::optional<PendingOutputMode> pending_mode_;
+  std::atomic<bool> pending_mode_set_{false};
+  void ApplyPendingOutputMode();
 
   // Probed once in InitPlaneAllocator: true iff at least one plane on
   // the CRTC has reflect-y in its rotation bitmask. Gates the

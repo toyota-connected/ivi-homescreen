@@ -564,6 +564,13 @@ void App::OnDisplayOutputsChanged(IDisplay* display,
     if (!view || view->GetIDisplay() != display) {
       continue;
     }
+    // An output the view's engine drives as an extra view is not the one it
+    // is bound to, so the transition below reads kNone for it; its mode is
+    // the backend's to re-pick (#856). Back after an unplug counts too: it
+    // may return at a different mode.
+    if (event != homescreen::OutputEvent::kRemoved) {
+      view->OnAdditionalOutputChanged(output_name);
+    }
     const std::optional<std::string> current = view->BoundOutput();
     const homescreen::OutputResolution wanted =
         homescreen::OutputManager::ResolveForViewDetailed(view->GetConfig(),

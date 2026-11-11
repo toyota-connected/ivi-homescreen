@@ -638,6 +638,35 @@ void Engine::OnRemoveViewComplete(const FlutterRemoveViewResult* result) {
   }
 }
 
+FlutterEngineResult Engine::SetViewSize(const int64_t view_id,
+                                        const size_t width,
+                                        const size_t height,
+                                        const double pixel_ratio,
+                                        const uint64_t display_id) {
+  if (!m_running) {
+    return kInternalInconsistency;
+  }
+  const FlutterWindowMetricsEvent fwme = {
+      .struct_size = sizeof(FlutterWindowMetricsEvent),
+      .width = width,
+      .height = height,
+      .pixel_ratio = pixel_ratio,
+      .left = 0,
+      .top = 0,
+      .physical_view_inset_top = 0,
+      .physical_view_inset_right = 0,
+      .physical_view_inset_bottom = 0,
+      .physical_view_inset_left = 0,
+      .display_id = display_id,
+      .view_id = view_id,
+      .has_constraints = false,
+      .min_width_constraint = 0,
+      .min_height_constraint = 0,
+      .max_width_constraint = 0,
+      .max_height_constraint = 0};
+  return LibFlutterEngine->SendWindowMetricsEvent(m_flutter_engine, &fwme);
+}
+
 FlutterEngineResult Engine::AddView(const int64_t view_id,
                                     const size_t width,
                                     const size_t height,
