@@ -567,7 +567,8 @@ size_t GlCompositor::CompositeSurfaceLayers(
     bool blend_first,
     const std::function<void(const ICompositorSurface::GlLayerTexture&)>&
         on_drawn,
-    const ICompositorSurface::GlLayerTexture* layer0) {
+    const ICompositorSurface::GlLayerTexture* layer0,
+    const DisplayRotation* rotation) {
   size_t drawn = 0;
   const size_t count = surface.GetLayerCount();
   for (size_t i = 0; i < count; ++i) {
@@ -587,6 +588,11 @@ size_t GlCompositor::CompositeSurfaceLayers(
     // stored bottom row first (a GL render target) has that row at v = 1.
     if (!t.top_first) {
       p.uv = FlipRows(p.uv);
+    }
+    // Clipped to the view in render space above; only the draw turns.
+    if (rotation != nullptr) {
+      p.dst = rotation->ToPanel(p.dst);
+      p.uv = rotation->ToPanel(p.uv);
     }
     GLint gl_y = fb_height - p.dst.y - p.dst.h;
     if (target_top_first) {

@@ -25,6 +25,7 @@
 
 #include "display/icursor_shape_sink.h"
 #include "input/cursor_position_sink.h"
+#include "view/display_rotation.h"
 
 namespace homescreen {
 
@@ -81,7 +82,12 @@ class GlCursor final : public ICursorPositionSink, public ICursorShapeSink {
 
   // Rasterizer thread, EGL context current, FBO 0 holding the rendered frame.
   // Composites the cursor over it. No-op until the cursor is visible.
-  void Draw(uint32_t fb_w, uint32_t fb_h);
+  // @p rotation: FBO 0 is a panel the frame was turned onto on the GPU, so
+  // the sprite is turned with it from render to panel space. Null draws it as
+  // is, which is also right for a plane rotation applied after FBO 0.
+  void Draw(uint32_t fb_w,
+            uint32_t fb_h,
+            const DisplayRotation* rotation = nullptr);
 
   // Rasterizer thread, EGL context current. Release GL objects.
   void Destroy();

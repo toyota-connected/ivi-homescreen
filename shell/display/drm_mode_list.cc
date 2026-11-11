@@ -136,12 +136,11 @@ void PrintPlaneRotation(const int fd) {
   std::printf(
       "\nNote: rotation is a per-plane hardware capability, not a per-mode "
       "one.\n"
-      "--drm-rotation sets the plane's rotation property (drm-kms-vulkan and\n"
-      "wayland-leased-drm-vulkan only). An angle no plane above lists is "
-      "refused\n"
-      "at startup: there is no software rotation to fall back to. On amdgpu,\n"
-      "90/270 also needs a tiled non-DCC scanout buffer (it does not rotate\n"
-      "LINEAR).\n");
+      "drm-kms-vulkan applies --drm-rotation through the plane's rotation\n"
+      "property and refuses an angle no plane above lists. On amdgpu, 90/270\n"
+      "also needs a tiled non-DCC scanout buffer (it does not rotate LINEAR).\n"
+      "drm-kms-egl turns the picture on the GPU instead, so it needs none of\n"
+      "the above.\n");
 }
 
 }  // namespace

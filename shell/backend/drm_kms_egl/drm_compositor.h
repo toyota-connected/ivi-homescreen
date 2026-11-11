@@ -56,6 +56,7 @@
 #include "backend/drm_plane_formats.h"
 #include "backend/wayland_egl/gl_caps.h"
 #include "backend/wayland_egl/gl_compositor.h"
+#include "view/display_rotation.h"
 #include "view/layer_scanout.h"
 #include "view/presentation.h"
 
@@ -387,7 +388,14 @@ class DrmCompositor : public IFlipSink {
       GLint fb_height,
       bool target_top_first,
       bool blend,
-      const ICompositorSurface::GlLayerTexture* layer0);
+      const ICompositorSurface::GlLayerTexture* layer0,
+      const DisplayRotation* rotation = nullptr);
+
+  // The display turned on the GPU (#848): set when --drm-rotation is non-zero.
+  // Every present then goes through the GL composite with each layer drawn
+  // turned onto the panel, since no plane here is asked to rotate. Nullopt
+  // otherwise.
+  [[nodiscard]] std::optional<DisplayRotation> GpuRotation() const;
 
   // Layer 0's texture for a one-layer surface, else nullopt. Imports
   // the layer's latest frame (it calls GetLayerGlTexture), so raster thread

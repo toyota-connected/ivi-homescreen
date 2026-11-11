@@ -199,6 +199,7 @@ endif ()
 add_subdirectory(output_resolver-test)
 add_subdirectory(ihs_pv-test)
 add_subdirectory(layer_geometry-test)
+add_subdirectory(display_rotation-test)
 add_subdirectory(layer_scanout-test)
 add_subdirectory(presentation-test)
 # GlCompositor exists wherever an EGL backend is built.

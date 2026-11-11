@@ -187,6 +187,12 @@ struct DrmConfig {
   // driving the device with no seat/VT arbitration (headless/SSH/kiosk).
   // drmSetMaster is still required and still enforced.
   bool no_seat{false};
+
+  // --drm-rotation: 0, 90, 180 or 270, counter-clockwise as DRM_MODE_ROTATE_*
+  // reads. Turned on the GPU (#848), not by a plane, so it works on a display
+  // whose planes cannot rotate. Flutter renders at the turned extent; the
+  // scanout stays the full mode. Needs BUILD_COMPOSITOR.
+  int rotation{0};
 };
 
 // PrintDrmModes / ConnectorTypeName moved to display/drm_mode_list.h so the
@@ -414,12 +420,15 @@ class DrmBackend : public Backend, public IFlipSink {
   }
   [[nodiscard]] uint32_t crtc_id() const { return crtc_id_; }
   [[nodiscard]] uint32_t crtc_index() const { return crtc_index_; }
-  // Framebuffer size — what the Flutter engine renders at. When the user
-  // didn't request a size, this equals the CRTC mode (full-screen). When
-  // they did, it's the requested size and the primary plane is centered
-  // on the CRTC with black borders.
-  [[nodiscard]] uint32_t width() const { return fb_w_; }
-  [[nodiscard]] uint32_t height() const { return fb_h_; }
+  // Render size — what the Flutter engine renders at. When the user didn't
+  // request a size, this equals the CRTC mode (full-screen). When they did,
+  // it's the requested size and the primary plane is centered on the CRTC
+  // with black borders. A 90/270 rotation swaps it against the mode: see
+  // ExtentsForMode.
+  [[nodiscard]] uint32_t width() const { return render_w_; }
+  [[nodiscard]] uint32_t height() const { return render_h_; }
+  // The configured --drm-rotation, in degrees.
+  [[nodiscard]] int rotation() const { return cfg_.rotation; }
   // CRTC mode size — what the display is actually driven at.
   [[nodiscard]] uint32_t mode_width() const { return mode_.hdisplay; }
   [[nodiscard]] uint32_t mode_height() const { return mode_.vdisplay; }
@@ -441,6 +450,24 @@ class DrmBackend : public Backend, public IFlipSink {
   [[nodiscard]] static std::pair<uint32_t, uint32_t> FbExtentForMode(
       std::optional<uint32_t> requested_w,
       std::optional<uint32_t> requested_h,
+      const drmModeModeInfo& mode);
+
+  // The scanout FB and the extent Flutter renders at, for @p mode. Unrotated
+  // they are one and the same, FbExtentForMode's. Rotated, the composite
+  // turns the picture onto the panel itself, so the FB is the whole mode and
+  // letterboxing is the composite's to do; the render extent is the request
+  // clamped to the mode as the turned picture sees it (height first at
+  // 90/270).
+  struct Extents {
+    uint32_t fb_w{0};
+    uint32_t fb_h{0};
+    uint32_t render_w{0};
+    uint32_t render_h{0};
+  };
+  [[nodiscard]] static Extents ExtentsForMode(
+      std::optional<uint32_t> requested_w,
+      std::optional<uint32_t> requested_h,
+      int rotation,
       const drmModeModeInfo& mode);
 
   // Compares on timings rather than vrefresh, which is DIV_ROUND_CLOSEST of
@@ -588,6 +615,10 @@ class DrmBackend : public Backend, public IFlipSink {
   // Populated in InitDrm after mode selection.
   uint32_t fb_w_ = 0;
   uint32_t fb_h_ = 0;
+  // What Flutter renders at (width()/height()). fb_w_/fb_h_ unless a rotation
+  // is set; see ExtentsForMode.
+  uint32_t render_w_ = 0;
+  uint32_t render_h_ = 0;
   drmModeCrtc* saved_crtc_ = nullptr;
 
   // Populated by DriverProbe::Resolve() inside Create(). Non-null for the

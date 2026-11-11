@@ -282,7 +282,9 @@ bool GlCursor::EnsureGl() {
   return true;
 }
 
-void GlCursor::Draw(const uint32_t fb_w, const uint32_t fb_h) {
+void GlCursor::Draw(const uint32_t fb_w,
+                    const uint32_t fb_h,
+                    const DisplayRotation* rotation) {
   if (!visible_.load(std::memory_order_acquire)) {
     return;
   }
@@ -304,15 +306,28 @@ void GlCursor::Draw(const uint32_t fb_w, const uint32_t fb_h) {
 
   // Pixel space (top-left origin, y-down) → NDC. The window framebuffer shows
   // the Flutter scene upright, so top-left pixel (0,0) maps to NDC (-1, +1).
-  auto nx = [fw](const float x) { return x / fw * 2.0F - 1.0F; };
-  auto ny = [fh](const float y) { return 1.0F - y / fh * 2.0F; };
+  // A GPU-turned panel takes each corner through the turn first, which turns
+  // the quad, and the sprite on it, with the picture.
+  auto ndc = [fw, fh, rotation](const float x, const float y) {
+    double px = x;
+    double py = y;
+    if (rotation != nullptr) {
+      rotation->ToPanel(x, y, &px, &py);
+    }
+    return std::array<float, 2>{static_cast<float>(px) / fw * 2.0F - 1.0F,
+                                1.0F - static_cast<float>(py) / fh * 2.0F};
+  };
+  const auto tl = ndc(x0, y0);
+  const auto bl = ndc(x0, y1);
+  const auto tr = ndc(x1, y0);
+  const auto br = ndc(x1, y1);
 
   // Triangle strip: TL, BL, TR, BR. Texture V=0 is the top (arrow tip row).
   const std::array<float, 16> verts = {
-      nx(x0), ny(y0), 0.0F, 0.0F,  // TL
-      nx(x0), ny(y1), 0.0F, 1.0F,  // BL
-      nx(x1), ny(y0), 1.0F, 0.0F,  // TR
-      nx(x1), ny(y1), 1.0F, 1.0F,  // BR
+      tl[0], tl[1], 0.0F, 0.0F,  // TL
+      bl[0], bl[1], 0.0F, 1.0F,  // BL
+      tr[0], tr[1], 1.0F, 0.0F,  // TR
+      br[0], br[1], 1.0F, 1.0F,  // BR
   };
 
   // Flutter's renderer (Skia) caches GL state and does NOT re-query it between
