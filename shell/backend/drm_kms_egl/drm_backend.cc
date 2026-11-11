@@ -2335,8 +2335,12 @@ bool DrmBackend::Present() {
 #if BUILD_HUD
   // Draw the debug HUD over FBO 0 before the swap. This is the GL-swap path;
   // the plane-compositor path is not covered. No layer list here, so per-view
-  // rows are omitted (stats + histogram still show).
-  MaybeRenderHud(nullptr, 0);
+  // rows are omitted (stats + histogram still show). Rotated, FBO 0 is the
+  // panel and the HUD has to turn with the picture, so the GL composite draws
+  // it instead (DrmCompositor::PresentViaGlFallback).
+  if (cfg_.rotation == 0) {
+    MaybeRenderHud(nullptr, 0);
+  }
 #endif
 
   const int64_t t_waited = present_trace ? now_us() : 0;

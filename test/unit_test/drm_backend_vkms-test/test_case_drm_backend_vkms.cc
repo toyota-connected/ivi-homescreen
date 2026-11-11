@@ -37,6 +37,7 @@
 #include "backend/drm_kms_egl/drm_backend.h"
 #include "backend/drm_kms_egl/drm_compositor.h"
 #include "backend/register_backends.h"
+#include "config/common.h"
 #include "configuration/configuration.h"
 #include "display/drm_display.h"
 #include "logging/logger.hpp"
@@ -1214,6 +1215,84 @@ TEST_P(DrmBackendVkmsRotated, AFlutterFrameIsTurnedOnThePanel) {
 
   compositor_->CollectBackingStore(&bs);
 }
+
+#if BUILD_HUD
+// The debug HUD turns with the picture. It sits at the picture's top-left, so
+// on the panel it has to be in the quadrant that holds that corner once
+// turned: bottom-left at 90, where an unturned HUD would be top-left.
+TEST_P(DrmBackendVkmsRotated, TheHudIsTurnedWithThePicture) {
+  // Read once, on the backend's first present.
+  ::setenv("IVI_HUD", "1", 1);
+  struct Unset {
+    ~Unset() { ::unsetenv("IVI_HUD"); }
+  } unset;
+
+  FlutterBackingStoreConfig cfg{};
+  cfg.struct_size = sizeof(FlutterBackingStoreConfig);
+  cfg.size = FlutterSize{static_cast<double>(content_w_),
+                         static_cast<double>(content_h_)};
+  FlutterBackingStore bs{};
+  ASSERT_TRUE(compositor_->CreateBackingStore(&cfg, &bs));
+  // A black frame, so whatever is not black is the HUD.
+  ASSERT_TRUE(backend_->MakeCurrent());
+  glBindFramebuffer(GL_FRAMEBUFFER, bs.open_gl.framebuffer.name);
+  glClearColor(0.0F, 0.0F, 0.0F, 1.0F);
+  glClear(GL_COLOR_BUFFER_BIT);
+  glFinish();
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  ASSERT_EQ(glGetError(), static_cast<GLenum>(GL_NO_ERROR));
+
+  FlutterLayer layer{};
+  layer.struct_size = sizeof(FlutterLayer);
+  layer.type = kFlutterLayerContentTypeBackingStore;
+  layer.backing_store = &bs;
+  layer.size = cfg.size;
+  const FlutterLayer* layers[] = {&layer};
+  // Twice: imgui lays its window out on the first frame and draws it from the
+  // second.
+  ASSERT_TRUE(compositor_->PresentLayers(layers, 1));
+  ASSERT_TRUE(compositor_->PresentLayers(layers, 1));
+
+  const drm::capture::Image image =
+      Snapshot(("rotated_hud_" + std::to_string(GetParam())).c_str());
+  ASSERT_FALSE(image.empty());
+  const uint32_t w = image.width();
+  const uint32_t h = image.height();
+  // The panel quadrant holding the picture's top-left corner, counter-
+  // clockwise as DRM_MODE_ROTATE_* turns a plane.
+  uint32_t qx = 0;
+  uint32_t qy = 0;
+  switch (GetParam()) {
+    case 90:
+      qy = h / 2;
+      break;
+    case 180:
+      qx = w / 2;
+      qy = h / 2;
+      break;
+    case 270:
+      qx = w / 2;
+      break;
+    default:
+      break;
+  }
+  size_t inside = 0;
+  size_t outside = 0;
+  for (uint32_t y = 0; y < h; ++y) {
+    for (uint32_t x = 0; x < w; ++x) {
+      if ((image.pixels()[static_cast<size_t>(y) * w + x] & 0x00FFFFFFu) == 0) {
+        continue;
+      }
+      const bool in = x >= qx && x < qx + w / 2 && y >= qy && y < qy + h / 2;
+      ++(in ? inside : outside);
+    }
+  }
+  EXPECT_GT(inside, 1000u) << "no HUD where the picture's top-left landed";
+  EXPECT_EQ(outside, 0u) << "HUD pixels outside that quadrant";
+
+  compositor_->CollectBackingStore(&bs);
+}
+#endif  // BUILD_HUD
 #endif  // IHS_TEST_HAVE_CAPTURE
 
 INSTANTIATE_TEST_SUITE_P(Angles,

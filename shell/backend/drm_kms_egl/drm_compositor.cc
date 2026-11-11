@@ -2070,6 +2070,21 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
     }
   }
 
+#if BUILD_HUD
+  // Turned, the HUD is drawn here, last and over the picture, so it turns
+  // with it. Present() would draw it straight onto the panel, unturned; it
+  // leaves a rotated frame's HUD to this.
+  if (rot != nullptr) {
+    if (const unsigned int hud_tex =
+            backend_->RenderHudTexture(static_cast<uint32_t>(rot->render_w),
+                                       static_cast<uint32_t>(rot->render_h))) {
+      // Rendered into a GL framebuffer: its first row is the HUD's bottom.
+      draw_turned(hud_tex, RectI{0, 0, rot->render_w, rot->render_h},
+                  FlipRows(UvAffine{}), /*blend=*/true, /*external=*/false);
+    }
+  }
+#endif
+
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   ArmCommitTarget();
   const bool presented = backend_->Present();
