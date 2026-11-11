@@ -82,6 +82,7 @@ extern "C" {
 #include "task_runner.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <iostream>
@@ -999,6 +1000,228 @@ TEST_F(DrmBackendVkmsFramed, TheViewsTextureReachesTheDisplay) {
   compositor_->UnregisterSurface(19);
 }
 #endif  // IHS_TEST_HAVE_CAPTURE
+
+// --drm-rotation on the EGL backend (#848): the GL composite turns the picture
+// onto the panel, no plane asked to rotate. Parameterized on the angle, 0
+// included: it is what says the readback below is the right way up, so the
+// turned cases are measured against something.
+//
+// A turned display is left to the probe (kAuto) on purpose. A rotation has to
+// keep the plane path off whatever the probe says -- a backing store scanned
+// out directly would show unturned -- and with enable_overlay=1 the probe
+// would otherwise pick it. 0 pins the GL composite: on the plane path a
+// texture-only view is never drawn (see DrmBackendVkmsBase), and 0 is here
+// only to read the picture back the right way up.
+class DrmBackendVkmsRotated : public DrmBackendVkmsBase,
+                              public ::testing::WithParamInterface<int> {
+ protected:
+  void Configure(DrmConfig& cfg) override {
+    cfg.compositor = GetParam() == 0 ? drm_config::Compositor::kGl
+                                     : drm_config::Compositor::kAuto;
+    cfg.rotation = GetParam();
+    const bool swap = GetParam() == 90 || GetParam() == 270;
+    content_w_ = swap ? card_.mode_h : card_.mode_w;
+    content_h_ = swap ? card_.mode_w : card_.mode_h;
+  }
+
+  static constexpr uint32_t kRed = 0x00FF0000u;
+  static constexpr uint32_t kGreen = 0x0000FF00u;
+  static constexpr uint32_t kBlue = 0x000000FFu;
+  static constexpr uint32_t kWhite = 0x00FFFFFFu;
+
+  // The picture every case draws: red top-left, green top-right, blue
+  // bottom-left, white bottom-right, as Flutter would see it.
+  //
+  // What the panel shows in its four quadrants (TL, TR, BL, BR), turned
+  // counter-clockwise as DRM_MODE_ROTATE_* turns a plane: at 90 the picture's
+  // top-right corner is the panel's top-left. Written out per angle rather
+  // than derived, so it does not share a mistake with the code under test.
+  static std::array<uint32_t, 4> PanelQuadrants(int degrees) {
+    switch (degrees) {
+      case 90:
+        return {kGreen, kWhite, kRed, kBlue};
+      case 180:
+        return {kWhite, kBlue, kGreen, kRed};
+      case 270:
+        return {kBlue, kRed, kWhite, kGreen};
+      default:
+        return {kRed, kGreen, kBlue, kWhite};
+    }
+  }
+
+#if IHS_TEST_HAVE_CAPTURE
+  void ExpectQuadrants(const std::string& name) {
+    const drm::capture::Image image = Snapshot(name.c_str());
+    ASSERT_FALSE(image.empty());
+    // The panel is scanned out at its mode whatever the angle.
+    ASSERT_EQ(image.width(), card_.mode_w);
+    ASSERT_EQ(image.height(), card_.mode_h);
+    const auto at = [&image](uint32_t x, uint32_t y) {
+      return image.pixels()[static_cast<size_t>(y) * image.width() + x] &
+             0x00FFFFFFu;
+    };
+    const uint32_t w = image.width();
+    const uint32_t h = image.height();
+    const auto want = PanelQuadrants(GetParam());
+    EXPECT_EQ(at(w / 4, h / 4), want[0]) << "top-left";
+    EXPECT_EQ(at(3 * w / 4, h / 4), want[1]) << "top-right";
+    EXPECT_EQ(at(w / 4, 3 * h / 4), want[2]) << "bottom-left";
+    EXPECT_EQ(at(3 * w / 4, 3 * h / 4), want[3]) << "bottom-right";
+  }
+#endif  // IHS_TEST_HAVE_CAPTURE
+};
+
+// Flutter is told the turned extent: what it lays out at, and what the seat
+// clamps the pointer to.
+TEST_P(DrmBackendVkmsRotated, FlutterRendersAtTheTurnedExtent) {
+  EXPECT_EQ(backend_->width(), content_w_);
+  EXPECT_EQ(backend_->height(), content_h_);
+  EXPECT_EQ(backend_->mode_width(), card_.mode_w);
+  EXPECT_EQ(backend_->mode_height(), card_.mode_h);
+  EXPECT_EQ(backend_->rotation(), GetParam());
+}
+
+#if IHS_TEST_HAVE_CAPTURE
+// A platform view's texture, the one sampled as is (bottom row first, as a GL
+// texture is): its picture reaches the panel turned by the angle.
+TEST_P(DrmBackendVkmsRotated, AViewsPictureIsTurnedOnThePanel) {
+  // Two rows of two, bottom row first in memory.
+  const std::array<uint32_t, 4> quad = {kBlue, kWhite, kRed, kGreen};
+  std::array<uint8_t, 16> px{};
+  for (size_t i = 0; i < quad.size(); ++i) {
+    px[i * 4 + 0] = static_cast<uint8_t>(quad[i] >> 16U);
+    px[i * 4 + 1] = static_cast<uint8_t>(quad[i] >> 8U);
+    px[i * 4 + 2] = static_cast<uint8_t>(quad[i]);
+    px[i * 4 + 3] = 0xFF;
+  }
+  ASSERT_TRUE(backend_->MakeCurrent());
+  glBindTexture(GL_TEXTURE_2D, tex_);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+               px.data());
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  ASSERT_EQ(glGetError(), static_cast<GLenum>(GL_NO_ERROR));
+
+  auto view = std::make_shared<FakePlatformView>(23);
+  view->set_texture(tex_);
+  layer_w_ = content_w_;
+  layer_h_ = content_h_;
+  compositor_->RegisterSurface(23, view);
+
+  ASSERT_TRUE(PresentPlatformView(23));
+  ExpectQuadrants("rotated_view_" + std::to_string(GetParam()));
+
+  compositor_->UnregisterSurface(23);
+}
+
+// The cropped (layered) draw, which turns each layer itself rather than the
+// view as a whole.
+TEST_P(DrmBackendVkmsRotated, ALayeredViewIsTurnedOnThePanel) {
+  const std::array<uint32_t, 4> quad = {kBlue, kWhite, kRed, kGreen};
+  std::array<uint8_t, 16 * 16 * 4> px{};
+  for (int y = 0; y < 16; ++y) {
+    for (int x = 0; x < 16; ++x) {
+      const uint32_t c = quad[static_cast<size_t>((y / 8) * 2 + (x / 8))];
+      const size_t i = static_cast<size_t>(y * 16 + x) * 4;
+      px[i + 0] = static_cast<uint8_t>(c >> 16U);
+      px[i + 1] = static_cast<uint8_t>(c >> 8U);
+      px[i + 2] = static_cast<uint8_t>(c);
+      px[i + 3] = 0xFF;
+    }
+  }
+  ASSERT_TRUE(backend_->MakeCurrent());
+  glBindTexture(GL_TEXTURE_2D, tex_);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 16, 16, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+               px.data());
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  ASSERT_EQ(glGetError(), static_cast<GLenum>(GL_NO_ERROR));
+
+  // An 8x8 crop at the origin. A crop is in the picture's displayed
+  // orientation, whatever the memory order, so this is the picture's top-left
+  // quadrant: red, stretched over the whole view. Turned, the view still
+  // covers the whole panel, which it does not if its rect is turned wrong.
+  auto view = std::make_shared<FakePlatformView>(29);
+  view->set_texture(tex_);
+  view->set_cropped(true);
+  layer_w_ = content_w_;
+  layer_h_ = content_h_;
+  compositor_->RegisterSurface(29, view);
+
+  ASSERT_TRUE(PresentPlatformView(29));
+
+  const drm::capture::Image image =
+      Snapshot(("rotated_layered_" + std::to_string(GetParam())).c_str());
+  ASSERT_FALSE(image.empty());
+  const auto at = [&image](uint32_t x, uint32_t y) {
+    return image.pixels()[static_cast<size_t>(y) * image.width() + x] &
+           0x00FFFFFFu;
+  };
+  const uint32_t w = image.width();
+  const uint32_t h = image.height();
+  EXPECT_EQ(at(w / 2, h / 2), kRed) << "a crop of one color fills the view";
+  EXPECT_EQ(at(w / 8, h / 8), kRed);
+  EXPECT_EQ(at(7 * w / 8, h / 8), kRed);
+  EXPECT_EQ(at(w / 8, 7 * h / 8), kRed);
+  EXPECT_EQ(at(7 * w / 8, 7 * h / 8), kRed);
+
+  compositor_->UnregisterSurface(29);
+}
+
+// Flutter's own layer, a backing store it rendered into with GL (bottom row
+// first): the frame a running app actually presents.
+TEST_P(DrmBackendVkmsRotated, AFlutterFrameIsTurnedOnThePanel) {
+  FlutterBackingStoreConfig cfg{};
+  cfg.struct_size = sizeof(FlutterBackingStoreConfig);
+  cfg.size = FlutterSize{static_cast<double>(content_w_),
+                         static_cast<double>(content_h_)};
+  FlutterBackingStore bs{};
+  ASSERT_TRUE(compositor_->CreateBackingStore(&cfg, &bs));
+
+  // Render the picture the way Flutter does: GL's y = 0 is the bottom row.
+  ASSERT_TRUE(backend_->MakeCurrent());
+  glBindFramebuffer(GL_FRAMEBUFFER, bs.open_gl.framebuffer.name);
+  glEnable(GL_SCISSOR_TEST);
+  const auto hw = static_cast<GLsizei>(content_w_ / 2);
+  const auto hh = static_cast<GLsizei>(content_h_ / 2);
+  const struct {
+    GLint x;
+    GLint y;
+    uint32_t rgb;
+  } fills[] = {{0, hh, kRed}, {hw, hh, kGreen}, {0, 0, kBlue}, {hw, 0, kWhite}};
+  for (const auto& f : fills) {
+    glScissor(f.x, f.y, hw, hh);
+    glClearColor(static_cast<float>((f.rgb >> 16U) & 0xFFU) / 255.0F,
+                 static_cast<float>((f.rgb >> 8U) & 0xFFU) / 255.0F,
+                 static_cast<float>(f.rgb & 0xFFU) / 255.0F, 1.0F);
+    glClear(GL_COLOR_BUFFER_BIT);
+  }
+  glDisable(GL_SCISSOR_TEST);
+  glFinish();
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  ASSERT_EQ(glGetError(), static_cast<GLenum>(GL_NO_ERROR));
+
+  FlutterLayer layer{};
+  layer.struct_size = sizeof(FlutterLayer);
+  layer.type = kFlutterLayerContentTypeBackingStore;
+  layer.backing_store = &bs;
+  layer.offset = FlutterPoint{0.0, 0.0};
+  layer.size = cfg.size;
+  const FlutterLayer* layers[] = {&layer};
+  ASSERT_TRUE(compositor_->PresentLayers(layers, 1));
+
+  ExpectQuadrants("rotated_frame_" + std::to_string(GetParam()));
+
+  compositor_->CollectBackingStore(&bs);
+}
+#endif  // IHS_TEST_HAVE_CAPTURE
+
+INSTANTIATE_TEST_SUITE_P(Angles,
+                         DrmBackendVkmsRotated,
+                         ::testing::Values(0, 90, 180, 270),
+                         [](const ::testing::TestParamInfo<int>& info) {
+                           return "Rotate" + std::to_string(info.param);
+                         });
 
 // The zero-copy path end to end: a producer's own dma-buf lands on a KMS plane
 // and its pixels reach the display without the compositor drawing anything.
@@ -3524,6 +3747,49 @@ TEST(DrmBackendFbExtent, AModeSmallerThanTheRequestClampsPerAxis) {
   std::tie(w, h) = DrmBackend::FbExtentForMode(1920u, 480u, mode);
   EXPECT_EQ(w, 1024u);
   EXPECT_EQ(h, 480u);
+}
+
+// #848: a turned display scans out the whole mode and Flutter renders at the
+// mode turned. Unturned, the two are FbExtentForMode's one extent.
+TEST(DrmBackendFbExtent, ATurnedDisplayRendersAtTheTurnedMode) {
+  drmModeModeInfo mode{};
+  mode.hdisplay = 1920;
+  mode.vdisplay = 1080;
+  for (const int deg : {90, 270}) {
+    const auto e =
+        DrmBackend::ExtentsForMode(std::nullopt, std::nullopt, deg, mode);
+    EXPECT_EQ(e.fb_w, 1920u);
+    EXPECT_EQ(e.fb_h, 1080u);
+    EXPECT_EQ(e.render_w, 1080u);
+    EXPECT_EQ(e.render_h, 1920u);
+  }
+  const auto half =
+      DrmBackend::ExtentsForMode(std::nullopt, std::nullopt, 180, mode);
+  EXPECT_EQ(half.render_w, 1920u);
+  EXPECT_EQ(half.render_h, 1080u);
+  const auto none = DrmBackend::ExtentsForMode(1280u, 720u, 0, mode);
+  EXPECT_EQ(none.fb_w, 1280u);
+  EXPECT_EQ(none.fb_h, 720u);
+  EXPECT_EQ(none.render_w, 1280u);
+  EXPECT_EQ(none.render_h, 720u);
+}
+
+// A configured size is what Flutter renders at, clamped to the mode as the
+// turned picture sees it; the FB stays the whole mode and the composite
+// centers the picture in it. No plane is framed, so no overlay is needed.
+TEST(DrmBackendFbExtent, ATurnedDisplayClampsTheRequestToTheTurnedMode) {
+  drmModeModeInfo mode{};
+  mode.hdisplay = 1024;
+  mode.vdisplay = 768;
+  auto e = DrmBackend::ExtentsForMode(600u, 1000u, 90, mode);
+  EXPECT_EQ(e.fb_w, 1024u);
+  EXPECT_EQ(e.fb_h, 768u);
+  EXPECT_EQ(e.render_w, 600u);
+  EXPECT_EQ(e.render_h, 1000u);
+  // 1000 high fits a 1024-wide panel turned; 1000 wide does not fit 768.
+  e = DrmBackend::ExtentsForMode(1000u, 1000u, 270, mode);
+  EXPECT_EQ(e.render_w, 768u);
+  EXPECT_EQ(e.render_h, 1000u);
 }
 
 // #765, the other half: an extent change applied for real. The classifier

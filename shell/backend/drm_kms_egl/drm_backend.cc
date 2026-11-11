@@ -73,6 +73,7 @@
 #if BUILD_COMPOSITOR
 #include "view/compositor_surface_interface.h"
 #endif
+#include "view/display_rotation.h"
 
 namespace {
 
@@ -174,6 +175,22 @@ std::unique_ptr<DrmBackend> DrmBackend::Create(const DrmConfig& cfg,
                                                homescreen::DrmSession* session,
                                                drm::Device* shared_device,
                                                DrmDisplay* display) {
+  if (cfg.rotation != 0 && cfg.rotation != 90 && cfg.rotation != 180 &&
+      cfg.rotation != 270) {
+    ihs::log::error("[DrmBackend] --drm-rotation {} is not 0, 90, 180 or 270",
+                    cfg.rotation);
+    return nullptr;
+  }
+#if !BUILD_COMPOSITOR
+  // The turn is the compositor's last pass; without it Flutter draws straight
+  // into the scanout surface and nothing turns the picture.
+  if (cfg.rotation != 0) {
+    ihs::log::error(
+        "[DrmBackend] --drm-rotation {} needs a build with BUILD_COMPOSITOR",
+        cfg.rotation);
+    return nullptr;
+  }
+#endif
   std::unique_ptr<DrmBackend> backend(new DrmBackend(cfg, session));
   backend->drm_dev_ = shared_device;
   backend->drm_display_ = display;
@@ -260,10 +277,16 @@ std::unique_ptr<DrmBackend> DrmBackend::Create(const DrmConfig& cfg,
   if (backend->cfg_.disable_cursor) {
     ihs::log::info("[DrmBackend] HW cursor disabled (--disable-cursor)");
   } else {
+    // The cursor plane is on the panel: it is placed over the picture as the
+    // panel shows it, turned, and its sprite turned to match. The seat hands
+    // it panel positions (DrmSeat::SetCursorRotation).
+    const int rot = backend->cfg_.rotation;
+    const bool swap = rot == 90 || rot == 270;
     backend->cursor_ = homescreen::DrmCursor::Create(
         *backend->drm_dev_, backend->crtc_id_, backend->connector_id_,
-        backend->mode_, backend->fb_w_, backend->fb_h_,
-        /*rotation_degrees=*/0, backend->cfg_.cursor_theme,
+        backend->mode_, swap ? backend->render_h_ : backend->render_w_,
+        swap ? backend->render_w_ : backend->render_h_, rot,
+        backend->cfg_.cursor_theme,
         /*self_committing=*/!stage_cursor);
   }
 #if BUILD_COMPOSITOR
@@ -769,7 +792,12 @@ bool DrmBackend::InitDrm() {
   }
 
   // Framebuffer size: explicit request wins; otherwise full-screen.
-  std::tie(fb_w_, fb_h_) = FbExtentForMode(cfg_.width, cfg_.height, mode_);
+  const Extents ext =
+      ExtentsForMode(cfg_.width, cfg_.height, cfg_.rotation, mode_);
+  fb_w_ = ext.fb_w;
+  fb_h_ = ext.fb_h;
+  render_w_ = ext.render_w;
+  render_h_ = ext.render_h;
 
   drmModeEncoder* enc = nullptr;
   if (connector->encoder_id) {
@@ -1356,6 +1384,28 @@ std::pair<uint32_t, uint32_t> DrmBackend::FbExtentForMode(
       std::min<uint32_t>(requested_h.value_or(mode.vdisplay), mode.vdisplay)};
 }
 
+DrmBackend::Extents DrmBackend::ExtentsForMode(
+    const std::optional<uint32_t> requested_w,
+    const std::optional<uint32_t> requested_h,
+    const int rotation,
+    const drmModeModeInfo& mode) {
+  Extents e;
+  if (rotation == 0) {
+    std::tie(e.fb_w, e.fb_h) = FbExtentForMode(requested_w, requested_h, mode);
+    e.render_w = e.fb_w;
+    e.render_h = e.fb_h;
+    return e;
+  }
+  e.fb_w = mode.hdisplay;
+  e.fb_h = mode.vdisplay;
+  const bool swap = rotation == 90 || rotation == 270;
+  const uint32_t turned_w = swap ? mode.vdisplay : mode.hdisplay;
+  const uint32_t turned_h = swap ? mode.hdisplay : mode.vdisplay;
+  e.render_w = std::min<uint32_t>(requested_w.value_or(turned_w), turned_w);
+  e.render_h = std::min<uint32_t>(requested_h.value_or(turned_h), turned_h);
+  return e;
+}
+
 DrmBackend::ModeChange DrmBackend::ClassifyModeChange(
     const drmModeModeInfo& picked,
     const drmModeModeInfo& current) {
@@ -1572,7 +1622,10 @@ bool DrmBackend::ApplyPendingExtentChange() {
 
   // Same rule InitDrm picks the FB size by, so a configured (framed) size
   // survives the change and an unconfigured one follows the panel.
-  const auto [new_w, new_h] = FbExtentForMode(cfg_.width, cfg_.height, picked);
+  const Extents next =
+      ExtentsForMode(cfg_.width, cfg_.height, cfg_.rotation, picked);
+  const uint32_t new_w = next.fb_w;
+  const uint32_t new_h = next.fb_h;
 
   // Quiesce on this thread rather than from the latch. WaitForPendingFlip
   // returns once the completion handler has run, so nothing on the platform
@@ -1586,11 +1639,15 @@ bool DrmBackend::ApplyPendingExtentChange() {
   const drmModeModeInfo prev_mode = mode_;
   const uint32_t prev_w = fb_w_;
   const uint32_t prev_h = fb_h_;
+  const uint32_t prev_render_w = render_w_;
+  const uint32_t prev_render_h = render_h_;
 
   DestroyScanoutSurfaces();
   mode_ = picked;
   fb_w_ = new_w;
   fb_h_ = new_h;
+  render_w_ = next.render_w;
+  render_h_ = next.render_h;
 
   if (!CreateGbmSurface() || !CreateEglWindowSurface()) {
     // The old surfaces are already gone, so there is nothing to keep driving
@@ -1604,6 +1661,8 @@ bool DrmBackend::ApplyPendingExtentChange() {
     mode_ = prev_mode;
     fb_w_ = prev_w;
     fb_h_ = prev_h;
+    render_w_ = prev_render_w;
+    render_h_ = prev_render_h;
     if (!CreateGbmSurface() || !CreateEglWindowSurface()) {
       ihs::log::critical(
           "[DrmBackend] scanout surfaces are gone and will not reallocate at "
@@ -2255,7 +2314,15 @@ bool DrmBackend::Present() {
   // Composite the cursor over the rendered Flutter scene (still in FBO 0's
   // back buffer) before the swap. No-op until the cursor is visible / absent.
   if (gl_cursor_) {
-    gl_cursor_->Draw(fb_w_, fb_h_);
+    if (cfg_.rotation != 0) {
+      const DisplayRotation rot{cfg_.rotation, static_cast<int32_t>(render_w_),
+                                static_cast<int32_t>(render_h_),
+                                static_cast<int32_t>(fb_w_),
+                                static_cast<int32_t>(fb_h_)};
+      gl_cursor_->Draw(fb_w_, fb_h_, &rot);
+    } else {
+      gl_cursor_->Draw(fb_w_, fb_h_);
+    }
   }
 
 #if BUILD_HUD
@@ -2712,6 +2779,16 @@ bool DrmBackend::ResolveOutputContext(const std::string& connector_name,
 
 bool DrmBackend::AddOutput(const std::string& connector_name,
                            const int64_t view_id) {
+  // An additional output has no GL composite of its own to turn the picture
+  // in (PresentViaGlFallback drops its frames), and the rotation is set for
+  // the backend, not per output.
+  if (cfg_.rotation != 0) {
+    ihs::log::error(
+        "[DrmBackend] output {} not added: --drm-rotation {} is served on the "
+        "primary output only",
+        connector_name, cfg_.rotation);
+    return false;
+  }
   DrmOutputContext ctx;
   if (!ResolveOutputContext(connector_name, ctx)) {
     return false;

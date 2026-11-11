@@ -28,6 +28,7 @@
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -257,6 +258,17 @@ std::unique_ptr<DrmCursor> DrmCursor::Create(drm::Device& dev,
   }
   auto renderer = drm::cursor::Renderer::create(dev, rcfg);
   if (!renderer) {
+    // drmModeSetCursor has no rotation, so drm-cxx refuses a turned sprite on
+    // the legacy path. Expected on a rotated display that has no atomic
+    // cursor to offer: the backend's GL-composited cursor takes over.
+    if (rotation_degrees != 0 && rcfg.prefer_legacy &&
+        renderer.error() == std::errc::not_supported) {
+      ihs::log::info(
+          "[DrmCursor] the legacy cursor cannot be turned for --drm-rotation "
+          "{}; no HW cursor sprite",
+          rotation_degrees);
+      return nullptr;
+    }
     ihs::log::warn("[DrmCursor] renderer create: {}; no cursor sprite",
                    renderer.error().message());
     return nullptr;

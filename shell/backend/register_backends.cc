@@ -95,10 +95,11 @@ static bool ResolveLeasedInputEnabled(const Configuration::Config& config);
 
 namespace {
 
-// --drm-rotation is applied by the Vulkan DRM backends only (#838). A backend
-// that scans out itself but does not rotate refuses it: the angle would parse,
-// validate and then be dropped, leaving the picture the wrong way round with
-// nothing said. True when it refused.
+// --drm-rotation is applied by the DRM backends: on a plane by the Vulkan ones
+// (#838), on the GPU by the EGL ones (#848). A backend that scans out itself
+// but does not rotate refuses it: the angle would parse, validate and then be
+// dropped, leaving the picture the wrong way round with nothing said. True
+// when it refused.
 [[maybe_unused]] bool RefuseDrmRotation(const Configuration::Config& config,
                                         const std::string_view backend) {
   const int rotation = config.view.drm_rotation.value_or(0);
@@ -106,9 +107,9 @@ namespace {
     return false;
   }
   ihs::log::error(
-      "[FlutterView] --drm-rotation {} is not supported on {}; "
-      "drm-kms-vulkan and wayland-leased-drm-vulkan apply it. Use one of "
-      "those, or drop --drm-rotation",
+      "[FlutterView] --drm-rotation {} is not supported on {}; the "
+      "drm-kms-egl, drm-kms-vulkan and wayland-leased-drm backends apply it. "
+      "Use one of those, or drop --drm-rotation",
       rotation, backend);
   return true;
 }
@@ -402,9 +403,6 @@ std::shared_ptr<IDisplay> MakeLeasedSoftwareDisplay(
 #if BUILD_BACKEND_DRM_KMS_EGL
 std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
                                            IDisplay* display) {
-  if (RefuseDrmRotation(config, "the EGL DRM backends")) {
-    return nullptr;
-  }
   std::shared_ptr<Backend> m_backend;
   auto parse_tri = [](const std::optional<std::string>& s,
                       drm_config::TriState def = drm_config::TriState::kAuto) {
@@ -506,6 +504,9 @@ std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
   // --drm-no-seat: DrmDisplay forced the session null; tell DrmBackend to
   // also skip the foreground-VT guard on its direct-open path.
   cfg.no_seat = config.view.drm_no_seat.value_or(false);
+  // Turned on the GPU by the compositor's last pass (#848); DrmBackend::Create
+  // refuses it in a build without one.
+  cfg.rotation = config.view.drm_rotation.value_or(0);
   // Leased tier: the compositor chose the connector, and the lease can be
   // revoked under us. Both are inert (0 / empty) on the direct tiers, which is
   // what makes this factory serve the leased descriptor unchanged.
@@ -578,6 +579,9 @@ std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
           dynamic_cast<homescreen::ICursorShapeSink*>(
               drm_backend->gl_cursor()));
     }
+    // Flutter's pointer space is the turned render extent set above; the HW
+    // cursor plane is in panel space, and touch digitizers report it.
+    drm_display->SetCursorRotation(drm_backend->rotation());
 
     // this one engine also drives the additional outputs listed in
     // [[view.output]] (entries 2..N). Each becomes a compositor on its own CRTC

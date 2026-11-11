@@ -582,10 +582,12 @@ After the first rotated commit the backend also checks the plane it was
 actually given, and logs an error once if the scanout layer was composited or
 landed on a plane without the angle.
 
-`--drm-rotation` is applied by this backend and `wayland-leased-drm-vulkan`
-only. drm-kms-egl, wayland-leased-drm-egl and the software backends refuse it at
-startup. The Wayland and headless backends ignore it with a warning: on Wayland
-the compositor rotates the output (e.g. `weston.ini` `transform=rotate-90`).
+`--drm-rotation` is applied by this backend and `wayland-leased-drm-vulkan` on
+a plane. drm-kms-egl and wayland-leased-drm-egl turn the picture on the GPU
+instead, which also works on a display whose planes cannot rotate (see that
+backend's README). The software backends refuse it at startup. The Wayland and
+headless backends ignore it with a warning: on Wayland the compositor rotates
+the output (e.g. `weston.ini` `transform=rotate-90`).
 
 ### Input on a rotated display
 

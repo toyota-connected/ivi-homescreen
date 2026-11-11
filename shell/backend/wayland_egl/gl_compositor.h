@@ -22,6 +22,7 @@
 #include <functional>
 
 #include "view/compositor_surface_interface.h"
+#include "view/display_rotation.h"
 #include "view/layer_geometry.h"
 
 #include "gl_caps.h"
@@ -125,6 +126,10 @@ class GlCompositor {
    *                    present: drawn as is rather than imported again. A
    *                    second import replaces a frame nothing has drawn, and
    *                    no release is queued for that frame.
+   * @param rotation    The target is a display turned on the GPU: @p view is
+   *                    in its render space, and each layer is drawn turned
+   *                    onto the panel. @p fb_height is then the panel's.
+   *                    Null draws as is. Bottom-left targets only.
    * @return            The number of layers drawn.
    *
    * Imports each layer's latest frame (GetLayerGlTexture), so it runs on the
@@ -139,7 +144,8 @@ class GlCompositor {
       bool blend_first,
       const std::function<void(const ICompositorSurface::GlLayerTexture&)>&
           on_drawn = nullptr,
-      const ICompositorSurface::GlLayerTexture* layer0 = nullptr);
+      const ICompositorSurface::GlLayerTexture* layer0 = nullptr,
+      const DisplayRotation* rotation = nullptr);
 
   /**
    * @brief Whether CompositeToFbo may take the glBlitFramebuffer path.

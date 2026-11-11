@@ -178,8 +178,8 @@
   # type=string default=auto values=auto|xrgb8888|xbgr8888|argb8888|abgr8888|rgb565 applies=drm
   primary_format =
 
-  # Scanout rotation in degrees, on a hardware plane. drm-kms-vulkan and wayland-leased-drm-vulkan only; refused at startup where no plane can do the angle and by the other DRM and software backends; ignored on Wayland, where the compositor rotates.
-  # type=int default=0 values=0|90|180|270 applies=drm-vk
+  # Scanout rotation in degrees, counter-clockwise. The Vulkan DRM backends rotate on a hardware plane and refuse an angle no plane can do; the EGL DRM backends turn the picture on the GPU, on any display. Refused by the software backends; ignored on Wayland, where the compositor rotates.
+  # type=int default=0 values=0|90|180|270 applies=drm
   rotation =
 
   # Stage HW cursor into the compositor commit (auto = nvidia-drm only).

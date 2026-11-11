@@ -168,6 +168,7 @@ thread-owned (the seat thread); the compositor never touches it.
 | EACCES (master loss) skip-frame | ✓ | Always; avoids latching GL fallback during libseat pause |
 | HDR signaling (HDR_OUTPUT_METADATA) | deferred | Waiting on Flutter HDR API |
 | Explicit sync (`IN_FENCE_FD` / `OUT_FENCE_PTR`) | plane path | Release fence published to platform views; GL-composite path still on the eventfd |
+| Scanout rotation (0/90/180/270) | ✓ | `--drm-rotation`, turned on the GPU; any display, plane path off (see [Rotation](#rotation)) |
 
 ---
 
@@ -333,6 +334,7 @@ Typical first-run log lines worth reading:
 | `--drm-explicit-sync=auto\|yes\|no` | Reserved knob; not consumed today (no per-frame fence producer) |
 | `--drm-async-flip=auto\|yes\|no` | DRM_MODE_PAGE_FLIP_ASYNC for tearing updates |
 | `--drm-pipeline-depth=1\|2` | Frames in flight; `2` gives the raster thread a frame of headroom. Only applies when the legacy present path drives scanout — see [Choosing a pipeline depth](#choosing-a-pipeline-depth) |
+| `--drm-rotation=0\|90\|180\|270` | Rotate the display counter-clockwise; see [Rotation](#rotation) |
 | `-f` / `--fullscreen` | Drive panel at preferred mode (clears explicit w/h) |
 | `--debug-backend` | Verbose per-frame plane assignment log |
 
@@ -500,6 +502,31 @@ trace that `wait_flip` actually fell, rather than assuming the flag took.
 
 Pacing and scheduling are separate problems and both have to be right — see
 [docs/drm-kms-scheduling.md](../../../docs/drm-kms-scheduling.md).
+
+### Rotation
+
+`--drm-rotation <0|90|180|270>` turns the display counter-clockwise, the same
+way a plane's `rotation` property would, so a config means the same thing here
+and on drm-kms-vulkan. This backend never asks a plane to rotate. The GL
+composite draws each layer turned onto the panel, so it works on a display whose
+planes have no `rotation` property at all (Renesas rcar-du on Sparrow Hawk, for
+one), which drm-kms-vulkan refuses.
+
+- **Extent.** The CRTC keeps its mode and the scanout surface is the whole
+  mode. Flutter renders at the turned extent: 90/270 swap the mode's width and
+  height. A configured `width`/`height` is the size Flutter renders at, clamped
+  to the turned mode and centered once turned.
+- **Cost.** Every frame takes the GL composite (`PresentViaGlFallback`). The
+  plane path and direct scanout of backing stores stay off for the session,
+  since a plane would show a backing store unturned. That is one full-screen
+  draw per frame more than direct scanout costs, and the same as
+  `--drm-compositor gl`.
+- **Input.** The shared DRM seat turns touch and the HW cursor exactly as for
+  drm-kms-vulkan (see that README's "Input on a rotated display"). The
+  GL-composited cursor is turned with the picture.
+- **Limits.** The primary output only: an additional `[[view.output]]` is not
+  added while a rotation is set. Needs `BUILD_COMPOSITOR`. The debug HUD is
+  drawn on the panel unturned.
 
 ### Env vars for runtime toggles
 

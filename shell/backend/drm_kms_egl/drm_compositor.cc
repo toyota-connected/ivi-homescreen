@@ -489,7 +489,8 @@ bool DrmCompositor::CompositeLayeredSurface(
     GLint fb_height,
     bool target_top_first,
     bool blend,
-    const ICompositorSurface::GlLayerTexture* layer0) {
+    const ICompositorSurface::GlLayerTexture* layer0,
+    const DisplayRotation* rotation) {
   const RectI view{static_cast<int32_t>(layer->offset.x),
                    static_cast<int32_t>(layer->offset.y),
                    static_cast<int32_t>(layer->size.width),
@@ -499,7 +500,18 @@ bool DrmCompositor::CompositeLayeredSurface(
              [this, &surface](const ICompositorSurface::GlLayerTexture& t) {
                NoteGlComposited(surface, t);
              },
-             layer0) > 0;
+             layer0, rotation) > 0;
+}
+
+std::optional<DisplayRotation> DrmCompositor::GpuRotation() const {
+  const int degrees = backend_->rotation();
+  if (degrees == 0) {
+    return std::nullopt;
+  }
+  return DisplayRotation{degrees, static_cast<int32_t>(backend_->width()),
+                         static_cast<int32_t>(backend_->height()),
+                         static_cast<int32_t>(out_.width()),
+                         static_cast<int32_t>(out_.height())};
 }
 
 void DrmCompositor::NoteGlComposited(
@@ -1174,10 +1186,21 @@ void DrmCompositor::EnsureGlCapsProbed() {
     ihs::log::error("[DrmCompositor] missing EGL_KHR_image / GL_OES_EGL_image");
   }
 
-  // Only take the plane path if DriverProbe said this driver supports it
-  // (atomic + primary + ≥1 overlay). Otherwise, all frames go through
-  // PresentViaGlFallback — same outcome as before, just honest about it.
-  if (out_.resolved().use_plane_compositor) {
+  // A GPU-rotated display never takes the plane path. No plane is asked to
+  // rotate: the composite turns the picture, so it works on a display whose
+  // planes have no rotation property at all. Direct scanout of a backing
+  // store would show it unturned.
+  //
+  // Otherwise, only take the plane path if DriverProbe said this driver
+  // supports it (atomic + primary + ≥1 overlay). Otherwise, all frames go
+  // through PresentViaGlFallback — same outcome as before, just honest about
+  // it.
+  if (const auto rot = GpuRotation(); rot.has_value()) {
+    ihs::log::info(
+        "[DrmCompositor] rotation {}: GL composite turns {}x{} onto the {}x{} "
+        "panel; plane path off",
+        rot->degrees, rot->render_w, rot->render_h, rot->panel_w, rot->panel_h);
+  } else if (out_.resolved().use_plane_compositor) {
     if (!InitPlaneAllocator()) {
       ihs::log::warn(
           "[DrmCompositor] plane allocator init failed; GL fallback");
@@ -1940,6 +1963,23 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
 
+  // Layers arrive in render space. Turned, each is drawn onto its panel rect
+  // with its texture coordinates turned to match; FBO 0 is then the panel, so
+  // the GL-y conversion below uses the panel's height.
+  const std::optional<DisplayRotation> rotation = GpuRotation();
+  const DisplayRotation* rot = rotation ? &*rotation : nullptr;
+  const auto target_h = static_cast<GLint>(
+      rot ? rot->panel_h : static_cast<int32_t>(out_.height()));
+  // Draw @p tex across render rect @p dst turned onto the panel. @p uv maps
+  // the rect to the texture (see UvAffine).
+  const auto draw_turned = [&](GLuint tex, const RectI& dst, const UvAffine& uv,
+                               bool blend, bool external) {
+    const RectI p = rot->ToPanel(dst);
+    gl_compositor_->CompositeLayerToFbo(0, tex, external, rot->ToPanel(uv), p.x,
+                                        target_h - p.y - p.h, p.w, p.h, blend,
+                                        /*opaque=*/false);
+  };
+
   bool composited_any = false;
   for (size_t i = 0; i < count; ++i) {
     const FlutterLayer* layer = layers[i];
@@ -1950,7 +1990,16 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
     if (layer->type == kFlutterLayerContentTypeBackingStore &&
         layer->backing_store) {
       auto* baton = static_cast<StoreBaton*>(layer->backing_store->user_data);
-      if (baton && baton->store) {
+      if (baton && baton->store && rot != nullptr) {
+        // A GL render target: its first row is the picture's bottom.
+        draw_turned(baton->store->active().color_tex,
+                    RectI{static_cast<int32_t>(layer->offset.x),
+                          static_cast<int32_t>(layer->offset.y),
+                          static_cast<int32_t>(layer->size.width),
+                          static_cast<int32_t>(layer->size.height)},
+                    FlipRows(UvAffine{}), blend, /*external=*/false);
+        composited_any = true;
+      } else if (baton && baton->store) {
         const auto* s = baton->store;
         // A quad, not a blit: see CompositeLayerIntoFbo.
         gl_compositor_->CompositeToDefault(
@@ -1981,12 +2030,24 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
         const auto first = SingleLayerTexture(*surface_sp);
         if (!IsWholeImage(first)) {
           // FBO 0 of the gbm_surface: standard GL NDC, bottom-left origin.
-          if (CompositeLayeredSurface(0, surface_sp, layer,
-                                      static_cast<GLint>(out_.height()),
+          if (CompositeLayeredSurface(0, surface_sp, layer, target_h,
                                       /*target_top_first=*/false, blend,
-                                      first ? &*first : nullptr)) {
+                                      first ? &*first : nullptr, rot)) {
             composited_any = true;
           }
+        } else if (const auto tex = first->name; tex != 0 && rot != nullptr) {
+          // The single-texture draw below, turned. Its flip_y reads "the
+          // texture is top-first", which needs no row flip here.
+          draw_turned(tex,
+                      RectI{static_cast<int32_t>(layer->offset.x),
+                            static_cast<int32_t>(layer->offset.y),
+                            static_cast<int32_t>(layer->size.width),
+                            static_cast<int32_t>(layer->size.height)},
+                      surface_sp->TextureIsTopFirst() ? UvAffine{}
+                                                      : FlipRows(UvAffine{}),
+                      blend, surface_sp->TextureIsExternalOes());
+          composited_any = true;
+          NoteGlComposited(surface_sp);
         } else if (const auto tex = first->name; tex != 0) {
           const auto sw = surface_sp->GetGlTextureWidth();
           const auto sh = surface_sp->GetGlTextureHeight();
