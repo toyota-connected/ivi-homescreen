@@ -24,6 +24,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -290,6 +291,19 @@ class DrmBackend : public Backend, public IFlipSink {
     uint32_t height;
   };
   [[nodiscard]] std::vector<ViewOutputSpec> AdditionalViews() const;
+
+  // An additional output's connector was reconfigured: re-pick its mode the
+  // way AddOutput did and, when it differs from the one being driven, have
+  // that output's compositor adopt it at its next present. Returns the view's
+  // geometry at the new mode, which the caller re-sends as that view's window
+  // metrics; nullopt when @p connector_name is not an additional output of
+  // this backend or its mode did not change (#856). Platform thread.
+  std::optional<ViewOutputSpec> OnAdditionalOutputReconfigured(
+      std::string_view connector_name);
+  // The same for a mode already in hand (a test, or a runtime mode switch).
+  std::optional<ViewOutputSpec> RequestAdditionalOutputMode(
+      int64_t view_id,
+      const drmModeModeInfo& mode);
   // vblank-locked OnVsync via DRM PAGE_FLIP_EVENT. Returns nullptr (so
   // Flutter falls back to its wall-clock scheduler) when the user opts
   // out via IVI_DRM_VSYNC=0 — useful for diagnosing pacing regressions
@@ -869,6 +883,12 @@ class DrmBackend : public Backend, public IFlipSink {
     // The extent the view renders at: the mode, turned by the rotation.
     uint32_t width;
     uint32_t height;
+    std::string connector_name;
+    uint32_t connector_id;
+    int rotation;
+    // The mode last handed to the compositor. The platform thread's copy: the
+    // compositor's own output context is the raster thread's.
+    drmModeModeInfo mode;
   };
   std::vector<ExtraOutput> extra_outputs_;
   // CRTCs already claimed (primary + each AddOutput) so additional outputs pick

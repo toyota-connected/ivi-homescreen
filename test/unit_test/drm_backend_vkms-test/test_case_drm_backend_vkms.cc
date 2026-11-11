@@ -1398,6 +1398,139 @@ class DrmBackendVkmsDual : public ::testing::TestWithParam<int> {
     display_.reset();
   }
 
+#if IHS_TEST_HAVE_CAPTURE
+  static constexpr uint32_t kRed = 0x00FF0000u;
+  static constexpr uint32_t kGreen = 0x0000FF00u;
+  static constexpr uint32_t kBlue = 0x000000FFu;
+  static constexpr uint32_t kWhite = 0x00FFFFFFu;
+
+  // Presents one Flutter frame of @p w x @p h on the secondary: red, green,
+  // blue and white quadrants as Flutter draws them (GL's y = 0 the bottom
+  // row), or all @p solid when it is set.
+  void PresentQuadrants(const uint32_t w,
+                        const uint32_t h,
+                        const std::optional<uint32_t> solid = std::nullopt) {
+    FlutterBackingStoreConfig cfg{};
+    cfg.struct_size = sizeof(FlutterBackingStoreConfig);
+    cfg.size = FlutterSize{static_cast<double>(w), static_cast<double>(h)};
+    FlutterBackingStore bs{};
+    ASSERT_TRUE(backend_->MakeCurrent());
+    ASSERT_TRUE(secondary_->CreateBackingStore(&cfg, &bs));
+
+    glBindFramebuffer(GL_FRAMEBUFFER, bs.open_gl.framebuffer.name);
+    glEnable(GL_SCISSOR_TEST);
+    const auto hw = static_cast<GLsizei>(w / 2);
+    const auto hh = static_cast<GLsizei>(h / 2);
+    const struct {
+      GLint x;
+      GLint y;
+      uint32_t rgb;
+    } fills[] = {{0, hh, solid.value_or(kRed)},
+                 {hw, hh, solid.value_or(kGreen)},
+                 {0, 0, solid.value_or(kBlue)},
+                 { hw,
+                   0,
+                   solid.value_or(kWhite) }};
+    for (const auto& f : fills) {
+      glScissor(f.x, f.y, hw, hh);
+      glClearColor(static_cast<float>((f.rgb >> 16U) & 0xFFU) / 255.0F,
+                   static_cast<float>((f.rgb >> 8U) & 0xFFU) / 255.0F,
+                   static_cast<float>(f.rgb & 0xFFU) / 255.0F, 1.0F);
+      glClear(GL_COLOR_BUFFER_BIT);
+    }
+    glDisable(GL_SCISSOR_TEST);
+    glFinish();
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    ASSERT_EQ(glGetError(), static_cast<GLenum>(GL_NO_ERROR));
+
+    FlutterLayer layer{};
+    layer.struct_size = sizeof(FlutterLayer);
+    layer.type = kFlutterLayerContentTypeBackingStore;
+    layer.backing_store = &bs;
+    layer.size = cfg.size;
+    const FlutterLayer* layers[] = {&layer};
+    EXPECT_TRUE(secondary_->PresentLayers(layers, 1));
+    secondary_->CollectBackingStore(&bs);
+  }
+
+  // What the secondary's CRTC scans out now. @p name, when given, also lands
+  // as a PNG in IHS_TEST_CAPTURE_DIR.
+  drm::capture::Image CaptureSecondary(const std::string& name = {}) {
+    auto shot = drm::capture::snapshot(backend_->device(),
+                                       secondary_->OutputForTest().crtc_id());
+    EXPECT_TRUE(shot) << "snapshot failed: " << shot.error().message();
+    if (!shot) {
+      return {};
+    }
+    drm::capture::Image image = std::move(shot.value());
+    if (const char* dir = std::getenv("IHS_TEST_CAPTURE_DIR");
+        dir != nullptr && !name.empty()) {
+      (void)drm::capture::write_png(image, std::string(dir) + "/" + name + "_" +
+                                               std::to_string(GetParam()) +
+                                               ".png");
+    }
+    return image;
+  }
+
+  static uint32_t At(const drm::capture::Image& image,
+                     const uint32_t x,
+                     const uint32_t y) {
+    return image.pixels()[static_cast<size_t>(y) * image.width() + x] &
+           0x00FFFFFFu;
+  }
+
+  // Where PresentQuadrants' four land on the panel, top-left, top-right,
+  // bottom-left, bottom-right. Written out per angle, as
+  // DrmBackendVkmsRotated does, so it does not share a mistake with the code
+  // under test.
+  [[nodiscard]] static std::array<uint32_t, 4> TurnedQuadrants() {
+    switch (GetParam()) {
+      case 90:
+        return {kGreen, kWhite, kRed, kBlue};
+      case 180:
+        return {kWhite, kBlue, kGreen, kRed};
+      case 270:
+        return {kBlue, kRed, kWhite, kGreen};
+      default:
+        return {kRed, kGreen, kBlue, kWhite};
+    }
+  }
+
+  void ExpectQuadrants(const drm::capture::Image& image) const {
+    const std::array<uint32_t, 4> want = TurnedQuadrants();
+    const uint32_t w = image.width();
+    const uint32_t h = image.height();
+    EXPECT_EQ(At(image, w / 4, h / 4), want[0]) << "top-left";
+    EXPECT_EQ(At(image, 3 * w / 4, h / 4), want[1]) << "top-right";
+    EXPECT_EQ(At(image, w / 4, 3 * h / 4), want[2]) << "bottom-left";
+    EXPECT_EQ(At(image, 3 * w / 4, 3 * h / 4), want[3]) << "bottom-right";
+  }
+#endif  // IHS_TEST_HAVE_CAPTURE
+
+  // A mode the secondary's connector offers at a different size from the one
+  // it is driving; nullopt when it offers none.
+  [[nodiscard]] std::optional<drmModeModeInfo> OtherSecondaryMode() const {
+    const int fd = backend_->device().fd();
+    std::optional<drmModeModeInfo> out;
+    drmModeConnector* conn =
+        drmModeGetConnector(fd, secondary_->OutputForTest().connector_id());
+    if (conn == nullptr) {
+      return out;
+    }
+    for (int i = 0; i < conn->count_modes; ++i) {
+      const drmModeModeInfo& m = conn->modes[i];
+      // Even halves, so the quadrant probes sit well inside each one.
+      if ((m.hdisplay != card_.mode_w[1] || m.vdisplay != card_.mode_h[1]) &&
+          m.hdisplay >= 320 && m.vdisplay >= 240 && m.hdisplay % 4 == 0 &&
+          m.vdisplay % 4 == 0) {
+        out = m;
+        break;
+      }
+    }
+    drmModeFreeConnector(conn);
+    return out;
+  }
+
   VkmsDualCard card_;
   std::unique_ptr<DrmDisplay> display_;
   std::unique_ptr<DrmBackend> backend_;
@@ -1405,6 +1538,49 @@ class DrmBackendVkmsDual : public ::testing::TestWithParam<int> {
   uint32_t render_w_{0};
   uint32_t render_h_{0};
 };
+
+// A VT switch-out revokes master for every CRTC on the card, not only the
+// primary's; the secondary is gated and re-armed with it (#856).
+TEST_P(DrmBackendVkmsDual, PauseAndResumeReachTheSecondary) {
+  ASSERT_FALSE(secondary_->paused());
+  backend_->OnSessionPaused();
+  EXPECT_TRUE(secondary_->paused());
+  backend_->OnSessionResumed(display_->SharedDevice()->fd());
+  EXPECT_FALSE(secondary_->paused());
+}
+
+// A reconfigure naming a connector that is not an additional output, or one
+// whose mode did not move, changes nothing.
+TEST_P(DrmBackendVkmsDual, AReconfigureWithNothingToAdoptIsIgnored) {
+  EXPECT_FALSE(backend_->OnAdditionalOutputReconfigured("no-such-connector"));
+  EXPECT_FALSE(backend_->OnAdditionalOutputReconfigured(card_.connectors[0]))
+      << "the primary is not an additional output";
+  EXPECT_FALSE(backend_->OnAdditionalOutputReconfigured(card_.connectors[1]))
+      << "the secondary's mode did not change";
+  EXPECT_FALSE(backend_->RequestAdditionalOutputMode(
+      1, secondary_->OutputForTest().mode()));
+}
+
+// A new mode on the secondary's connector is laid out at, turned, as AddOutput
+// laid out the first.
+TEST_P(DrmBackendVkmsDual, AModeChangeResizesTheView) {
+  const auto other = OtherSecondaryMode();
+  if (!other) {
+    GTEST_SKIP() << card_.connectors[1] << " offers no other mode";
+  }
+  const auto spec = backend_->RequestAdditionalOutputMode(1, *other);
+  ASSERT_TRUE(spec.has_value());
+  const bool swap = GetParam() == 90 || GetParam() == 270;
+  EXPECT_EQ(spec->view_id, 1);
+  EXPECT_EQ(spec->width, swap ? other->vdisplay : other->hdisplay);
+  EXPECT_EQ(spec->height, swap ? other->hdisplay : other->vdisplay);
+  const auto views = backend_->AdditionalViews();
+  ASSERT_EQ(views.size(), 1u);
+  EXPECT_EQ(views[0].width, spec->width);
+  EXPECT_EQ(views[0].height, spec->height);
+  // Asked again, it is the mode being driven.
+  EXPECT_FALSE(backend_->RequestAdditionalOutputMode(1, *other));
+}
 
 // The view is laid out at the secondary's mode, turned.
 TEST_P(DrmBackendVkmsDual, TheViewRendersAtItsTurnedExtent) {
@@ -1443,87 +1619,51 @@ TEST(DrmBackendVkmsDualRefusal, AnAngleThatIsNotAQuarterTurnIsRefused) {
 // DRM_MODE_ROTATE_* would put them. The commit is at ROTATE_0, so the
 // readback (blind to a plane's rotation property) sees what the panel shows.
 TEST_P(DrmBackendVkmsDual, AFrameReachesTheSecondaryTurned) {
-  FlutterBackingStoreConfig cfg{};
-  cfg.struct_size = sizeof(FlutterBackingStoreConfig);
-  cfg.size = FlutterSize{static_cast<double>(render_w_),
-                         static_cast<double>(render_h_)};
-  FlutterBackingStore bs{};
-  ASSERT_TRUE(backend_->MakeCurrent());
-  ASSERT_TRUE(secondary_->CreateBackingStore(&cfg, &bs));
-
-  constexpr uint32_t kRed = 0x00FF0000u;
-  constexpr uint32_t kGreen = 0x0000FF00u;
-  constexpr uint32_t kBlue = 0x000000FFu;
-  constexpr uint32_t kWhite = 0x00FFFFFFu;
-  // As Flutter renders: GL's y = 0 is the bottom row.
-  glBindFramebuffer(GL_FRAMEBUFFER, bs.open_gl.framebuffer.name);
-  glEnable(GL_SCISSOR_TEST);
-  const auto hw = static_cast<GLsizei>(render_w_ / 2);
-  const auto hh = static_cast<GLsizei>(render_h_ / 2);
-  const struct {
-    GLint x;
-    GLint y;
-    uint32_t rgb;
-  } fills[] = {{0, hh, kRed}, {hw, hh, kGreen}, {0, 0, kBlue}, {hw, 0, kWhite}};
-  for (const auto& f : fills) {
-    glScissor(f.x, f.y, hw, hh);
-    glClearColor(static_cast<float>((f.rgb >> 16U) & 0xFFU) / 255.0F,
-                 static_cast<float>((f.rgb >> 8U) & 0xFFU) / 255.0F,
-                 static_cast<float>(f.rgb & 0xFFU) / 255.0F, 1.0F);
-    glClear(GL_COLOR_BUFFER_BIT);
-  }
-  glDisable(GL_SCISSOR_TEST);
-  glFinish();
-  glBindFramebuffer(GL_FRAMEBUFFER, 0);
-  ASSERT_EQ(glGetError(), static_cast<GLenum>(GL_NO_ERROR));
-
-  FlutterLayer layer{};
-  layer.struct_size = sizeof(FlutterLayer);
-  layer.type = kFlutterLayerContentTypeBackingStore;
-  layer.backing_store = &bs;
-  layer.size = cfg.size;
-  const FlutterLayer* layers[] = {&layer};
-  ASSERT_TRUE(secondary_->PresentLayers(layers, 1));
-
-  auto shot = drm::capture::snapshot(backend_->device(),
-                                     secondary_->OutputForTest().crtc_id());
-  ASSERT_TRUE(shot) << "snapshot failed: " << shot.error().message();
-  const drm::capture::Image image = std::move(shot.value());
-  if (const char* dir = std::getenv("IHS_TEST_CAPTURE_DIR"); dir != nullptr) {
-    (void)drm::capture::write_png(
-        image,
-        std::string(dir) + "/secondary_" + std::to_string(GetParam()) + ".png");
-  }
+  PresentQuadrants(render_w_, render_h_);
+  const drm::capture::Image image = CaptureSecondary("secondary");
   ASSERT_EQ(image.width(), card_.mode_w[1]);
   ASSERT_EQ(image.height(), card_.mode_h[1]);
-  const auto at = [&image](uint32_t x, uint32_t y) {
-    return image.pixels()[static_cast<size_t>(y) * image.width() + x] &
-           0x00FFFFFFu;
-  };
-  // Written out per angle, as DrmBackendVkmsRotated does, so it does not share
-  // a mistake with the code under test.
-  std::array<uint32_t, 4> want{kRed, kGreen, kBlue, kWhite};
-  switch (GetParam()) {
-    case 90:
-      want = {kGreen, kWhite, kRed, kBlue};
-      break;
-    case 180:
-      want = {kWhite, kBlue, kGreen, kRed};
-      break;
-    case 270:
-      want = {kBlue, kRed, kWhite, kGreen};
-      break;
-    default:
-      break;
-  }
-  const uint32_t w = image.width();
-  const uint32_t h = image.height();
-  EXPECT_EQ(at(w / 4, h / 4), want[0]) << "top-left";
-  EXPECT_EQ(at(3 * w / 4, h / 4), want[1]) << "top-right";
-  EXPECT_EQ(at(w / 4, 3 * h / 4), want[2]) << "bottom-left";
-  EXPECT_EQ(at(3 * w / 4, 3 * h / 4), want[3]) << "bottom-right";
+  ExpectQuadrants(image);
+}
 
-  secondary_->CollectBackingStore(&bs);
+// A frame presented while the session is paused does not reach the panel; the
+// first one after resume does, through the modeset the resume re-arms.
+TEST_P(DrmBackendVkmsDual, APausedSecondaryHoldsItsFrameUntilResume) {
+  PresentQuadrants(render_w_, render_h_);
+  backend_->OnSessionPaused();
+  PresentQuadrants(render_w_, render_h_, kBlue);
+  ExpectQuadrants(CaptureSecondary());
+  backend_->OnSessionResumed(display_->SharedDevice()->fd());
+  PresentQuadrants(render_w_, render_h_, kBlue);
+  const drm::capture::Image image = CaptureSecondary("resumed");
+  ASSERT_GT(image.width(), 0u);
+  EXPECT_EQ(At(image, image.width() / 4, image.height() / 4), kBlue);
+  EXPECT_EQ(At(image, 3 * image.width() / 4, 3 * image.height() / 4), kBlue);
+}
+
+// The frame after a mode change is scanned out at the new mode, on the
+// secondary's own CRTC, still turned.
+TEST_P(DrmBackendVkmsDual, AFrameAfterAModeChangeIsScannedOutAtIt) {
+  PresentQuadrants(render_w_, render_h_);
+  const auto other = OtherSecondaryMode();
+  if (!other) {
+    GTEST_SKIP() << card_.connectors[1] << " offers no other mode";
+  }
+  const auto spec = backend_->RequestAdditionalOutputMode(1, *other);
+  ASSERT_TRUE(spec.has_value());
+  PresentQuadrants(spec->width, spec->height);
+
+  drmModeCrtc* crtc = drmModeGetCrtc(backend_->device().fd(),
+                                     secondary_->OutputForTest().crtc_id());
+  ASSERT_NE(crtc, nullptr);
+  EXPECT_EQ(crtc->mode.hdisplay, other->hdisplay);
+  EXPECT_EQ(crtc->mode.vdisplay, other->vdisplay);
+  drmModeFreeCrtc(crtc);
+
+  const drm::capture::Image image = CaptureSecondary("mode_changed");
+  ASSERT_EQ(image.width(), other->hdisplay);
+  ASSERT_EQ(image.height(), other->vdisplay);
+  ExpectQuadrants(image);
 }
 #endif  // IHS_TEST_HAVE_CAPTURE
 

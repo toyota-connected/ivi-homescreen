@@ -138,6 +138,17 @@ class Engine {
                               uint64_t display_id);
 
   /**
+   * @brief Re-send an added view's window metrics, when the output it is on
+   * changed extent. view_id 0 is SetWindowSize's.
+   * @relation flutter
+   */
+  FlutterEngineResult SetViewSize(int64_t view_id,
+                                  size_t width,
+                                  size_t height,
+                                  double pixel_ratio,
+                                  uint64_t display_id);
+
+  /**
    * @brief Detach a previously added view. The implicit view (0) cannot be
    * removed. Asynchronous (internal completion callback).
    * @relation flutter

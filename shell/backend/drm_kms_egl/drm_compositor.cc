@@ -2183,11 +2183,23 @@ bool DrmCompositor::CompositeLayersTurned(const GLuint fbo,
 }
 
 bool DrmCompositor::EnsureOwnComposite() {
-  if (own_composite_ready_) {
+  if (own_composite_ready_ && comp_bufs_valid_) {
     return true;
   }
   if (own_composite_failed_) {
     return false;
+  }
+  if (own_composite_ready_) {
+    // An extent change freed the composition buffers; the plane and its
+    // properties are the same CRTC's as before.
+    own_composite_ready_ = false;
+    own_composite_failed_ = true;  // until the buffers are back
+    if (!CreateOwnCompositeBuffers()) {
+      return false;
+    }
+    own_composite_failed_ = false;
+    own_composite_ready_ = true;
+    return true;
   }
   own_composite_failed_ = true;  // until everything below succeeds
   if (!EnsurePlaneFormats()) {
@@ -2232,22 +2244,8 @@ bool DrmCompositor::EnsureOwnComposite() {
     backend_->display()->ReservePlanes({own_primary_id_});
   }
 
-  // The plane path may have built them already, scanout-capable. Otherwise
-  // build them here, for scanout whatever the plane path decided.
-  if (!comp_bufs_valid_) {
-    const uint32_t format = out_.resolved().primary_format;
-    for (auto& comp_buf : comp_bufs_) {
-      if (!CreateGbmStore(comp_buf, out_.width(), out_.height(), format,
-                          /*pool_size=*/1, /*force_scanout=*/true) ||
-          !EnsureDrmFbId(comp_buf)) {
-        ihs::log::error(
-            "[DrmCompositor] crtc={}: no {}x{} scanout buffer; frames are "
-            "dropped",
-            out_.crtc_id(), out_.width(), out_.height());
-        return false;
-      }
-    }
-    comp_bufs_valid_ = true;
+  if (!CreateOwnCompositeBuffers()) {
+    return false;
   }
 
   own_composite_failed_ = false;
@@ -2262,6 +2260,28 @@ bool DrmCompositor::EnsureOwnComposite() {
     ihs::log::info("[DrmCompositor] crtc={}: GL composite on primary plane {}",
                    out_.crtc_id(), own_primary_id_);
   }
+  return true;
+}
+
+// The plane path may have built them already, scanout-capable. Otherwise
+// build them here, for scanout whatever the plane path decided.
+bool DrmCompositor::CreateOwnCompositeBuffers() {
+  if (comp_bufs_valid_) {
+    return true;
+  }
+  const uint32_t format = out_.resolved().primary_format;
+  for (auto& comp_buf : comp_bufs_) {
+    if (!CreateGbmStore(comp_buf, out_.width(), out_.height(), format,
+                        /*pool_size=*/1, /*force_scanout=*/true) ||
+        !EnsureDrmFbId(comp_buf)) {
+      ihs::log::error(
+          "[DrmCompositor] crtc={}: no {}x{} scanout buffer; frames are "
+          "dropped",
+          out_.crtc_id(), out_.width(), out_.height());
+      return false;
+    }
+  }
+  comp_bufs_valid_ = true;
   return true;
 }
 
@@ -3185,6 +3205,13 @@ bool DrmCompositor::PresentView(const int64_t /*view_id*/,
 
 bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
                                   const size_t layer_count) {
+  // Before the scene lock, which OnModeChanged takes itself. Left latched
+  // while paused: the flip wait it does would not complete, and the resume's
+  // modeset carries whichever mode is current by then.
+  if (pending_mode_set_.load(std::memory_order_acquire) &&
+      !paused_.load(std::memory_order_acquire)) {
+    ApplyPendingOutputMode();
+  }
   bool presented = false;
   {
     const std::lock_guard<std::mutex> lock(scene_mu_);
@@ -5717,6 +5744,40 @@ void DrmCompositor::ReleaseAllSlots() {
       ref.store->pool[ref.slot_idx].state = GbmBackingStore::Slot::State::Free;
     }
     in_flight_slots_.pop_front();
+  }
+}
+
+void DrmCompositor::RequestOutputMode(const drmModeModeInfo& mode,
+                                      const uint32_t fb_w,
+                                      const uint32_t fb_h,
+                                      const uint32_t render_w,
+                                      const uint32_t render_h) {
+  {
+    const std::lock_guard<std::mutex> lock(pending_mode_mu_);
+    pending_mode_ = PendingOutputMode{mode, fb_w, fb_h, render_w, render_h};
+  }
+  pending_mode_set_.store(true, std::memory_order_release);
+}
+
+void DrmCompositor::ApplyPendingOutputMode() {
+  std::optional<PendingOutputMode> next;
+  {
+    const std::lock_guard<std::mutex> lock(pending_mode_mu_);
+    next.swap(pending_mode_);
+    pending_mode_set_.store(false, std::memory_order_release);
+  }
+  if (!next.has_value()) {
+    return;
+  }
+  // OnModeChanged waits out this output's own flip before it frees anything;
+  // there is no backend-side surface to quiesce for an additional output.
+  if (!OnModeChanged(next->mode, next->fb_w, next->fb_h, next->render_w,
+                     next->render_h)) {
+    ihs::log::error(
+        "[DrmCompositor] crtc={}: mode {}x{}@{}Hz adopted with the plane path "
+        "disabled",
+        out_.crtc_id(), next->mode.hdisplay, next->mode.vdisplay,
+        next->mode.vrefresh);
   }
 }
 

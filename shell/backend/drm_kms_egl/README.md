@@ -538,9 +538,12 @@ a plane where one can rotate and turns on the GPU where none can.
   default 0), independently of the first, and its view is laid out at its
   mode turned. Whenever an additional output's frame takes the GL composite
   -- always, when it is rotated -- the frame is drawn into scanout buffers of
-  that output's own and committed on its CRTC's primary plane. An additional
-  output has no cursor and no HUD, and touch and pointer input are not routed
-  to it yet.
+  that output's own and committed on its CRTC's primary plane. A VT switch
+  pauses and re-modesets every output, and when an additional output's
+  connector is reconfigured (or comes back) at a different preferred mode, it
+  is driven at that mode from its next frame and its view is resized to it. An
+  additional output has no cursor and no HUD, and touch and pointer input are
+  not routed to it yet.
 
 ```toml
 [[view.output]]
