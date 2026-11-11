@@ -158,6 +158,38 @@ TEST(DisplayRotation, APanelPixelSamplesWhatItsRenderPixelWould) {
   }
 }
 
+// The engine's form of the turn is ToPanel less the centering offset, for a
+// picture that fills the panel and for one that does not.
+TEST(DisplayRotation, TheTurnIsToPanelWithoutTheOffset) {
+  for (const int deg : kAngles) {
+    SCOPED_TRACE(deg);
+    for (const DisplayRotation& r :
+         {Filling(deg), DisplayRotation{deg, 6, 3, 10, 9}}) {
+      const DisplayRotation::Affine m = r.Turn();
+      for (int y = 0; y <= r.render_h; ++y) {
+        for (int x = 0; x <= r.render_w; ++x) {
+          double px = 0;
+          double py = 0;
+          r.ToPanel(x, y, &px, &py);
+          EXPECT_DOUBLE_EQ(m.a * x + m.c * y + m.tx, px - r.offset_x());
+          EXPECT_DOUBLE_EQ(m.b * x + m.d * y + m.ty, py - r.offset_y());
+        }
+      }
+    }
+  }
+}
+
+TEST(DisplayRotation, OnlyAPictureAsLargeAsThePanelFillsIt) {
+  for (const int deg : kAngles) {
+    SCOPED_TRACE(deg);
+    EXPECT_TRUE(Filling(deg).fills_panel());
+    EXPECT_FALSE((DisplayRotation{deg, 600, 400, 1024, 768}.fills_panel()));
+  }
+  // Turned, a 768x1024 picture fills a 1024x768 panel; upright it does not.
+  EXPECT_TRUE((DisplayRotation{90, 768, 1024, 1024, 768}.fills_panel()));
+  EXPECT_FALSE((DisplayRotation{180, 768, 1024, 1024, 768}.fills_panel()));
+}
+
 TEST(DisplayRotation, ZeroIsTheIdentity) {
   const DisplayRotation r = Filling(0);
   const UvAffine uv = UvForLayer({1, 2, 3, 4}, 8, 8, BufferTransform::k270);

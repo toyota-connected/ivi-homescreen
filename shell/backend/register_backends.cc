@@ -505,8 +505,8 @@ std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
   // --drm-no-seat: DrmDisplay forced the session null; tell DrmBackend to
   // also skip the foreground-VT guard on its direct-open path.
   cfg.no_seat = config.view.drm_no_seat.value_or(false);
-  // Turned on the GPU by the compositor's last pass (#848); DrmBackend::Create
-  // refuses it in a build without one.
+  // Turned on the GPU (#848): by the compositor's last pass, or without one by
+  // the engine or at present (DrmBackend::GetRenderConfig).
   cfg.rotation = config.view.drm_rotation.value_or(0);
   // Leased tier: the compositor chose the connector, and the lease can be
   // revoked under us. Both are inert (0 / empty) on the direct tiers, which is

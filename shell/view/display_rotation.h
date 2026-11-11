@@ -79,6 +79,39 @@ struct DisplayRotation {
     *py += offset_y();
   }
 
+  // The turn alone as an affine map: (x, y) -> (a x + c y + tx, b x + d y +
+  // ty). ToPanel without the centering offset, so the turned picture starts at
+  // the origin. That is the form the Flutter engine's surface_transformation
+  // needs: it sizes its surface to the turned picture's bounds and does not
+  // place it anywhere but the origin.
+  struct Affine {
+    double a{1};
+    double b{0};
+    double c{0};
+    double d{1};
+    double tx{0};
+    double ty{0};
+  };
+  [[nodiscard]] Affine Turn() const {
+    const auto rw = static_cast<double>(render_w);
+    const auto rh = static_cast<double>(render_h);
+    switch (degrees) {
+      case 90:  // (y, rw - x)
+        return {0, -1, 1, 0, 0, rw};
+      case 180:  // (rw - x, rh - y)
+        return {-1, 0, 0, -1, rw, rh};
+      case 270:  // (rh - y, x)
+        return {0, 1, -1, 0, rh, 0};
+      default:
+        return {};
+    }
+  }
+  // Whether the turned picture covers the whole panel, so the engine can turn
+  // it straight into the panel's surface.
+  [[nodiscard]] bool fills_panel() const {
+    return rotated_w() == panel_w && rotated_h() == panel_h;
+  }
+
   // A render rect on the panel. Axis-aligned either way: the turns are all
   // quarter turns.
   [[nodiscard]] RectI ToPanel(const RectI& r) const {

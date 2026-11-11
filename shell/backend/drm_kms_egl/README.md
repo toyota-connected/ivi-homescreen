@@ -507,27 +507,34 @@ Pacing and scheduling are separate problems and both have to be right — see
 
 `--drm-rotation <0|90|180|270>` turns the display counter-clockwise, the same
 way a plane's `rotation` property would, so a config means the same thing here
-and on drm-kms-vulkan. This backend never asks a plane to rotate. The GL
-composite draws each layer turned onto the panel, so it works on a display whose
-planes have no `rotation` property at all (Renesas rcar-du on Sparrow Hawk, for
-one). drm-kms-vulkan uses a plane where one can rotate and turns on the GPU
-where none can.
+and on drm-kms-vulkan. This backend never asks a plane to rotate: the picture
+is turned on the GPU, so it works on a display whose planes have no `rotation`
+property at all (Renesas rcar-du on Sparrow Hawk, for one). drm-kms-vulkan uses
+a plane where one can rotate and turns on the GPU where none can.
 
 - **Extent.** The CRTC keeps its mode and the scanout surface is the whole
   mode. Flutter renders at the turned extent: 90/270 swap the mode's width and
   height. A configured `width`/`height` is the size Flutter renders at, clamped
   to the turned mode and centered once turned.
-- **Cost.** Every frame takes the GL composite (`PresentViaGlFallback`). The
+- **How, with `BUILD_COMPOSITOR`.** Every frame takes the GL composite
+  (`PresentViaGlFallback`), which draws each layer turned onto the panel. The
   plane path and direct scanout of backing stores stay off for the session,
   since a plane would show a backing store unturned. That is one full-screen
   draw per frame more than direct scanout costs, and the same as
   `--drm-compositor gl`.
+- **How, without it.** Under Skia, with no `width`/`height` configured, the
+  engine turns the picture itself through the embedder's
+  `surface_transformation`, at no extra cost. Impeller ignores that hook, and
+  it cannot center a smaller picture, so otherwise the engine renders upright
+  into an offscreen framebuffer and the present draws it turned onto the panel
+  (`GlTurn`): one full-screen draw per frame. The startup log names the one
+  in use: `rotation N: the engine turns the picture`, or `rotation N: turned
+  at present`.
 - **Input.** The shared DRM seat turns touch and the HW cursor exactly as for
   drm-kms-vulkan (see that README's "Input on a rotated display"). The
   GL-composited cursor is turned with the picture.
 - **Limits.** The primary output only: an additional `[[view.output]]` is not
-  added while a rotation is set. Needs `BUILD_COMPOSITOR`. The debug HUD is
-  drawn on the panel unturned.
+  added while a rotation is set. The debug HUD is drawn on the panel unturned.
 
 ### Env vars for runtime toggles
 

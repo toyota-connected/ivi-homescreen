@@ -59,11 +59,15 @@
 #include "backend/drm_kms_egl/drm_cursor.h"
 #include "backend/drm_kms_egl/drm_session.h"
 #include "backend/drm_kms_egl/gl_cursor.h"
+#if !BUILD_COMPOSITOR
+#include "backend/drm_kms_egl/gl_turn.h"
+#endif
 #include "backend/gl_process_resolver.h"
 #if BUILD_HUD
 #include "backend/hud/gl_hud.h"
 #endif
 #include "engine.h"
+#include "engine_switches.h"
 #include "logging.h"
 #include "profiling/frame_profile.h"
 #include "shell/platform/homescreen/flutter_desktop_engine_state.h"
@@ -181,16 +185,6 @@ std::unique_ptr<DrmBackend> DrmBackend::Create(const DrmConfig& cfg,
                     cfg.rotation);
     return nullptr;
   }
-#if !BUILD_COMPOSITOR
-  // The turn is the compositor's last pass; without it Flutter draws straight
-  // into the scanout surface and nothing turns the picture.
-  if (cfg.rotation != 0) {
-    ihs::log::error(
-        "[DrmBackend] --drm-rotation {} needs a build with BUILD_COMPOSITOR",
-        cfg.rotation);
-    return nullptr;
-  }
-#endif
   std::unique_ptr<DrmBackend> backend(new DrmBackend(cfg, session));
   backend->drm_dev_ = shared_device;
   backend->drm_display_ = display;
@@ -448,6 +442,15 @@ DrmBackend::~DrmBackend() {
     gl_cursor_->Destroy();
   }
   gl_cursor_.reset();
+
+#if !BUILD_COMPOSITOR
+  if (gl_turn_ && egl_display_ != EGL_NO_DISPLAY &&
+      egl_context_ != EGL_NO_CONTEXT) {
+    eglMakeCurrent(egl_display_, egl_surface_, egl_surface_, egl_context_);
+    gl_turn_->Destroy();
+  }
+  gl_turn_.reset();
+#endif
 
 #if BUILD_HUD
   // Free the HUD's GL objects while the context is current.
@@ -2311,14 +2314,18 @@ bool DrmBackend::Present() {
     return false;
   }
 
+#if !BUILD_COMPOSITOR
+  // A frame the engine rendered upright offscreen goes onto the panel turned,
+  // before the cursor is drawn over it.
+  if (gl_turn_) {
+    gl_turn_->Draw(panel_rotation());
+  }
+#endif
   // Composite the cursor over the rendered Flutter scene (still in FBO 0's
   // back buffer) before the swap. No-op until the cursor is visible / absent.
   if (gl_cursor_) {
     if (cfg_.rotation != 0) {
-      const DisplayRotation rot{cfg_.rotation, static_cast<int32_t>(render_w_),
-                                static_cast<int32_t>(render_h_),
-                                static_cast<int32_t>(fb_w_),
-                                static_cast<int32_t>(fb_h_)};
+      const DisplayRotation rot = panel_rotation();
       gl_cursor_->Draw(fb_w_, fb_h_, &rot);
     } else {
       gl_cursor_->Draw(fb_w_, fb_h_);
@@ -2574,6 +2581,58 @@ void DrmBackend::Resize(size_t /*index*/,
   // mode resolution. Runtime mode switches are not supported in this phase.
 }
 
+#if !BUILD_COMPOSITOR
+void DrmBackend::ConfigureTurn(FlutterOpenGLRendererConfig& gl) {
+  if (cfg_.rotation == 0) {
+    return;
+  }
+  // The engine turns the root surface itself through surface_transformation,
+  // which costs nothing extra. Only Skia honors it: Impeller's GL surface
+  // ignores it and renders upright without a word. And it starts the turned
+  // picture at the surface's origin, so it serves a picture that fills the
+  // panel, which is every extent the mode gives when no --width/--height was
+  // asked for. Anything else is rendered offscreen and turned at present.
+  const bool impeller = ihs::engine_switches::ImpellerActive();
+  const bool sized = cfg_.width.has_value() || cfg_.height.has_value();
+  if (!impeller && !sized && panel_rotation().fills_panel()) {
+    gl.surface_transformation = [](void* user_data) -> FlutterTransformation {
+      const DisplayRotation::Affine m =
+          BackendFromState(user_data)->panel_rotation().Turn();
+      FlutterTransformation t{};
+      t.scaleX = m.a;
+      t.skewX = m.c;
+      t.transX = m.tx;
+      t.skewY = m.b;
+      t.scaleY = m.d;
+      t.transY = m.ty;
+      t.pers2 = 1.0;
+      return t;
+    };
+    ihs::log::info("[DrmBackend] rotation {}: the engine turns the picture",
+                   cfg_.rotation);
+    return;
+  }
+  gl_turn_ = std::make_unique<homescreen::GlTurn>();
+  gl.fbo_callback = [](void* user_data) -> uint32_t {
+    auto* b = BackendFromState(user_data);
+    return b->gl_turn_->Fbo(b->render_w_, b->render_h_);
+  };
+  ihs::log::info(
+      "[DrmBackend] rotation {}: turned at present, one {}x{} draw a frame "
+      "({})",
+      cfg_.rotation, fb_w_, fb_h_,
+      impeller ? "Impeller does not turn its surface"
+               : "a configured width/height, which the engine's turn cannot "
+                 "center");
+}
+
+#if defined(UNIT_TEST)
+uint32_t DrmBackend::TurnFramebufferForTest() {
+  return gl_turn_ ? gl_turn_->Fbo(render_w_, render_h_) : 0;
+}
+#endif
+#endif
+
 FlutterRendererConfig DrmBackend::GetRenderConfig() {
   FlutterRendererConfig config{};
   config.type = kOpenGL;
@@ -2622,6 +2681,9 @@ FlutterRendererConfig DrmBackend::GetRenderConfig() {
     return BackendFromState(user_data)->MakeResourceCurrent();
   };
   config.open_gl.fbo_reset_after_present = false;
+#if !BUILD_COMPOSITOR
+  ConfigureTurn(config.open_gl);
+#endif
   config.open_gl.gl_proc_resolver = [](void* /*userdata*/,
                                        const char* name) -> void* {
     return GlProcessResolver::GetInstance().process_resolver(name);
