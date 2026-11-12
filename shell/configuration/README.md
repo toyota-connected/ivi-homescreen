@@ -227,8 +227,14 @@ Usage:
                                 latency)
       --drm-mode arg            DRM mode <WxH@R> (e.g. 1920x1080@120); default 
                                 = preferred mode
-      --drm-rotation arg        DRM scanout rotation in degrees: 0|90|180|270 
-                                (default 0)
+      --drm-rotation arg        DRM scanout rotation in degrees, 
+                                counter-clockwise: 0|90|180|270 (default 0). 
+                                drm-kms-vulkan rotates on a hardware plane 
+                                where one offers the angle and turns the 
+                                picture on the GPU where none does; drm-kms-egl 
+                                always turns it on the GPU. Refused by the 
+                                software backends; ignored on Wayland, where 
+                                the compositor rotates
       --drm-compositor arg      DRM compositor strategy: auto|planes|gl
       --drm-modeset arg         DRM modeset API: auto|legacy|atomic
       --drm-allow-nonblock-modeset arg
