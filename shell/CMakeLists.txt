@@ -347,6 +347,7 @@ if (BUILD_BACKEND_DRM_KMS_EGL)
             backend/drm_kms_egl/drm_session.cc
             backend/drm_kms_egl/driver_probe.cc
             backend/drm_kms_egl/gl_cursor.cc
+            backend/drm_kms_egl/gl_turn.cc
             backend/gl_process_resolver.cc
             display/drm_display.cc
             display/connector_edid.cc
@@ -430,6 +431,7 @@ if (BUILD_BACKEND_DRM_KMS_VULKAN)
             backend/drm_kms_vulkan/contiguous_allocator.cc
             backend/drm_kms_vulkan/drm_scanout_target.cc
             backend/drm_kms_vulkan/modifier_format.cc
+            backend/drm_kms_vulkan/rotation_caps.cc
             backend/drm_kms_egl/scene_layer_source_vk.cc
             backend/drm_kms_egl/drm_session.cc
             # Shared with the Wayland Vulkan backend, which is where it lives.

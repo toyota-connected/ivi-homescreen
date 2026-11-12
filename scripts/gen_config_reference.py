@@ -18,6 +18,8 @@
 # Usage:
 #   scripts/gen_config_reference.py          # write the outputs
 #   scripts/gen_config_reference.py --check  # exit 1 if outputs are stale (CI)
+#   ... --require-cli  # fail rather than skip the CLI block when there is no
+#                      # usable binary; CI passes it where it has built one
 
 import re
 import subprocess
@@ -100,7 +102,7 @@ META = {
     "backend.drm.connector": ("(rank-pick)", "e.g. eDP-1, HDMI-A-1", "drm/sw", "Connector to drive."),
     "backend.drm.mode": ("(preferred)", "<W>x<H>@<R>", "drm/sw", "Mode; unset = preferred from EDID."),
     "backend.drm.pipeline_depth": ("1", "1|2", "drm", "Frames in flight in the EGL present path. 1 waits for the page flip before swapping (lowest latency); 2 queues the frame and commits it from the flip handler, giving the raster thread a frame of headroom."),
-    "backend.drm.rotation": ("0", "0|90|180|270", "drm", "Scanout rotation in degrees."),
+    "backend.drm.rotation": ("0", "0|90|180|270", "drm", "Scanout rotation in degrees, counter-clockwise. The Vulkan DRM backends rotate on a hardware plane where one offers the angle and turn the picture on the GPU where none does; the EGL DRM backends always turn it on the GPU. Refused by the software backends; ignored on Wayland, where the compositor rotates."),
     "backend.drm.compositor": ("auto", "auto|planes|gl", "drm", "Compositor strategy."),
     "backend.drm.modeset": ("auto", "auto|legacy|atomic", "drm", "Modeset API."),
     "backend.drm.allow_nonblock_modeset": ("auto", "auto|yes|no", "drm", "Allow NONBLOCK|ALLOW_MODESET commits."),
@@ -123,6 +125,7 @@ META = {
     "output.x": ("0", "int (px)", "all", "This display's X position in the combined desktop space (multi-display input layout)."),
     "output.y": ("0", "int (px)", "all", "This display's Y position in the combined desktop space (multi-display input layout)."),
     "output.touch_device": ("(primary)", "device-name substring", "all", "Route touch from this panel (libinput device-name substring) to this view; unset sends touch to the primary view."),
+    "output.rotation": ("0", "0|90|180|270", "drm", "Rotation of an additional [[view.output]] (entries 2..N), counter-clockwise, turned on the GPU like backend.drm.rotation turns the first. drm-kms-egl only; the first entry is turned by backend.drm.rotation."),
 
     # [view.engine] — engine threading knobs
     "engine.merge_render_platform": ("false", "true|false", "all", "Run the engine's raster thread on the platform thread (single-thread native/Dart-FFI aliasing)."),
@@ -357,26 +360,29 @@ def render_reftoml(rows):
 
 
 def capture_help():
-    # The binary's --help is the source of truth for the CLI. Returns a fenced
-    # code block, or None if no binary is available (skip, don't fail).
+    # The binary's --help is the source of truth for the CLI. Returns
+    # (fenced code block, None), or (None, reason) when there is no binary or
+    # it gave no usage text. The caller decides whether that skips or fails.
     for b in (ROOT / "cmake-build-debug/shell/homescreen",
               ROOT / "build/shell/homescreen"):
         if not b.exists():
             continue
+        rel = b.relative_to(ROOT)
         try:
             r = subprocess.run([str(b), "--help"], capture_output=True,
                                text=True, timeout=15)
-        except Exception:
-            return None
+        except Exception as e:
+            return None, f"{rel} --help failed to run: {e}"
         # --help is program output on stdout; stderr carries startup log lines
         # (e.g. the DLT/sink bring-up warnings) that are not part of the CLI
         # reference, so capture stdout only.
         text = r.stdout or ""
         i = text.find("Usage:")
-        if i >= 0:
-            text = text[i:]
-        return "```text\n" + text.strip() + "\n```"
-    return None
+        if r.returncode != 0 or i < 0:
+            return None, (f"{rel} --help exited {r.returncode} without "
+                          "usage text")
+        return "```text\n" + text[i:].strip() + "\n```", None
+    return None, ("no homescreen binary found (cmake-build-debug/ or build/)")
 
 
 def replace_block(text, begin, end, body):
@@ -389,6 +395,7 @@ def replace_block(text, begin, end, body):
 
 def main():
     check = "--check" in sys.argv[1:]
+    require_cli = "--require-cli" in sys.argv[1:]
     rows = build()
     reftoml = render_reftoml(rows)
     table = render_table(rows)
@@ -406,10 +413,13 @@ def main():
     else:
         sys.stderr.write(f"note: {readme_rel} has no CONFIG-REFERENCE markers; "
                          "skipping config table.\n")
-    cli = capture_help()
+    cli, why = capture_help()
     if cli is None:
-        sys.stderr.write("note: no homescreen binary found "
-                         "(cmake-build-debug/ or build/); skipping CLI block.\n")
+        if require_cli:
+            sys.stderr.write(f"error: {why}; --require-cli needs the CLI "
+                             "block checked.\n")
+            sys.exit(2)
+        sys.stderr.write(f"note: {why}; skipping CLI block.\n")
     else:
         r = replace_block(new_readme, BEGIN_CLI, END_CLI, cli)
         if r is not None:

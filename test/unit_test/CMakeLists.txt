@@ -199,6 +199,7 @@ endif ()
 add_subdirectory(output_resolver-test)
 add_subdirectory(ihs_pv-test)
 add_subdirectory(layer_geometry-test)
+add_subdirectory(display_rotation-test)
 add_subdirectory(layer_scanout-test)
 add_subdirectory(presentation-test)
 # GlCompositor exists wherever an EGL backend is built.
@@ -288,6 +289,11 @@ endif ()
 if (BUILD_BACKEND_DRM_KMS_EGL AND BUILD_COMPOSITOR)
     add_subdirectory(drm_backend_vkms-test)
 endif ()
+# The other half of --drm-rotation on drm-kms-egl (#848): no compositor, so
+# the picture is turned at present. Needs the capture module to read it back.
+if (BUILD_BACKEND_DRM_KMS_EGL AND NOT BUILD_COMPOSITOR AND IVI_DRM_HAVE_CAPTURE)
+    add_subdirectory(drm_backend_vkms_turn-test)
+endif ()
 # The software-renderer opt-in lives in the Vulkan backend's device_caps, so the
 # test has nothing to link against without it.
 if (BUILD_BACKEND_DRM_KMS_VULKAN)
@@ -321,6 +327,8 @@ if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN)
 endif ()
 if (BUILD_BACKEND_DRM_KMS_VULKAN)
     add_subdirectory(drm_mode_divergence-test)
+    # What --drm-rotation needs from a display (#838); pure, no display needed.
+    add_subdirectory(drm_rotation_caps-test)
 endif ()
 add_subdirectory(compositor_registry-test)
 add_subdirectory(platform_view_registry-test)

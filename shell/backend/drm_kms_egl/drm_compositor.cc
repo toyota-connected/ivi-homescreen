@@ -489,7 +489,8 @@ bool DrmCompositor::CompositeLayeredSurface(
     GLint fb_height,
     bool target_top_first,
     bool blend,
-    const ICompositorSurface::GlLayerTexture* layer0) {
+    const ICompositorSurface::GlLayerTexture* layer0,
+    const DisplayRotation* rotation) {
   const RectI view{static_cast<int32_t>(layer->offset.x),
                    static_cast<int32_t>(layer->offset.y),
                    static_cast<int32_t>(layer->size.width),
@@ -499,7 +500,18 @@ bool DrmCompositor::CompositeLayeredSurface(
              [this, &surface](const ICompositorSurface::GlLayerTexture& t) {
                NoteGlComposited(surface, t);
              },
-             layer0) > 0;
+             layer0, rotation) > 0;
+}
+
+std::optional<DisplayRotation> DrmCompositor::GpuRotation() const {
+  const int degrees = out_.rotation();
+  if (degrees == 0) {
+    return std::nullopt;
+  }
+  return DisplayRotation{degrees, static_cast<int32_t>(out_.render_width()),
+                         static_cast<int32_t>(out_.render_height()),
+                         static_cast<int32_t>(out_.width()),
+                         static_cast<int32_t>(out_.height())};
 }
 
 void DrmCompositor::NoteGlComposited(
@@ -1174,10 +1186,21 @@ void DrmCompositor::EnsureGlCapsProbed() {
     ihs::log::error("[DrmCompositor] missing EGL_KHR_image / GL_OES_EGL_image");
   }
 
-  // Only take the plane path if DriverProbe said this driver supports it
-  // (atomic + primary + ≥1 overlay). Otherwise, all frames go through
-  // PresentViaGlFallback — same outcome as before, just honest about it.
-  if (out_.resolved().use_plane_compositor) {
+  // A GPU-rotated display never takes the plane path. No plane is asked to
+  // rotate: the composite turns the picture, so it works on a display whose
+  // planes have no rotation property at all. Direct scanout of a backing
+  // store would show it unturned.
+  //
+  // Otherwise, only take the plane path if DriverProbe said this driver
+  // supports it (atomic + primary + ≥1 overlay). Otherwise, all frames go
+  // through PresentViaGlFallback — same outcome as before, just honest about
+  // it.
+  if (const auto rot = GpuRotation(); rot.has_value()) {
+    ihs::log::info(
+        "[DrmCompositor] rotation {}: GL composite turns {}x{} onto the {}x{} "
+        "panel; plane path off",
+        rot->degrees, rot->render_w, rot->render_h, rot->panel_w, rot->panel_h);
+  } else if (out_.resolved().use_plane_compositor) {
     if (!InitPlaneAllocator()) {
       ihs::log::warn(
           "[DrmCompositor] plane allocator init failed; GL fallback");
@@ -1566,8 +1589,11 @@ void DrmCompositor::SettlePresentation(const uint64_t serial,
                                        const bool blocking) {
   // Every atomic path reaches here once its commit succeeded; the GL fallback
   // counts inside DrmBackend::Present. One counter across both, so a session
-  // that latches the fallback mid-way still reads as one series.
-  backend_->LogPresentedFrame();
+  // that latches the fallback mid-way still reads as one series. The series
+  // is the primary output's; a secondary's frames would double it.
+  if (drives_vsync_) {
+    backend_->LogPresentedFrame();
+  }
   last_frame_commit_ns_.store(NowTime().ust_ns, std::memory_order_release);
   if (blocking) {
     // A blocking commit has taken effect when it returns and sends no event.
@@ -1607,7 +1633,10 @@ void DrmCompositor::OnFlipComplete() {
     }
   }
 
-  backend_->RecordFlipComplete();
+  // The backend's flip stats and stall detector track the primary output.
+  if (drives_vsync_) {
+    backend_->RecordFlipComplete();
+  }
 }
 
 size_t DrmCompositor::ChooseRenderSlotLocked(GbmBackingStore& store) {
@@ -1881,16 +1910,10 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
   // The GL fallback composites into, and page-flips, the backend's own
   // (primary) gbm_surface/CRTC via DrmBackend::Present(). A secondary output
   // must not touch that -- doing so would render its frame onto the
-  // primary display's CRTC and never clear its own flip. A per-output
-  // GL-fallback surface is a follow-up; until then drop the frame on secondary
-  // outputs rather than corrupt the primary. The zero-copy scene path (the
-  // normal zero-copy scene path) does not reach this.
+  // primary display's CRTC and never clear its own flip -- so it composites
+  // into buffers of its own and commits them on its own CRTC.
   if (!drives_vsync_) {
-    ihs::log::warn(
-        "[DrmCompositor] GL fallback unavailable on a secondary output "
-        "(crtc={}); dropping frame",
-        out_.crtc_id());
-    return true;  // ack to Flutter; nothing presented, primary untouched
+    return PresentOwnComposite(layers, count);
   }
 
   // Releases queued by the previous fallback present. Taken now, before the
@@ -1940,8 +1963,19 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
 
+  // Layers arrive in render space. Turned, each is drawn onto its panel rect
+  // with its texture coordinates turned to match; FBO 0 is then the panel, so
+  // the GL-y conversion below uses the panel's height.
+  const std::optional<DisplayRotation> rotation = GpuRotation();
+  const DisplayRotation* rot = rotation ? &*rotation : nullptr;
+  const auto target_h = static_cast<GLint>(
+      rot ? rot->panel_h : static_cast<int32_t>(out_.height()));
   bool composited_any = false;
-  for (size_t i = 0; i < count; ++i) {
+  if (rot != nullptr) {
+    composited_any = CompositeLayersTurned(0, target_h, /*top_first=*/false,
+                                           *rot, layers, count);
+  }
+  for (size_t i = 0; rot == nullptr && i < count; ++i) {
     const FlutterLayer* layer = layers[i];
     if (!layer) {
       continue;
@@ -1981,10 +2015,10 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
         const auto first = SingleLayerTexture(*surface_sp);
         if (!IsWholeImage(first)) {
           // FBO 0 of the gbm_surface: standard GL NDC, bottom-left origin.
-          if (CompositeLayeredSurface(0, surface_sp, layer,
-                                      static_cast<GLint>(out_.height()),
+          if (CompositeLayeredSurface(0, surface_sp, layer, target_h,
                                       /*target_top_first=*/false, blend,
-                                      first ? &*first : nullptr)) {
+                                      first ? &*first : nullptr,
+                                      /*rotation=*/nullptr)) {
             composited_any = true;
           }
         } else if (const auto tex = first->name; tex != 0) {
@@ -2008,6 +2042,22 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
       }
     }
   }
+
+#if BUILD_HUD
+  // Turned, the HUD is drawn here, last and over the picture, so it turns
+  // with it. Present() would draw it straight onto the panel, unturned; it
+  // leaves a rotated frame's HUD to this.
+  if (rot != nullptr) {
+    if (const unsigned int hud_tex =
+            backend_->RenderHudTexture(static_cast<uint32_t>(rot->render_w),
+                                       static_cast<uint32_t>(rot->render_h))) {
+      // Rendered into a GL framebuffer: its first row is the HUD's bottom.
+      DrawTurned(0, target_h, /*top_first=*/false, *rot, hud_tex,
+                 RectI{0, 0, rot->render_w, rot->render_h},
+                 FlipRows(UvAffine{}), /*blend=*/true, /*external=*/false);
+    }
+  }
+#endif
 
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   ArmCommitTarget();
@@ -2039,6 +2089,319 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
 }
 
 // ─── Cursor staging + shared commit settle ──────────────────────────────
+
+void DrmCompositor::DrawTurned(const GLuint fbo,
+                               const GLint target_h,
+                               const bool top_first,
+                               const DisplayRotation& rot,
+                               const GLuint tex,
+                               const RectI& dst,
+                               UvAffine uv,
+                               const bool blend,
+                               const bool external) {
+  const RectI p = rot.ToPanel(dst);
+  uv = rot.ToPanel(uv);
+  GLint gl_y = target_h - p.y - p.h;
+  if (top_first) {
+    // GL's y = 0 is the target's top row, so the rect goes in unconverted and
+    // the quad's t axis (top to bottom in window terms) turns over. As
+    // GlCompositor::CompositeLayeredSurface does for a top-first target.
+    gl_y = p.y;
+    uv.tx += uv.c;
+    uv.c = -uv.c;
+    uv.ty += uv.d;
+    uv.d = -uv.d;
+  }
+  gl_compositor_->CompositeLayerToFbo(fbo, tex, external, uv, p.x, gl_y, p.w,
+                                      p.h, blend, /*opaque=*/false);
+}
+
+bool DrmCompositor::CompositeLayersTurned(const GLuint fbo,
+                                          const GLint target_h,
+                                          const bool top_first,
+                                          const DisplayRotation& rot,
+                                          const FlutterLayer** layers,
+                                          const size_t count) {
+  // Layers arrive in render space; each is drawn onto its panel rect with its
+  // texture coordinates turned to match. 0 degrees is the identity turn.
+  const auto rect_of = [](const FlutterLayer* layer) {
+    return RectI{static_cast<int32_t>(layer->offset.x),
+                 static_cast<int32_t>(layer->offset.y),
+                 static_cast<int32_t>(layer->size.width),
+                 static_cast<int32_t>(layer->size.height)};
+  };
+  bool composited_any = false;
+  for (size_t i = 0; i < count; ++i) {
+    const FlutterLayer* layer = layers[i];
+    if (!layer) {
+      continue;
+    }
+    const bool blend = composited_any;
+    if (layer->type == kFlutterLayerContentTypeBackingStore &&
+        layer->backing_store) {
+      auto* baton = static_cast<StoreBaton*>(layer->backing_store->user_data);
+      if (baton && baton->store) {
+        // A GL render target: its first row is the picture's bottom.
+        DrawTurned(fbo, target_h, top_first, rot,
+                   baton->store->active().color_tex, rect_of(layer),
+                   FlipRows(UvAffine{}), blend, /*external=*/false);
+        composited_any = true;
+      }
+    } else if (layer->type == kFlutterLayerContentTypePlatformView &&
+               layer->platform_view) {
+      std::shared_ptr<ICompositorSurface> surface_sp;
+      {
+        std::lock_guard<std::mutex> lock(surfaces_mu_);
+        if (auto it = surfaces_.find(layer->platform_view->identifier);
+            it != surfaces_.end()) {
+          surface_sp = it->second;
+        }
+      }
+      if (!surface_sp) {
+        continue;
+      }
+      // GL-composited this present: no plane (see PresentViaGlFallback).
+      surface_sp->SetScanoutPlane(0);
+      surface_sp->OnPresent(layer);
+      const auto first = SingleLayerTexture(*surface_sp);
+      if (!IsWholeImage(first)) {
+        if (CompositeLayeredSurface(fbo, surface_sp, layer, target_h, top_first,
+                                    blend, first ? &*first : nullptr, &rot)) {
+          composited_any = true;
+        }
+      } else if (const auto tex = first->name; tex != 0) {
+        DrawTurned(
+            fbo, target_h, top_first, rot, tex, rect_of(layer),
+            surface_sp->TextureIsTopFirst() ? UvAffine{} : FlipRows(UvAffine{}),
+            blend, surface_sp->TextureIsExternalOes());
+        composited_any = true;
+        NoteGlComposited(surface_sp);
+      }
+    }
+  }
+  return composited_any;
+}
+
+bool DrmCompositor::EnsureOwnComposite() {
+  if (own_composite_ready_ && comp_bufs_valid_) {
+    return true;
+  }
+  if (own_composite_failed_) {
+    return false;
+  }
+  if (own_composite_ready_) {
+    // An extent change freed the composition buffers; the plane and its
+    // properties are the same CRTC's as before.
+    own_composite_ready_ = false;
+    own_composite_failed_ = true;  // until the buffers are back
+    if (!CreateOwnCompositeBuffers()) {
+      return false;
+    }
+    own_composite_failed_ = false;
+    own_composite_ready_ = true;
+    return true;
+  }
+  own_composite_failed_ = true;  // until everything below succeeds
+  if (!EnsurePlaneFormats()) {
+    ihs::log::error(
+        "[DrmCompositor] crtc={}: no plane registry; frames are dropped",
+        out_.crtc_id());
+    return false;
+  }
+  if (!modeset_) {
+    auto ms = drm::modeset::Modeset::create(backend_->device(), out_.crtc_id(),
+                                            out_.connector_id(), out_.mode());
+    if (!ms) {
+      ihs::log::error("[DrmCompositor] crtc={}: Modeset::create: {}",
+                      out_.crtc_id(), ms.error().message());
+      return false;
+    }
+    modeset_.emplace(std::move(*ms));
+  }
+
+  const std::vector<uint32_t> reserved =
+      backend_->display() != nullptr ? backend_->display()->ReservedPlanes()
+                                     : std::vector<uint32_t>{};
+  const int fd = backend_->drm_fd();
+  for (const auto* p : plane_registry_->for_crtc(out_.crtc_index())) {
+    if (p->type == drm::planes::DRMPlaneType::CURSOR) {
+      continue;
+    }
+    if (p->type == drm::planes::DRMPlaneType::PRIMARY && own_primary_id_ == 0 &&
+        std::find(reserved.begin(), reserved.end(), p->id) == reserved.end()) {
+      own_primary_id_ = static_cast<uint32_t>(p->id);
+    }
+    (void)own_props_.cache_properties(fd, static_cast<uint32_t>(p->id),
+                                      DRM_MODE_OBJECT_PLANE);
+  }
+  if (own_primary_id_ == 0) {
+    ihs::log::error(
+        "[DrmCompositor] crtc={}: no free primary plane; frames are dropped",
+        out_.crtc_id());
+    return false;
+  }
+  if (backend_->display() != nullptr) {
+    backend_->display()->ReservePlanes({own_primary_id_});
+  }
+
+  if (!CreateOwnCompositeBuffers()) {
+    return false;
+  }
+
+  own_composite_failed_ = false;
+  own_composite_ready_ = true;
+  if (const auto rot = GpuRotation(); rot.has_value()) {
+    ihs::log::info(
+        "[DrmCompositor] crtc={}: GL composite on primary plane {}, turning "
+        "{}x{} by {} onto the {}x{} panel",
+        out_.crtc_id(), own_primary_id_, rot->render_w, rot->render_h,
+        rot->degrees, rot->panel_w, rot->panel_h);
+  } else {
+    ihs::log::info("[DrmCompositor] crtc={}: GL composite on primary plane {}",
+                   out_.crtc_id(), own_primary_id_);
+  }
+  return true;
+}
+
+// The plane path may have built them already, scanout-capable. Otherwise
+// build them here, for scanout whatever the plane path decided.
+bool DrmCompositor::CreateOwnCompositeBuffers() {
+  if (comp_bufs_valid_) {
+    return true;
+  }
+  const uint32_t format = out_.resolved().primary_format;
+  for (auto& comp_buf : comp_bufs_) {
+    if (!CreateGbmStore(comp_buf, out_.width(), out_.height(), format,
+                        /*pool_size=*/1, /*force_scanout=*/true) ||
+        !EnsureDrmFbId(comp_buf)) {
+      ihs::log::error(
+          "[DrmCompositor] crtc={}: no {}x{} scanout buffer; frames are "
+          "dropped",
+          out_.crtc_id(), out_.width(), out_.height());
+      return false;
+    }
+  }
+  comp_bufs_valid_ = true;
+  return true;
+}
+
+bool DrmCompositor::PresentOwnComposite(const FlutterLayer** layers,
+                                        const size_t count) {
+  if (!EnsureOwnComposite()) {
+    return true;  // ack to Flutter; nothing presented, primary untouched
+  }
+  if (!WaitForPendingFlip()) {
+    return true;  // paused: the flip will not complete; skip the frame
+  }
+  WaitForRepaintWindow();
+  DrainDeferredScanoutReleases();
+  // The commit that took the CRTC back from the scene has landed, so nothing
+  // the scene held is on screen any more.
+  if (scene_hold_pending_) {
+    ReleaseSceneHold();
+  }
+
+  auto& comp = comp_bufs_[comp_idx_];
+  glBindFramebuffer(GL_FRAMEBUFFER, comp.fbo);
+  glDisable(GL_SCISSOR_TEST);
+  glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+  glClearColor(0.0F, 0.0F, 0.0F, 1.0F);
+  glClear(GL_COLOR_BUFFER_BIT);
+  const DisplayRotation rot = GpuRotation().value_or(DisplayRotation{
+      0, static_cast<int32_t>(out_.width()),
+      static_cast<int32_t>(out_.height()), static_cast<int32_t>(out_.width()),
+      static_cast<int32_t>(out_.height())});
+  // A buffer KMS scans out directly: top row first.
+  (void)CompositeLayersTurned(comp.fbo, static_cast<GLint>(out_.height()),
+                              /*top_first=*/true, rot, layers, count);
+  glFinish();
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+  drm::AtomicRequest req(backend_->device());
+  if (!req.valid()) {
+    ihs::log::warn("[DrmCompositor] crtc={}: AtomicRequest alloc failed",
+                   out_.crtc_id());
+    return true;
+  }
+  if (!plane_mode_set_ && modeset_) {
+    if (auto r = modeset_->attach(req); !r) {
+      ihs::log::warn("[DrmCompositor] crtc={}: modeset attach: {}",
+                     out_.crtc_id(), r.error().message());
+      return true;
+    }
+  }
+  auto set = [&](const uint32_t obj, const char* name,
+                 const uint64_t value) -> bool {
+    auto pid = own_props_.property_id(obj, name);
+    if (!pid) {
+      return false;
+    }
+    return req.add_property(obj, *pid, value).has_value();
+  };
+  const uint32_t prim = own_primary_id_;
+  const uint32_t fb_w = out_.width();
+  const uint32_t fb_h = out_.height();
+  if (!set(prim, "FB_ID", comp.active().drm_fb_id) ||
+      !set(prim, "CRTC_ID", out_.crtc_id()) || !set(prim, "CRTC_X", 0) ||
+      !set(prim, "CRTC_Y", 0) || !set(prim, "CRTC_W", out_.mode_width()) ||
+      !set(prim, "CRTC_H", out_.mode_height()) || !set(prim, "SRC_X", 0) ||
+      !set(prim, "SRC_Y", 0) ||
+      !set(prim, "SRC_W", static_cast<uint64_t>(fb_w) << 16) ||
+      !set(prim, "SRC_H", static_cast<uint64_t>(fb_h) << 16)) {
+    ihs::log::warn("[DrmCompositor] crtc={}: primary plane {} properties",
+                   out_.crtc_id(), prim);
+    return true;
+  }
+  // The picture is already turned: whatever the scene or a previous session
+  // left in the plane's rotation (REFLECT_Y for a bottom-up backing store)
+  // goes back to none. Optional property.
+  (void)set(prim, "rotation", DRM_MODE_ROTATE_0);
+
+  // Every other plane on this CRTC off, as PresentFramed does, but for those
+  // another view on this card owns.
+  const std::vector<uint32_t> reserved =
+      backend_->display() != nullptr ? backend_->display()->ReservedPlanes()
+                                     : std::vector<uint32_t>{};
+  for (const auto* p : plane_registry_->for_crtc(out_.crtc_index())) {
+    if (p->type == drm::planes::DRMPlaneType::CURSOR || p->id == prim ||
+        std::find(reserved.begin(), reserved.end(), p->id) != reserved.end()) {
+      continue;
+    }
+    (void)set(static_cast<uint32_t>(p->id), "FB_ID", 0);
+    (void)set(static_cast<uint32_t>(p->id), "CRTC_ID", 0);
+  }
+
+  // Taking the CRTC back from the scene: its buffers come back once this
+  // commit's flip has landed (top of the next present).
+  if (scene_owns_crtc_) {
+    scene_hold_pending_ = scene_holds_pv_;
+    scene_owns_crtc_ = false;
+    scene_stale_ = true;
+  }
+
+  const bool blocking = !plane_mode_set_ || StageCursorInto(req);
+  const uint32_t commit_flags =
+      blocking ? DRM_MODE_ATOMIC_ALLOW_MODESET
+               : (DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK);
+  ScopedFlipArm arm(flip_pending_, backend_->vsync_, !blocking, drives_vsync_,
+                    /*mirror_source_pending=*/false);
+  ArmCommitTarget();
+  ScopedPresentation pres(*this, blocking);
+  if (auto r = req.commit(commit_flags, static_cast<IFlipSink*>(this)); !r) {
+    if (r.error() != std::errc::permission_denied ||
+        !paused_.load(std::memory_order_acquire)) {
+      ihs::log::warn("[DrmCompositor] crtc={}: GL composite commit failed: {}",
+                     out_.crtc_id(), r.error().message());
+    }
+    arm.Abort();
+    pres.Abort();
+    return true;
+  }
+  SettleAtomicCommit(arm, blocking);
+  pres.Commit();
+  comp_idx_ ^= 1;
+  return true;
+}
 
 void DrmCompositor::SetCursor(homescreen::DrmCursor* const cursor) {
   cursor_ = cursor;
@@ -2204,7 +2567,11 @@ void DrmCompositor::SettleAtomicCommit(ScopedFlipArm& arm,
       VerifyPipeRunning();
     }
     flip_pending_.store(false, std::memory_order_release);
-    (void)backend_->vsync_.DeliverParkedBaton();
+    // The baton is the primary's: a secondary output's first modeset handing
+    // it back would pace the engine to the wrong CRTC.
+    if (drives_vsync_) {
+      (void)backend_->vsync_.DeliverParkedBaton();
+    }
   } else {
     // The latch went up before the ioctl (ScopedFlipArm); all that is left is
     // to stop the arm disarming it at scope exit. Raising it here instead is
@@ -2838,6 +3205,13 @@ bool DrmCompositor::PresentView(const int64_t /*view_id*/,
 
 bool DrmCompositor::PresentLayers(const FlutterLayer** layers,
                                   const size_t layer_count) {
+  // Before the scene lock, which OnModeChanged takes itself. Left latched
+  // while paused: the flip wait it does would not complete, and the resume's
+  // modeset carries whichever mode is current by then.
+  if (pending_mode_set_.load(std::memory_order_acquire) &&
+      !paused_.load(std::memory_order_acquire)) {
+    ApplyPendingOutputMode();
+  }
   bool presented = false;
   {
     const std::lock_guard<std::mutex> lock(scene_mu_);
@@ -4478,7 +4852,9 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       VerifyPipeRunning();
     }
     flip_pending_.store(false, std::memory_order_release);
-    (void)backend_->vsync_.DeliverParkedBaton();
+    if (drives_vsync_) {
+      (void)backend_->vsync_.DeliverParkedBaton();
+    }
   } else {
     arm.Commit();
   }
@@ -5221,7 +5597,9 @@ void DrmCompositor::ApplyCursorReservation() {
 
 bool DrmCompositor::OnModeChanged(const drmModeModeInfo& mode,
                                   const uint32_t fb_w,
-                                  const uint32_t fb_h) {
+                                  const uint32_t fb_h,
+                                  const uint32_t render_w,
+                                  const uint32_t render_h) {
   const bool extent_changed = fb_w != out_.width() || fb_h != out_.height() ||
                               mode.hdisplay != out_.mode_width() ||
                               mode.vdisplay != out_.mode_height();
@@ -5229,9 +5607,9 @@ bool DrmCompositor::OnModeChanged(const drmModeModeInfo& mode,
   // DrmOutputContext is a value type with no setters, deliberately. Rebuild it
   // rather than opening it up: the CRTC, the connector and the probe result are
   // the same card whichever mode it is driving.
-  out_ =
-      DrmOutputContext(out_.crtc_id(), out_.crtc_index(), out_.connector_id(),
-                       mode, fb_w, fb_h, &out_.resolved());
+  out_ = DrmOutputContext(
+      out_.crtc_id(), out_.crtc_index(), out_.connector_id(), mode, fb_w, fb_h,
+      &out_.resolved(), out_.rotation(), render_w, render_h);
   // From the mode timings, not vrefresh: this is the figure frame judging and
   // the repaint window are measured against, so it wants the exact period.
   refresh_ns_ = ModeRefreshPeriodNs(mode.clock, mode.htotal, mode.vtotal);
@@ -5366,6 +5744,40 @@ void DrmCompositor::ReleaseAllSlots() {
       ref.store->pool[ref.slot_idx].state = GbmBackingStore::Slot::State::Free;
     }
     in_flight_slots_.pop_front();
+  }
+}
+
+void DrmCompositor::RequestOutputMode(const drmModeModeInfo& mode,
+                                      const uint32_t fb_w,
+                                      const uint32_t fb_h,
+                                      const uint32_t render_w,
+                                      const uint32_t render_h) {
+  {
+    const std::lock_guard<std::mutex> lock(pending_mode_mu_);
+    pending_mode_ = PendingOutputMode{mode, fb_w, fb_h, render_w, render_h};
+  }
+  pending_mode_set_.store(true, std::memory_order_release);
+}
+
+void DrmCompositor::ApplyPendingOutputMode() {
+  std::optional<PendingOutputMode> next;
+  {
+    const std::lock_guard<std::mutex> lock(pending_mode_mu_);
+    next.swap(pending_mode_);
+    pending_mode_set_.store(false, std::memory_order_release);
+  }
+  if (!next.has_value()) {
+    return;
+  }
+  // OnModeChanged waits out this output's own flip before it frees anything;
+  // there is no backend-side surface to quiesce for an additional output.
+  if (!OnModeChanged(next->mode, next->fb_w, next->fb_h, next->render_w,
+                     next->render_h)) {
+    ihs::log::error(
+        "[DrmCompositor] crtc={}: mode {}x{}@{}Hz adopted with the plane path "
+        "disabled",
+        out_.crtc_id(), next->mode.hdisplay, next->mode.vdisplay,
+        next->mode.vrefresh);
   }
 }
 

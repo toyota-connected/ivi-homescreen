@@ -28,6 +28,7 @@
 // question about this backend needs.
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -41,6 +42,11 @@
 #include <vector>
 
 #include <gtest/gtest.h>
+
+#if IHS_TEST_HAVE_CAPTURE
+#include "capture/png.hpp"
+#include "capture/snapshot.hpp"
+#endif
 
 #include "backend/backend_registry.h"
 #include "backend/drm_kms_vulkan/vulkan_drm_backend.h"
@@ -175,7 +181,7 @@ class VulkanDrmVkms : public ::testing::Test {
     backend_ = VulkanDrmBackend::Create(
         card_.path, /*enable_validation=*/false, /*session=*/nullptr,
         /*shared_device=*/nullptr, /*mode_spec=*/"", /*connector_name=*/"",
-        /*rotation=*/0);
+        Rotation());
     if (backend_ == nullptr) {
       // No Vulkan loader, or no device that can import dma-buf at all. A skip,
       // not a failure: the host simply cannot run this backend.
@@ -193,14 +199,19 @@ class VulkanDrmVkms : public ::testing::Test {
     }
   }
 
+  // The --drm-rotation the backend is created with. The rotation fixture below
+  // overrides it.
+  [[nodiscard]] virtual int Rotation() const { return 0; }
+
   // One frame: take a store, present it as the single layer. The engine would
   // render into it first; nothing here needs its contents, only that a real
-  // buffer reaches a real commit.
+  // buffer reaches a real commit. Sized to the backend's render extent, which
+  // a 90/270 rotation swaps against the mode.
   bool PresentOneFrame() {
     FlutterBackingStoreConfig cfg{};
     cfg.struct_size = sizeof(FlutterBackingStoreConfig);
-    cfg.size = FlutterSize{static_cast<double>(card_.mode_w),
-                           static_cast<double>(card_.mode_h)};
+    cfg.size = FlutterSize{static_cast<double>(backend_->width()),
+                           static_cast<double>(backend_->height())};
     FlutterBackingStore bs{};
     if (!backend_->CreateBackingStoreForTest(&cfg, &bs)) {
       return false;
@@ -249,6 +260,370 @@ TEST_F(VulkanDrmVkms, APresentedFrameReachesTheDisplay) {
   EXPECT_GE(backend_->PresentedFramesForTest(), 5u)
       << "five presents returned true but the backend committed fewer frames";
 }
+
+// --drm-rotation on a display that can do it. vkms rotates every plane by any
+// angle but scans out LINEAR only, which is the case a blanket "90/270 needs a
+// tiled modifier" rule gets wrong (#838): the rotation has to come up, swap the
+// render extent for 90/270, and have its frames reach the display.
+class VulkanDrmVkmsRotation : public VulkanDrmVkms,
+                              public ::testing::WithParamInterface<int> {
+ protected:
+  [[nodiscard]] int Rotation() const override { return GetParam(); }
+};
+
+TEST_P(VulkanDrmVkmsRotation, ARotatedFrameReachesTheDisplay) {
+  ASSERT_NE(backend_, nullptr);
+  EXPECT_EQ(backend_->rotation(), GetParam());
+  const bool swap = GetParam() == 90 || GetParam() == 270;
+  EXPECT_EQ(backend_->width(), swap ? card_.mode_h : card_.mode_w);
+  EXPECT_EQ(backend_->height(), swap ? card_.mode_w : card_.mode_h);
+
+  ASSERT_TRUE(PresentOneFrame()) << "the first present is the blocking modeset";
+  for (int i = 0; i < 4; ++i) {
+    EXPECT_TRUE(PresentOneFrame()) << "frame " << i << " was not presented";
+  }
+  EXPECT_GE(backend_->PresentedFramesForTest(), 5u)
+      << "five rotated presents returned true but fewer frames committed";
+  // Committed is not the same as rotated: a layer composited instead of placed
+  // on a plane commits fine and comes out unrotated.
+  EXPECT_TRUE(backend_->RotationOnPlaneForTest())
+      << "the scanout layer did not land on a plane that rotates by "
+      << GetParam();
+}
+
+INSTANTIATE_TEST_SUITE_P(Angles,
+                         VulkanDrmVkmsRotation,
+                         ::testing::Values(90, 180, 270),
+                         [](const ::testing::TestParamInfo<int>& info) {
+                           return "Rotate" + std::to_string(info.param);
+                         });
+
+// --drm-rotation turned on the GPU (#848): what a display whose planes cannot
+// rotate gets. vkms planes rotate any angle, so IVI_DRMVK_GPU_ROTATION forces
+// the turn here; the plane path above stays what vkms picks on its own.
+class VulkanDrmVkmsGpuTurn : public VulkanDrmVkms,
+                             public ::testing::WithParamInterface<int> {
+ protected:
+  void SetUp() override {
+    ::setenv(kGpuRotation, "1", 1);
+    VulkanDrmVkms::SetUp();
+    ::unsetenv(kGpuRotation);
+  }
+  [[nodiscard]] int Rotation() const override { return GetParam(); }
+
+  static constexpr const char* kGpuRotation = "IVI_DRMVK_GPU_ROTATION";
+};
+
+TEST_P(VulkanDrmVkmsGpuTurn, ATurnedFrameReachesTheDisplay) {
+  ASSERT_NE(backend_, nullptr);
+  EXPECT_TRUE(backend_->TurnedOnGpuForTest());
+  const bool swap = GetParam() == 90 || GetParam() == 270;
+  EXPECT_EQ(backend_->width(), swap ? card_.mode_h : card_.mode_w);
+  EXPECT_EQ(backend_->height(), swap ? card_.mode_w : card_.mode_h);
+
+  ASSERT_TRUE(PresentOneFrame()) << "the first present is the blocking modeset";
+  // More presents than there are turn targets, so every one is drawn into and
+  // reused while another is scanning.
+  for (int i = 0; i < 8; ++i) {
+    EXPECT_TRUE(PresentOneFrame()) << "frame " << i << " was not presented";
+  }
+  EXPECT_GE(backend_->PresentedFramesForTest(), 9u);
+  // The plane scans the turned buffer out unrotated.
+  EXPECT_FALSE(backend_->RotationOnPlaneForTest());
+}
+
+INSTANTIATE_TEST_SUITE_P(Angles,
+                         VulkanDrmVkmsGpuTurn,
+                         ::testing::Values(90, 180, 270),
+                         [](const ::testing::TestParamInfo<int>& info) {
+                           return "Rotate" + std::to_string(info.param);
+                         });
+
+#if IHS_TEST_HAVE_CAPTURE
+// The GPU turn puts the picture on the panel the right way round: a
+// four-color frame read back off the CRTC. 0 (unturned) says the readback
+// itself is the right way up.
+//
+// The plane path at 90/180/270 is not here because this readback cannot see
+// it: drm::capture composites each plane's framebuffer as stored, without its
+// rotation property, so a correctly rotated plane reads back unrotated.
+struct TurnCase {
+  int degrees;
+  bool gpu;
+};
+
+class VulkanDrmVkmsTurnPixels : public VulkanDrmVkms,
+                                public ::testing::WithParamInterface<TurnCase> {
+ protected:
+  void SetUp() override {
+    if (GetParam().gpu) {
+      ::setenv("IVI_DRMVK_GPU_ROTATION", "1", 1);
+    }
+    VulkanDrmVkms::SetUp();
+    ::unsetenv("IVI_DRMVK_GPU_ROTATION");
+  }
+  [[nodiscard]] int Rotation() const override { return GetParam().degrees; }
+
+  static constexpr uint32_t kRed = 0x00FF0000u;
+  static constexpr uint32_t kGreen = 0x0000FF00u;
+  static constexpr uint32_t kBlue = 0x000000FFu;
+  static constexpr uint32_t kWhite = 0x00FFFFFFu;
+
+  // Counter-clockwise, as DRM_MODE_ROTATE_* turns a plane: at 90 the
+  // picture's top-right corner is the panel's top-left. Panel quadrants TL,
+  // TR, BL, BR, for the picture red TL, green TR, blue BL, white BR. Written
+  // out rather than derived, as in the EGL fixture.
+  static std::array<uint32_t, 4> PanelQuadrants(int degrees) {
+    switch (degrees) {
+      case 90:
+        return {kGreen, kWhite, kRed, kBlue};
+      case 180:
+        return {kWhite, kBlue, kGreen, kRed};
+      case 270:
+        return {kBlue, kRed, kWhite, kGreen};
+      default:
+        return {kRed, kGreen, kBlue, kWhite};
+    }
+  }
+
+  // Upload the picture into @p image (a backing store, in
+  // COLOR_ATTACHMENT_OPTIMAL as the engine is handed it) and leave it there,
+  // as if the engine had rendered it. Waits for the queue to drain.
+  bool Paint(VkImage image, uint32_t w, uint32_t h) {
+    BackendVulkanContext vk{};
+    if (!backend_->GetVulkanContext(&vk)) {
+      return false;
+    }
+    const auto gipa =
+        reinterpret_cast<PFN_vkGetInstanceProcAddr>(vk.get_instance_proc_addr);
+    const auto instance = static_cast<VkInstance>(vk.instance);
+    const auto device = static_cast<VkDevice>(vk.device);
+    const auto gdpa = reinterpret_cast<PFN_vkGetDeviceProcAddr>(
+        gipa(instance, "vkGetDeviceProcAddr"));
+    const auto dfn = [&](const char* name) { return gdpa(device, name); };
+#define IHS_FN(name) const auto name = reinterpret_cast<PFN_##name>(dfn(#name))
+    IHS_FN(vkCreateBuffer);
+    IHS_FN(vkDestroyBuffer);
+    IHS_FN(vkGetBufferMemoryRequirements);
+    IHS_FN(vkAllocateMemory);
+    IHS_FN(vkFreeMemory);
+    IHS_FN(vkBindBufferMemory);
+    IHS_FN(vkMapMemory);
+    IHS_FN(vkUnmapMemory);
+    IHS_FN(vkCreateCommandPool);
+    IHS_FN(vkDestroyCommandPool);
+    IHS_FN(vkAllocateCommandBuffers);
+    IHS_FN(vkBeginCommandBuffer);
+    IHS_FN(vkEndCommandBuffer);
+    IHS_FN(vkCmdPipelineBarrier);
+    IHS_FN(vkCmdCopyBufferToImage);
+    IHS_FN(vkQueueSubmit);
+    IHS_FN(vkQueueWaitIdle);
+#undef IHS_FN
+    const auto mem_props =
+        reinterpret_cast<PFN_vkGetPhysicalDeviceMemoryProperties>(
+            gipa(instance, "vkGetPhysicalDeviceMemoryProperties"));
+
+    const VkDeviceSize size = VkDeviceSize{w} * h * 4;
+    VkBufferCreateInfo bci{};
+    bci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bci.size = size;
+    bci.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    VkBuffer buffer = VK_NULL_HANDLE;
+    if (vkCreateBuffer(device, &bci, nullptr, &buffer) != VK_SUCCESS) {
+      return false;
+    }
+    VkMemoryRequirements req{};
+    vkGetBufferMemoryRequirements(device, buffer, &req);
+    VkPhysicalDeviceMemoryProperties props{};
+    mem_props(static_cast<VkPhysicalDevice>(vk.physical_device), &props);
+    constexpr VkMemoryPropertyFlags kHost =
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    uint32_t type = UINT32_MAX;
+    for (uint32_t i = 0; i < props.memoryTypeCount; ++i) {
+      if ((req.memoryTypeBits & (1U << i)) != 0U &&
+          (props.memoryTypes[i].propertyFlags & kHost) == kHost) {
+        type = i;
+        break;
+      }
+    }
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    VkMemoryAllocateInfo mai{};
+    mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    mai.allocationSize = req.size;
+    mai.memoryTypeIndex = type;
+    bool ok = type != UINT32_MAX &&
+              vkAllocateMemory(device, &mai, nullptr, &memory) == VK_SUCCESS &&
+              vkBindBufferMemory(device, buffer, memory, 0) == VK_SUCCESS;
+    void* mapped = nullptr;
+    ok = ok && vkMapMemory(device, memory, 0, size, 0, &mapped) == VK_SUCCESS;
+    if (ok) {
+      // B8G8R8A8: bytes B, G, R, A.
+      auto* px = static_cast<uint8_t*>(mapped);
+      for (uint32_t y = 0; y < h; ++y) {
+        for (uint32_t x = 0; x < w; ++x) {
+          const bool right = x >= w / 2;
+          const bool bottom = y >= h / 2;
+          const uint32_t c =
+              bottom ? (right ? kWhite : kBlue) : (right ? kGreen : kRed);
+          uint8_t* p = px + (static_cast<size_t>(y) * w + x) * 4;
+          p[0] = static_cast<uint8_t>(c);
+          p[1] = static_cast<uint8_t>(c >> 8U);
+          p[2] = static_cast<uint8_t>(c >> 16U);
+          p[3] = 0xFF;
+        }
+      }
+      vkUnmapMemory(device, memory);
+    }
+
+    VkCommandPool pool = VK_NULL_HANDLE;
+    VkCommandPoolCreateInfo pci{};
+    pci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    pci.queueFamilyIndex = vk.queue_family_index;
+    ok = ok && vkCreateCommandPool(device, &pci, nullptr, &pool) == VK_SUCCESS;
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    VkCommandBufferAllocateInfo cai{};
+    cai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cai.commandPool = pool;
+    cai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cai.commandBufferCount = 1;
+    ok = ok && vkAllocateCommandBuffers(device, &cai, &cmd) == VK_SUCCESS;
+    if (ok) {
+      VkCommandBufferBeginInfo bi{};
+      bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+      bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+      vkBeginCommandBuffer(cmd, &bi);
+      VkImageMemoryBarrier b{};
+      b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+      b.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+      b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+      b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      b.image = image;
+      b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+      b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+      vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                           VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                           nullptr, 1, &b);
+      VkBufferImageCopy region{};
+      region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+      region.imageExtent = {w, h, 1};
+      vkCmdCopyBufferToImage(cmd, buffer, image,
+                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+      b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+      b.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+      b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+      b.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+      vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                           VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0,
+                           nullptr, 0, nullptr, 1, &b);
+      vkEndCommandBuffer(cmd);
+      VkSubmitInfo si{};
+      si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      si.commandBufferCount = 1;
+      si.pCommandBuffers = &cmd;
+      const auto queue = static_cast<VkQueue>(vk.queue);
+      ok = vkQueueSubmit(queue, 1, &si, VK_NULL_HANDLE) == VK_SUCCESS &&
+           vkQueueWaitIdle(queue) == VK_SUCCESS;
+    }
+    if (pool != VK_NULL_HANDLE) {
+      vkDestroyCommandPool(device, pool, nullptr);
+    }
+    if (memory != VK_NULL_HANDLE) {
+      vkFreeMemory(device, memory, nullptr);
+    }
+    vkDestroyBuffer(device, buffer, nullptr);
+    return ok;
+  }
+
+  // The active CRTC: vkms has one, driving the connector the backend took.
+  static uint32_t ActiveCrtc(int fd) {
+    uint32_t id = 0;
+    if (drmModeRes* res = drmModeGetResources(fd); res != nullptr) {
+      for (int i = 0; i < res->count_crtcs && id == 0; ++i) {
+        if (drmModeCrtc* crtc = drmModeGetCrtc(fd, res->crtcs[i]);
+            crtc != nullptr) {
+          if (crtc->mode_valid != 0) {
+            id = crtc->crtc_id;
+          }
+          drmModeFreeCrtc(crtc);
+        }
+      }
+      drmModeFreeResources(res);
+    }
+    return id;
+  }
+};
+
+TEST_P(VulkanDrmVkmsTurnPixels, ThePictureIsTurnedOnThePanel) {
+  ASSERT_NE(backend_, nullptr);
+  EXPECT_EQ(backend_->TurnedOnGpuForTest(), GetParam().gpu);
+  const uint32_t w = backend_->width();
+  const uint32_t h = backend_->height();
+
+  FlutterBackingStoreConfig cfg{};
+  cfg.struct_size = sizeof(FlutterBackingStoreConfig);
+  cfg.size = FlutterSize{static_cast<double>(w), static_cast<double>(h)};
+  FlutterBackingStore bs{};
+  ASSERT_TRUE(backend_->CreateBackingStoreForTest(&cfg, &bs));
+  ASSERT_TRUE(Paint(reinterpret_cast<VkImage>(bs.vulkan.image->image), w, h));
+
+  FlutterLayer layer{};
+  layer.struct_size = sizeof(FlutterLayer);
+  layer.type = kFlutterLayerContentTypeBackingStore;
+  layer.backing_store = &bs;
+  layer.offset = FlutterPoint{0.0, 0.0};
+  layer.size = cfg.size;
+  const FlutterLayer* layers[] = {&layer};
+  ASSERT_TRUE(backend_->PresentLayersForTest(layers, 1));
+  backend_->CollectBackingStoreForTest(&bs);
+
+  const drm::Device dev = drm::Device::from_fd(backend_->DrmFdForTest());
+  const uint32_t crtc = ActiveCrtc(dev.fd());
+  ASSERT_NE(crtc, 0u);
+  auto shot = drm::capture::snapshot(dev, crtc);
+  if (!shot) {
+    // The capture maps the scanout buffer through its dma-buf, which a
+    // hardware GPU's export into vkms need not allow. CPU-memory Vulkan
+    // (lavapipe, all a CI runner has) does.
+    GTEST_SKIP() << "the CRTC cannot be read back from this Vulkan device ("
+                 << shot.error().message()
+                 << "); VK_DRIVER_FILES=<lavapipe ICD> runs this case";
+  }
+  const drm::capture::Image& img = shot.value();
+  if (const char* dir = std::getenv("IHS_TEST_CAPTURE_DIR"); dir != nullptr) {
+    const std::string path = std::string(dir) + "/vk_turn_" +
+                             std::to_string(GetParam().degrees) +
+                             (GetParam().gpu ? "_gpu" : "_plane") + ".png";
+    (void)drm::capture::write_png(img, path);
+  }
+  ASSERT_EQ(img.width(), card_.mode_w);
+  ASSERT_EQ(img.height(), card_.mode_h);
+  const auto at = [&img](uint32_t x, uint32_t y) {
+    return img.pixels()[static_cast<size_t>(y) * img.width() + x] & 0x00FFFFFFu;
+  };
+  const uint32_t pw = img.width();
+  const uint32_t ph = img.height();
+  const auto want = PanelQuadrants(GetParam().degrees);
+  EXPECT_EQ(at(pw / 4, ph / 4), want[0]) << "top-left";
+  EXPECT_EQ(at(3 * pw / 4, ph / 4), want[1]) << "top-right";
+  EXPECT_EQ(at(pw / 4, 3 * ph / 4), want[2]) << "bottom-left";
+  EXPECT_EQ(at(3 * pw / 4, 3 * ph / 4), want[3]) << "bottom-right";
+}
+
+INSTANTIATE_TEST_SUITE_P(Paths,
+                         VulkanDrmVkmsTurnPixels,
+                         ::testing::Values(TurnCase{0, false},
+                                           TurnCase{90, true},
+                                           TurnCase{180, true},
+                                           TurnCase{270, true}),
+                         [](const ::testing::TestParamInfo<TurnCase>& info) {
+                           return "Rotate" +
+                                  std::to_string(info.param.degrees) +
+                                  (info.param.gpu ? "Gpu" : "Plane");
+                         });
+#endif  // IHS_TEST_HAVE_CAPTURE
 
 // The serial a flip event will report must already name this frame by the time
 // the commit is in flight.

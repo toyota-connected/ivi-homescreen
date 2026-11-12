@@ -258,6 +258,26 @@ TEST(HomescreenConfigurationGetTomlConfig, OutputArray) {
 }
 
 /****************************************************************
+Test Case Name.Test Name： HomescreenConfigurationGetTomlConfig_OutputRotation
+Use Case Name: Initialization
+Test Summary：Each additional [[view.output]] carries its own rotation; unset
+is no rotation, and one that is not 0/90/180/270 is dropped.
+***************************************************************/
+TEST(HomescreenConfigurationGetTomlConfig, OutputRotation) {
+  Configuration::Config config{};
+  std::filesystem::path config_toml_path = kSourceRoot;
+  config_toml_path /= "files/GetTomlConfig_OutputRotation.toml";
+
+  Configuration::get_toml_config(config_toml_path.c_str(), config);
+
+  EXPECT_FALSE(config.view.output.rotation.has_value());
+  ASSERT_EQ(3u, config.view.additional_outputs.size());
+  EXPECT_EQ(90, config.view.additional_outputs[0].rotation.value_or(-1));
+  EXPECT_FALSE(config.view.additional_outputs[1].rotation.has_value());
+  EXPECT_FALSE(config.view.additional_outputs[2].rotation.has_value());
+}
+
+/****************************************************************
 Test Case Name.Test Name： HomescreenConfigurationParseConfig_MultiView
 Use Case Name: Initialization
 Test Summary：A --config master file yields one Config per [[view]], each with

@@ -68,6 +68,7 @@
 #include "backend/drm_kms_vulkan/device_caps.h"
 #include "backend/drm_kms_vulkan/drm_scanout_target.h"
 #include "backend/drm_kms_vulkan/modifier_format.h"
+#include "backend/drm_kms_vulkan/rotation_caps.h"
 #include "backend/drm_kms_vulkan/vulkan_backing_store.h"
 #include "engine.h"
 #include "engine_switches.h"
@@ -75,6 +76,7 @@
 #include "shell/platform/homescreen/flutter_desktop_engine_state.h"
 #include "shell/platform/homescreen/flutter_desktop_texture_registrar.h"
 #include "task_runner.h"
+#include "view/display_rotation.h"
 #include "view/layer_scanout.h"
 #include "view/presentation.h"
 
@@ -131,40 +133,6 @@ class ScopedFd {
  private:
   int fd_{-1};
 };
-
-// Map a rotation in degrees (validated to 0|90|180|270 at config time) to the
-// KMS plane rotation bitflag. drm-cxx lowers DisplayParams::rotation to the
-// plane's `rotation` property (or software pre-rotation if the plane lacks it).
-uint64_t RotationToDrmFlag(const int degrees) {
-  switch (degrees) {
-    case 90:
-      return DRM_MODE_ROTATE_90;
-    case 180:
-      return DRM_MODE_ROTATE_180;
-    case 270:
-      return DRM_MODE_ROTATE_270;
-    default:
-      return DRM_MODE_ROTATE_0;
-  }
-}
-
-// Whether the display can scan out a buffer with this modifier under a 90/270
-// rotation. amdgpu rejects both LINEAR (the rotated fetch needs a tiled read
-// pattern) and DCC (delta-color compression is incompatible with the rotated
-// read) for 90/270, so keep only tiled, non-DCC modifiers. Non-AMD tiled
-// modifiers are assumed rotatable (the kernel still validates at AddFB/commit).
-bool RotationCompatible(const uint64_t mod) {
-  if (mod == DRM_FORMAT_MOD_LINEAR) {
-    return false;
-  }
-#ifdef AMD_FMT_MOD
-  if (static_cast<uint8_t>(mod >> 56) == DRM_FORMAT_MOD_VENDOR_AMD &&
-      AMD_FMT_MOD_GET(DCC, mod) != 0U) {
-    return false;
-  }
-#endif
-  return true;
-}
 
 // Device extensions required for zero-copy dma-buf scanout and explicit
 // synchronization. Most dependencies of VK_EXT_image_drm_format_modifier
@@ -466,6 +434,48 @@ void WaitForFlip(const int drm_fd, drmEventContext& evctx) {
   }
 }
 
+// Whether the scanout layer of a committed frame landed on a plane that rotates
+// by `rotation`. The startup check asks whether any plane on the CRTC can; this
+// is the plane the allocator actually bound. A layer it composited instead is
+// drawn unrotated, since composition does not rotate (#838), so that is said
+// at error level rather than left to whoever looks at the screen.
+bool RotationReachedPlane(const std::optional<drm::scene::LayerHandle>& layer,
+                          const uint64_t rotation,
+                          const drm::scene::CommitReport& report) {
+  const std::string angle = drm_kms_vulkan::DescribeRotationBits(rotation);
+  if (layer.has_value()) {
+    for (const auto& p : report.placements) {
+      if (!(p.handle == *layer)) {
+        continue;
+      }
+      if (p.placement != drm::scene::LayerPlacement::AssignedToPlane) {
+        ihs::log::error(
+            "[VulkanDrmBackend] --drm-rotation dropped: the scanout layer was "
+            "composited rather than placed on a plane, and composition does "
+            "not rotate ({} requested); the picture is unrotated",
+            angle);
+        return false;
+      }
+      if (!drm_kms_vulkan::RotationSupported(p.plane_rotation_bits, rotation)) {
+        ihs::log::error(
+            "[VulkanDrmBackend] --drm-rotation dropped: plane {} took the "
+            "scanout layer but offers only {} ({} requested)",
+            p.plane_id,
+            drm_kms_vulkan::DescribeRotationBits(p.plane_rotation_bits), angle);
+        return false;
+      }
+      ihs::log::info("[VulkanDrmBackend] rotation {} on plane {}", angle,
+                     p.plane_id);
+      return true;
+    }
+  }
+  ihs::log::error(
+      "[VulkanDrmBackend] --drm-rotation unconfirmed: the commit report does "
+      "not place the scanout layer ({} requested)",
+      angle);
+  return false;
+}
+
 }  // namespace
 
 std::atomic<VulkanDrmBackend*> VulkanDrmBackend::s_active_{nullptr};
@@ -513,6 +523,7 @@ VulkanDrmBackend::~VulkanDrmBackend() {
   // destroyed after this body -- and so after Teardown() -- calling vkDestroy*
   // on a dead device.
   layer_compositor_.reset();
+  turn_compositor_.reset();
 #endif
   // Tear the cursor down first: it commits on compositor_'s DRM device, so it
   // must not outlive it.
@@ -749,6 +760,8 @@ struct VulkanDrmBackend::CompositorState {
     scene.reset();
     ring_owner.reset();
     slots.clear();
+    // The turn targets' framebuffers went with the ring above.
+    turn_targets.clear();
     if (barrier_fence != VK_NULL_HANDLE) {
       d().vkDestroyFence(vk_device, barrier_fence, nullptr);
     }
@@ -807,10 +820,35 @@ struct VulkanDrmBackend::CompositorState {
   uint32_t crtc_width = 0;
   uint32_t crtc_height = 0;
   // Plane rotation (DRM_MODE_ROTATE_*) applied to the scanned-out buffer.
+  // ROTATE_0 when the GPU does the turn instead (see turn).
   uint64_t rotation = 0;
+  // Set when --drm-rotation is turned on the GPU rather than by a plane
+  // (#848): no plane on the CRTC offers the angle, the driver cannot rotate
+  // any buffer layout the GPU can export, or IVI_DRMVK_GPU_ROTATION asks for
+  // it. Each present then draws the finished frame turned into one of
+  // turn_targets, which is what the scene scans out, unrotated. The engine's
+  // slots never reach a plane, so they are allocated for rendering
+  // (render_modifiers) rather than for scanout.
+  std::optional<DisplayRotation> turn;
+  // Panel-sized scanout buffers the turn draws into, ring slots 0..N-1. Three:
+  // one scanning, one in the pending flip, one to draw.
+  static constexpr size_t kTurnTargets = 3;
+  std::vector<std::unique_ptr<drm_kms_vulkan::VulkanBackingStore>> turn_targets;
+  int turn_scanning = -1;
+  int turn_pending = -1;
+  // The target this present draws into, chosen in PresentSlot. Raster thread.
+  size_t turn_target = 0;
+  // What the engine's slots allocate against when turned: anything the GPU
+  // exports, so a sampleable layout can be had where the plane's set has none.
+  std::vector<uint64_t> render_modifiers;
+  // Whether the first committed frame's placement has been checked against
+  // the rotation (RotationReachedPlane), and what it found. Raster thread only.
+  bool rotation_checked = false;
+  bool rotation_on_plane = false;
   // Modifiers the backing stores allocate against. LINEAR for an unrotated
-  // scanout (simple, universally importable); tiled non-DCC for 90/270 (amdgpu
-  // requires a tiled layout to rotate, and rejects DCC + rotation).
+  // scanout (simple, universally importable). For 90/270, see
+  // RotatedScanoutModifiers: tiled where the driver has one it can rotate,
+  // else LINEAR where the driver rotates that (amdgpu does not).
   std::vector<uint64_t> scanout_modifiers;
   // Set only when the display cannot import what the GPU exports, and the
   // buffers therefore come from a contiguous heap instead. Null means the
@@ -1075,36 +1113,16 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   const bool swap = (rotation_ == 90 || rotation_ == 270);
   state->width = swap ? target.mode_height : target.mode_width;
   state->height = swap ? target.mode_width : target.mode_height;
-  state->rotation = RotationToDrmFlag(rotation_);
+  state->rotation = drm_kms_vulkan::RotationToDrmFlag(rotation_);
 
-  // Pick the backing-store modifiers. Unrotated: LINEAR (simple, importable
-  // everywhere). 90/270: a tiled non-DCC modifier from the negotiated set —
-  // amdgpu needs tiling to rotate and rejects DCC + rotation. If the filter
-  // empties (no tiled scanout modifier), fall back to LINEAR so allocation
-  // still succeeds; the rotated commit then fails loudly rather than silently.
-  if (swap) {
-    for (const auto m : allowed) {
-      if (RotationCompatible(m)) {
-        state->scanout_modifiers.push_back(m);
-      }
+  // The KMS driver, not the Vulkan one: whether a LINEAR buffer can be scanned
+  // out rotated is the display's question.
+  std::string kms_driver;
+  if (drmVersionPtr v = drmGetVersion(state->device.fd()); v != nullptr) {
+    if (v->name != nullptr) {
+      kms_driver = v->name;
     }
-    if (state->scanout_modifiers.empty()) {
-      ihs::log::warn(
-          "[VulkanDrmBackend] no tiled non-DCC modifier available for a "
-          "{}-degree rotation; the rotated scanout will not commit",
-          rotation_);
-      state->scanout_modifiers.push_back(DRM_FORMAT_MOD_LINEAR);
-    } else {
-      std::string picked;
-      for (const auto m : state->scanout_modifiers) {
-        picked += " " + drm_kms_vulkan::DescribeModifier(m);
-      }
-      ihs::log::info(
-          "[VulkanDrmBackend] rotation {} backing-store modifiers:{}",
-          rotation_, picked);
-    }
-  } else {
-    state->scanout_modifiers.push_back(DRM_FORMAT_MOD_LINEAR);
+    drmFreeVersion(v);
   }
 
   drm::scene::LayerScene::Config scfg{};
@@ -1117,6 +1135,81 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
     return false;
   }
   state->scene = std::move(scene_exp.value());
+
+  // Who turns the picture. A plane does when one on this CRTC that scans out
+  // the format offers the angle (asked before the first commit, #838) and,
+  // for 90/270, the driver can rotate a buffer layout the GPU exports: a tiled
+  // one where there is one, else LINEAR where the driver rotates that (amdgpu
+  // does not, and never DCC). Otherwise the GPU turns each frame into a
+  // panel-sized buffer the plane scans out unrotated (#848), rather than the
+  // layer being composited unrotated or the angle refused.
+  std::string turn_reason;
+  if (rotation_ != 0) {
+    const uint64_t bits = state->scene->candidate_rotation(state->fourcc);
+    if (std::getenv("IVI_DRMVK_GPU_ROTATION") != nullptr) {
+      turn_reason = "IVI_DRMVK_GPU_ROTATION is set";
+    } else if (!drm_kms_vulkan::RotationSupported(bits, state->rotation)) {
+      turn_reason = fmt::format(
+          "no plane that scans out this format offers it (they offer: {})",
+          drm_kms_vulkan::DescribeRotationBits(bits));
+    } else if (swap) {
+      state->scanout_modifiers =
+          drm_kms_vulkan::RotatedScanoutModifiers(allowed, kms_driver);
+      if (state->scanout_modifiers.empty()) {
+        turn_reason = fmt::format(
+            "{} cannot rotate any negotiated scanout modifier (no tiled "
+            "non-DCC one, and it does not rotate LINEAR)",
+            kms_driver);
+      }
+    }
+  }
+  // Turn on the GPU from here on: the plane scans out the panel unrotated.
+  [[maybe_unused]] const auto turn_on_gpu = [&](const std::string& why) {
+    state->turn = DisplayRotation{rotation_, static_cast<int32_t>(state->width),
+                                  static_cast<int32_t>(state->height),
+                                  static_cast<int32_t>(state->crtc_width),
+                                  static_cast<int32_t>(state->crtc_height)};
+    state->rotation = DRM_MODE_ROTATE_0;
+    state->scanout_modifiers.assign(1, DRM_FORMAT_MOD_LINEAR);
+    state->render_modifiers = drm_kms_vulkan::ExportableModifiers(
+        physical_device_, VK_FORMAT_B8G8R8A8_UNORM);
+    if (state->render_modifiers.empty()) {
+      state->render_modifiers = allowed;
+    }
+    ihs::log::info(
+        "[VulkanDrmBackend] rotation {} turned on the GPU: {}. Each frame is "
+        "drawn turned into a {}x{} scanout buffer",
+        rotation_, why, state->crtc_width, state->crtc_height);
+  };
+  if (!turn_reason.empty()) {
+#if BUILD_COMPOSITOR
+    turn_on_gpu(turn_reason);
+#else
+    // The turn is drawn by the layer compositor, which only this build has.
+    err = fmt::format(
+        "--drm-rotation {} cannot be served on crtc {}: {}, and turning it on "
+        "the GPU needs a build with BUILD_COMPOSITOR",
+        rotation_, target.crtc_id, turn_reason);
+    return false;
+#endif
+  } else if (swap) {
+    std::string picked;
+    for (const auto m : state->scanout_modifiers) {
+      picked += " " + drm_kms_vulkan::DescribeModifier(m);
+    }
+    ihs::log::info("[VulkanDrmBackend] rotation {} backing-store modifiers:{}",
+                   rotation_, picked);
+  } else {
+    state->scanout_modifiers.push_back(DRM_FORMAT_MOD_LINEAR);
+  }
+
+  // A plane per layer would put each store on the panel unturned.
+  if (state->turn && plane_layers_) {
+    plane_layers_ = false;
+    ihs::log::info(
+        "[VulkanDrmBackend] IVI_DRMVK_PLANE_LAYERS ignored: the GPU turns "
+        "every frame into one buffer");
+  }
 
   if (plane_layers_) {
     // Bias every overlay's zpos by the primary's own. A raw zpos of 1 sits
@@ -1163,10 +1256,12 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
   // is gone before the memory it references).
   {
     std::string probe_err;
+    // Turned, what scans out is the panel-sized turn target, not the slots.
+    const uint32_t probe_w = state->turn ? state->crtc_width : state->width;
+    const uint32_t probe_h = state->turn ? state->crtc_height : state->height;
     auto probe = drm_kms_vulkan::VulkanBackingStore::Create(
-        physical_device_, device_, state->width, state->height,
-        VK_FORMAT_B8G8R8A8_UNORM, state->fourcc, state->scanout_modifiers,
-        probe_err);
+        physical_device_, device_, probe_w, probe_h, VK_FORMAT_B8G8R8A8_UNORM,
+        state->fourcc, state->scanout_modifiers, probe_err);
     if (!probe) {
       err = "scanout buffer allocation failed: " + probe_err;
       return false;
@@ -1190,8 +1285,8 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
       }
       std::string imported_err;
       auto imported = drm_kms_vulkan::VulkanBackingStore::CreateImported(
-          physical_device_, device_, state->width, state->height,
-          VK_FORMAT_B8G8R8A8_UNORM, state->fourcc, *contiguous, imported_err);
+          physical_device_, device_, probe_w, probe_h, VK_FORMAT_B8G8R8A8_UNORM,
+          state->fourcc, *contiguous, imported_err);
       if (!imported) {
         err =
             "the display cannot import the GPU's exported buffers, and the "
@@ -1211,18 +1306,53 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
           "[VulkanDrmBackend] the display cannot import the GPU's exported "
           "buffers; scanning out of the '{}' contiguous heap instead",
           contiguous->name());
-      // Linear is the only layout a contiguous heap allocation has, so a
-      // rotation that needed a tiled modifier cannot be served this way. 0/180
-      // never did, so only the swapping rotations lose anything here.
-      if (swap) {
-        ihs::log::warn(
-            "[VulkanDrmBackend] rotation {} needs a tiled modifier, which the "
-            "contiguous scanout path cannot provide; the rotated commit will "
-            "fail",
-            rotation_);
+      // Linear is the only layout a contiguous heap allocation has, so a plane
+      // can do a 90/270 rotation this way only where the driver rotates
+      // LINEAR. 0/180 never needed more. Where it cannot, the GPU turns it.
+      if (swap && !state->turn && !drm_kms_vulkan::LinearRotates(kms_driver)) {
+#if BUILD_COMPOSITOR
+        turn_on_gpu(fmt::format(
+            "the contiguous heap this display needs allocates LINEAR only, "
+            "which {} does not rotate",
+            kms_driver));
+#else
+        err = fmt::format(
+            "--drm-rotation {} needs a tiled scanout buffer on {}, and the "
+            "contiguous heap this display needs allocates LINEAR only",
+            rotation_, kms_driver);
+        return false;
+#endif
       }
       state->scanout_modifiers.assign(1, DRM_FORMAT_MOD_LINEAR);
       state->contiguous = std::move(contiguous);
+    }
+  }
+
+  // The panel-sized buffers the GPU turns each frame into, made the way the
+  // probe above settled and imported as the ring the scene scans out.
+  if (state->turn) {
+    state->ring_owner = std::make_unique<VkScanoutRing>();
+    state->ring = state->ring_owner.get();
+    for (size_t i = 0; i < CompositorState::kTurnTargets; ++i) {
+      std::string turn_err;
+      auto store = state->contiguous
+                       ? drm_kms_vulkan::VulkanBackingStore::CreateImported(
+                             physical_device_, device_, state->crtc_width,
+                             state->crtc_height, VK_FORMAT_B8G8R8A8_UNORM,
+                             state->fourcc, *state->contiguous, turn_err)
+                       : drm_kms_vulkan::VulkanBackingStore::Create(
+                             physical_device_, device_, state->crtc_width,
+                             state->crtc_height, VK_FORMAT_B8G8R8A8_UNORM,
+                             state->fourcc, state->scanout_modifiers, turn_err);
+      if (!store) {
+        err = "turned scanout buffer allocation failed: " + turn_err;
+        return false;
+      }
+      if (!state->ring->AddSlot(state->device, *store, state->fourcc)) {
+        err = "turned scanout buffer framebuffer import failed";
+        return false;
+      }
+      state->turn_targets.push_back(std::move(store));
     }
   }
 
@@ -1566,8 +1696,13 @@ int VulkanDrmBackend::AcquireScanoutSlot(const uint32_t w, const uint32_t h) {
     // per-plane layout. Imported: one linear buffer from the contiguous heap,
     // whose layout we state. Either way AddSlot imports the framebuffer with
     // store.modifier(), so the layout is honored end to end.
+    // Turned on the GPU, a slot is only rendered and sampled, never scanned
+    // out: allocate it for that, whichever direction the scanout went.
     auto store =
-        c.contiguous
+        c.turn ? drm_kms_vulkan::VulkanBackingStore::Create(
+                     physical_device_, device_, w, h, VK_FORMAT_B8G8R8A8_UNORM,
+                     c.fourcc, c.render_modifiers, err)
+        : c.contiguous
             ? drm_kms_vulkan::VulkanBackingStore::CreateImported(
                   physical_device_, device_, w, h, VK_FORMAT_B8G8R8A8_UNORM,
                   c.fourcc, *c.contiguous, err)
@@ -1578,6 +1713,17 @@ int VulkanDrmBackend::AcquireScanoutSlot(const uint32_t w, const uint32_t h) {
       ihs::log::error("[VulkanDrmBackend] CreateBackingStore({}x{}): {}", w, h,
                       err);
       return -1;
+    }
+    if (c.turn) {
+      // The ring holds the turn targets; slots are indexed on their own.
+      slot = static_cast<int>(c.slots.size());
+      c.key_to_slot[store.get()] = static_cast<size_t>(slot);
+      c.slots.push_back({std::move(store), false, nullptr});
+      ihs::log::info(
+          "[VulkanDrmBackend] render ring grew to {} buffer(s) ({}x{}, {})",
+          c.slots.size(), w, h,
+          drm_kms_vulkan::DescribeModifier(c.slots.back().store->modifier()));
+      return slot;
     }
     if (c.ring == nullptr) {
       c.ring_owner = std::make_unique<VkScanoutRing>();
@@ -1698,6 +1844,14 @@ uint64_t VulkanDrmBackend::PresentedFramesForTest() const {
   return compositor_ ? compositor_->frame : 0;
 }
 
+bool VulkanDrmBackend::RotationOnPlaneForTest() const {
+  return compositor_ && compositor_->rotation_on_plane;
+}
+
+bool VulkanDrmBackend::TurnedOnGpuForTest() const {
+  return compositor_ && compositor_->turn.has_value();
+}
+
 uint64_t VulkanDrmBackend::LastFlipNsForTest() const {
   return compositor_ ? compositor_->last_flip_ns.load(std::memory_order_acquire)
                      : 0;
@@ -1811,6 +1965,8 @@ void VulkanDrmBackend::OnSessionResumed(const int new_fd) {
   c->plane_topology_changed = true;
   c->scanning_slot = -1;
   c->pending_slot = -1;
+  c->turn_scanning = -1;
+  c->turn_pending = -1;
   // The plane-layer path keeps its live stores in these two lists instead of
   // the single-plane indexes above, and AcquireScanoutSlot excludes both when
   // looking for a reusable slot. Master loss ended that scanout as surely as
@@ -2013,6 +2169,12 @@ int VulkanDrmBackend::SubmitScanoutBarrier(
                 VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr,
                 1, &barrier);
           }
+#if BUILD_COMPOSITOR
+          // Turned on the GPU, what scans out is the turn target, drawn last.
+          if (c.turn) {
+            (void)RecordTurn(c, cmd, image);
+          }
+#endif
         },
         c.pending_acquire_waits);
     // This path blocks until the submit retires, so the imported semaphores
@@ -2109,6 +2271,14 @@ int VulkanDrmBackend::SubmitScanoutBarrier(
   (void)height;
   (void)layers;
   (void)count;
+#endif
+#if BUILD_COMPOSITOR
+  // Turned on the GPU, the finished frame -- HUD included, so it turns with
+  // the picture -- is drawn into the turn target the scene scans out. Same
+  // submit, so the exported fence covers it.
+  if (c.turn) {
+    (void)RecordTurn(c, cmd, image);
+  }
 #endif
   d().vkEndCommandBuffer(cmd);
   return SubmitSyncRing(c, i);
@@ -3305,6 +3475,136 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
   restore_handoffs();
   return opened;
 }
+
+bool VulkanDrmBackend::RecordTurn(CompositorState& c,
+                                  VkCommandBuffer cmd,
+                                  VkImage image) {
+  drm_kms_vulkan::VulkanBackingStore* store = nullptr;
+  for (const auto& slot : c.slots) {
+    if (slot.store && slot.store->image() == image) {
+      store = slot.store.get();
+      break;
+    }
+  }
+  if (store == nullptr || !c.turn || c.turn_target >= c.turn_targets.size()) {
+    return false;
+  }
+  if (!turn_compositor_ && !turn_compositor_failed_) {
+    std::string err;
+    turn_compositor_ = wl_vulkan::LayerCompositor::Create(
+        device_, VK_FORMAT_B8G8R8A8_UNORM, err,
+        wl_vulkan::LayerCompositor::ContentMode::kClear);
+    if (!turn_compositor_) {
+      turn_compositor_failed_ = true;
+      ihs::log::error(
+          "[VulkanDrmBackend] --drm-rotation cannot be turned on the GPU ({}); "
+          "the display will show the last turned frame",
+          err);
+    }
+  }
+  if (!turn_compositor_) {
+    return false;
+  }
+
+  const auto barrier =
+      [cmd](VkImage img, VkImageLayout from, VkImageLayout to,
+            VkAccessFlags src_access, VkPipelineStageFlags src_stage,
+            VkAccessFlags dst_access, VkPipelineStageFlags dst_stage) {
+        const VkImageMemoryBarrier b =
+            ColorBarrier(img, from, to, src_access, dst_access);
+        d().vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 0, nullptr, 0,
+                                 nullptr, 1, &b);
+      };
+
+  // The slot was last written by the engine, the overlay blend or the HUD, and
+  // may have been through a barrier to GENERAL since: wait on all of it.
+  constexpr VkPipelineStageFlags kAfterEverything =
+      VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+  constexpr VkAccessFlags kWrites =
+      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+
+  // Sample the slot itself where its usage allows; otherwise a copy of it
+  // (#617). A slot made from render_modifiers is normally sampleable, which
+  // is why it is made that way.
+  VkImage sampled = image;
+  VkImageLayout left_in = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  if (!store->sampleable()) {
+    // Past every index an overlay blend can take (at most one per slot).
+    VkImage scratch =
+        store->copyable()
+            ? AcquireSampleScratch(c, CompositorState::kMaxRing, store->width(),
+                                   store->height(), store->vk_format())
+            : VK_NULL_HANDLE;
+    if (scratch != VK_NULL_HANDLE) {
+      barrier(image, VK_IMAGE_LAYOUT_GENERAL,
+              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, kWrites, kAfterEverything,
+              VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+      barrier(scratch, VK_IMAGE_LAYOUT_UNDEFINED,
+              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0,
+              VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
+              VK_PIPELINE_STAGE_TRANSFER_BIT);
+      VkImageCopy region{};
+      region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+      region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+      region.extent = {store->width(), store->height(), 1};
+      d().vkCmdCopyImage(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                         scratch, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+                         &region);
+      barrier(scratch, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+              VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+              VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+      sampled = scratch;
+      left_in = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    } else {
+      static std::once_flag warned;
+      std::call_once(warned, [] {
+        ihs::log::warn(
+            "[VulkanDrmBackend] turning --drm-rotation by sampling a render "
+            "buffer created without SAMPLED usage, and no TRANSFER_SRC to "
+            "copy it with either (#617). Frames may be correct anyway; the "
+            "usage is not");
+      });
+    }
+  }
+  if (sampled == image) {
+    barrier(image, VK_IMAGE_LAYOUT_GENERAL,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, kWrites, kAfterEverything,
+            VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+  }
+
+  // The whole frame, turned onto the panel: one opaque quad. Vulkan images
+  // are first row first, so the frame's own mapping is the identity.
+  const DisplayRotation& turn = *c.turn;
+  const auto& target = c.turn_targets[c.turn_target];
+  bool drawn = false;
+  if (turn_compositor_->BeginFrame(cmd, target->view(), target->width(),
+                                   target->height(), c.frame)) {
+    const RectI dst = turn.ToPanel(RectI{0, 0, turn.render_w, turn.render_h});
+    turn_compositor_->DrawLayer(cmd, sampled, store->vk_format(),
+                                VK_SAMPLER_YCBCR_MODEL_CONVERSION_RGB_IDENTITY,
+                                VK_SAMPLER_YCBCR_RANGE_ITU_NARROW, dst.x, dst.y,
+                                dst.w, dst.h, turn.ToPanel(UvAffine{}),
+                                /*opaque=*/true);
+    wl_vulkan::LayerCompositor::EndFrame(cmd);
+    drawn = true;
+    // The pass leaves the target in GENERAL; make its writes visible to the
+    // scanout engine, as the slot's own barrier does on the unturned path.
+    barrier(target->image(), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
+            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_ACCESS_MEMORY_READ_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+  }
+
+  // Back to GENERAL, where every present leaves a slot.
+  const bool copied = left_in == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+  barrier(image, left_in, VK_IMAGE_LAYOUT_GENERAL,
+          copied ? VK_ACCESS_TRANSFER_READ_BIT : VK_ACCESS_SHADER_READ_BIT,
+          copied ? VK_PIPELINE_STAGE_TRANSFER_BIT
+                 : VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+          0, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+  return drawn;
+}
 #endif  // BUILD_COMPOSITOR
 
 bool VulkanDrmBackend::PresentLayersImpl(const FlutterLayer** layers,
@@ -3674,6 +3974,22 @@ bool VulkanDrmBackend::PresentSlot(const size_t slot,
     c.scanning_slot = c.pending_slot;
     c.pending_slot = -1;
   }
+  // The same for the turn targets, when the GPU turns the frame: pick one KMS
+  // is neither scanning nor about to, for the barrier below to draw into.
+  if (c.turn) {
+    if (c.turn_pending >= 0) {
+      c.turn_scanning = c.turn_pending;
+      c.turn_pending = -1;
+    }
+    for (size_t k = 0; k < c.turn_targets.size(); ++k) {
+      const size_t cand = (c.turn_target + 1 + k) % c.turn_targets.size();
+      if (static_cast<int>(cand) != c.turn_scanning &&
+          static_cast<int>(cand) != c.turn_pending) {
+        c.turn_target = cand;
+        break;
+      }
+    }
+  }
   // Then hold the composite until the repaint window opens, so a producer
   // buffer that lands meanwhile makes this vblank rather than the next. The
   // flip lands on the same vblank either way.
@@ -3718,6 +4034,8 @@ bool VulkanDrmBackend::PresentSlot(const size_t slot,
     // dst_rect is the CRTC mode; src_rect defaults to the buffer's full extent
     // (the render size). For a 90/270 rotation the render buffer is landscape
     // and the plane rotates it onto the portrait CRTC, so dst != src extent.
+    // Turned on the GPU, the buffer is a panel-sized turn target and the
+    // rotation ROTATE_0.
     desc.display.dst_rect = {0, 0, c.crtc_width, c.crtc_height};
     desc.display.rotation = c.rotation;
     auto layer = c.scene->add_layer(std::move(desc));
@@ -3732,15 +4050,17 @@ bool VulkanDrmBackend::PresentSlot(const size_t slot,
   // Mark the slot ready. On the explicit-sync path, hand its render-done
   // sync_file to the source as the acquire fence (the scene lowers it to the
   // plane's IN_FENCE_FD). import_fd dups, so the fence the ring receives is its
-  // own; ours is closed by ScopedFd on the way out either way.
+  // own; ours is closed by ScopedFd on the way out either way. Turned on the
+  // GPU, the ring's slots are the turn targets and the one drawn is ready.
+  const size_t ready = c.turn ? c.turn_target : slot;
   if (scanout_fence.get() >= 0) {
     if (auto fence = drm::sync::SyncFence::import_fd(scanout_fence.get())) {
-      c.ring->SetReady(slot, std::move(fence.value()));
+      c.ring->SetReady(ready, std::move(fence.value()));
     } else {
-      c.ring->SetReady(slot);
+      c.ring->SetReady(ready);
     }
   } else {
-    c.ring->SetReady(slot);
+    c.ring->SetReady(ready);
   }
   // First commit is a blocking modeset (the scene adds ALLOW_MODESET, which
   // cannot be non-blocking); subsequent frames are non-blocking page flips we
@@ -3760,7 +4080,8 @@ bool VulkanDrmBackend::PresentSlot(const size_t slot,
   c.commit_target_ns.store(ring_modeset ? 0 : judged_target,
                            std::memory_order_release);
   // Pass `this` as the flip user_data so the event routes to OnFlipEvent.
-  if (auto report = c.scene->commit(flags, this); !report) {
+  auto report = c.scene->commit(flags, this);
+  if (!report) {
     c.commit_target_ns.store(0, std::memory_order_release);
     // EACCES is how a VT switch-out actually reaches us: master is revoked and
     // the commit already in flight fails before libseat's pause callback
@@ -3790,15 +4111,25 @@ bool VulkanDrmBackend::PresentSlot(const size_t slot,
   }
 #endif
   pres.Commit();
+  if (!c.rotation_checked && c.rotation != DRM_MODE_ROTATE_0) {
+    c.rotation_checked = true;
+    c.rotation_on_plane = RotationReachedPlane(c.layer, c.rotation, *report);
+  }
   if (c.first_commit) {
     // Blocking modeset: no flip event. Leave the source not-pending so the
     // provider drains the next baton inline and the async loop starts.
     c.first_commit = false;
     c.scanning_slot = static_cast<int>(slot);
+    if (c.turn) {
+      c.turn_scanning = static_cast<int>(c.turn_target);
+    }
   } else {
     // Non-blocking flip: mark the source pending so the provider holds the next
     // baton until OnFlipEvent returns it on vblank.
     c.pending_slot = static_cast<int>(slot);
+    if (c.turn) {
+      c.turn_pending = static_cast<int>(c.turn_target);
+    }
     arm.Commit();
   }
 

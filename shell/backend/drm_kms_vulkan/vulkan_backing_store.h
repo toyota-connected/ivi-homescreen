@@ -46,6 +46,13 @@ std::vector<uint64_t> NegotiateModifiers(
     VkFormat vk_format,
     const std::vector<uint64_t>& plane_modifiers);
 
+// Every modifier the ICD can export for @p vk_format as a transfer/color
+// target, in the same order: tiled first, DRM_FORMAT_MOD_LINEAR last. For an
+// image no plane scans out, which need not be one the plane accepts: the
+// render buffers of a display turned on the GPU (#848).
+std::vector<uint64_t> ExportableModifiers(VkPhysicalDevice physical_device,
+                                          VkFormat vk_format);
+
 // A device-local VkImage allocated with an explicit DRM format modifier and
 // exported as a dma-buf, ready for zero-copy KMS scanout. The driver chooses a
 // modifier from the negotiated set; the chosen modifier and per-plane layout

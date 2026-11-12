@@ -168,6 +168,16 @@ void ParseOutputMatch(const toml::table& t, homescreen::OutputMatch& out) {
   if (t["touch_device"].is_string()) {
     out.touch_device = t["touch_device"].as_string()->value_or("");
   }
+  // Rotation of an additional output (#848).
+  if (t["rotation"].is_integer()) {
+    const auto deg = t["rotation"].value<int64_t>().value();
+    if (deg == 0 || deg == 90 || deg == 180 || deg == 270) {
+      out.rotation = static_cast<int>(deg);
+    } else {
+      ihs::log::error(
+          "[view.output] rotation must be 0, 90, 180 or 270; ignoring {}", deg);
+    }
+  }
 }
 }  // namespace
 
@@ -204,6 +214,11 @@ void Configuration::get_view_parameters(toml::table* v, Config& instance) {
       }
       if (first) {
         ParseOutputMatch(*t, instance.view.output);
+        if (instance.view.output.rotation.has_value()) {
+          ihs::log::warn(
+              "[view.output] rotation applies to additional outputs; the "
+              "first one turns by backend.drm.rotation / --drm-rotation");
+        }
         first = false;
       } else {
         homescreen::OutputMatch extra;
@@ -938,7 +953,11 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
         "DRM mode <WxH@R> (e.g. 1920x1080@120); default = preferred mode",
         cxxopts::value<std::string>())(
         "drm-rotation",
-        "DRM scanout rotation in degrees: 0|90|180|270 (default 0)",
+        "DRM scanout rotation in degrees, counter-clockwise: 0|90|180|270 "
+        "(default 0). drm-kms-vulkan rotates on a hardware plane where one "
+        "offers the angle and turns the picture on the GPU where none does; "
+        "drm-kms-egl always turns it on the GPU. Refused by the software "
+        "backends; ignored on Wayland, where the compositor rotates",
         cxxopts::value<int>())("drm-compositor",
                                "DRM compositor strategy: auto|planes|gl",
                                cxxopts::value<std::string>())(

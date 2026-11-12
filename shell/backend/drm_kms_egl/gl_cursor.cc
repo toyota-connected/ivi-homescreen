@@ -27,6 +27,7 @@
 #include <drm-cxx/cursor/theme.hpp>
 #endif
 
+#include "backend/drm_kms_egl/gl_state_guard.h"
 #include "logging.h"
 
 namespace homescreen {
@@ -282,7 +283,9 @@ bool GlCursor::EnsureGl() {
   return true;
 }
 
-void GlCursor::Draw(const uint32_t fb_w, const uint32_t fb_h) {
+void GlCursor::Draw(const uint32_t fb_w,
+                    const uint32_t fb_h,
+                    const DisplayRotation* rotation) {
   if (!visible_.load(std::memory_order_acquire)) {
     return;
   }
@@ -304,78 +307,32 @@ void GlCursor::Draw(const uint32_t fb_w, const uint32_t fb_h) {
 
   // Pixel space (top-left origin, y-down) → NDC. The window framebuffer shows
   // the Flutter scene upright, so top-left pixel (0,0) maps to NDC (-1, +1).
-  auto nx = [fw](const float x) { return x / fw * 2.0F - 1.0F; };
-  auto ny = [fh](const float y) { return 1.0F - y / fh * 2.0F; };
+  // A GPU-turned panel takes each corner through the turn first, which turns
+  // the quad, and the sprite on it, with the picture.
+  auto ndc = [fw, fh, rotation](const float x, const float y) {
+    double px = x;
+    double py = y;
+    if (rotation != nullptr) {
+      rotation->ToPanel(x, y, &px, &py);
+    }
+    return std::array<float, 2>{static_cast<float>(px) / fw * 2.0F - 1.0F,
+                                1.0F - static_cast<float>(py) / fh * 2.0F};
+  };
+  const auto tl = ndc(x0, y0);
+  const auto bl = ndc(x0, y1);
+  const auto tr = ndc(x1, y0);
+  const auto br = ndc(x1, y1);
 
   // Triangle strip: TL, BL, TR, BR. Texture V=0 is the top (arrow tip row).
   const std::array<float, 16> verts = {
-      nx(x0), ny(y0), 0.0F, 0.0F,  // TL
-      nx(x0), ny(y1), 0.0F, 1.0F,  // BL
-      nx(x1), ny(y0), 1.0F, 0.0F,  // TR
-      nx(x1), ny(y1), 1.0F, 1.0F,  // BR
+      tl[0], tl[1], 0.0F, 0.0F,  // TL
+      bl[0], bl[1], 0.0F, 1.0F,  // BL
+      tr[0], tr[1], 1.0F, 0.0F,  // TR
+      br[0], br[1], 1.0F, 1.0F,  // BR
   };
 
-  // Flutter's renderer (Skia) caches GL state and does NOT re-query it between
-  // frames. Any state we change and leave changed desyncs that cache and
-  // corrupts the next frame (e.g. a disabled scissor → full-field flashing).
-  // So snapshot every piece of state we touch and restore it exactly, leaving
-  // the context byte-for-byte as Skia left it.
-  GLint s_prog = 0;
-  GLint s_fbo = 0;
-  GLint s_vp[4] = {0, 0, 0, 0};
-  GLint s_array_buf = 0;
-  GLint s_active_tex = GL_TEXTURE0;
-  GLint s_tex2d = 0;
-  glGetIntegerv(GL_CURRENT_PROGRAM, &s_prog);
-  glGetIntegerv(GL_FRAMEBUFFER_BINDING, &s_fbo);
-  glGetIntegerv(GL_VIEWPORT, s_vp);
-  glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &s_array_buf);
-  glGetIntegerv(GL_ACTIVE_TEXTURE, &s_active_tex);
-  glActiveTexture(GL_TEXTURE0);
-  glGetIntegerv(GL_TEXTURE_BINDING_2D, &s_tex2d);
-
-  const GLboolean s_blend = glIsEnabled(GL_BLEND);
-  const GLboolean s_scissor = glIsEnabled(GL_SCISSOR_TEST);
-  const GLboolean s_depth = glIsEnabled(GL_DEPTH_TEST);
-  const GLboolean s_cull = glIsEnabled(GL_CULL_FACE);
-  const GLboolean s_stencil = glIsEnabled(GL_STENCIL_TEST);
-  GLint s_bsrc_rgb = GL_ONE;
-  GLint s_bdst_rgb = GL_ZERO;
-  GLint s_bsrc_a = GL_ONE;
-  GLint s_bdst_a = GL_ZERO;
-  GLint s_beq_rgb = GL_FUNC_ADD;
-  GLint s_beq_a = GL_FUNC_ADD;
-  glGetIntegerv(GL_BLEND_SRC_RGB, &s_bsrc_rgb);
-  glGetIntegerv(GL_BLEND_DST_RGB, &s_bdst_rgb);
-  glGetIntegerv(GL_BLEND_SRC_ALPHA, &s_bsrc_a);
-  glGetIntegerv(GL_BLEND_DST_ALPHA, &s_bdst_a);
-  glGetIntegerv(GL_BLEND_EQUATION_RGB, &s_beq_rgb);
-  glGetIntegerv(GL_BLEND_EQUATION_ALPHA, &s_beq_a);
-
-  struct AttribState {
-    GLint enabled;
-    GLint size;
-    GLint type;
-    GLint normalized;
-    GLint stride;
-    GLint buffer;
-    void* pointer;
-  };
-  const std::array<GLint, 2> locs = {a_pos_, a_uv_};
-  std::array<AttribState, 2> sa{};
-  for (size_t i = 0; i < locs.size(); ++i) {
-    const auto loc = static_cast<GLuint>(locs[i]);
-    glGetVertexAttribiv(loc, GL_VERTEX_ATTRIB_ARRAY_ENABLED, &sa[i].enabled);
-    glGetVertexAttribiv(loc, GL_VERTEX_ATTRIB_ARRAY_SIZE, &sa[i].size);
-    glGetVertexAttribiv(loc, GL_VERTEX_ATTRIB_ARRAY_TYPE, &sa[i].type);
-    glGetVertexAttribiv(loc, GL_VERTEX_ATTRIB_ARRAY_NORMALIZED,
-                        &sa[i].normalized);
-    glGetVertexAttribiv(loc, GL_VERTEX_ATTRIB_ARRAY_STRIDE, &sa[i].stride);
-    glGetVertexAttribiv(loc, GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING,
-                        &sa[i].buffer);
-    glGetVertexAttribPointerv(loc, GL_VERTEX_ATTRIB_ARRAY_POINTER,
-                              &sa[i].pointer);
-  }
+  // Put every piece of GL state the draw touches back as the engine left it.
+  const ScopedGlState saved({a_pos_, a_uv_});
 
   // --- our draw ---
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -401,47 +358,6 @@ void GlCursor::Draw(const uint32_t fb_w, const uint32_t fb_h) {
   glVertexAttribPointer(static_cast<GLuint>(a_uv_), 2, GL_FLOAT, GL_FALSE,
                         4 * sizeof(float), verts.data() + 2);
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-
-  // --- restore exactly ---
-  for (size_t i = 0; i < locs.size(); ++i) {
-    const auto loc = static_cast<GLuint>(locs[i]);
-    glBindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(sa[i].buffer));
-    glVertexAttribPointer(loc, sa[i].size, static_cast<GLenum>(sa[i].type),
-                          static_cast<GLboolean>(sa[i].normalized),
-                          sa[i].stride, sa[i].pointer);
-    if (sa[i].enabled) {
-      glEnableVertexAttribArray(loc);
-    } else {
-      glDisableVertexAttribArray(loc);
-    }
-  }
-  glBindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(s_array_buf));
-
-  glBlendEquationSeparate(static_cast<GLenum>(s_beq_rgb),
-                          static_cast<GLenum>(s_beq_a));
-  glBlendFuncSeparate(
-      static_cast<GLenum>(s_bsrc_rgb), static_cast<GLenum>(s_bdst_rgb),
-      static_cast<GLenum>(s_bsrc_a), static_cast<GLenum>(s_bdst_a));
-
-  auto set_enable = [](const GLenum cap, const GLboolean on) {
-    if (on != GL_FALSE) {
-      glEnable(cap);
-    } else {
-      glDisable(cap);
-    }
-  };
-  set_enable(GL_BLEND, s_blend);
-  set_enable(GL_SCISSOR_TEST, s_scissor);
-  set_enable(GL_DEPTH_TEST, s_depth);
-  set_enable(GL_CULL_FACE, s_cull);
-  set_enable(GL_STENCIL_TEST, s_stencil);
-
-  glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(s_tex2d));
-  glActiveTexture(static_cast<GLenum>(s_active_tex));
-  glUseProgram(static_cast<GLuint>(s_prog));
-  glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(s_fbo));
-  glViewport(s_vp[0], s_vp[1], s_vp[2], s_vp[3]);
 }
 
 void GlCursor::Destroy() {

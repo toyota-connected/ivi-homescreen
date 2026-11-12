@@ -24,6 +24,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -45,6 +46,7 @@
 #include "backend/backend.h"
 #include "backend/drm_kms_egl/drm_output_context.h"
 #include "backend/drm_kms_egl/flip_sink.h"
+#include "view/display_rotation.h"
 #include "view/presentation.h"
 #include "vsync/ivsync_provider.h"
 
@@ -59,6 +61,7 @@ namespace homescreen {
 class DrmCapture;
 class DrmCursor;
 class GlCursor;
+class GlTurn;
 class ICursorPositionSink;
 class DrmSession;
 }  // namespace homescreen
@@ -187,6 +190,12 @@ struct DrmConfig {
   // driving the device with no seat/VT arbitration (headless/SSH/kiosk).
   // drmSetMaster is still required and still enforced.
   bool no_seat{false};
+
+  // --drm-rotation: 0, 90, 180 or 270, counter-clockwise as DRM_MODE_ROTATE_*
+  // reads. Turned on the GPU (#848), not by a plane, so it works on a display
+  // whose planes cannot rotate. Flutter renders at the turned extent; the
+  // scanout stays the full mode. Needs BUILD_COMPOSITOR.
+  int rotation{0};
 };
 
 // PrintDrmModes / ConnectorTypeName moved to display/drm_mode_list.h so the
@@ -267,7 +276,13 @@ class DrmBackend : public Backend, public IFlipSink {
   // to view_id (which becomes an added Flutter view). Returns false if the
   // connector isn't connected or no free CRTC remains. No-op / false when
   // BUILD_COMPOSITOR is off.
-  bool AddOutput(const std::string& connector_name, int64_t view_id);
+  //
+  // @p rotation turns this output's picture on the GPU, counter-clockwise in
+  // degrees, as --drm-rotation turns the primary's (#848): the view is laid
+  // out at the turned extent. Anything but 0/90/180/270 is refused.
+  bool AddOutput(const std::string& connector_name,
+                 int64_t view_id,
+                 int rotation = 0);
 
   // Geometry FlutterView needs to FlutterEngineAddView each additional output.
   struct ViewOutputSpec {
@@ -276,6 +291,19 @@ class DrmBackend : public Backend, public IFlipSink {
     uint32_t height;
   };
   [[nodiscard]] std::vector<ViewOutputSpec> AdditionalViews() const;
+
+  // An additional output's connector was reconfigured: re-pick its mode the
+  // way AddOutput did and, when it differs from the one being driven, have
+  // that output's compositor adopt it at its next present. Returns the view's
+  // geometry at the new mode, which the caller re-sends as that view's window
+  // metrics; nullopt when @p connector_name is not an additional output of
+  // this backend or its mode did not change (#856). Platform thread.
+  std::optional<ViewOutputSpec> OnAdditionalOutputReconfigured(
+      std::string_view connector_name);
+  // The same for a mode already in hand (a test, or a runtime mode switch).
+  std::optional<ViewOutputSpec> RequestAdditionalOutputMode(
+      int64_t view_id,
+      const drmModeModeInfo& mode);
   // vblank-locked OnVsync via DRM PAGE_FLIP_EVENT. Returns nullptr (so
   // Flutter falls back to its wall-clock scheduler) when the user opts
   // out via IVI_DRM_VSYNC=0 — useful for diagnosing pacing regressions
@@ -306,6 +334,11 @@ class DrmBackend : public Backend, public IFlipSink {
   bool ClearCurrent() const;
   bool MakeResourceCurrent() const;
   bool Present();
+#if !BUILD_COMPOSITOR
+  // Sets @p gl up to turn --drm-rotation without a compositor: the engine's
+  // surface_transformation where the engine honors it, GlTurn otherwise.
+  void ConfigureTurn(FlutterOpenGLRendererConfig& gl);
+#endif
 
   // Make the next Present() flip also hand the CRTC back from the plane
   // compositor: @p primary at ROTATE_0 showing the new frame, @p overlays off.
@@ -414,12 +447,22 @@ class DrmBackend : public Backend, public IFlipSink {
   }
   [[nodiscard]] uint32_t crtc_id() const { return crtc_id_; }
   [[nodiscard]] uint32_t crtc_index() const { return crtc_index_; }
-  // Framebuffer size — what the Flutter engine renders at. When the user
-  // didn't request a size, this equals the CRTC mode (full-screen). When
-  // they did, it's the requested size and the primary plane is centered
-  // on the CRTC with black borders.
-  [[nodiscard]] uint32_t width() const { return fb_w_; }
-  [[nodiscard]] uint32_t height() const { return fb_h_; }
+  // Render size — what the Flutter engine renders at. When the user didn't
+  // request a size, this equals the CRTC mode (full-screen). When they did,
+  // it's the requested size and the primary plane is centered on the CRTC
+  // with black borders. A 90/270 rotation swaps it against the mode: see
+  // ExtentsForMode.
+  [[nodiscard]] uint32_t width() const { return render_w_; }
+  [[nodiscard]] uint32_t height() const { return render_h_; }
+  // The configured --drm-rotation, in degrees.
+  [[nodiscard]] int rotation() const { return cfg_.rotation; }
+  // The configured rotation from the render extent onto the panel (the
+  // window surface, at the full mode once rotated).
+  [[nodiscard]] DisplayRotation panel_rotation() const {
+    return {cfg_.rotation, static_cast<int32_t>(render_w_),
+            static_cast<int32_t>(render_h_), static_cast<int32_t>(fb_w_),
+            static_cast<int32_t>(fb_h_)};
+  }
   // CRTC mode size — what the display is actually driven at.
   [[nodiscard]] uint32_t mode_width() const { return mode_.hdisplay; }
   [[nodiscard]] uint32_t mode_height() const { return mode_.vdisplay; }
@@ -441,6 +484,24 @@ class DrmBackend : public Backend, public IFlipSink {
   [[nodiscard]] static std::pair<uint32_t, uint32_t> FbExtentForMode(
       std::optional<uint32_t> requested_w,
       std::optional<uint32_t> requested_h,
+      const drmModeModeInfo& mode);
+
+  // The scanout FB and the extent Flutter renders at, for @p mode. Unrotated
+  // they are one and the same, FbExtentForMode's. Rotated, the composite
+  // turns the picture onto the panel itself, so the FB is the whole mode and
+  // letterboxing is the composite's to do; the render extent is the request
+  // clamped to the mode as the turned picture sees it (height first at
+  // 90/270).
+  struct Extents {
+    uint32_t fb_w{0};
+    uint32_t fb_h{0};
+    uint32_t render_w{0};
+    uint32_t render_h{0};
+  };
+  [[nodiscard]] static Extents ExtentsForMode(
+      std::optional<uint32_t> requested_w,
+      std::optional<uint32_t> requested_h,
+      int rotation,
       const drmModeModeInfo& mode);
 
   // Compares on timings rather than vrefresh, which is DIV_ROUND_CLOSEST of
@@ -588,6 +649,10 @@ class DrmBackend : public Backend, public IFlipSink {
   // Populated in InitDrm after mode selection.
   uint32_t fb_w_ = 0;
   uint32_t fb_h_ = 0;
+  // What Flutter renders at (width()/height()). fb_w_/fb_h_ unless a rotation
+  // is set; see ExtentsForMode.
+  uint32_t render_w_ = 0;
+  uint32_t render_h_ = 0;
   drmModeCrtc* saved_crtc_ = nullptr;
 
   // Populated by DriverProbe::Resolve() inside Create(). Non-null for the
@@ -781,6 +846,22 @@ class DrmBackend : public Backend, public IFlipSink {
     return flip_pending_.load(std::memory_order_acquire);
   }
 
+#if !BUILD_COMPOSITOR
+  /// The framebuffer the engine renders into when --drm-rotation is turned at
+  /// present, built at the current render extent. 0 when nothing turns it
+  /// there: no rotation, or the engine turns the picture itself. Call after
+  /// GetRenderConfig, with the context current.
+  [[nodiscard]] uint32_t TurnFramebufferForTest();
+#endif
+#if BUILD_COMPOSITOR
+  /// The compositor scanning view @p view_id out: 0 is the primary, an
+  /// AddOutput view its own. An unknown view gets the primary's.
+  [[nodiscard]] DrmCompositor* CompositorForViewForTest(
+      const int64_t view_id) const {
+    return CompositorForView(view_id);
+  }
+#endif
+
  private:
 #endif
 
@@ -799,14 +880,22 @@ class DrmBackend : public Backend, public IFlipSink {
   struct ExtraOutput {
     int64_t view_id;
     std::unique_ptr<DrmCompositor> compositor;
+    // The extent the view renders at: the mode, turned by the rotation.
     uint32_t width;
     uint32_t height;
+    std::string connector_name;
+    uint32_t connector_id;
+    int rotation;
+    // The mode last handed to the compositor. The platform thread's copy: the
+    // compositor's own output context is the raster thread's.
+    drmModeModeInfo mode;
   };
   std::vector<ExtraOutput> extra_outputs_;
   // CRTCs already claimed (primary + each AddOutput) so additional outputs pick
   // a distinct one. Seeded with the primary CRTC after InitDrm.
   std::vector<uint32_t> used_crtcs_;
   bool ResolveOutputContext(const std::string& connector_name,
+                            int rotation,
                             DrmOutputContext& out);
 #endif
 #if HAVE_DRM_CURSOR
@@ -816,6 +905,13 @@ class DrmBackend : public Backend, public IFlipSink {
   // available (this display controller has none) and the cursor isn't
   // disabled. Drawn into FBO 0 each Present.
   std::unique_ptr<homescreen::GlCursor> gl_cursor_{};
+#if !BUILD_COMPOSITOR
+  // --drm-rotation with nothing to turn it but present (#848): the engine
+  // renders upright into this one's framebuffer and Present() draws it turned
+  // onto FBO 0. Null when the engine turns the picture itself, or there is no
+  // rotation. See GetRenderConfig.
+  std::unique_ptr<homescreen::GlTurn> gl_turn_{};
+#endif
 #if HAVE_DRM_CAPTURE
   std::unique_ptr<homescreen::DrmCapture> capture_;
 #endif

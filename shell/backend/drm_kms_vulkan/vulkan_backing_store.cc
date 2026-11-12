@@ -142,13 +142,9 @@ bool SupportsUsageForExport(VkPhysicalDevice physical_device,
           VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT) != 0;
 }
 
-}  // namespace
-
-std::vector<uint64_t> NegotiateModifiers(
-    VkPhysicalDevice physical_device,
-    VkFormat vk_format,
-    const std::vector<uint64_t>& plane_modifiers) {
-  // Modifiers the ICD can export for this format as a transfer/color target.
+// Modifiers the ICD can export for this format as a transfer/color target.
+std::set<uint64_t> ExportableSet(VkPhysicalDevice physical_device,
+                                 VkFormat vk_format) {
   VkDrmFormatModifierPropertiesListEXT list{};
   list.sType = VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_EXT;
   VkFormatProperties2 fp{};
@@ -167,26 +163,46 @@ std::vector<uint64_t> NegotiateModifiers(
       exportable.insert(m.drmFormatModifier);
     }
   }
+  return exportable;
+}
 
-  const std::set<uint64_t> plane(plane_modifiers.begin(),
-                                 plane_modifiers.end());
+// @p mods ordered tiled first (the driver prefers a compressed/tiled layout),
+// LINEAR last.
+std::vector<uint64_t> TiledFirst(const std::set<uint64_t>& mods) {
   std::vector<uint64_t> tiled;
   bool has_linear = false;
-  for (uint64_t m : exportable) {
-    if (!plane.count(m)) {
-      continue;
-    }
+  for (uint64_t m : mods) {
     if (m == DRM_FORMAT_MOD_LINEAR) {
       has_linear = true;
     } else {
       tiled.push_back(m);
     }
   }
-  // Tiled first (the driver prefers a compressed/tiled layout), LINEAR last.
   if (has_linear) {
     tiled.push_back(DRM_FORMAT_MOD_LINEAR);
   }
   return tiled;
+}
+}  // namespace
+
+std::vector<uint64_t> NegotiateModifiers(
+    VkPhysicalDevice physical_device,
+    VkFormat vk_format,
+    const std::vector<uint64_t>& plane_modifiers) {
+  const std::set<uint64_t> plane(plane_modifiers.begin(),
+                                 plane_modifiers.end());
+  std::set<uint64_t> common;
+  for (uint64_t m : ExportableSet(physical_device, vk_format)) {
+    if (plane.count(m) != 0U) {
+      common.insert(m);
+    }
+  }
+  return TiledFirst(common);
+}
+
+std::vector<uint64_t> ExportableModifiers(VkPhysicalDevice physical_device,
+                                          VkFormat vk_format) {
+  return TiledFirst(ExportableSet(physical_device, vk_format));
 }
 
 std::unique_ptr<VulkanBackingStore> VulkanBackingStore::Create(

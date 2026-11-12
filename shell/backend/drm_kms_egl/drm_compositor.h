@@ -56,6 +56,7 @@
 #include "backend/drm_plane_formats.h"
 #include "backend/wayland_egl/gl_caps.h"
 #include "backend/wayland_egl/gl_compositor.h"
+#include "view/display_rotation.h"
 #include "view/layer_scanout.h"
 #include "view/presentation.h"
 
@@ -197,12 +198,32 @@ class DrmCompositor : public IFlipSink {
   // Raster thread, and the caller owns the flip quiesce. Returns false when
   // the plane path can no longer be driven at this mode; the GL fallback is
   // unaffected either way.
+  // @p render_w x @p render_h is the extent Flutter renders at, which a
+  // rotation turns onto @p fb_w x @p fb_h; the rotation itself is kept.
   [[nodiscard]] bool OnModeChanged(const drmModeModeInfo& mode,
                                    uint32_t fb_w,
-                                   uint32_t fb_h);
+                                   uint32_t fb_h,
+                                   uint32_t render_w,
+                                   uint32_t render_h);
 
   void SetPaused(bool paused);
   void OnResume();
+  [[nodiscard]] bool paused() const {
+    return paused_.load(std::memory_order_acquire);
+  }
+
+  // An additional output's connector now reports @p mode: adopt it, at the
+  // extents given (as OnModeChanged takes them), at this compositor's next
+  // present. Latched rather than applied because adopting an extent frees the
+  // buffers the raster thread composites into, and the caller -- the hotplug
+  // listener -- is on the platform thread. A second request before that
+  // present replaces the first. Not for the primary, whose backend rebuilds
+  // its own scanout surfaces and calls OnModeChanged itself (#856).
+  void RequestOutputMode(const drmModeModeInfo& mode,
+                         uint32_t fb_w,
+                         uint32_t fb_h,
+                         uint32_t render_w,
+                         uint32_t render_h);
 
   // Tell the compositor which DRM plane an externally-managed cursor
   // (drm::cursor::Renderer) is armed on, so the scene allocator never
@@ -387,7 +408,14 @@ class DrmCompositor : public IFlipSink {
       GLint fb_height,
       bool target_top_first,
       bool blend,
-      const ICompositorSurface::GlLayerTexture* layer0);
+      const ICompositorSurface::GlLayerTexture* layer0,
+      const DisplayRotation* rotation = nullptr);
+
+  // The display turned on the GPU (#848): set when --drm-rotation is non-zero.
+  // Every present then goes through the GL composite with each layer drawn
+  // turned onto the panel, since no plane here is asked to rotate. Nullopt
+  // otherwise.
+  [[nodiscard]] std::optional<DisplayRotation> GpuRotation() const;
 
   // Layer 0's texture for a one-layer surface, else nullopt. Imports
   // the layer's latest frame (it calls GetLayerGlTexture), so raster thread
@@ -438,6 +466,42 @@ class DrmCompositor : public IFlipSink {
   bool PresentViaGlFallback(const FlutterLayer** layers,
                             size_t count,
                             int from_line = __builtin_LINE());
+
+  // A secondary output's GL composite. PresentViaGlFallback's target, FBO 0,
+  // is the primary output's window surface, so a secondary used to drop the
+  // frame there. It draws every layer, turned when the output is rotated,
+  // into comp_bufs_ and commits that on its own CRTC's primary plane.
+  bool PresentOwnComposite(const FlutterLayer** layers, size_t count);
+  // Builds what PresentOwnComposite needs on first use: the plane registry,
+  // the modeset, the primary plane's properties and scanout-capable
+  // composition buffers. False when this CRTC cannot be driven that way.
+  // After an extent change freed the buffers, rebuilds those alone.
+  bool EnsureOwnComposite();
+  // comp_bufs_ at the output's extent, scanout-capable with FB ids. A no-op
+  // while they are valid.
+  bool CreateOwnCompositeBuffers();
+
+  // Draws @p layers into @p fbo, @p target_h rows tall, each turned by @p rot
+  // from render space onto it. @p top_first: the target is stored top row
+  // first, as a buffer KMS scans out directly is; FBO 0 of the window
+  // surface is not. Returns whether anything was drawn.
+  bool CompositeLayersTurned(GLuint fbo,
+                             GLint target_h,
+                             bool top_first,
+                             const DisplayRotation& rot,
+                             const FlutterLayer** layers,
+                             size_t count);
+  // One texture across render rect @p dst, turned onto @p fbo. @p uv maps the
+  // rect to the texture (see UvAffine).
+  void DrawTurned(GLuint fbo,
+                  GLint target_h,
+                  bool top_first,
+                  const DisplayRotation& rot,
+                  GLuint tex,
+                  const RectI& dst,
+                  UvAffine uv,
+                  bool blend,
+                  bool external);
 
   // Tally one GL-fallback entry against its call site, and every
   // kFallbackTraceWindow entries log the running distribution. No-op unless
@@ -792,6 +856,13 @@ class DrmCompositor : public IFlipSink {
   uint64_t framed_overlay_zpos_{0};
   drm::PropertyStore framed_props_;
 
+  // PresentOwnComposite's primary plane and its cached properties (with the
+  // other planes' on this CRTC, which each commit disables).
+  uint32_t own_primary_id_{0};
+  drm::PropertyStore own_props_;
+  bool own_composite_ready_{false};
+  bool own_composite_failed_{false};
+
   // ── Direct-overlay mode (zero-copy scene present) ─────────────────
   // For non-framed configs on hardware whose PRIMARY plane lacks
   // REFLECT_Y (amdgpu DC, RPi5 vc4) but whose overlays support it: pin
@@ -1014,6 +1085,8 @@ class DrmCompositor : public IFlipSink {
   /// dispatched. A test blocks here to force that order. Never set outside
   /// tests.
   std::function<void()> on_commit_returned_;
+  /// The output this compositor scans out on.
+  [[nodiscard]] const DrmOutputContext& OutputForTest() const { return out_; }
 
  private:
 #endif
@@ -1070,6 +1143,19 @@ class DrmCompositor : public IFlipSink {
   // by the Present* entry points on the rasterizer thread; written on
   // DrmSession's dispatch thread — must be atomic.
   std::atomic<bool> paused_{false};
+
+  // RequestOutputMode's latch, consumed at the top of PresentLayers.
+  struct PendingOutputMode {
+    drmModeModeInfo mode;
+    uint32_t fb_w;
+    uint32_t fb_h;
+    uint32_t render_w;
+    uint32_t render_h;
+  };
+  std::mutex pending_mode_mu_;
+  std::optional<PendingOutputMode> pending_mode_;
+  std::atomic<bool> pending_mode_set_{false};
+  void ApplyPendingOutputMode();
 
   // Probed once in InitPlaneAllocator: true iff at least one plane on
   // the CRTC has reflect-y in its rotation bitmask. Gates the
