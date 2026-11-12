@@ -18,7 +18,6 @@
 #include "backend/gl_extensions.h"
 #include "logging/logging.h"
 
-#include <EGL/egl.h>
 #include <GLES2/gl2ext.h>  // GL_TEXTURE_EXTERNAL_OES
 
 #include <array>
@@ -243,39 +242,10 @@ namespace {
 // and one with a mipmap minification filter makes a texture without mipmaps
 // (any imported dma-buf) incomplete, which samples as opaque black. Sampler
 // objects are ES3, so there is nothing to do on an ES2 context.
-constexpr GLenum kSamplerBinding = 0x8919;  // GL_SAMPLER_BINDING
-
-using BindSamplerFn = void(GL_APIENTRY*)(GLuint unit, GLuint sampler);
-
-BindSamplerFn BindSamplerProc(const GlCaps* caps) {
-  if (caps == nullptr || !caps->is_es3) {
-    return nullptr;
-  }
-  static const auto fn =
-      reinterpret_cast<BindSamplerFn>(eglGetProcAddress("glBindSampler"));
-  return fn;
-}
-
-// Clear the sampler on unit 0, which must be the active unit, and return what
-// was there for RestoreSampler0.
-GLuint ClearSampler0(const GlCaps* caps) {
-  const auto bind = BindSamplerProc(caps);
-  if (bind == nullptr) {
-    return 0;
-  }
-  GLint previous = 0;
-  glGetIntegerv(kSamplerBinding, &previous);
-  if (previous != 0) {
-    bind(0, 0);
-  }
-  return static_cast<GLuint>(previous);
-}
-
-// The renderer tracks its own bindings, so it gets back what it left.
-void RestoreSampler0(const GlCaps* caps, const GLuint sampler) {
-  const auto bind = BindSamplerProc(caps);
-  if (bind != nullptr && sampler != 0) {
-    bind(0, sampler);
+// Not restored: the engine resets its GL state before each frame.
+void UnbindSampler0(const GlCaps* caps) {
+  if (caps != nullptr && caps->bind_sampler != nullptr) {
+    caps->bind_sampler(0, 0);
   }
 }
 
@@ -293,7 +263,7 @@ void GlCompositor::EmitPersistentQuadState() {
 
   glUseProgram(program_);
   glActiveTexture(GL_TEXTURE0);
-  saved_sampler0_ = ClearSampler0(caps_);
+  UnbindSampler0(caps_);
   if (uni_tex_ >= 0) {
     glUniform1i(uni_tex_, 0);
   }
@@ -331,8 +301,6 @@ void GlCompositor::TearDownPersistentQuadState() {
   glBindBuffer(GL_ARRAY_BUFFER, 0);
   glBindTexture(GL_TEXTURE_2D, 0);
   glUseProgram(0);
-  RestoreSampler0(caps_, saved_sampler0_);
-  saved_sampler0_ = 0;
   bound_tex_ = 0;
 }
 
@@ -384,7 +352,7 @@ void GlCompositor::CompositeViaQuadExternal(GLuint tex,
 
   glUseProgram(program_external_);
   glActiveTexture(GL_TEXTURE0);
-  const GLuint saved_sampler0 = ClearSampler0(caps_);
+  UnbindSampler0(caps_);
   if (uni_tex_external_ >= 0) {
     glUniform1i(uni_tex_external_, 0);
   }
@@ -421,7 +389,6 @@ void GlCompositor::CompositeViaQuadExternal(GLuint tex,
   }
   glBindBuffer(GL_ARRAY_BUFFER, 0);
   glUseProgram(0);
-  RestoreSampler0(caps_, saved_sampler0);
   // Blend is left off rather than as this draw wanted it. This path clears
   // persistent_state_emitted_, so EndFrame will not tear anything down, and an
   // enabled blend would leak into the rest of the present and the next frame.
@@ -523,7 +490,7 @@ void GlCompositor::CompositeViaQuad(GLuint src_color_tex,
 
   glUseProgram(program_);
   glActiveTexture(GL_TEXTURE0);
-  const GLuint saved_sampler0 = ClearSampler0(caps_);
+  UnbindSampler0(caps_);
   glBindTexture(GL_TEXTURE_2D, src_color_tex);
   if (uni_tex_ >= 0) {
     glUniform1i(uni_tex_, 0);
@@ -555,7 +522,6 @@ void GlCompositor::CompositeViaQuad(GLuint src_color_tex,
   glBindBuffer(GL_ARRAY_BUFFER, 0);
   glBindTexture(GL_TEXTURE_2D, 0);
   glUseProgram(0);
-  RestoreSampler0(caps_, saved_sampler0);
 }
 
 void GlCompositor::CompositeToFbo(GLuint dst_fbo,
