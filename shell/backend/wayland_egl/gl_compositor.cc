@@ -235,6 +235,22 @@ void GlCompositor::BuildExternalProgram() {
   uni_opaque_external_ = glGetUniformLocation(program_external_, "u_opaque");
 }
 
+namespace {
+
+// A sampler object bound to a unit overrides the sampling state of the texture
+// on it. Flutter's renderer shares this context and can leave one on unit 0,
+// and one with a mipmap minification filter makes a texture without mipmaps
+// (any imported dma-buf) incomplete, which samples as opaque black. Sampler
+// objects are ES3, so there is nothing to do on an ES2 context.
+// Not restored: the engine resets its GL state before each frame.
+void UnbindSampler0(const GlCaps* caps) {
+  if (caps != nullptr && caps->bind_sampler != nullptr) {
+    caps->bind_sampler(0, 0);
+  }
+}
+
+}  // namespace
+
 void GlCompositor::EmitPersistentQuadState() {
   // Once-per-frame setup. Establishes a known baseline (blend disabled,
   // bound_tex_ cleared) so per-call deltas can be tracked accurately.
@@ -247,6 +263,7 @@ void GlCompositor::EmitPersistentQuadState() {
 
   glUseProgram(program_);
   glActiveTexture(GL_TEXTURE0);
+  UnbindSampler0(caps_);
   if (uni_tex_ >= 0) {
     glUniform1i(uni_tex_, 0);
   }
@@ -335,6 +352,7 @@ void GlCompositor::CompositeViaQuadExternal(GLuint tex,
 
   glUseProgram(program_external_);
   glActiveTexture(GL_TEXTURE0);
+  UnbindSampler0(caps_);
   if (uni_tex_external_ >= 0) {
     glUniform1i(uni_tex_external_, 0);
   }
@@ -472,6 +490,7 @@ void GlCompositor::CompositeViaQuad(GLuint src_color_tex,
 
   glUseProgram(program_);
   glActiveTexture(GL_TEXTURE0);
+  UnbindSampler0(caps_);
   glBindTexture(GL_TEXTURE_2D, src_color_tex);
   if (uni_tex_ >= 0) {
     glUniform1i(uni_tex_, 0);

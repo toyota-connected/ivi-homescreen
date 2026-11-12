@@ -27,6 +27,7 @@
 
 #include "gtest/gtest.h"
 
+#include "backend/wayland_egl/gl_caps.h"
 #include "backend/wayland_egl/gl_compositor.h"
 #include "view/compositor_surface_interface.h"
 #include "view/layer_geometry.h"
@@ -71,6 +72,9 @@ std::pair<int, int> ProducerPlaces(BufferTransform t, int x, int y) {
 
 class LayerDrawGl : public ::testing::Test {
  protected:
+  virtual EGLint ClientVersion() const { return 2; }
+  virtual const GlCaps* ProbeCaps() { return nullptr; }
+
   void SetUp() override {
     const char* client = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
     if (client == nullptr ||
@@ -90,23 +94,25 @@ class LayerDrawGl : public ::testing::Test {
       GTEST_SKIP() << "surfaceless EGL display did not initialize";
     }
     eglBindAPI(EGL_OPENGL_ES_API);
-    const EGLint config_attribs[] = {EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
-                                     EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
-                                     EGL_NONE};
+    const EGLint config_attribs[] = {
+        EGL_RENDERABLE_TYPE,
+        ClientVersion() >= 3 ? EGL_OPENGL_ES3_BIT : EGL_OPENGL_ES2_BIT,
+        EGL_SURFACE_TYPE, EGL_PBUFFER_BIT, EGL_NONE};
     EGLConfig config = nullptr;
     EGLint n = 0;
     if (eglChooseConfig(display_, config_attribs, &config, 1, &n) != EGL_TRUE ||
         n == 0) {
-      GTEST_SKIP() << "no GLES2 config";
+      GTEST_SKIP() << "no GLES" << ClientVersion() << " config";
     }
-    const EGLint ctx_attribs[] = {EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE};
+    const EGLint ctx_attribs[] = {EGL_CONTEXT_CLIENT_VERSION, ClientVersion(),
+                                  EGL_NONE};
     context_ = eglCreateContext(display_, config, EGL_NO_CONTEXT, ctx_attribs);
     if (context_ == EGL_NO_CONTEXT ||
         eglMakeCurrent(display_, EGL_NO_SURFACE, EGL_NO_SURFACE, context_) !=
             EGL_TRUE) {
-      GTEST_SKIP() << "no surfaceless GLES2 context";
+      GTEST_SKIP() << "no surfaceless GLES" << ClientVersion() << " context";
     }
-    compositor_ = std::make_unique<GlCompositor>(nullptr);  // quad path only
+    compositor_ = std::make_unique<GlCompositor>(ProbeCaps());
   }
 
   void TearDown() override {
@@ -175,6 +181,17 @@ class LayerDrawGl : public ::testing::Test {
   EGLDisplay display_{EGL_NO_DISPLAY};
   EGLContext context_{EGL_NO_CONTEXT};
   std::unique_ptr<GlCompositor> compositor_;
+};
+
+class LayerDrawGlEs3 : public LayerDrawGl {
+ protected:
+  EGLint ClientVersion() const override { return 3; }
+  const GlCaps* ProbeCaps() override {
+    caps_.Probe();
+    return &caps_;
+  }
+
+  GlCaps caps_;
 };
 
 }  // namespace
@@ -454,4 +471,48 @@ TEST_F(LayerDrawGl, ALayerZeroAlreadyTakenIsDrawnNotTakenAgain) {
       << "drew a frame other than the one handed in";
   glDeleteTextures(1, &taken_tex);
   glDeleteTextures(1, &newer_tex);
+}
+
+TEST_F(LayerDrawGlEs3, SamplerLeftOnUnit0DoesNotBlackOutTheLayer) {
+  using GenSamplersFn = void(GL_APIENTRY*)(GLsizei, GLuint*);
+  using SamplerParameteriFn = void(GL_APIENTRY*)(GLuint, GLenum, GLint);
+  using DeleteSamplersFn = void(GL_APIENTRY*)(GLsizei, const GLuint*);
+  const auto gen_samplers =
+      reinterpret_cast<GenSamplersFn>(eglGetProcAddress("glGenSamplers"));
+  const auto sampler_parameteri = reinterpret_cast<SamplerParameteriFn>(
+      eglGetProcAddress("glSamplerParameteri"));
+  const auto delete_samplers =
+      reinterpret_cast<DeleteSamplersFn>(eglGetProcAddress("glDeleteSamplers"));
+  ASSERT_NE(gen_samplers, nullptr);
+  ASSERT_NE(sampler_parameteri, nullptr);
+  ASSERT_NE(delete_samplers, nullptr);
+  ASSERT_NE(caps_.bind_sampler, nullptr) << "glBindSampler did not resolve";
+
+  std::vector<uint8_t> image(Px(0, kH, kW));
+  for (int i = 0; i < kW * kH; ++i) {
+    const auto c = ColorOf(i);
+    std::memcpy(&image[Px(i, 0, 0)], c.data(), 4);
+  }
+  const GLuint tex = MakeTexture(kW, kH, image);  // one level, no mipmaps
+
+  GLuint sampler = 0;
+  gen_samplers(1, &sampler);
+  sampler_parameteri(sampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+  glActiveTexture(GL_TEXTURE0);
+  caps_.bind_sampler(0, sampler);
+
+  const auto out = Draw(tex, UvForLayer({}, kW, kH, BufferTransform::kNormal),
+                        /*opaque=*/false);
+
+  caps_.bind_sampler(0, 0);
+  delete_samplers(1, &sampler);
+  glDeleteTextures(1, &tex);
+  for (int i = 0; i < kW * kH; ++i) {
+    const auto want = ColorOf(i);
+    const uint8_t* got = &out[Px(i, 0, 0)];
+    EXPECT_TRUE(std::memcmp(got, want.data(), 4) == 0)
+        << "pixel " << i << ": got " << int(got[0]) << "," << int(got[1]) << ","
+        << int(got[2]) << " want " << int(want[0]) << "," << int(want[1]) << ","
+        << int(want[2]);
+  }
 }
