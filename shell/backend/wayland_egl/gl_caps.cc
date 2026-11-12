@@ -115,8 +115,16 @@ void GlCaps::Probe() {
   }
   has_multisampled_renderbuffer = (renderbuffer_storage_multisample != nullptr);
 
+  // Resolve bind_sampler.
+  bind_sampler = nullptr;
+  if (is_es3) {
+    bind_sampler = reinterpret_cast<BindSamplerFn>(Resolve("glBindSampler"));
+  }
+
   ihs::log::debug(
-      "GlCaps: ES{}.{} rgb8={} packed_ds={} blit={} msaa_rb={} fb0_samples={}",
+      "GlCaps: ES{}.{} rgb8={} packed_ds={} blit={} msaa_rb={} fb0_samples={} "
+      "bind_sampler={}",
       context_major, context_minor, has_rgb8_rgba8, has_packed_depth_stencil,
-      has_blit_framebuffer, has_multisampled_renderbuffer, default_fb_samples);
+      has_blit_framebuffer, has_multisampled_renderbuffer, default_fb_samples,
+      bind_sampler != nullptr);
 }

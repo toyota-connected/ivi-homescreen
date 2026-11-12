@@ -66,8 +66,11 @@ struct GlCaps {
                          GLsizei width,
                          GLsizei height);
 
+  using BindSamplerFn = void(GL_APIENTRY*)(GLuint unit, GLuint sampler);
+
   BlitFramebufferFn blit_framebuffer{nullptr};
   RenderbufferStorageMultisampleFn renderbuffer_storage_multisample{nullptr};
+  BindSamplerFn bind_sampler{nullptr};
 
   /**
    * @brief Probe the current GL context. Safe to call more than once.
