@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include "backend/wayland_egl/egl_backing_store.h"
 #include "backend/wayland_egl/gl_compositor.h"
 #include "gtest/gtest.h"
 
@@ -64,6 +65,41 @@ TEST(GlCompositorCanBlit, UnresolvedEntryPointTakesQuadPath) {
   caps = Blittable();
   caps.has_blit_framebuffer = false;
   EXPECT_FALSE(GlCompositor::CanBlit(caps, false, false, 1, 0));
+}
+
+// --msaa-samples sizes the root backing store, whatever the window surface
+// got (#839).
+GlCaps Multisampling(const GLint max_samples) {
+  GlCaps caps{};
+  caps.has_multisampled_renderbuffer = true;
+  caps.renderbuffer_storage_multisample = [](GLenum, GLsizei, GLenum, GLsizei,
+                                             GLsizei) {};
+  caps.max_samples = max_samples;
+  return caps;
+}
+
+TEST(EglFboBackingStoreSamples, TheRequestIsTakenWhenTheGlHasIt) {
+  EXPECT_EQ(EglFboBackingStore::SamplesFor(2, Multisampling(8)), 2u);
+  EXPECT_EQ(EglFboBackingStore::SamplesFor(4, Multisampling(8)), 4u);
+  EXPECT_EQ(EglFboBackingStore::SamplesFor(8, Multisampling(8)), 8u);
+}
+
+TEST(EglFboBackingStoreSamples, TheRequestIsClampedToMaxSamples) {
+  EXPECT_EQ(EglFboBackingStore::SamplesFor(8, Multisampling(4)), 4u);
+}
+
+TEST(EglFboBackingStoreSamples, ZeroAndOneMeanNone) {
+  EXPECT_EQ(EglFboBackingStore::SamplesFor(0, Multisampling(8)), 0u);
+  EXPECT_EQ(EglFboBackingStore::SamplesFor(1, Multisampling(8)), 0u);
+}
+
+TEST(EglFboBackingStoreSamples, NoMultisampleRenderbuffersMeansNone) {
+  GlCaps caps = Multisampling(8);
+  caps.renderbuffer_storage_multisample = nullptr;
+  EXPECT_EQ(EglFboBackingStore::SamplesFor(4, caps), 0u);
+  caps = Multisampling(8);
+  caps.has_multisampled_renderbuffer = false;
+  EXPECT_EQ(EglFboBackingStore::SamplesFor(4, caps), 0u);
 }
 
 }  // namespace

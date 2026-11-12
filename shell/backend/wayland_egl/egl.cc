@@ -17,13 +17,59 @@
 #include "egl.h"
 #include "logging/logging.h"
 
+#include <array>
 #include <cassert>
 #include <cstring>
 #include <sstream>
+#include <vector>
 
 #include <GLES2/gl2.h>
 
 #include "logging.h"
+
+namespace {
+
+/// Returns |base| with its EGL_SAMPLE_BUFFERS / EGL_SAMPLES entries rewritten
+/// to request |samples|. Arrays without those keys (the relaxed fallback set)
+/// come back unchanged, which is what we want: the fallback exists to find
+/// *any* usable config.
+template <std::size_t N>
+std::array<EGLint, N> ConfigAttribsWithSamples(
+    const std::array<EGLint, N>& base,
+    const uint32_t samples) {
+  auto attribs = base;
+  for (std::size_t i = 0; i + 1 < attribs.size(); i += 2) {
+    if (attribs[i] == EGL_SAMPLE_BUFFERS) {
+      attribs[i + 1] = samples > 0 ? 1 : 0;
+    } else if (attribs[i] == EGL_SAMPLES) {
+      attribs[i + 1] = static_cast<EGLint>(samples);
+    }
+  }
+  return attribs;
+}
+
+/// Sample counts to try, in descending order, starting at |requested|.
+///
+/// EGL treats EGL_SAMPLES as a *minimum*, so a request the driver cannot meet
+/// matches no config at all. Stepping down finds the best the driver can
+/// actually do instead of dropping straight to no multisampling -- asking for
+/// more anti-aliasing than the hardware supports should not turn it off.
+/// Always ends at 0 so there is a guaranteed final attempt.
+std::vector<uint32_t> SampleCountLadder(const uint32_t requested) {
+  static constexpr std::array<uint32_t, 4> kCounts = {8, 4, 2, 0};
+  std::vector<uint32_t> ladder;
+  for (const auto count : kCounts) {
+    if (count <= requested) {
+      ladder.push_back(count);
+    }
+  }
+  if (ladder.empty() || ladder.back() != 0) {
+    ladder.push_back(0);
+  }
+  return ladder;
+}
+
+}  // namespace
 
 // Brings up the EGL display for |native_display| and the GLES contexts the
 // renderer needs. The sequence is: initialize the display and bind the GLES
@@ -33,7 +79,10 @@
 // damage-region / buffer-age extensions used by the swap path. A failure to
 // create a context leaves the object partially constructed and is logged
 // rather than fatal. |debug| additionally dumps the GLES/EGL attributes.
-Egl::Egl(void* native_display, const int buffer_size, const bool debug)
+Egl::Egl(void* native_display,
+         const int buffer_size,
+         const bool debug,
+         const uint32_t window_samples)
     : m_buffer_size(buffer_size),
       m_dpy(eglGetDisplay(static_cast<EGLNativeDisplayType>(native_display))) {
   assert(m_dpy);
@@ -51,13 +100,39 @@ Egl::Egl(void* native_display, const int buffer_size, const bool debug)
   }
 
   std::vector<EGLConfig> configs;
-  if (!GetConfig(kEglConfigAttribs.data(), configs)) {
+
+  // Walk the ladder down until the driver has a config at exactly that count.
+  // A miss on the way is expected, so it is probed quietly; only running out
+  // of rungs is worth reporting.
+  bool have_config = false;
+  for (const auto samples : SampleCountLadder(window_samples)) {
+    if (GetConfig(ConfigAttribsWithSamples(kEglConfigAttribs, samples).data(),
+                  configs, samples, /*quiet=*/true)) {
+      have_config = true;
+      break;
+    }
+  }
+
+  if (!have_config) {
     ihs::log::warn("Could not use default EGLConfig trying with fallback.");
-    // try with the fallback one
-    if (!GetConfig(kEglConfigAttribsFallBack.data(), configs)) {
-      ihs::log::critical("did not find config with buffer size {}",
-                         m_buffer_size);
-      abort();
+    // The fallback asks for no samples, whatever was requested.
+    have_config = GetConfig(kEglConfigAttribsFallBack.data(), configs, 0,
+                            /*quiet=*/false);
+  }
+
+  if (!have_config) {
+    ihs::log::critical("did not find config with buffer size {}",
+                       m_buffer_size);
+    abort();
+  }
+
+  {
+    EGLint chosen_samples = 0;
+    eglGetConfigAttrib(m_dpy, m_config, EGL_SAMPLES, &chosen_samples);
+    m_window_samples = static_cast<uint32_t>(chosen_samples);
+    if (window_samples > 0 || chosen_samples > 0) {
+      ihs::log::info("MSAA: window surface requested {} sample(s), got {}.",
+                     window_samples, chosen_samples);
     }
   }
 
@@ -865,11 +940,15 @@ EGLSurface Egl::create_egl_surface(void* native_window,
 }
 
 bool Egl::GetConfig(const EGLint* attrib_list,
-                    std::vector<EGLConfig>& configs) {
+                    std::vector<EGLConfig>& configs,
+                    const uint32_t samples,
+                    const bool quiet) {
   EGLint n = 0;
   auto ret = eglChooseConfig(m_dpy, attrib_list, nullptr, 0, &n);
   if (!ret || n < 1) {
-    ihs::log::error("Failed to choose EGL config");
+    if (!quiet) {
+      ihs::log::error("Failed to choose EGL config");
+    }
     return false;
   }
 
@@ -877,14 +956,24 @@ bool Egl::GetConfig(const EGLint* attrib_list,
   ret = eglChooseConfig(m_dpy, attrib_list, configs.data(),
                         static_cast<EGLint>(configs.size()), &n);
   if (!ret || n < 1) {
-    ihs::log::error("Failed to choose EGL config");
+    if (!quiet) {
+      ihs::log::error("Failed to choose EGL config");
+    }
     return false;
   }
 
   EGLint size;
   for (EGLint i = 0; i < n; i++) {
-    eglGetConfigAttrib(m_dpy, configs[static_cast<size_t>(i)], EGL_BUFFER_SIZE,
-                       &size);
+    EGLConfig config = configs[static_cast<size_t>(i)];
+    // EGL_SAMPLES only sets a floor, and color depth sorts ahead of it, so a
+    // config with more samples than asked for can come first. Skip it rather
+    // than take on samples nobody asked for.
+    EGLint config_samples = 0;
+    eglGetConfigAttrib(m_dpy, config, EGL_SAMPLES, &config_samples);
+    if (static_cast<uint32_t>(config_samples) != samples) {
+      continue;
+    }
+    eglGetConfigAttrib(m_dpy, config, EGL_BUFFER_SIZE, &size);
     IHS_DEBUG("Buffer size for config {} is {}", i, size);
     if (m_buffer_size <= size) {
       std::copy(&configs[static_cast<size_t>(i)],

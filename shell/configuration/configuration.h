@@ -34,6 +34,18 @@ class Configuration {
     std::optional<bool> debug_backend;
     std::vector<std::string> bundle_paths;
 
+    // [global] msaa_samples: multisample anti-aliasing sample count for the
+    // rendering surface -- 0, 2, 4 or 8, where 0 disables MSAA. Unset means
+    // kBuiltInMsaaSamples: 4 on a build with BUILD_EGL_ENABLE_MULTISAMPLE,
+    // else 0.
+    //
+    // Runtime-configurable because MSAA renderbuffers are typically the single
+    // largest GPU allocation, and on memory-constrained devices turning it down
+    // or off has to be possible without a rebuild.
+    //
+    // Wayland EGL only; every other backend ignores it and says so.
+    std::optional<uint32_t> msaa_samples;
+
     // [global] enable_mcp: serve the MCP surface, which lets an external agent
     // read the UI and drive it. Off unless asked for, and asking takes both a
     // build that included the surface (BUILD_MCP) and this key -- the double

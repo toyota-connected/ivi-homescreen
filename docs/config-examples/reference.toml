@@ -30,6 +30,10 @@
   # type=array<string> default=all tools values=array of tool names applies=all
   mcp_allowed_tools =
 
+  # MSAA sample count; 0 disables it. With the compositor it sizes the root backing store (clamped to GL_MAX_SAMPLES) and the window surface stays single sample; without, the window surface gets it, stepping down to what the driver has. Impeller treats 2 and 8 as 4. Other backends ignore it, with a warning. An invalid value is fatal on the command line and ignored, with an error, in TOML.
+  # type=int default=4 with BUILD_EGL_ENABLE_MULTISAMPLE, else 0 values=0|2|4|8 applies=wayland-egl
+  msaa_samples =
+
   # Wayland input events to mask (e.g. 'keyboard pointer').
   # type=string default=— values=comma/space list applies=wayland
   wayland_event_mask =
