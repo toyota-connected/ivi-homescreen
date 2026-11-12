@@ -70,13 +70,19 @@ WaylandEglBackend::WaylandEglBackend(Display* shell_display,
                                      const uint32_t initial_height,
                                      const bool debug_backend,
                                      const bool enable_impeller,
-                                     const std::optional<uint32_t> msaa_samples,
-                                     const int buffer_size)
-    : Egl(display, buffer_size, debug_backend, msaa_samples),
+                                     const int buffer_size,
+                                     const uint32_t msaa_samples)
+    : Egl(display,
+          buffer_size,
+          debug_backend,
+          BUILD_COMPOSITOR ? 0 : msaa_samples),
       Backend(),
       m_initial_width(initial_width),
       m_initial_height(initial_height),
       m_partial_repaint_enabled(!enable_impeller) {
+#if BUILD_COMPOSITOR
+  m_msaa_samples = msaa_samples;
+#endif
   if (enable_impeller) {
     ihs::log::info(
         "[WaylandEglBackend] Impeller renderer active — partial repaint "
@@ -901,6 +907,17 @@ void WaylandEglBackend::EnsureGlCapsProbed() {
   m_gl_caps.Probe();
   m_gl_compositor = std::make_unique<GlCompositor>(&m_gl_caps);
   m_gl_caps_probed = true;
+
+  m_fbo_samples = EglFboBackingStore::SamplesFor(m_msaa_samples, m_gl_caps);
+  if (m_msaa_samples > 1 && m_fbo_samples == 0) {
+    ihs::log::warn(
+        "MSAA: {} sample(s) requested, but the GL has no multisample "
+        "renderbuffers; rendering without",
+        m_msaa_samples);
+  } else if (m_msaa_samples > 1) {
+    ihs::log::info("MSAA: backing store requested {} sample(s), using {}",
+                   m_msaa_samples, m_fbo_samples);
+  }
 }
 
 bool WaylandEglBackend::CreateBackingStore(
@@ -930,10 +947,9 @@ bool WaylandEglBackend::CreateBackingStore(
   // for overlays that typically don't need it, and the texture name is
   // directly sampleable by plugins that want to effect the overlay).
   if (IsRootSize(w, h)) {
-    // MsaaSamples() is what the chosen EGLConfig actually granted, which is
-    // what the multisample renderbuffers must match. Constant for the process
-    // lifetime, so the pool's {width,height} key stays sufficient.
-    auto store = m_fbo_pool.Acquire(w, h, &m_gl_caps, MsaaSamples());
+    // Constant for the process lifetime, so the pool's {width,height} key
+    // stays sufficient.
+    auto store = m_fbo_pool.Acquire(w, h, &m_gl_caps, m_fbo_samples);
     auto* baton = new StoreBaton{this, StoreKind::Fbo, {}};
     baton->fbo_store = store.get();
 

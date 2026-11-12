@@ -56,9 +56,9 @@ EglFboBackingStore::EglFboBackingStore(int32_t width,
     : width_(width), height_(height) {
   const ColorFormat color = PickColorFormat(caps);
   const auto msaa = static_cast<GLsizei>(msaa_samples);
-  // The sample count is now a runtime value, so it has to be part of the
-  // decision: 0 (or 1) means the caller asked for no multisampling and the
-  // store must use a plain texture attachment, not a 1-sample renderbuffer.
+  // 0 (or 1) means no multisampling: a plain texture attachment, not a
+  // 1-sample renderbuffer. The backend has already checked the GL can do it
+  // and clamped the count to GL_MAX_SAMPLES.
   const bool msaa_ok = msaa > 1 && caps &&
                        caps->has_multisampled_renderbuffer &&
                        caps->renderbuffer_storage_multisample != nullptr;
@@ -75,7 +75,6 @@ EglFboBackingStore::EglFboBackingStore(int32_t width,
   glTexImage2D(GL_TEXTURE_2D, 0, static_cast<GLint>(color.internal_format),
                width_, height_, 0, color.format, GL_UNSIGNED_BYTE, nullptr);
 
-#if BUILD_EGL_ENABLE_MULTISAMPLE
   if (msaa_ok) {
     // Multisample renderbuffer used as the color attachment; the texture is
     // the resolve target and gets blitted/composited during presentation.
@@ -86,24 +85,9 @@ EglFboBackingStore::EglFboBackingStore(int32_t width,
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
                               GL_RENDERBUFFER, color_rb_msaa_);
   } else {
-    // Only a complaint when MSAA was actually wanted. msaa <= 1 is the
-    // configured-off case (--msaa-samples 0, or an EGLConfig that granted no
-    // samples), which is a deliberate choice and not worth a warning.
-    if (msaa > 1) {
-      ihs::log::warn(
-          "EglFboBackingStore: {} MSAA sample(s) requested but no multisample "
-          "renderbuffer support; dropping MSAA.",
-          msaa);
-    }
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
                            color_texture_, 0);
   }
-#else
-  (void)msaa_ok;
-  (void)msaa;
-  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-                         color_texture_, 0);
-#endif
 
 #if BUILD_EGL_ENABLE_3D
   glGenRenderbuffers(1, &depth_stencil_rb_);
@@ -111,16 +95,12 @@ EglFboBackingStore::EglFboBackingStore(int32_t width,
   const bool packed_ds = caps && caps->has_packed_depth_stencil;
   const GLenum ds_format =
       packed_ds ? GL_DEPTH24_STENCIL8_OES : GL_DEPTH_COMPONENT16;
-#if BUILD_EGL_ENABLE_MULTISAMPLE
   if (msaa_ok) {
     caps->renderbuffer_storage_multisample(GL_RENDERBUFFER, msaa, ds_format,
                                            width_, height_);
   } else {
     glRenderbufferStorage(GL_RENDERBUFFER, ds_format, width_, height_);
   }
-#else
-  glRenderbufferStorage(GL_RENDERBUFFER, ds_format, width_, height_);
-#endif
   glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
                             GL_RENDERBUFFER, depth_stencil_rb_);
   if (packed_ds) {

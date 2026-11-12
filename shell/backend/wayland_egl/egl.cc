@@ -20,7 +20,6 @@
 #include <array>
 #include <cassert>
 #include <cstring>
-#include <optional>
 #include <sstream>
 #include <vector>
 
@@ -83,7 +82,7 @@ std::vector<uint32_t> SampleCountLadder(const uint32_t requested) {
 Egl::Egl(void* native_display,
          const int buffer_size,
          const bool debug,
-         const std::optional<uint32_t> msaa_samples)
+         const uint32_t window_samples)
     : m_buffer_size(buffer_size),
       m_dpy(eglGetDisplay(static_cast<EGLNativeDisplayType>(native_display))) {
   assert(m_dpy);
@@ -101,36 +100,24 @@ Egl::Egl(void* native_display,
   }
 
   std::vector<EGLConfig> configs;
-  const auto requested_samples = msaa_samples.value_or(
-      BUILD_EGL_ENABLE_MULTISAMPLE ? kDefaultMsaaSamples : 0u);
 
-  // The sample count actually used. Walk the ladder down until the driver
-  // matches, and carry the result into the fallback attempt so an explicit
-  // --msaa-samples=0 is never silently upgraded to a multisampled config.
-  uint32_t effective_samples = 0;
+  // Walk the ladder down until the driver has a config at exactly that count.
+  // A miss on the way is expected, so it is probed quietly; only running out
+  // of rungs is worth reporting.
   bool have_config = false;
-
-  for (const auto samples : SampleCountLadder(requested_samples)) {
-    effective_samples = samples;
+  for (const auto samples : SampleCountLadder(window_samples)) {
     if (GetConfig(ConfigAttribsWithSamples(kEglConfigAttribs, samples).data(),
-                  configs)) {
+                  configs, samples, /*quiet=*/true)) {
       have_config = true;
       break;
-    }
-    if (samples > 0) {
-      ihs::log::warn(
-          "No EGLConfig with at least {} MSAA sample(s); trying fewer.",
-          samples);
     }
   }
 
   if (!have_config) {
     ihs::log::warn("Could not use default EGLConfig trying with fallback.");
-    // try with the fallback one
-    have_config = GetConfig(
-        ConfigAttribsWithSamples(kEglConfigAttribsFallBack, effective_samples)
-            .data(),
-        configs);
+    // The fallback asks for no samples, whatever was requested.
+    have_config = GetConfig(kEglConfigAttribsFallBack.data(), configs, 0,
+                            /*quiet=*/false);
   }
 
   if (!have_config) {
@@ -139,14 +126,14 @@ Egl::Egl(void* native_display,
     abort();
   }
 
-  // EGL_SAMPLES is a minimum, so read back what the chosen config actually
-  // provides rather than assuming the request was honoured exactly.
   {
     EGLint chosen_samples = 0;
     eglGetConfigAttrib(m_dpy, m_config, EGL_SAMPLES, &chosen_samples);
-    m_msaa_samples = static_cast<uint32_t>(chosen_samples);
-    ihs::log::info("MSAA: requested {} sample(s), EGLConfig provides {}.",
-                   requested_samples, chosen_samples);
+    m_window_samples = static_cast<uint32_t>(chosen_samples);
+    if (window_samples > 0 || chosen_samples > 0) {
+      ihs::log::info("MSAA: window surface requested {} sample(s), got {}.",
+                     window_samples, chosen_samples);
+    }
   }
 
   configs.clear();
@@ -953,11 +940,15 @@ EGLSurface Egl::create_egl_surface(void* native_window,
 }
 
 bool Egl::GetConfig(const EGLint* attrib_list,
-                    std::vector<EGLConfig>& configs) {
+                    std::vector<EGLConfig>& configs,
+                    const uint32_t samples,
+                    const bool quiet) {
   EGLint n = 0;
   auto ret = eglChooseConfig(m_dpy, attrib_list, nullptr, 0, &n);
   if (!ret || n < 1) {
-    ihs::log::error("Failed to choose EGL config");
+    if (!quiet) {
+      ihs::log::error("Failed to choose EGL config");
+    }
     return false;
   }
 
@@ -965,14 +956,24 @@ bool Egl::GetConfig(const EGLint* attrib_list,
   ret = eglChooseConfig(m_dpy, attrib_list, configs.data(),
                         static_cast<EGLint>(configs.size()), &n);
   if (!ret || n < 1) {
-    ihs::log::error("Failed to choose EGL config");
+    if (!quiet) {
+      ihs::log::error("Failed to choose EGL config");
+    }
     return false;
   }
 
   EGLint size;
   for (EGLint i = 0; i < n; i++) {
-    eglGetConfigAttrib(m_dpy, configs[static_cast<size_t>(i)], EGL_BUFFER_SIZE,
-                       &size);
+    EGLConfig config = configs[static_cast<size_t>(i)];
+    // EGL_SAMPLES only sets a floor, and color depth sorts ahead of it, so a
+    // config with more samples than asked for can come first. Skip it rather
+    // than take on samples nobody asked for.
+    EGLint config_samples = 0;
+    eglGetConfigAttrib(m_dpy, config, EGL_SAMPLES, &config_samples);
+    if (static_cast<uint32_t>(config_samples) != samples) {
+      continue;
+    }
+    eglGetConfigAttrib(m_dpy, config, EGL_BUFFER_SIZE, &size);
     IHS_DEBUG("Buffer size for config {} is {}", i, size);
     if (m_buffer_size <= size) {
       std::copy(&configs[static_cast<size_t>(i)],

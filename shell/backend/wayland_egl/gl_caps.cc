@@ -115,8 +115,17 @@ void GlCaps::Probe() {
   }
   has_multisampled_renderbuffer = (renderbuffer_storage_multisample != nullptr);
 
+  // ES3 core; the ANGLE and NV extensions define the same enum.
+  max_samples = 0;
+  if (has_multisampled_renderbuffer) {
+    constexpr GLenum kMaxSamples = 0x8D57;  // GL_MAX_SAMPLES
+    glGetIntegerv(kMaxSamples, &max_samples);
+  }
+
   ihs::log::debug(
-      "GlCaps: ES{}.{} rgb8={} packed_ds={} blit={} msaa_rb={} fb0_samples={}",
+      "GlCaps: ES{}.{} rgb8={} packed_ds={} blit={} msaa_rb={} max_samples={} "
+      "fb0_samples={}",
       context_major, context_minor, has_rgb8_rgba8, has_packed_depth_stencil,
-      has_blit_framebuffer, has_multisampled_renderbuffer, default_fb_samples);
+      has_blit_framebuffer, has_multisampled_renderbuffer, max_samples,
+      default_fb_samples);
 }

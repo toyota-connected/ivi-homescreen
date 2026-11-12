@@ -653,8 +653,8 @@ std::shared_ptr<Backend> MakeWaylandEglBackend(
       wl, wl->GetDisplay(), config.view.width.value_or(kDefaultViewWidth),
       config.view.height.value_or(kDefaultViewHeight),
       config.debug_backend.value_or(false),
-      EngineSwitchesEnableImpeller(config.view.engine_args),
-      config.msaa_samples, kEglBufferSize);
+      EngineSwitchesEnableImpeller(config.view.engine_args), kEglBufferSize,
+      config.msaa_samples.value_or(kBuiltInMsaaSamples));
 }
 #endif
 

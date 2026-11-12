@@ -222,7 +222,7 @@ Below are some of the flags available for configuring the CMake build. Please no
 
 `BUILD_EGL_ENABLE_3D` - Build with EGL Stencil, Depth, and Stencil config Enabled. Defaults to ON
 
-`BUILD_EGL_ENABLE_MULTISAMPLE` - Build with EGL Sample set to 4. Defaults to OFF
+`BUILD_EGL_ENABLE_MULTISAMPLE` - Default `--msaa-samples` to 4 instead of 0 (Wayland EGL). Defaults to OFF
 
 `BUILD_BACKEND_WAYLAND_VULKAN` - Build Backend for Vulkan. Declared (default ON) only when `BUILD_BACKEND_WAYLAND_EGL=OFF`; can still be set explicitly alongside EGL
 

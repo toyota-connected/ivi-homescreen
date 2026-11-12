@@ -20,7 +20,7 @@
 
 #include <GLES2/gl2.h>
 
-struct GlCaps;
+#include "backend/wayland_egl/gl_caps.h"
 
 /**
  * @brief FBO-backed EGL backing store.
@@ -47,14 +47,32 @@ struct GlCaps;
 class EglFboBackingStore {
  public:
   /// @param msaa_samples Sample count for the multisample renderbuffers. 0
-  ///        disables MSAA for this store. Comes from the EGLConfig the backend
-  ///        negotiated (Egl::MsaaSamples()), not from a compile-time constant,
-  ///        so --msaa-samples / [global].msaa_samples take effect.
+  ///        disables MSAA for this store. --msaa-samples /
+  ///        [global].msaa_samples, clamped by the backend to GL_MAX_SAMPLES.
   EglFboBackingStore(int32_t width,
                      int32_t height,
                      const GlCaps* caps,
                      uint32_t msaa_samples);
   ~EglFboBackingStore();
+
+  /**
+   * @brief The sample count a store asked for @p requested samples gets.
+   *
+   * 0 when @p requested is 0 or 1, or when the GL has no multisample
+   * renderbuffers; otherwise @p requested clamped to GL_MAX_SAMPLES. Static so
+   * it is testable without a GL context.
+   */
+  static uint32_t SamplesFor(const uint32_t requested, const GlCaps& caps) {
+    if (requested <= 1 || !caps.has_multisampled_renderbuffer ||
+        caps.renderbuffer_storage_multisample == nullptr) {
+      return 0;
+    }
+    if (caps.max_samples > 0 &&
+        requested > static_cast<uint32_t>(caps.max_samples)) {
+      return static_cast<uint32_t>(caps.max_samples);
+    }
+    return requested;
+  }
 
   EglFboBackingStore(const EglFboBackingStore&) = delete;
   EglFboBackingStore& operator=(const EglFboBackingStore&) = delete;
@@ -67,8 +85,8 @@ class EglFboBackingStore {
   /**
    * @brief Whether the color attachment is a multisample renderbuffer.
    *
-   * True only under BUILD_EGL_ENABLE_MULTISAMPLE, and only where the caps
-   * probe found the entry point. A store in that state cannot be sampled and
+   * True only when MSAA was asked for, and only where the caps probe found
+   * the entry point. A store in that state cannot be sampled and
    * has to be resolved first.
    */
   [[nodiscard]] bool IsMultisampled() const { return color_rb_msaa_ != 0; }

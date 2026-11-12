@@ -17,7 +17,6 @@
 #pragma once
 
 #include <array>
-#include <optional>
 #include <vector>
 
 #include <EGL/egl.h>
@@ -28,14 +27,13 @@
 
 class Egl {
  public:
-  /// @param msaa_samples Requested MSAA sample count (0, 2, 4 or 8), or
-  ///        std::nullopt to use the count the embedder was built with. EGL
-  ///        treats EGL_SAMPLES as a minimum, so the count finally granted by
-  ///        the driver may be lower -- see MsaaSamples().
+  /// @param window_samples MSAA sample count wanted for the window surface
+  ///        (0, 2, 4 or 8). When the driver has no config at that count, the
+  ///        next lower one is tried, down to 0 -- see WindowSamples().
   Egl(void* native_display,
       int buffer_size,
       bool debug,
-      std::optional<uint32_t> msaa_samples = std::nullopt);
+      uint32_t window_samples = 0);
 
   ~Egl();
 
@@ -154,10 +152,9 @@ class Egl {
 
   [[nodiscard]] EGLConfig GetConfig() const { return m_config; }
 
-  /// Sample count of the EGLConfig actually chosen, which is what the
-  /// framebuffer's multisample renderbuffers must be allocated with. 0 when
+  /// Sample count of the EGLConfig chosen for the window surface. 0 when
   /// multisampling is off or unavailable. Only meaningful after construction.
-  [[nodiscard]] uint32_t MsaaSamples() const { return m_msaa_samples; }
+  [[nodiscard]] uint32_t WindowSamples() const { return m_window_samples; }
 
   [[nodiscard]] EGLContext GetTextureContext() const {
     return m_texture_context;
@@ -179,8 +176,8 @@ class Egl {
   EGLConfig m_config{};
   EGLContext m_texture_context{};
 
-  /// EGL_SAMPLES of the chosen config (see MsaaSamples()).
-  uint32_t m_msaa_samples{0};
+  /// EGL_SAMPLES of the chosen config (see WindowSamples()).
+  uint32_t m_window_samples{0};
 
   int m_buffer_size{};
 
@@ -264,5 +261,11 @@ class Egl {
    */
   static void print_extension_list(const EGLDisplay& dpy);
 
-  bool GetConfig(const EGLint* attrib_list, std::vector<EGLConfig>& configs);
+  // Picks a config matching @p attrib_list with exactly @p samples samples
+  // and at least m_buffer_size bits. @p quiet: a miss is expected (a probe),
+  // so it is not logged.
+  bool GetConfig(const EGLint* attrib_list,
+                 std::vector<EGLConfig>& configs,
+                 uint32_t samples,
+                 bool quiet);
 };

@@ -147,8 +147,8 @@ class GlCompositor {
    * Blit cannot blend, cannot read a layer with no FBO behind it, and is a
    * resolve only: ES3 makes a blit into a multisampled draw framebuffer
    * GL_INVALID_OPERATION. Framebuffer 0 carries samples whenever the EGL
-   * config asked for them (BUILD_EGL_ENABLE_MULTISAMPLE), so that case takes
-   * the quad path instead. Static so it is testable without a GL context.
+   * config has them, so that case takes the quad path instead. Static so it is
+   * testable without a GL context.
    */
   static bool CanBlit(const GlCaps& caps,
                       bool external,

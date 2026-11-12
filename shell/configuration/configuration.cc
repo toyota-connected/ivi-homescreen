@@ -18,7 +18,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -32,7 +31,7 @@
 namespace {
 
 /// Sample counts accepted for MSAA. 0 disables it. Impeller models only
-/// single- and 4x-sampling internally, so 2 and 8 are honoured by the EGL
+/// single- and 4x-sampling internally, so 2 and 8 are honored by the EGL
 /// surface but seen as 4x by the engine.
 constexpr std::array<int64_t, 4> kMsaaSampleCounts = {0, 2, 4, 8};
 constexpr char kMsaaSampleCountsDescription[] = "0, 2, 4 or 8";
@@ -481,6 +480,8 @@ void Configuration::get_cli_override(const std::string& bundle_path,
   if (cli.msaa_samples.has_value()) {
     instance.msaa_samples = cli.msaa_samples.value();
   }
+  // The two argument lists are the one exception to "CLI replaces TOML": they
+  // append, so a bundle's own engine/Dart args survive alongside the CLI's.
   if (!cli.view.engine_args.empty()) {
     for (auto const& arg : cli.view.engine_args) {
       instance.view.engine_args.emplace_back(arg);
@@ -725,12 +726,6 @@ void Configuration::PrintConfig(const Config& config) {
                  (config.debug_backend.value_or(false) ? "true" : "false"));
   ihs::log::info("MCP Surface: ........... {}",
                  (config.enable_mcp.value_or(false) ? "true" : "false"));
-  // Report the resolved value, including what "unset" resolves to, so the log
-  // answers "how much MSAA am I actually getting" without knowing the build
-  // flags. The EGL backend logs the count the driver actually granted.
-  ihs::log::info("MSAA Samples: .......... {}",
-                 config.msaa_samples.value_or(
-                     BUILD_EGL_ENABLE_MULTISAMPLE ? kDefaultMsaaSamples : 0u));
   ihs::log::info("********");
   ihs::log::info("* View *");
   ihs::log::info("********");
@@ -840,8 +835,8 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
         cxxopts::value<bool>()->implicit_value("true"))(
         "msaa-samples",
         "Number of samples used for multisample anti-aliasing of the "
-        "rendering surface: 0, 2, 4 or 8. 0 disables MSAA. Unset = the "
-        "value the embedder was built with. EGL backends only.",
+        "rendering surface: 0, 2, 4 or 8. 0 disables MSAA. Unset = 4 on a "
+        "build with BUILD_EGL_ENABLE_MULTISAMPLE, else 0. Wayland EGL only.",
         cxxopts::value<int64_t>());
 
     // [[view]] (geometry / Flutter)
