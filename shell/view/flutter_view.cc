@@ -712,6 +712,10 @@ bool FlutterView::Initialize() {
   }
 #endif
   if (!handled_by_wayland) {
+    // The configured [view] pixel_ratio is otherwise only reported through
+    // NotifyDisplayUpdate; the window metrics are what Flutter lays out with.
+    m_flutter_engine->SetInitialPixelRatio(
+        m_config.view.pixel_ratio.value_or(kDefaultPixelRatio));
     const auto result = m_flutter_engine->SetWindowSize(
         static_cast<size_t>(extent.height), static_cast<size_t>(extent.width));
     ihs::log::info("[FlutterView] SendWindowMetrics {}x{} result={}",
