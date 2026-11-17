@@ -33,18 +33,10 @@ class PlatformHandler;
 class PlatformViewsHandler;
 class PlatformViewRegistry;
 
-// Custom deleter for FlutterEngineAOTData.
-struct AOTDataDeleter {
-  void operator()(const FlutterEngineAOTData aot_data) const {
-    LibFlutterEngine->CollectAOTData(aot_data);
-  }
-};
-
 using FlutterDesktopMessengerReferenceOwner =
     std::unique_ptr<FlutterDesktopMessenger,
                     decltype(&FlutterDesktopMessengerRelease)>;
 
-using UniqueAotDataPtr = std::unique_ptr<_FlutterEngineAOTData, AOTDataDeleter>;
 /// Maintains one ref on the FlutterDesktopMessenger's internal reference count.
 
 extern "C" {
@@ -113,9 +105,6 @@ struct FlutterDesktopEngineState {
   // The controller associated with this engine instance, if any.
   // This will always be null for a headless engine.
   FlutterDesktopViewControllerState* view_controller = nullptr;
-
-  // AOT data for this engine instance, if applicable.
-  UniqueAotDataPtr aot_data = nullptr;
 
   // Flutter Asset Folder
   std::string flutter_asset_directory;

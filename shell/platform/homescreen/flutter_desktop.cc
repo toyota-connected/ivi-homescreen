@@ -10,7 +10,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <filesystem>
 #include <mutex>
 #include <string>
 
@@ -41,31 +40,6 @@ struct FlutterDesktopEngineState;
 struct FlutterDesktopView;
 
 static_assert(FLUTTER_ENGINE_VERSION == 1, "Engine version does not match");
-
-// Attempts to load AOT data from the given path, which must be absolute and
-// non-empty. Logs and returns nullptr on failure.
-std::unique_ptr<_FlutterEngineAOTData, AOTDataDeleter> LoadAotData(
-    const std::filesystem::path& aot_data_path) {
-  if (aot_data_path.empty()) {
-    ihs::log::error(
-        "Attempted to load AOT data, but no aot_data_path was provided.");
-    return nullptr;
-  }
-  const std::string path_string = aot_data_path.string();
-  if (!std::filesystem::exists(aot_data_path)) {
-    ihs::log::error("Can't load AOT data from {}; no such file.", path_string);
-    return nullptr;
-  }
-  FlutterEngineAOTDataSource source = {};
-  source.type = kFlutterEngineAOTDataSourceTypeElfPath;
-  source.elf_path = path_string.c_str();
-  FlutterEngineAOTData data = nullptr;
-  if (LibFlutterEngine->CreateAOTData(&source, &data) != kSuccess) {
-    ihs::log::error("Failed to load AOT data from: {}", path_string);
-    return nullptr;
-  }
-  return std::unique_ptr<_FlutterEngineAOTData, AOTDataDeleter>(data);
-}
 
 // Populates |state|'s helper object fields that are common to normal and
 // headless mode.
