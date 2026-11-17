@@ -620,9 +620,7 @@ class Engine {
   bool m_merge_render_platform = false;
 
   // Zero-initialized: only assigned for AOT runs (RunsAOTCompiledDartCode()).
-  // On a JIT/debug run LoadAotData() never runs, so this must be null —
-  // otherwise the `if (m_aot_data)` guard in Shutdown() reads garbage and
-  // CollectAOTData() corrupts the heap.
+  // Never collected: see Shutdown().
   FlutterEngineAOTData m_aot_data{};
 
   // Owned by Engine so it survives FlutterEngineDeinitialize. See

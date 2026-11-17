@@ -418,12 +418,6 @@ platform_views_handler.h
 flutter_desktop_engine_state.h
 ------------------------------
 
-.. doxygenstruct:: AOTDataDeleter
-   :project: ivi-homescreen
-   :members:
-   :private-members:
-   :undoc-members:
-
 .. doxygenstruct:: FlutterDesktopEngineState
    :project: ivi-homescreen
    :members:

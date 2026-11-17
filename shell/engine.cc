@@ -381,10 +381,13 @@ void Engine::Shutdown() {
     LibFlutterEngine->Deinitialize(m_flutter_engine);
     LibFlutterEngine->Shutdown(m_flutter_engine);
   }
-  if (m_aot_data) {
-    LibFlutterEngine->CollectAOTData(m_aot_data);
-    m_aot_data = nullptr;
-  }
+  // The AOT data is deliberately not collected. FlutterEngineShutdown stops
+  // the root isolate, but isolates it spawned live on in the same isolate
+  // group, and the Dart VM outlives this engine (it is never shut down, and a
+  // second view's engine may still be running on it). Collecting unmaps the
+  // snapshot's code while such an isolate can still execute it: one blocked
+  // in an FFI call returns into unmapped memory and the process dies with
+  // SIGSEGV on its way out. The mapping is released when the process exits.
 }
 
 bool Engine::IsRunning() const {
