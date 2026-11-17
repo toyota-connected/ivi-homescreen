@@ -174,6 +174,21 @@ class Engine {
    */
   [[nodiscard]] double GetPixelRatio() const { return m_prev_pixel_ratio; };
 
+  /**
+   * @brief Record the pixel ratio that SetWindowSize() reports, without
+   * sending a window-metrics event
+   * @param[in] pixel_ratio Pixel ratio of flutter window
+   * @relation
+   * flutter
+   *
+   * For backends with no Wayland window, which send their first metrics
+   * through SetWindowSize(). SetPixelRatio() does not fit there: it re-sends
+   * the previous size and asserts one was set.
+   */
+  void SetInitialPixelRatio(const double pixel_ratio) {
+    m_prev_pixel_ratio = pixel_ratio;
+  }
+
   // wl_output buffer scale applied to incoming pointer/touch coordinates.
   // Wayland delivers surface-local (logical) coords; Flutter expects physical
   // pixels. Only the output scale applies here — the config pixel_ratio part
