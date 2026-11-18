@@ -49,10 +49,12 @@
 #include "backend/drm_kms_egl/drm_backend.h"
 #include "backend/drm_kms_egl/drm_cursor.h"
 #include "backend/drm_kms_egl/scene_layer_source_gl.h"
+#include "backend/wayland_egl/egl_backing_store.h"
 #include "display/drm_display.h"
 #include "drm-cxx/src/display/connector_info.hpp"  // ColorimetryInfo / Chromaticity
 #include "drm-cxx/src/display/hdr_metadata.hpp"  // HdrSourceMetadata / TransferFunction
 #include "drm-cxx/src/modeset/atomic.hpp"
+#include "engine_switches.h"
 #include "ihs/platform_view.h"
 #include "libflutter_engine.h"
 #include "logging.h"
@@ -120,6 +122,11 @@ bool AllocDebug() {
   static const bool enabled = std::getenv("DRM_ALLOC_DEBUG") != nullptr;
   return enabled;
 }
+
+// ES3 core enums (the NV / ANGLE extension variants share the values), which
+// the ES2 headers this file builds against do not define.
+constexpr GLenum kReadFramebuffer = 0x8CA8;
+constexpr GLenum kDrawFramebuffer = 0x8CA9;
 
 // Map the ABI's container colorimetry (IhsColorSpace/IhsColorRange, carried on
 // the platform view's Dmabuf) to the drm-cxx plane CSC. DEFAULT -> nullopt lets
@@ -1182,6 +1189,34 @@ void DrmCompositor::EnsureGlCapsProbed() {
   }
   gl_caps_.Probe();
   gl_compositor_ = std::make_unique<GlCompositor>(&gl_caps_);
+
+  // Only Impeller needs it, as on wayland-egl (SamplesFor). Its OpenGL ES
+  // backend anti-aliases geometry only through MSAA, and it binds the FBO of
+  // a backing store the embedder hands it as is (render_pass_gles.cc), so a
+  // single-sample store gets none, with GL_EXT_multisampled_render_to_texture
+  // or without. Skia anti-aliases on its own, and it wraps the store as
+  // single-sample, so reading back from a multisampled one (dst reads,
+  // backdrop filters) would fail. MSAA also needs a blit to resolve it and a
+  // packed depth/stencil, both ES3 core.
+  const uint32_t requested = backend_->cfg_.msaa_samples;
+  const bool impeller = ihs::engine_switches::ImpellerActive();
+  const uint32_t samples =
+      EglFboBackingStore::SamplesFor(requested, gl_caps_, impeller);
+  const char* why_off = nullptr;
+  if (!impeller) {
+    why_off = "Skia";
+  } else if (requested <= 1) {
+    why_off = "msaa_samples <= 1";
+  } else if (!gl_caps_.has_blit_framebuffer ||
+             !gl_caps_.has_packed_depth_stencil || samples <= 1) {
+    why_off = "no multisample renderbuffers";
+  }
+  msaa_samples_ = why_off == nullptr ? static_cast<GLsizei>(samples) : 0;
+  if (msaa_samples_ > 1) {
+    ihs::log::info("[DrmCompositor] backing-store MSAA: {}x", msaa_samples_);
+  } else {
+    ihs::log::info("[DrmCompositor] backing-store MSAA: off ({})", why_off);
+  }
   if (!InitEglExtensions()) {
     ihs::log::error("[DrmCompositor] missing EGL_KHR_image / GL_OES_EGL_image");
   }
@@ -1360,21 +1395,7 @@ bool DrmCompositor::CreateGbmStore(GbmBackingStore& store,
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
                          store.pool[0].color_tex, 0);
 
-  glGenRenderbuffers(1, &store.depth_stencil_rb);
-  glBindRenderbuffer(GL_RENDERBUFFER, store.depth_stencil_rb);
-  if (gl_caps_.has_packed_depth_stencil) {
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8_OES,
-                          static_cast<GLsizei>(w), static_cast<GLsizei>(h));
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
-                              GL_RENDERBUFFER, store.depth_stencil_rb);
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT,
-                              GL_RENDERBUFFER, store.depth_stencil_rb);
-  } else {
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16,
-                          static_cast<GLsizei>(w), static_cast<GLsizei>(h));
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
-                              GL_RENDERBUFFER, store.depth_stencil_rb);
-  }
+  AttachDepthStencil(store);
 
   if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
     ihs::log::error("[DrmCompositor] FBO incomplete");
@@ -1389,6 +1410,25 @@ bool DrmCompositor::CreateGbmStore(GbmBackingStore& store,
   // EnsureDrmFbId() after construction; Flutter-side backing stores
   // let the layer-setup path import on the first direct-scanout use.
   return true;
+}
+
+void DrmCompositor::AttachDepthStencil(GbmBackingStore& store) const {
+  const auto w = static_cast<GLsizei>(store.width);
+  const auto h = static_cast<GLsizei>(store.height);
+  glGenRenderbuffers(1, &store.depth_stencil_rb);
+  glBindRenderbuffer(GL_RENDERBUFFER, store.depth_stencil_rb);
+  if (gl_caps_.has_packed_depth_stencil) {
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8_OES, w, h);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                              GL_RENDERBUFFER, store.depth_stencil_rb);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT,
+                              GL_RENDERBUFFER, store.depth_stencil_rb);
+  } else {
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, w, h);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                              GL_RENDERBUFFER, store.depth_stencil_rb);
+  }
+  glBindRenderbuffer(GL_RENDERBUFFER, 0);
 }
 
 bool DrmCompositor::EnsureDrmFbId(GbmBackingStore& store) const {
@@ -1458,8 +1498,159 @@ uint32_t DrmCompositor::ImportBoAsFb(gbm_bo* bo) const {
   return fb_id;
 }
 
+bool DrmCompositor::CreateMsaaTarget(GbmBackingStore& store) const {
+  const auto w = static_cast<GLsizei>(store.width);
+  const auto h = static_cast<GLsizei>(store.height);
+  // A multisample resolve needs the same color format on both sides. An
+  // EGLImage texture takes GL_RGBA8 from a fourcc with alpha and GL_RGB8
+  // from one without; the trial resolve below catches any other mismatch.
+  const bool alpha = store.format == GBM_FORMAT_ARGB8888 ||
+                     store.format == GBM_FORMAT_ABGR8888;
+  const GLenum color_format = alpha ? GL_RGBA8_OES : GL_RGB8_OES;
+
+  glGenRenderbuffers(1, &store.msaa_color_rb);
+  glBindRenderbuffer(GL_RENDERBUFFER, store.msaa_color_rb);
+  gl_caps_.renderbuffer_storage_multisample(GL_RENDERBUFFER, msaa_samples_,
+                                            color_format, w, h);
+  glGenRenderbuffers(1, &store.msaa_depth_stencil_rb);
+  glBindRenderbuffer(GL_RENDERBUFFER, store.msaa_depth_stencil_rb);
+  gl_caps_.renderbuffer_storage_multisample(GL_RENDERBUFFER, msaa_samples_,
+                                            GL_DEPTH24_STENCIL8_OES, w, h);
+  glBindRenderbuffer(GL_RENDERBUFFER, 0);
+
+  glGenFramebuffers(1, &store.msaa_fbo);
+  glBindFramebuffer(GL_FRAMEBUFFER, store.msaa_fbo);
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                            GL_RENDERBUFFER, store.msaa_color_rb);
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                            GL_RENDERBUFFER, store.msaa_depth_stencil_rb);
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT,
+                            GL_RENDERBUFFER, store.msaa_depth_stencil_rb);
+  const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+  // One trial resolve. A resolve that fails leaves the scanout buffer
+  // unwritten on every frame, so fall back to single-sample instead.
+  bool ok = status == GL_FRAMEBUFFER_COMPLETE;
+  if (ok) {
+    for (int i = 0; i < 8 && glGetError() != GL_NO_ERROR; ++i) {
+    }
+    glDisable(GL_SCISSOR_TEST);
+    glBindFramebuffer(kReadFramebuffer, store.msaa_fbo);
+    glBindFramebuffer(kDrawFramebuffer, store.fbo);
+    gl_caps_.blit_framebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT,
+                              GL_NEAREST);
+    const GLenum err = glGetError();
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    ok = err == GL_NO_ERROR;
+    if (!ok) {
+      ihs::log::warn(
+          "[DrmCompositor] MSAA resolve into {} failed (0x{:x}); backing "
+          "store stays single-sample",
+          drm::format_name(store.format), err);
+    }
+  } else {
+    ihs::log::warn(
+        "[DrmCompositor] MSAA framebuffer incomplete (0x{:x}); backing store "
+        "stays single-sample",
+        status);
+  }
+  if (!ok) {
+    glDeleteFramebuffers(1, &store.msaa_fbo);
+    glDeleteRenderbuffers(1, &store.msaa_color_rb);
+    glDeleteRenderbuffers(1, &store.msaa_depth_stencil_rb);
+    store.msaa_fbo = 0;
+    store.msaa_color_rb = 0;
+    store.msaa_depth_stencil_rb = 0;
+    return false;
+  }
+
+  // Flutter no longer renders into store.fbo; it is only the resolve target.
+  glBindFramebuffer(GL_FRAMEBUFFER, store.fbo);
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                            GL_RENDERBUFFER, 0);
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT,
+                            GL_RENDERBUFFER, 0);
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  glDeleteRenderbuffers(1, &store.depth_stencil_rb);
+  store.depth_stencil_rb = 0;
+  return true;
+}
+
+void DrmCompositor::ResolveMsaaStores(const FlutterLayer** layers,
+                                      const size_t layer_count) const {
+  // Color, depth and stencil: the depth/stencil Flutter renders with is
+  // never read after the frame either.
+  static constexpr std::array<GLenum, 3> kAttachments = {
+      GL_COLOR_ATTACHMENT0, GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT};
+  bool resolved = false;
+  for (size_t i = 0; i < layer_count; ++i) {
+    const FlutterLayer* fl = layers[i];
+    if (fl == nullptr || fl->type != kFlutterLayerContentTypeBackingStore ||
+        fl->backing_store == nullptr) {
+      continue;
+    }
+    const auto* baton = static_cast<StoreBaton*>(fl->backing_store->user_data);
+    if (baton == nullptr || baton->store == nullptr ||
+        baton->store->msaa_fbo == 0) {
+      continue;
+    }
+    const GbmBackingStore& store = *baton->store;
+    const auto w = static_cast<GLint>(store.width);
+    const auto h = static_cast<GLint>(store.height);
+    if (!resolved) {
+      // The blit is clipped by the scissor test, which Flutter leaves set.
+      glDisable(GL_SCISSOR_TEST);
+      resolved = true;
+    }
+    glBindFramebuffer(kReadFramebuffer, store.msaa_fbo);
+    glBindFramebuffer(kDrawFramebuffer, store.fbo);
+    gl_caps_.blit_framebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT,
+                              GL_NEAREST);
+    if (gl_caps_.invalidate_framebuffer != nullptr) {
+      gl_caps_.invalidate_framebuffer(kReadFramebuffer,
+                                      static_cast<GLsizei>(kAttachments.size()),
+                                      kAttachments.data());
+    }
+  }
+  if (resolved) {
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  }
+}
+
+void DrmCompositor::ReleaseIdleMsaaTargets() {
+  // avoid_backing_store_cache has Flutter collect every store after each
+  // present and take it back from the pool for the next frame, so a store
+  // still pooled when a frame presents was not used by that frame: an overlay
+  // whose platform view went away, or a size no longer drawn. Its MSAA target
+  // is the bulk of its memory (about 66 MB at 1080p and 4x);
+  // CreateBackingStore builds it again if the store is taken back.
+  for (const auto& idle : store_pool_) {
+    if (idle && idle->msaa_fbo != 0) {
+      ReleaseMsaaTarget(*idle);
+      idle->msaa_released = true;
+    }
+  }
+}
+
+void DrmCompositor::ReleaseMsaaTarget(GbmBackingStore& store) {
+  if (store.msaa_fbo != 0) {
+    glDeleteFramebuffers(1, &store.msaa_fbo);
+    store.msaa_fbo = 0;
+  }
+  if (store.msaa_color_rb != 0) {
+    glDeleteRenderbuffers(1, &store.msaa_color_rb);
+    store.msaa_color_rb = 0;
+  }
+  if (store.msaa_depth_stencil_rb != 0) {
+    glDeleteRenderbuffers(1, &store.msaa_depth_stencil_rb);
+    store.msaa_depth_stencil_rb = 0;
+  }
+}
+
 void DrmCompositor::DestroyGbmStore(GbmBackingStore& store) const {
   // Shared resources first: one FBO + one depth/stencil RB per BS.
+  ReleaseMsaaTarget(store);
   if (store.fbo != 0) {
     glDeleteFramebuffers(1, &store.fbo);
     store.fbo = 0;
@@ -3256,6 +3447,9 @@ bool DrmCompositor::PresentLayersLocked(const FlutterLayer** layers,
 
   backend_->MaybeCaptureSnapshot();
   EnsureGlCapsProbed();
+  // Before any path below scans a slot out or composites it.
+  ResolveMsaaStores(layers, layer_count);
+  ReleaseIdleMsaaTargets();
   // The path this present takes is settled from here; a latch to the GL
   // fallback during it shows from the next.
   PublishLatchLead();
@@ -5437,6 +5631,7 @@ bool DrmCompositor::CreateBackingStore(const FlutterBackingStoreConfig* config,
   const uint32_t backing_format = out_.resolved().bs_format;
 
   std::unique_ptr<GbmBackingStore> store;
+  bool fresh = false;
   for (auto it = store_pool_.begin(); it != store_pool_.end(); ++it) {
     if (*it && (*it)->width == w && (*it)->height == h &&
         (*it)->format == backing_format) {
@@ -5462,7 +5657,19 @@ bool DrmCompositor::CreateBackingStore(const FlutterBackingStoreConfig* config,
     if (!CreateGbmStore(*store, w, h, backing_format, pool_size)) {
       return false;
     }
+    fresh = true;
     ++store_pool_misses_;
+  }
+  // A new store, or a pooled one whose MSAA target was freed while it sat
+  // idle (ReleaseIdleMsaaTargets). That one has no depth/stencil left either,
+  // so if the target cannot be built again it gets a single-sample one back.
+  if (msaa_samples_ > 1 && (fresh || store->msaa_released)) {
+    store->msaa_released = false;
+    if (!CreateMsaaTarget(*store) && store->depth_stencil_rb == 0) {
+      glBindFramebuffer(GL_FRAMEBUFFER, store->fbo);
+      AttachDepthStencil(*store);
+      glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    }
   }
 
   auto* baton = new StoreBaton{};
@@ -5483,7 +5690,8 @@ bool DrmCompositor::CreateBackingStore(const FlutterBackingStoreConfig* config,
   out->open_gl.type = kFlutterOpenGLTargetTypeFramebuffer;
   out->open_gl.framebuffer.target =
       gl_caps_.has_rgb8_rgba8 ? GL_RGBA8_OES : GL_RGBA;
-  out->open_gl.framebuffer.name = store->fbo;
+  out->open_gl.framebuffer.name =
+      store->msaa_fbo != 0 ? store->msaa_fbo : store->fbo;
   out->open_gl.framebuffer.user_data = baton;
   out->open_gl.framebuffer.destruction_callback = [](void*) {};
 

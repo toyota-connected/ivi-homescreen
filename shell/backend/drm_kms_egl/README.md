@@ -554,6 +554,41 @@ name = "HDMI-A-2"
 rotation = 90
 ```
 
+### Anti-aliasing (MSAA)
+
+Impeller's OpenGL ES backend anti-aliases geometry only through MSAA, and it
+renders into the framebuffer of a backing store the embedder hands it as is.
+With a single-sample store, every border, rounded rect, circle and path
+Flutter draws reaches the panel with no anti-aliasing. So under Impeller the
+compositor gives each Flutter backing store a multisampled color buffer and a
+multisampled D24S8 buffer, and resolves it with `glBlitFramebuffer` into the
+scanout buffer at the top of every present. The resolve keeps the store's own
+color format and does not flip, so it stays on the GPU.
+
+`[global] msaa_samples` / `--msaa-samples` sets the sample count: 4 when unset,
+whatever `BUILD_EGL_ENABLE_MULTISAMPLE` says, clamped to `GL_MAX_SAMPLES`; `0`
+renders single-sample. Skia always renders single-sample (it anti-aliases on
+its own). The startup log says which:
+`backing-store MSAA: 4x`, or `backing-store MSAA: off (<reason>)`.
+
+The cost is per backing store, not per output. Flutter creates a full-size
+store for the root layer and one more for each overlay above a platform view,
+and each of them gets its own buffers and its own full-size resolve every
+frame. At 4x a store needs:
+
+| Store size | Multisampled color + D24S8 | Net, less the single-sample D24S8 it drops |
+|---|---|---|
+| 1920x1080 | 66 MB | 58 MB |
+| 1280x720 | 30 MB | 26 MB |
+| 1024x600 | 20 MB | 17 MB |
+
+So a 1080p screen with three platform views (four stores) adds about 230 MB.
+On a Pi 5 with one store per output, GPU time per render job rose from about
+0.8 ms to about 2.8 ms while the app animated, at the same frame rate; each
+overlay store adds its own multisampled rendering and resolve on top. A store
+the last frame did not use (an overlay whose platform view went away) frees
+its MSAA buffers at the next present, and gets them back if it is reused.
+
 ### Env vars for runtime toggles
 
 | Env | Default | Effect |
