@@ -71,6 +71,10 @@ struct GlCaps {
                          GLsizei height);
 
   using BindSamplerFn = void(GL_APIENTRY*)(GLuint unit, GLuint sampler);
+  // glInvalidateFramebuffer: ES3 core only, so null on an ES2 context.
+  using InvalidateFramebufferFn = void(GL_APIENTRY*)(GLenum target,
+                                                     GLsizei num_attachments,
+                                                     const GLenum* attachments);
 
   // Vertex array objects: ES3 core, or GL_OES_vertex_array_object.
   using BindVertexArrayFn = void(GL_APIENTRY*)(GLuint array);
@@ -84,6 +88,7 @@ struct GlCaps {
   BindVertexArrayFn bind_vertex_array{nullptr};
   GenVertexArraysFn gen_vertex_arrays{nullptr};
   DeleteVertexArraysFn delete_vertex_arrays{nullptr};
+  InvalidateFramebufferFn invalidate_framebuffer{nullptr};
 
   /**
    * @brief Probe the current GL context. Safe to call more than once.

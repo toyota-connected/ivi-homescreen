@@ -178,9 +178,10 @@ Usage:
       --msaa-samples arg        Number of samples used for multisample 
                                 anti-aliasing of the rendering surface: 0, 2, 4 
                                 or 8. 0 disables MSAA. Unset = 4 on a build 
-                                with BUILD_EGL_ENABLE_MULTISAMPLE, else 0. 
-                                Wayland EGL only; with the compositor, Impeller 
-                                only.
+                                with BUILD_EGL_ENABLE_MULTISAMPLE, else 0; on 
+                                DRM EGL, unset = 0. Wayland EGL, and DRM EGL on 
+                                a BUILD_COMPOSITOR build; with the compositor, 
+                                Impeller only.
 
  View options:
   -w, --width arg               View width in px
@@ -315,7 +316,7 @@ file see
 | `[global]` | `disable_cursor` | `bool` | `false` | `true\|false` | all |
 | `[global]` | `enable_mcp` | `bool` | `false` | `true\|false` | all |
 | `[global]` | `mcp_allowed_tools` | `array<string>` | `all tools` | `array of tool names` | all |
-| `[global]` | `msaa_samples` | `int` | `4 with BUILD_EGL_ENABLE_MULTISAMPLE, else 0` | `0\|2\|4\|8` | wayland-egl |
+| `[global]` | `msaa_samples` | `int` | `wayland-egl: 4 with BUILD_EGL_ENABLE_MULTISAMPLE, else 0; drm-kms-egl: 0` | `0\|2\|4\|8` | wayland-egl, drm-kms-egl |
 | `[global]` | `wayland_event_mask` | `string` | `—` | `comma/space list` | wayland |
 | `[sentry]` | `attachments` | `string` | `[]` | `array<path>` | all |
 | `[sentry]` | `env` | `string` | `(built-in)` | `string` | all |
