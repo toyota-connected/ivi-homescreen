@@ -165,6 +165,12 @@ std::shared_ptr<Backend> Backend::Create(
                        key);
     return nullptr;
   }
+  if (config.msaa_samples.has_value() && descriptor->key != "wayland-egl") {
+    // Only Wayland EGL reads it. Said here rather than in each factory, which
+    // would each have to remember to.
+    ihs::log::warn("msaa_samples = {} is ignored by the {} backend",
+                   *config.msaa_samples, descriptor->key);
+  }
   auto backend = descriptor->make_backend(config, display.get());
 #if BUILD_HUD
   if (backend) {

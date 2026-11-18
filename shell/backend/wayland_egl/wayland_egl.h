@@ -75,13 +75,19 @@ class WaylandEglBackend : public Egl, public Backend {
   // (via the --enable-impeller switch). When true the backend disables its
   // partial-repaint path and reports full-surface damage, since that path is
   // only correct under the Skia OpenGL renderer.
+  // @p msaa_samples is the MSAA sample count (0, 2, 4 or 8). With the
+  // compositor it sizes the root backing store's multisample renderbuffers
+  // (clamped to GL_MAX_SAMPLES) and the window surface stays single sample,
+  // since it only ever receives the composited quads. Without it the engine
+  // draws into the window surface, so that is where the samples go.
   WaylandEglBackend(Display* shell_display,
                     struct wl_display* display,
                     uint32_t initial_width,
                     uint32_t initial_height,
                     bool debug_backend,
                     bool enable_impeller,
-                    int buffer_size = kEglBufferSize);
+                    int buffer_size = kEglBufferSize,
+                    uint32_t msaa_samples = kBuiltInMsaaSamples);
 
   // Out-of-line so the GlHud unique_ptr (incomplete here) is destroyed where
   // GlHud is complete; also tears the HUD down with the GL context current,
@@ -299,6 +305,10 @@ class WaylandEglBackend : public Egl, public Backend {
 #if BUILD_COMPOSITOR
   GlCaps m_gl_caps;
   bool m_gl_caps_probed{false};
+  // Requested at construction; what the root backing store gets once the caps
+  // are known (EnsureGlCapsProbed).
+  uint32_t m_msaa_samples{0};
+  uint32_t m_fbo_samples{0};
   std::unique_ptr<GlCompositor> m_gl_compositor;
   BackingStorePool<EglFboBackingStore> m_fbo_pool;
   BackingStorePool<EglTextureBackingStore> m_texture_pool;

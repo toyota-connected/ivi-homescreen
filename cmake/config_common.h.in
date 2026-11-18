@@ -206,6 +206,17 @@ static constexpr char kDltContextIdDescription[] = "Flutter Embedder";
 // Compositor Surface
 constexpr unsigned int kCompSurfExpectedInterfaceVersion = 0x00010000;
 
+// Multisample level the embedder is built with, used when nothing overrides it
+// at runtime (--msaa-samples / [global].msaa_samples). Declared outside the
+// IVI_HAVE_EGL guard because the configuration layer reports it regardless of
+// backend, and kept here so the attribute array below and the config layer
+// cannot drift apart.
+static constexpr unsigned int kDefaultMsaaSamples = 4;
+// What an unset --msaa-samples resolves to: kDefaultMsaaSamples on a build
+// with BUILD_EGL_ENABLE_MULTISAMPLE, else none.
+static constexpr unsigned int kBuiltInMsaaSamples =
+    BUILD_EGL_ENABLE_MULTISAMPLE ? kDefaultMsaaSamples : 0;
+
 // EGL config arrays use EGLint / EGL_* and are consumed only by the EGL
 // backends; guard them with the same condition as the <EGL/egl.h> include so
 // non-EGL builds neither need nor reference the EGL header.
@@ -241,7 +252,7 @@ static constexpr std::array<EGLint, 27> kEglConfigAttribs = {{
 #endif
 #if BUILD_EGL_ENABLE_MULTISAMPLE
     EGL_SAMPLE_BUFFERS, 1,
-    EGL_SAMPLES, 4,
+    EGL_SAMPLES, static_cast<EGLint>(kDefaultMsaaSamples),
 #else
     EGL_SAMPLE_BUFFERS, 0,
     EGL_SAMPLES, 0,
@@ -251,10 +262,14 @@ static constexpr std::array<EGLint, 27> kEglConfigAttribs = {{
     // clang-format on
 }};
 
-static constexpr std::array<EGLint, 13> kEglConfigAttribsFallBack = {{
+static constexpr std::array<EGLint, 17> kEglConfigAttribsFallBack = {{
     // clang-format off
     EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
     EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+    // Spelled out: left unset, EGL takes any sample count and sorts color
+    // depth ahead of it, so a multisampled config can come back.
+    EGL_SAMPLE_BUFFERS, 0,
+    EGL_SAMPLES, 0,
 
     EGL_RED_SIZE, 1,
     EGL_GREEN_SIZE, 1,
