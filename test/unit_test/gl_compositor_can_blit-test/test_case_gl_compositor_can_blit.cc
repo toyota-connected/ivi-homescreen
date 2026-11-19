@@ -67,8 +67,8 @@ TEST(GlCompositorCanBlit, UnresolvedEntryPointTakesQuadPath) {
   EXPECT_FALSE(GlCompositor::CanBlit(caps, false, false, 1, 0));
 }
 
-// --msaa-samples sizes the root backing store, whatever the window surface
-// got (#839).
+// --msaa-samples sizes the root backing store under Impeller, whatever the
+// window surface got (#839).
 GlCaps Multisampling(const GLint max_samples) {
   GlCaps caps{};
   caps.has_multisampled_renderbuffer = true;
@@ -79,27 +79,35 @@ GlCaps Multisampling(const GLint max_samples) {
 }
 
 TEST(EglFboBackingStoreSamples, TheRequestIsTakenWhenTheGlHasIt) {
-  EXPECT_EQ(EglFboBackingStore::SamplesFor(2, Multisampling(8)), 2u);
-  EXPECT_EQ(EglFboBackingStore::SamplesFor(4, Multisampling(8)), 4u);
-  EXPECT_EQ(EglFboBackingStore::SamplesFor(8, Multisampling(8)), 8u);
+  EXPECT_EQ(EglFboBackingStore::SamplesFor(2, Multisampling(8), true), 2u);
+  EXPECT_EQ(EglFboBackingStore::SamplesFor(4, Multisampling(8), true), 4u);
+  EXPECT_EQ(EglFboBackingStore::SamplesFor(8, Multisampling(8), true), 8u);
 }
 
 TEST(EglFboBackingStoreSamples, TheRequestIsClampedToMaxSamples) {
-  EXPECT_EQ(EglFboBackingStore::SamplesFor(8, Multisampling(4)), 4u);
+  EXPECT_EQ(EglFboBackingStore::SamplesFor(8, Multisampling(4), true), 4u);
 }
 
 TEST(EglFboBackingStoreSamples, ZeroAndOneMeanNone) {
-  EXPECT_EQ(EglFboBackingStore::SamplesFor(0, Multisampling(8)), 0u);
-  EXPECT_EQ(EglFboBackingStore::SamplesFor(1, Multisampling(8)), 0u);
+  EXPECT_EQ(EglFboBackingStore::SamplesFor(0, Multisampling(8), true), 0u);
+  EXPECT_EQ(EglFboBackingStore::SamplesFor(1, Multisampling(8), true), 0u);
 }
 
 TEST(EglFboBackingStoreSamples, NoMultisampleRenderbuffersMeansNone) {
   GlCaps caps = Multisampling(8);
   caps.renderbuffer_storage_multisample = nullptr;
-  EXPECT_EQ(EglFboBackingStore::SamplesFor(4, caps), 0u);
+  EXPECT_EQ(EglFboBackingStore::SamplesFor(4, caps, true), 0u);
   caps = Multisampling(8);
   caps.has_multisampled_renderbuffer = false;
-  EXPECT_EQ(EglFboBackingStore::SamplesFor(4, caps), 0u);
+  EXPECT_EQ(EglFboBackingStore::SamplesFor(4, caps, true), 0u);
+}
+
+// Skia anti-aliases on its own and wraps the store as single sample, so it
+// never gets a multisampled one, whatever was requested.
+TEST(EglFboBackingStoreSamples, SkiaMeansNone) {
+  EXPECT_EQ(EglFboBackingStore::SamplesFor(2, Multisampling(8), false), 0u);
+  EXPECT_EQ(EglFboBackingStore::SamplesFor(4, Multisampling(8), false), 0u);
+  EXPECT_EQ(EglFboBackingStore::SamplesFor(8, Multisampling(8), false), 0u);
 }
 
 }  // namespace

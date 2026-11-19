@@ -179,7 +179,8 @@ Usage:
                                 anti-aliasing of the rendering surface: 0, 2, 4 
                                 or 8. 0 disables MSAA. Unset = 4 on a build 
                                 with BUILD_EGL_ENABLE_MULTISAMPLE, else 0. 
-                                Wayland EGL only.
+                                Wayland EGL only; with the compositor, Impeller 
+                                only.
 
  View options:
   -w, --width arg               View width in px
