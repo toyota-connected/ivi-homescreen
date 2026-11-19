@@ -25,6 +25,10 @@
 //                       for the layers-off baseline
 //   TIMINGS_FILE        where to write per-frame timings (default: stdout only)
 //   BENCH_SECONDS       run length before reporting and exiting (default 20)
+//   PV_SCALE            draw the view under Transform.scale(PV_SCALE) about
+//                       its center (default 1, no transform)
+//   PV_SCALE_ANIM       set to 1 to animate that scale between 0.4 and 1.0
+//                       over two seconds, back and forth
 
 import 'dart:async';
 import 'dart:ffi' as ffi;
@@ -195,7 +199,7 @@ class _PvBenchPageState extends State<PvBenchPage>
         fit: StackFit.expand,
         children: <Widget>[
           if (widget.showPlatformView)
-            const Positioned.fill(child: _BenchPlatformView())
+            Positioned.fill(child: _scaled(const _BenchPlatformView()))
           else
             const Center(
               child: Text('no platform view',
@@ -219,6 +223,53 @@ class _PvBenchPageState extends State<PvBenchPage>
           ),
         ],
       ),
+    );
+  }
+}
+
+// A scale on the view puts a transform mutation on its layer, so a run can check
+// that each backend draws the view at its scaled size and place (#865).
+final double _pvScale =
+    double.tryParse(Platform.environment['PV_SCALE'] ?? '') ?? 1.0;
+final bool _pvScaleAnim = Platform.environment['PV_SCALE_ANIM'] == '1';
+
+Widget _scaled(Widget child) {
+  if (_pvScaleAnim) {
+    return _PulsingScale(child: child);
+  }
+  if (_pvScale == 1.0) {
+    return child;
+  }
+  return Transform.scale(scale: _pvScale, child: child);
+}
+
+class _PulsingScale extends StatefulWidget {
+  const _PulsingScale({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_PulsingScale> createState() => _PulsingScaleState();
+}
+
+class _PulsingScaleState extends State<_PulsingScale>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 2),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ScaleTransition(
+      scale: Tween<double>(begin: 0.4, end: 1.0).animate(_pulse),
+      child: widget.child,
     );
   }
 }

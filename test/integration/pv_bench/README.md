@@ -90,9 +90,19 @@ previous process has released DRM master gives a run that produces no report.
 | `PV_BENCH_LAYERS` | `1` | layers per submit (1..3) through `ihs_pv_submit_layers`: the buffer whole, then cropped, placed and mirrored, then cropped, placed and turned a quarter |
 | `PV_BENCH_DRM_PLANE` | *(unset)* | prefer `DRM_PLANE`, keeping import and shm as fallbacks: measures direct scanout rather than composition. Offered only by `drm-kms-egl`; the run logs whether a plane was actually granted, so a fallback cannot be mistaken for a plane measurement |
 | `PV_BENCH_SHM` | *(unset)* | prefer `SOFTWARE_SHM` and fill the host's buffers (ABI 1.19) instead of the producer's own ring: the CPU floor, composited. One layer only. The per-second log's release timeouts should stay 0 |
+| `PV_SCALE` | `1` | draw the view under `Transform.scale` by this factor, about its center. Puts a transform mutation on the view's layer |
+| `PV_SCALE_ANIM` | *(unset)* | `1` animates the scale between 0.4 and 1.0, back and forth over two seconds |
 
 `PV_BENCH_NO_PV=1` is the control: same Flutter content, no layer. The difference
 between the two runs is what the layer costs.
+
+`PV_SCALE` and `PV_SCALE_ANIM` are for checking placement rather than for
+timing. At `PV_SCALE=0.5` on a full-screen view the view should cover the
+middle quarter of the output, half its width and height, centered. A view
+drawn full size from that quarter's top-left corner, running off the bottom
+right, is the bug in \#865. With `PV_SCALE_ANIM=1` and a plane path, the
+plane's destination rect should move while its source rect stays the size of
+the producer's buffer: the producer is not resized while the scale animates.
 
 The app reports build/raster/total percentiles and exits. The producer reports
 submits per second and mean release-fence wait every second -- check that first.
