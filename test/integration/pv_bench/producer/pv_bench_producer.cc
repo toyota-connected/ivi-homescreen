@@ -110,7 +110,8 @@ void DmabufSync(int fd, uint64_t flags) {
   }
 }
 
-/* One ring buffer: allocated once, mapped once, handed over many times. */
+/* One ring buffer: allocated once, handed over many times. A linear buffer is
+ * mapped once; a tiled one is mapped for each fill (see remap). */
 struct Slot {
   gbm_bo* bo = nullptr;
   int fd = -1;
@@ -126,6 +127,9 @@ struct Slot {
    * written between DMA_BUF_IOCTL_SYNC calls. */
   bool shm = false;
   size_t map_bytes = 0;
+  /* Not linear: gbm_bo_map gives a linear staging copy that reaches the buffer
+   * only on gbm_bo_unmap, so each fill maps, writes and unmaps (#872). */
+  bool remap = false;
 };
 
 class BenchView {
@@ -488,6 +492,14 @@ class BenchView {
       s.map_stride = map_stride ? map_stride : s.stride;
       s.modifier = gbm_bo_get_modifier(s.bo);
       s.planes = static_cast<uint32_t>(gbm_bo_get_plane_count(s.bo));
+      if (s.modifier != DRM_FORMAT_MOD_LINEAR) {
+        // A held map of a tiled buffer is a staging copy the buffer never
+        // sees. The map above proved it can be mapped; Fill maps it again.
+        gbm_bo_unmap(s.bo, s.map_data);
+        s.map = nullptr;
+        s.map_data = nullptr;
+        s.remap = true;
+      }
       slots_.push_back(s);
     }
     /*
@@ -513,6 +525,27 @@ class BenchView {
    * suffer.
    */
   void Fill(const Slot& s, uint32_t frame) const {
+    if (s.remap) {
+      // The unmap writes the staging copy back, tiled, so its cost is part of
+      // the fill time this producer reports.
+      Slot m = s;
+      uint32_t map_stride = 0;
+      m.map = gbm_bo_map(s.bo, 0, 0, width_, height_, GBM_BO_TRANSFER_WRITE,
+                         &map_stride, &m.map_data);
+      if (m.map == nullptr) {
+        static bool logged = false;  // the producer thread only
+        if (!logged) {
+          logged = true;
+          Log("gbm_bo_map failed for frame %u; the view will not update",
+              frame);
+        }
+        return;
+      }
+      m.map_stride = map_stride ? map_stride : s.stride;
+      FillRows(m, frame);
+      gbm_bo_unmap(s.bo, m.map_data);
+      return;
+    }
     if (s.shm) {
       DmabufSync(s.fd, DMA_BUF_SYNC_START | DMA_BUF_SYNC_WRITE);
     }
