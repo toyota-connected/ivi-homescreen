@@ -43,7 +43,8 @@ class Configuration {
     // largest GPU allocation, and on memory-constrained devices turning it down
     // or off has to be possible without a rebuild.
     //
-    // Wayland EGL only; every other backend ignores it and says so.
+    // Wayland EGL only; every other backend ignores it and says so. With the
+    // compositor it applies under Impeller only: Skia anti-aliases on its own.
     std::optional<uint32_t> msaa_samples;
 
     // [global] enable_mcp: serve the MCP surface, which lets an external agent

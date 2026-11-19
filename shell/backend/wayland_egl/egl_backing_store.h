@@ -58,12 +58,17 @@ class EglFboBackingStore {
   /**
    * @brief The sample count a store asked for @p requested samples gets.
    *
-   * 0 when @p requested is 0 or 1, or when the GL has no multisample
-   * renderbuffers; otherwise @p requested clamped to GL_MAX_SAMPLES. Static so
+   * 0 when @p impeller is false, when @p requested is 0 or 1, or when the GL
+   * has no multisample renderbuffers; otherwise @p requested clamped to
+   * GL_MAX_SAMPLES. Only Impeller gets anything from the samples: its OpenGL
+   * ES backend anti-aliases geometry only through MSAA, while Skia
+   * anti-aliases on its own and wraps the store as single sample. Static so
    * it is testable without a GL context.
    */
-  static uint32_t SamplesFor(const uint32_t requested, const GlCaps& caps) {
-    if (requested <= 1 || !caps.has_multisampled_renderbuffer ||
+  static uint32_t SamplesFor(const uint32_t requested,
+                             const GlCaps& caps,
+                             const bool impeller) {
+    if (!impeller || requested <= 1 || !caps.has_multisampled_renderbuffer ||
         caps.renderbuffer_storage_multisample == nullptr) {
       return 0;
     }

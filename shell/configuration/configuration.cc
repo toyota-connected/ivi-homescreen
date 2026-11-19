@@ -851,7 +851,8 @@ std::vector<Configuration::Config> Configuration::ParseArgcArgv(
         "msaa-samples",
         "Number of samples used for multisample anti-aliasing of the "
         "rendering surface: 0, 2, 4 or 8. 0 disables MSAA. Unset = 4 on a "
-        "build with BUILD_EGL_ENABLE_MULTISAMPLE, else 0. Wayland EGL only.",
+        "build with BUILD_EGL_ENABLE_MULTISAMPLE, else 0. Wayland EGL only; "
+        "with the compositor, Impeller only.",
         cxxopts::value<int64_t>());
 
     // [[view]] (geometry / Flutter)

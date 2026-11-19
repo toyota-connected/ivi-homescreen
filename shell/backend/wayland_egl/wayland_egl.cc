@@ -82,6 +82,7 @@ WaylandEglBackend::WaylandEglBackend(Display* shell_display,
       m_partial_repaint_enabled(!enable_impeller) {
 #if BUILD_COMPOSITOR
   m_msaa_samples = msaa_samples;
+  m_impeller = enable_impeller;
 #endif
   if (enable_impeller) {
     ihs::log::info(
@@ -908,8 +909,17 @@ void WaylandEglBackend::EnsureGlCapsProbed() {
   m_gl_compositor = std::make_unique<GlCompositor>(&m_gl_caps);
   m_gl_caps_probed = true;
 
-  m_fbo_samples = EglFboBackingStore::SamplesFor(m_msaa_samples, m_gl_caps);
-  if (m_msaa_samples > 1 && m_fbo_samples == 0) {
+  // Under Skia the samples would cost memory and a resolve per frame for
+  // nothing, and Skia, which wraps the store as single sample, does not
+  // expect a multisampled framebuffer (SamplesFor).
+  m_fbo_samples =
+      EglFboBackingStore::SamplesFor(m_msaa_samples, m_gl_caps, m_impeller);
+  if (m_msaa_samples > 1 && !m_impeller) {
+    ihs::log::info(
+        "MSAA: {} sample(s) requested; the backing store stays single sample "
+        "under Skia, which anti-aliases on its own",
+        m_msaa_samples);
+  } else if (m_msaa_samples > 1 && m_fbo_samples == 0) {
     ihs::log::warn(
         "MSAA: {} sample(s) requested, but the GL has no multisample "
         "renderbuffers; rendering without",

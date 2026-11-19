@@ -77,9 +77,10 @@ class WaylandEglBackend : public Egl, public Backend {
   // only correct under the Skia OpenGL renderer.
   // @p msaa_samples is the MSAA sample count (0, 2, 4 or 8). With the
   // compositor it sizes the root backing store's multisample renderbuffers
-  // (clamped to GL_MAX_SAMPLES) and the window surface stays single sample,
-  // since it only ever receives the composited quads. Without it the engine
-  // draws into the window surface, so that is where the samples go.
+  // (clamped to GL_MAX_SAMPLES) under Impeller only, and the window surface
+  // stays single sample, since it only ever receives the composited quads.
+  // Without the compositor the engine draws into the window surface, so that
+  // is where the samples go.
   WaylandEglBackend(Display* shell_display,
                     struct wl_display* display,
                     uint32_t initial_width,
@@ -309,6 +310,9 @@ class WaylandEglBackend : public Egl, public Backend {
   // are known (EnsureGlCapsProbed).
   uint32_t m_msaa_samples{0};
   uint32_t m_fbo_samples{0};
+  // The root backing store is multisampled only under Impeller; see
+  // EnsureGlCapsProbed.
+  bool m_impeller{false};
   std::unique_ptr<GlCompositor> m_gl_compositor;
   BackingStorePool<EglFboBackingStore> m_fbo_pool;
   BackingStorePool<EglTextureBackingStore> m_texture_pool;
