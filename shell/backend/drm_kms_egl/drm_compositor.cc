@@ -59,6 +59,7 @@
 #include "profiling/frame_profile.h"
 #include "view/compositor_surface_interface.h"
 #include "view/layer_scanout.h"
+#include "view/platform_view_geometry.h"
 
 namespace {
 
@@ -4037,9 +4038,13 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       }
       // The producer renders at this size; feed it the laid-out extent
       // before pulling its frame (the create/resize channel may not have
-      // reached it yet).
-      surface->OnResize(static_cast<int32_t>(fl->size.width),
-                        static_cast<int32_t>(fl->size.height));
+      // reached it yet). The laid-out extent, not the drawn one: a view under
+      // a scale keeps its buffer size and the plane scales it, so a scale
+      // animation does not resize the producer every frame.
+      const FlutterSize content =
+          ihs::platform_view::ContentSize(*fl, backend_->PresentPixelRatio());
+      surface->OnResize(static_cast<int32_t>(content.width),
+                        static_cast<int32_t>(content.height));
       RetireScanoutKeys(*surface);
       const RectI view_rect{static_cast<int32_t>(fl->offset.x),
                             static_cast<int32_t>(fl->offset.y),

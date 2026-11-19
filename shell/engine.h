@@ -20,6 +20,7 @@
 #include <filesystem>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -39,6 +40,7 @@
 #include "shell/input/touch_event.h"
 #include "task_runner.h"
 #include "view/flutter_view.h"
+#include "view/platform_view_geometry.h"
 
 class App;
 class Backend;
@@ -187,7 +189,26 @@ class Engine {
    */
   void SetInitialPixelRatio(const double pixel_ratio) {
     m_prev_pixel_ratio = pixel_ratio;
+    RecordViewPixelRatio(0, pixel_ratio);
   }
+
+  /**
+   * @brief Give a frame's platform view layers their drawn size.
+   * @param[in] view_id View the frame is for
+   * @param[in] layers The frame's layers, as the engine presented them
+   * @param[in] count Number of layers
+   * @return @p layers when no view is scaled; otherwise a copy, valid until
+   * the next call, with each scaled view's size corrected
+   * @relation
+   * internal
+   *
+   * Raster thread only. Also tells the backend the view's pixel ratio, so it
+   * can recover the size a view was laid out at (see
+   * view/platform_view_geometry.h).
+   */
+  const FlutterLayer** ScalePlatformViewLayers(int64_t view_id,
+                                               const FlutterLayer** layers,
+                                               size_t count);
 
   // wl_output buffer scale applied to incoming pointer/touch coordinates.
   // Wayland delivers surface-local (logical) coords; Flutter expects physical
@@ -578,6 +599,18 @@ class Engine {
   size_t m_prev_height;
   size_t m_prev_width;
   double m_prev_pixel_ratio;
+
+  // The pixel ratio last sent for each view, read on the raster thread to
+  // size scaled platform views. A frame laid out before a ratio change can
+  // present after it is recorded here, so one frame may be sized with the new
+  // ratio; the next frame is right.
+  void RecordViewPixelRatio(int64_t view_id, double pixel_ratio);
+  [[nodiscard]] double ViewPixelRatio(int64_t view_id) const;
+  mutable std::mutex m_view_pixel_ratio_mu;
+  std::map<int64_t, double> m_view_pixel_ratio;
+
+  // Holds ScalePlatformViewLayers' copies; raster thread only.
+  ihs::platform_view::FrameScaler m_frame_scaler;
   double m_pointer_scale{1.0};  // see SetPointerScale()
   int32_t m_accessibility_features;
 

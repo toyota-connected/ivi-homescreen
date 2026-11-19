@@ -429,7 +429,9 @@ bool ScenePresentLayers(const FlutterLayer** layers,
   auto* engine = static_cast<Engine*>(user_data);
   engine->GetView()->GetPlatformViewScene().Presented(layers, count);
   const auto& inner = engine->BackendCompositor();
-  return inner.present_layers_callback(layers, count, inner.user_data);
+  return inner.present_layers_callback(
+      engine->ScalePlatformViewLayers(0, layers, count), count,
+      inner.user_data);
 }
 
 bool ScenePresentView(const FlutterPresentViewInfo* info) {
@@ -443,10 +445,35 @@ bool ScenePresentView(const FlutterPresentViewInfo* info) {
   const auto& inner = engine->BackendCompositor();
   FlutterPresentViewInfo forwarded = *info;
   forwarded.user_data = inner.user_data;
+  forwarded.layers = engine->ScalePlatformViewLayers(
+      info->view_id, info->layers, info->layers_count);
   return inner.present_view_callback(&forwarded);
 }
 
 }  // namespace
+
+const FlutterLayer** Engine::ScalePlatformViewLayers(
+    const int64_t view_id,
+    const FlutterLayer** layers,
+    const size_t count) {
+  const double pixel_ratio = ViewPixelRatio(view_id);
+  if (m_backend != nullptr) {
+    m_backend->SetPresentPixelRatio(pixel_ratio);
+  }
+  return m_frame_scaler.Scale(layers, count, pixel_ratio);
+}
+
+void Engine::RecordViewPixelRatio(const int64_t view_id,
+                                  const double pixel_ratio) {
+  const std::lock_guard<std::mutex> lock(m_view_pixel_ratio_mu);
+  m_view_pixel_ratio[view_id] = pixel_ratio;
+}
+
+double Engine::ViewPixelRatio(const int64_t view_id) const {
+  const std::lock_guard<std::mutex> lock(m_view_pixel_ratio_mu);
+  const auto it = m_view_pixel_ratio.find(view_id);
+  return it != m_view_pixel_ratio.end() ? it->second : 0.0;
+}
 
 FlutterEngineResult Engine::Run(FlutterDesktopEngineState* state) {
   IHS_TRACE("({}) +Engine::Run", m_index);
@@ -576,6 +603,7 @@ FlutterEngineResult Engine::SetWindowSize(const size_t height,
 
   m_prev_height = height;
   m_prev_width = width;
+  RecordViewPixelRatio(0, m_prev_pixel_ratio);
 
   // Set window size
   const FlutterWindowMetricsEvent fwme = {
@@ -649,6 +677,7 @@ FlutterEngineResult Engine::SetViewSize(const int64_t view_id,
   if (!m_running) {
     return kInternalInconsistency;
   }
+  RecordViewPixelRatio(view_id, pixel_ratio);
   const FlutterWindowMetricsEvent fwme = {
       .struct_size = sizeof(FlutterWindowMetricsEvent),
       .width = width,
@@ -685,6 +714,7 @@ FlutterEngineResult Engine::AddView(const int64_t view_id,
         m_index);
     return kInternalInconsistency;
   }
+  RecordViewPixelRatio(view_id, pixel_ratio);
   // view_metrics is copied synchronously inside FlutterEngineAddView (the info
   // may be freed once it returns), so a local is safe. The metric's view_id
   // must match the info's view_id.
@@ -730,7 +760,12 @@ FlutterEngineResult Engine::RemoveView(const int64_t view_id) {
       .view_id = view_id,
       .user_data = this,
       .remove_view_callback = &Engine::OnRemoveViewComplete};
-  return LibFlutterEngine->RemoveView(m_flutter_engine, &info);
+  const auto result = LibFlutterEngine->RemoveView(m_flutter_engine, &info);
+  if (result == kSuccess) {
+    const std::lock_guard<std::mutex> lock(m_view_pixel_ratio_mu);
+    m_view_pixel_ratio.erase(view_id);
+  }
+  return result;
 }
 
 FlutterEngineResult Engine::SetPixelRatio(double pixel_ratio) {
@@ -742,6 +777,7 @@ FlutterEngineResult Engine::SetPixelRatio(double pixel_ratio) {
   assert(m_prev_height);
 
   m_prev_pixel_ratio = pixel_ratio;
+  RecordViewPixelRatio(0, pixel_ratio);
 
   // Set window size
   const FlutterWindowMetricsEvent fwme = {
