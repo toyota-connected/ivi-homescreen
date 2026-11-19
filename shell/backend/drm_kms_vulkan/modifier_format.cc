@@ -142,11 +142,24 @@ std::string ArmDescribe(uint64_t mod) {
 #endif  // AFBC_FORMAT_MOD_BLOCK_SIZE_MASK
 
 #ifdef DRM_FORMAT_MOD_BROADCOM_UIF
+// A SAND modifier's label: its column height only where it carries one.
+std::string BroadcomSand(const char* name, uint64_t column_height) {
+  std::string s = std::string("BROADCOM(") + name;
+  if (column_height != 0) {
+    s += " col=" + std::to_string(column_height);
+  }
+  return s + ")";
+}
+
 // Decode a Broadcom (Raspberry Pi V3D / vc4) modifier. The low 8 bits are the
-// format code; the SAND variants carry a column-height parameter in the next
-// 48 bits. UIF (Utile Interleaved Format) is V3D's tiled render layout — the
-// non-LINEAR option a Pi can scan out (Broadcom has no AFBC-style lossless
-// framebuffer compression, so this is tiling, not compression).
+// format code; the SAND variants may carry a column-height parameter in the
+// next 48 bits. A SAND modifier without one is not a height of zero: the
+// column height is then in each plane's pitch, which is how a decoder that
+// keeps luma and chroma in separate buffers has to say it, and such a
+// modifier is printed bare. UIF (Utile Interleaved Format) is V3D's tiled
+// render layout — the non-LINEAR option a Pi can scan out (Broadcom has no
+// AFBC-style lossless framebuffer compression, so this is tiling, not
+// compression).
 std::string BroadcomDescribe(uint64_t mod) {
   const uint64_t code = mod & 0xffULL;
   const uint64_t param = (mod >> 8) & ((1ULL << 48) - 1);  // SAND column height
@@ -154,13 +167,13 @@ std::string BroadcomDescribe(uint64_t mod) {
     case 1:
       return "BROADCOM(VC4_T_TILED)";
     case 2:
-      return "BROADCOM(SAND32 col=" + std::to_string(param) + ")";
+      return BroadcomSand("SAND32", param);
     case 3:
-      return "BROADCOM(SAND64 col=" + std::to_string(param) + ")";
+      return BroadcomSand("SAND64", param);
     case 4:
-      return "BROADCOM(SAND128 col=" + std::to_string(param) + ")";
+      return BroadcomSand("SAND128", param);
     case 5:
-      return "BROADCOM(SAND256 col=" + std::to_string(param) + ")";
+      return BroadcomSand("SAND256", param);
     case 6:
       return "BROADCOM(UIF)";
     default: {
