@@ -90,9 +90,30 @@ previous process has released DRM master gives a run that produces no report.
 | `PV_BENCH_LAYERS` | `1` | layers per submit (1..3) through `ihs_pv_submit_layers`: the buffer whole, then cropped, placed and mirrored, then cropped, placed and turned a quarter |
 | `PV_BENCH_DRM_PLANE` | *(unset)* | prefer `DRM_PLANE`, keeping import and shm as fallbacks: measures direct scanout rather than composition. Offered only by `drm-kms-egl`; the run logs whether a plane was actually granted, so a fallback cannot be mistaken for a plane measurement |
 | `PV_BENCH_SHM` | *(unset)* | prefer `SOFTWARE_SHM` and fill the host's buffers (ABI 1.19) instead of the producer's own ring: the CPU floor, composited. One layer only. The per-second log's release timeouts should stay 0 |
+| `PV_BENCH_SCALE` | `1` | the app wraps its view in `Transform.scale` by this factor, about its center |
+| `PV_BENCH_SCALE_ANIM` | *(unset)* | `1`: the app wraps its view in a `ScaleTransition` between 0.4 and 1.0 instead, two seconds each way |
 
 `PV_BENCH_NO_PV=1` is the control: same Flutter content, no layer. The difference
 between the two runs is what the layer costs.
+
+`PV_BENCH_SCALE` and `PV_BENCH_SCALE_ANIM` are read by the app, not the shell.
+The shell has no scale setting. In a real app the scale is whatever transform
+the Dart code puts around each platform view, and each view can have its own.
+pv_bench has one view and no UI, so these two pick the transform it wraps that
+view in, and one bundle can run scaled or not without a rebuild.
+
+The shell sees the transform the way it sees any app's: in the mutation list
+the engine sends with the view's layer each frame, from which it works out that
+view's drawn size.
+
+They are for checking placement rather than for timing. At
+`PV_BENCH_SCALE=0.5` on a full-screen view, the view should cover half the
+output's width and height, centered. A view drawn full size from that
+rectangle's top-left corner, running off the bottom right, is the bug in
+\#865, fixed for the texture and plane paths in \#871. With
+`PV_BENCH_SCALE_ANIM=1` and a plane path, the plane's destination rect should
+move while its source rect stays the size of the producer's buffer: the
+producer is not resized while the scale animates.
 
 The app reports build/raster/total percentiles and exits. The producer reports
 submits per second and mean release-fence wait every second -- check that first.
