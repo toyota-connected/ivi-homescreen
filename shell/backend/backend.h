@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -447,6 +448,27 @@ class Backend {
     return m2p_enabled_ ? &m2p_ : nullptr;
   }
 
+  /**
+   * @brief Record the device pixel ratio of the view about to be presented.
+   *
+   * Engine's present wrapper calls this on the raster thread before each
+   * present, after it has scaled the frame's platform view layers to their
+   * drawn size (see view/platform_view_geometry.h). Zero when unknown.
+   */
+  void SetPresentPixelRatio(const double pixel_ratio) {
+    present_pixel_ratio_.store(pixel_ratio, std::memory_order_relaxed);
+  }
+
+  /**
+   * @brief The pixel ratio of the view being presented, or zero when unknown.
+   *
+   * Pass it to @c ihs::platform_view::ContentSize to get the size a platform
+   * view was laid out at from its (scaled) layer.
+   */
+  [[nodiscard]] double PresentPixelRatio() const {
+    return present_pixel_ratio_.load(std::memory_order_relaxed);
+  }
+
  protected:
   /// Enable the motion-to-photon profiler for this backend if IVI_M2P_PROFILE
   /// is set. Called from the DRM/KMS backend constructors.
@@ -461,4 +483,9 @@ class Backend {
   ihs::hud::HudConfig hud_config_{};
   bool hud_config_enable_{false};
 #endif
+
+ private:
+  // Raster thread writes it before a present and reads it during one; atomic
+  // so a stray read from another thread is not a data race.
+  std::atomic<double> present_pixel_ratio_{0.0};
 };

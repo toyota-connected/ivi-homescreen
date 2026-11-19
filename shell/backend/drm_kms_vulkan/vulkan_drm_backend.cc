@@ -78,6 +78,7 @@
 #include "task_runner.h"
 #include "view/display_rotation.h"
 #include "view/layer_scanout.h"
+#include "view/platform_view_geometry.h"
 #include "view/presentation.h"
 
 static_assert(kDrmRotate0 == DRM_MODE_ROTATE_0 &&
@@ -2734,8 +2735,13 @@ bool VulkanDrmBackend::ReconcilePlatformViewLayers(
   if (!surface) {
     return false;
   }
-  surface->OnResize(static_cast<int32_t>(fl.size.width),
-                    static_cast<int32_t>(fl.size.height));
+  // The size the view was laid out at, not the drawn size: a view under a
+  // scale keeps its buffer size and the plane scales it, so a scale animation
+  // does not resize the producer every frame.
+  const FlutterSize content =
+      ihs::platform_view::ContentSize(fl, PresentPixelRatio());
+  surface->OnResize(static_cast<int32_t>(content.width),
+                    static_cast<int32_t>(content.height));
 
   // Drop the framebuffers the pools cached for buffers the producer retired.
   // A key is cached by whichever layer showed the buffer, and retiring an
