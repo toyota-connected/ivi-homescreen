@@ -482,10 +482,11 @@ DrmCompositor::SingleLayerTexture(const ICompositorSurface& surface) {
 bool DrmCompositor::IsWholeImage(
     const std::optional<ICompositorSurface::GlLayerTexture>& t,
     const FlutterLayer& layer) {
-  // A clipped or translucent view is drawn layer by layer: that path crops to
-  // the clip and draws at the opacity.
+  // A clipped, rounded or translucent view is drawn layer by layer: that path
+  // crops to the clip, cuts the corners and draws at the opacity.
   return t && t->name != 0 && t->geometry.IsWhole() && !t->geometry.opaque &&
          !ihs::platform_view::ClipRectOf(layer) &&
+         !ihs::platform_view::RoundedClipOf(layer) &&
          ihs::platform_view::OpacityOf(layer) >= 1.0f;
 }
 
@@ -503,13 +504,16 @@ bool DrmCompositor::CompositeLayeredSurface(
                    static_cast<int32_t>(layer->size.width),
                    static_cast<int32_t>(layer->size.height)};
   const std::optional<RectI> clip = ihs::platform_view::ClipRectOf(*layer);
+  const std::optional<RoundedRect> rounded =
+      ihs::platform_view::RoundedClipOf(*layer);
   return gl_compositor_->CompositeSurfaceLayers(
              target_fbo, *surface, view, fb_height, target_top_first, blend,
              [this, &surface](const ICompositorSurface::GlLayerTexture& t) {
                NoteGlComposited(surface, t);
              },
              layer0, rotation, clip ? &*clip : nullptr,
-             ihs::platform_view::OpacityOf(*layer)) > 0;
+             ihs::platform_view::OpacityOf(*layer),
+             rounded ? &*rounded : nullptr) > 0;
 }
 
 std::optional<DisplayRotation> DrmCompositor::GpuRotation() const {
@@ -3957,12 +3961,17 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   // A translucent view is shown through its plane's "alpha". A plane without
   // one would show it opaque, so where any lacks it the frame is composited.
   // Checked before any view's frame is taken.
-  if (!plane_formats_.AllHaveAlpha()) {
-    for (size_t i = 0; i < layer_count; ++i) {
-      if (layers[i] != nullptr &&
-          ihs::platform_view::OpacityOf(*layers[i]) < 1.0f) {
-        return PresentViaGlFallback(layers, layer_count);
-      }
+  //
+  // A plane has no rounded corners at all, so a view whose rounded clip cuts
+  // into it is composited too.
+  const bool all_alpha = plane_formats_.AllHaveAlpha();
+  for (size_t i = 0; i < layer_count; ++i) {
+    if (layers[i] == nullptr) {
+      continue;
+    }
+    if ((!all_alpha && ihs::platform_view::OpacityOf(*layers[i]) < 1.0f) ||
+        ihs::platform_view::RoundedClipOf(*layers[i])) {
+      return PresentViaGlFallback(layers, layer_count);
     }
   }
 

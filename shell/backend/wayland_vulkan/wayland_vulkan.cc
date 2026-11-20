@@ -3028,14 +3028,15 @@ void WaylandVulkanBackend::WarnMissingPlatformView(
 
 bool WaylandVulkanBackend::PresentPlatformView(const FlutterLayer* layer) {
   const auto composed = MutationStack::Compose(layer->platform_view);
-  // Opacity, clip and scale are drawn by the compositor; these are not.
-  if (composed.has_rounded_clip || composed.has_perspective ||
+  // Opacity, clip, scale and one rounded clip are drawn by the compositor;
+  // these are not.
+  if (!composed.rounded_clip_exact || composed.has_perspective ||
       !composed.IsAxisAligned()) {
     ihs::log::debug(
         "Vulkan compositor: platform view {} has mutations the compositor "
-        "does not draw (rounded={} perspective={} axis_aligned={}); plugin "
-        "OnPresent must apply them.",
-        layer->platform_view->identifier, composed.has_rounded_clip,
+        "does not draw (rounded_exact={} perspective={} axis_aligned={}); "
+        "plugin OnPresent must apply them.",
+        layer->platform_view->identifier, composed.rounded_clip_exact,
         composed.has_perspective, composed.IsAxisAligned());
   }
   std::shared_ptr<ICompositorSurface> surface;
@@ -3194,6 +3195,8 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
     bool opaque{false};
     // The view's opacity; 1 for backing stores.
     float alpha{1.0f};
+    // The view's rounded clip; none for backing stores.
+    std::optional<RoundedRect> rounded{};
   };
   std::vector<Draw> draws;
   draws.reserve(count);
@@ -3270,8 +3273,11 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
       // the view and oriented as the producer asked (ihs_pv_submit_layers);
       // a plain producer is one layer drawn whole.
       const RectI view{dx, dy, dw, dh};
-      // Each layer is cropped to the view's clip and drawn at its opacity.
+      // Each layer is cropped to the view's clip, its corners cut to the
+      // rounded clip, and drawn at the view's opacity.
       const std::optional<RectI> clip = ihs::platform_view::ClipRectOf(*layer);
+      const std::optional<RoundedRect> rounded =
+          ihs::platform_view::RoundedClipOf(*layer);
       const float alpha = ihs::platform_view::OpacityOf(*layer);
       for (size_t li = 0, n = surface->GetLayerCount(); li < n; ++li) {
         const auto img = surface->GetLayerVulkanImage(li);
@@ -3343,7 +3349,7 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
              place.dst.h, nullptr,
              static_cast<VkSamplerYcbcrModelConversion>(img.ycbcr_model),
              static_cast<VkSamplerYcbcrRange>(img.ycbcr_range), place.uv,
-             place.opaque, alpha});
+             place.opaque, alpha, rounded});
       }
       if (const int64_t us = ivi::pv_latency::FirstCompositeLatencyUs(
               layer->platform_view->identifier);
@@ -3364,7 +3370,8 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
     for (const Draw& dr : draws) {
       layer_compositor_->DrawLayer(cmd, dr.src, dr.format, dr.ycbcr_model,
                                    dr.ycbcr_range, dr.dx, dr.dy, dr.dw, dr.dh,
-                                   dr.uv, dr.opaque, dr.alpha);
+                                   dr.uv, dr.opaque, dr.alpha,
+                                   dr.rounded ? &*dr.rounded : nullptr);
     }
     wl_vulkan::LayerCompositor::EndFrame(cmd);
   } else {

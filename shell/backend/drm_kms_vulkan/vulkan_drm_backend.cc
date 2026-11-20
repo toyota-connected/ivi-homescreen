@@ -2775,6 +2775,11 @@ bool VulkanDrmBackend::ReconcilePlatformViewLayers(
   if (alpha < 1.0f && !plane_formats_.AllHaveAlpha()) {
     return false;
   }
+  // A plane has no rounded corners: a view whose rounded clip cuts into it is
+  // drawn by the blend, which has.
+  if (ihs::platform_view::RoundedClipOf(fl)) {
+    return false;
+  }
   const auto plane_alpha =
       static_cast<uint16_t>(std::lround(static_cast<double>(alpha) * 0xFFFF));
   // One scene layer per layer of the view, bottom to top, each on a plane of
@@ -3219,6 +3224,8 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
     bool opaque{false};
     // The view's opacity; 1 for backing stores.
     float alpha{1.0f};
+    // The view's rounded clip; none for backing stores.
+    std::optional<RoundedRect> rounded{};
   };
   std::vector<Draw> draws;
   // Images already moved to SHADER_READ_ONLY this frame, so a buffer shown by
@@ -3362,8 +3369,11 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
       // the view and oriented as the producer asked (ihs_pv_submit_layers);
       // a plain producer is one layer drawn whole.
       const RectI view{dx, dy, dw, dh};
-      // Each layer is cropped to the view's clip and drawn at its opacity.
+      // Each layer is cropped to the view's clip, its corners cut to the
+      // rounded clip, and drawn at the view's opacity.
       const std::optional<RectI> clip = ihs::platform_view::ClipRectOf(*layer);
+      const std::optional<RoundedRect> rounded =
+          ihs::platform_view::RoundedClipOf(*layer);
       const float alpha = ihs::platform_view::OpacityOf(*layer);
       bool sampled = false;
       for (size_t li = 0, n = surface->GetLayerCount(); li < n; ++li) {
@@ -3432,7 +3442,7 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
              place.dst.h, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED,
              static_cast<VkSamplerYcbcrModelConversion>(img.ycbcr_model),
              static_cast<VkSamplerYcbcrRange>(img.ycbcr_range), place.uv,
-             place.opaque, alpha});
+             place.opaque, alpha, rounded});
         compositor_->presentation.Note(surface->GetPresentationSink(),
                                        img.frame, /*zero_copy=*/false);
         sampled = true;
@@ -3487,7 +3497,8 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
     for (const Draw& dr : draws) {
       layer_compositor_->DrawLayer(cmd, dr.src, dr.format, dr.ycbcr_model,
                                    dr.ycbcr_range, dr.dx, dr.dy, dr.dw, dr.dh,
-                                   dr.uv, dr.opaque, dr.alpha);
+                                   dr.uv, dr.opaque, dr.alpha,
+                                   dr.rounded ? &*dr.rounded : nullptr);
     }
     wl_vulkan::LayerCompositor::EndFrame(cmd);
   }

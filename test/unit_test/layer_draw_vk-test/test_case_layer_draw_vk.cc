@@ -273,7 +273,8 @@ class LayerDrawVk : public ::testing::Test {
                             const UvAffine& uv,
                             bool opaque,
                             const std::array<float, 4>* backdrop = nullptr,
-                            float alpha = 1.0f) {
+                            float alpha = 1.0f,
+                            const RoundedRect* rounded = nullptr) {
     std::string err;
     auto comp = wl_vulkan::LayerCompositor::Create(
         device_, kFormat, err,
@@ -339,9 +340,10 @@ class LayerDrawVk : public ::testing::Test {
               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     }
     EXPECT_TRUE(comp->BeginFrame(cmd, dst_view, kW, kH, /*frame=*/0));
-    comp->DrawLayer(
-        cmd, src, kFormat, VK_SAMPLER_YCBCR_MODEL_CONVERSION_RGB_IDENTITY,
-        VK_SAMPLER_YCBCR_RANGE_ITU_FULL, 0, 0, kW, kH, uv, opaque, alpha);
+    comp->DrawLayer(cmd, src, kFormat,
+                    VK_SAMPLER_YCBCR_MODEL_CONVERSION_RGB_IDENTITY,
+                    VK_SAMPLER_YCBCR_RANGE_ITU_FULL, 0, 0, kW, kH, uv, opaque,
+                    alpha, rounded);
     wl_vulkan::LayerCompositor::EndFrame(cmd);
     // The render pass leaves the target in GENERAL.
     Barrier(cmd, dst, VK_IMAGE_LAYOUT_GENERAL,
@@ -475,4 +477,30 @@ TEST_F(LayerDrawVk, ATranslucentLayerLetsTheBackdropThrough) {
     EXPECT_NEAR(out[px + 2], 128, 2) << "pixel " << i;
     EXPECT_EQ(out[px + 3], 0xff) << "pixel " << i;
   }
+}
+
+// Over a white backdrop, a layer with its lower right corner rounded at a
+// radius of 3: the corner pixel shows the backdrop, the other corners and the
+// middle show the layer.
+TEST_F(LayerDrawVk, ARoundedClipCutsOnlyItsCorners) {
+  std::vector<uint8_t> buffer(static_cast<size_t>(kW) * kH * 4, 0);
+  for (int i = 0; i < kW * kH; ++i) {
+    buffer[static_cast<size_t>(i) * 4] = 0x40;
+    buffer[static_cast<size_t>(i) * 4 + 3] = 0xff;
+  }
+  const std::array<float, 4> white = {1, 1, 1, 1};
+  RoundedRect rounded;
+  rounded.rect = {0, 0, kW, kH};
+  rounded.radii[2] = {3, 3};
+  const auto out = Draw(kW, kH, buffer, UvAffine{}, /*opaque=*/true, &white,
+                        /*alpha=*/1.0f, &rounded);
+  ASSERT_EQ(out.size(), static_cast<size_t>(kW) * kH * 4);
+  const auto px = [&](int x, int y) {
+    return &out[(static_cast<size_t>(y) * kW + static_cast<size_t>(x)) * 4];
+  };
+  EXPECT_EQ(px(kW - 1, kH - 1)[1], 0xff) << "the corner shows the backdrop";
+  EXPECT_EQ(px(0, 0)[1], 0x00) << "upper left is square";
+  EXPECT_EQ(px(kW - 1, 0)[1], 0x00) << "upper right is square";
+  EXPECT_EQ(px(0, kH - 1)[1], 0x00) << "lower left is square";
+  EXPECT_EQ(px(1, 1)[1], 0x00) << "the middle shows the layer";
 }

@@ -17,6 +17,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 
 // Where a layer's pixels come from and where they land: a crop of its buffer,
@@ -45,6 +46,14 @@ struct RectF {
   double y{0};
   double w{0};
   double h{0};
+};
+
+// A rounded rect: a rect and the radii of its corners, each (x, y), clockwise
+// from the upper left. Zero radii are square corners.
+struct RoundedRect {
+  RectF rect;
+  std::array<std::array<float, 2>, 4> radii{};  // upper left, upper right,
+                                                // lower right, lower left
 };
 
 // A rect in whole destination pixels, top-left origin.
