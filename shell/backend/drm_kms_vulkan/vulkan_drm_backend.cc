@@ -2766,6 +2766,8 @@ bool VulkanDrmBackend::ReconcilePlatformViewLayers(
                    static_cast<int32_t>(fl.offset.y),
                    static_cast<int32_t>(fl.size.width),
                    static_cast<int32_t>(fl.size.height)};
+  // Each layer's plane is cropped to the view's clip.
+  const std::optional<RectI> clip = ihs::platform_view::ClipRectOf(fl);
   // One scene layer per layer of the view, bottom to top, each on a plane of
   // its own.
   const size_t count = surface->GetLayerCount();
@@ -2828,7 +2830,8 @@ bool VulkanDrmBackend::ReconcilePlatformViewLayers(
     }
     LayerPlane place;
     if (!PlaceLayerOnPlane(ld.geometry.src, ld.geometry.dst,
-                           ld.geometry.transform, buf_w, buf_h, view, &place)) {
+                           ld.geometry.transform, buf_w, buf_h, view, &place,
+                           clip ? &*clip : nullptr)) {
       // Nothing of it shows: no plane for it this present (a layer already in
       // the scene is pruned), and a frame it was handed goes straight back.
       if (have_db) {
@@ -3334,6 +3337,8 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
       // the view and oriented as the producer asked (ihs_pv_submit_layers);
       // a plain producer is one layer drawn whole.
       const RectI view{dx, dy, dw, dh};
+      // Each layer is cropped to the view's clip.
+      const std::optional<RectI> clip = ihs::platform_view::ClipRectOf(*layer);
       bool sampled = false;
       for (size_t li = 0, n = surface->GetLayerCount(); li < n; ++li) {
         const auto img = surface->GetLayerVulkanImage(li);
@@ -3344,8 +3349,9 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
         LayerPlacement place;
         if (!PlaceLayer(g.src, g.dst, g.transform, g.opaque,
                         static_cast<uint32_t>(img.width),
-                        static_cast<uint32_t>(img.height), view, &place)) {
-          continue;  // entirely outside the view
+                        static_cast<uint32_t>(img.height), view, &place,
+                        clip ? &*clip : nullptr)) {
+          continue;  // entirely outside the view or its clip
         }
         if (!img.top_first) {
           place.uv = FlipRows(place.uv);

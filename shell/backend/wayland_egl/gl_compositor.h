@@ -130,6 +130,8 @@ class GlCompositor {
    *                    in its render space, and each layer is drawn turned
    *                    onto the panel. @p fb_height is then the panel's.
    *                    Null draws as is. Bottom-left targets only.
+   * @param clip        The view's clip, in the same space as @p view: each
+   *                    layer is cropped to it. Null clips to the view only.
    * @return            The number of layers drawn.
    *
    * Imports each layer's latest frame (GetLayerGlTexture), so it runs on the
@@ -145,7 +147,8 @@ class GlCompositor {
       const std::function<void(const ICompositorSurface::GlLayerTexture&)>&
           on_drawn = nullptr,
       const ICompositorSurface::GlLayerTexture* layer0 = nullptr,
-      const DisplayRotation* rotation = nullptr);
+      const DisplayRotation* rotation = nullptr,
+      const RectI* clip = nullptr);
 
   /**
    * @brief Whether CompositeToFbo may take the glBlitFramebuffer path.

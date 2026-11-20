@@ -36,6 +36,7 @@
 #include "shell/platform/homescreen/flutter_desktop_engine_state.h"
 #include "shell/platform/homescreen/flutter_desktop_texture_registrar.h"
 #include "task_runner.h"
+#include "view/platform_view_geometry.h"
 #include "wayland/display.h"
 
 #if BUILD_COMPOSITOR
@@ -1247,8 +1248,12 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
         const ICompositorSurface::GlLayerTexture first =
             one_layer ? surface.GetLayerGlTexture(0)
                       : ICompositorSurface::GlLayerTexture{};
+        // A clipped view is drawn layer by layer too: that path crops each
+        // layer to the clip.
+        const std::optional<RectI> clip =
+            ihs::platform_view::ClipRectOf(*layer);
         if (first.name != 0 && first.geometry.IsWhole() &&
-            !first.geometry.opaque) {
+            !first.geometry.opaque && !clip) {
           NoteSampled(surface_sp, first);
           EnsureGlCapsProbed();
           const auto tex = first.name;
@@ -1300,7 +1305,8 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
                    &surface_sp](const ICompositorSurface::GlLayerTexture& t) {
                     NoteSampled(surface_sp, t);
                   },
-                  one_layer ? &first : nullptr) > 0) {
+                  one_layer ? &first : nullptr, /*rotation=*/nullptr,
+                  clip ? &*clip : nullptr) > 0) {
             composited_any = true;
           }
         }

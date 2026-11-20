@@ -253,3 +253,43 @@ TEST(LayerGeometry, PlaceDropsWhatTheViewCannotShow) {
   EXPECT_FALSE(PlaceLayer({}, {}, BufferTransform::kNormal, false, 0, 0,
                           {0, 0, 600, 400}, &p));
 }
+
+TEST(LayerGeometry, PlaceCropsToTheClipAndTheSourceWithIt) {
+  // A 400 x 200 view at (100, 50), clipped to its top half and right quarter.
+  const RectI clip{400, 0, 1000, 150};
+  LayerPlacement p;
+  ASSERT_TRUE(PlaceLayer({}, {}, BufferTransform::kNormal, false, 800, 400,
+                         {100, 50, 400, 200}, &p, &clip));
+  EXPECT_EQ(p.dst.x, 400);
+  EXPECT_EQ(p.dst.y, 50);
+  EXPECT_EQ(p.dst.w, 100);
+  EXPECT_EQ(p.dst.h, 100);
+  // The right quarter and top half of the buffer.
+  EXPECT_FLOAT_EQ(p.uv.a, 0.25f);
+  EXPECT_FLOAT_EQ(p.uv.tx, 0.75f);
+  EXPECT_FLOAT_EQ(p.uv.d, 0.5f);
+  EXPECT_FLOAT_EQ(p.uv.ty, 0.0f);
+}
+
+TEST(LayerGeometry, PlaceDropsALayerClippedAway) {
+  const RectI clip{0, 0, 50, 50};
+  LayerPlacement p;
+  EXPECT_FALSE(PlaceLayer({}, {}, BufferTransform::kNormal, false, 10, 10,
+                          {100, 100, 10, 10}, &p, &clip));
+  const RectI empty{0, 0, 0, 0};
+  EXPECT_FALSE(PlaceLayer({}, {}, BufferTransform::kNormal, false, 10, 10,
+                          {0, 0, 10, 10}, &p, &empty));
+}
+
+TEST(LayerGeometry, ViewBoundsIsTheClipInViewPixels) {
+  const RectI view{100, 50, 400, 200};
+  const RectI whole = ViewBounds(view, nullptr);
+  EXPECT_EQ(whole.x, 0);
+  EXPECT_EQ(whole.w, 400);
+  const RectI clip{300, 0, 1000, 100};
+  const RectI b = ViewBounds(view, &clip);
+  EXPECT_EQ(b.x, 200);
+  EXPECT_EQ(b.y, 0);
+  EXPECT_EQ(b.w, 200);
+  EXPECT_EQ(b.h, 50);
+}

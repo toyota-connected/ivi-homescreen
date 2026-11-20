@@ -36,6 +36,7 @@
 #include "profiling/pv_latency.h"
 #include "shell/platform/homescreen/flutter_desktop_texture_registrar.h"
 #include "task_runner.h"
+#include "view/platform_view_geometry.h"
 #include "wayland/display.h"
 
 #include <drm_fourcc.h>      // DRM_FORMAT_XRGB8888
@@ -3266,6 +3267,8 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
       // the view and oriented as the producer asked (ihs_pv_submit_layers);
       // a plain producer is one layer drawn whole.
       const RectI view{dx, dy, dw, dh};
+      // Each layer is cropped to the view's clip.
+      const std::optional<RectI> clip = ihs::platform_view::ClipRectOf(*layer);
       for (size_t li = 0, n = surface->GetLayerCount(); li < n; ++li) {
         const auto img = surface->GetLayerVulkanImage(li);
         if (img.image == nullptr || img.width <= 0 || img.height <= 0) {
@@ -3275,8 +3278,9 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
         LayerPlacement place;
         if (!PlaceLayer(g.src, g.dst, g.transform, g.opaque,
                         static_cast<uint32_t>(img.width),
-                        static_cast<uint32_t>(img.height), view, &place)) {
-          continue;  // entirely outside the view
+                        static_cast<uint32_t>(img.height), view, &place,
+                        clip ? &*clip : nullptr)) {
+          continue;  // entirely outside the view or its clip
         }
         if (!img.top_first) {
           place.uv = FlipRows(place.uv);
@@ -3409,6 +3413,7 @@ void WaylandVulkanBackend::BlitPlatformViewVulkan(VkCommandBuffer cmd,
                    static_cast<int32_t>(layer->offset.y),
                    static_cast<int32_t>(layer->size.width),
                    static_cast<int32_t>(layer->size.height)};
+  const std::optional<RectI> clip = ihs::platform_view::ClipRectOf(*layer);
   for (size_t li = 0, n = surface->GetLayerCount(); li < n; ++li) {
     const auto img = surface->GetLayerVulkanImage(li);
     if (img.image == nullptr || img.width <= 0 || img.height <= 0) {
@@ -3430,9 +3435,9 @@ void WaylandVulkanBackend::BlitPlatformViewVulkan(VkCommandBuffer cmd,
     if (place.w <= 0 || place.h <= 0) {
       place = {0, 0, view.w, view.h};
     }
-    if (!ClipLayerToView(&crop, &place, static_cast<uint32_t>(img.width),
-                         static_cast<uint32_t>(img.height), g.transform, view.w,
-                         view.h)) {
+    if (!ClipLayerToRect(&crop, &place, static_cast<uint32_t>(img.width),
+                         static_cast<uint32_t>(img.height), g.transform,
+                         ViewBounds(view, clip ? &*clip : nullptr))) {
       continue;
     }
     presentation_->Note(surface->GetPresentationSink(), img.frame,

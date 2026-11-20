@@ -86,23 +86,25 @@ struct LayerPlane {
 // Place a layer of a view whose rect on the CRTC is @p view. @p src and @p dst
 // are the layer's geometry as the surface reports it: @p dst in view-local
 // pixels, a zero-size @p dst meaning the whole view and a zero-size @p src the
-// whole buffer. The layer is clipped to the view and its crop shrunk to match.
-// False when nothing of it is visible, or the crop rounds away to nothing.
+// whole buffer. The layer is clipped to the view, and to @p clip (CRTC pixels)
+// when one is given, and its crop shrunk to match. False when nothing of it is
+// visible, or the crop rounds away to nothing.
 inline bool PlaceLayerOnPlane(RectF src,
                               RectI dst,
                               const BufferTransform transform,
                               const uint32_t buffer_w,
                               const uint32_t buffer_h,
                               const RectI& view,
-                              LayerPlane* out) {
+                              LayerPlane* out,
+                              const RectI* clip = nullptr) {
   if (buffer_w == 0 || buffer_h == 0) {
     return false;
   }
   if (dst.w <= 0 || dst.h <= 0) {
     dst = {0, 0, view.w, view.h};
   }
-  if (!ClipLayerToView(&src, &dst, buffer_w, buffer_h, transform, view.w,
-                       view.h)) {
+  if (!ClipLayerToRect(&src, &dst, buffer_w, buffer_h, transform,
+                       ViewBounds(view, clip))) {
     return false;
   }
   // Keep the crop inside the buffer. A producer may name one that is not; the

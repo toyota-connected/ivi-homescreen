@@ -46,6 +46,13 @@ FlutterPlatformViewMutation Translate(double tx, double ty) {
   return Transform(1, 0, tx, 0, 1, ty);
 }
 
+FlutterPlatformViewMutation Clip(double l, double t, double r, double b) {
+  FlutterPlatformViewMutation m{};
+  m.type = kFlutterPlatformViewMutationTypeClipRect;
+  m.clip_rect = {l, t, r, b};
+  return m;
+}
+
 // A platform view layer as the engine presents it: the mutations outermost
 // first, the origin of the transformed bounds, and the size it was laid out
 // at times the pixel ratio.
@@ -217,4 +224,39 @@ TEST(PlatformViewGeometry, FrameScalerCopiesAScaledFrame) {
   const FlutterLayer** out2 = scaler.Scale(next, 1, 2.0);
   ASSERT_NE(out2, next);
   EXPECT_DOUBLE_EQ(out2[0]->size.width, 300);
+}
+
+TEST(PlatformViewGeometry, NoClipMeansNoClipRect) {
+  ViewLayer v({Scale(2, 2)}, {0, 0}, {100, 100});
+  EXPECT_FALSE(pv::ClipRectOf(v.layer).has_value());
+}
+
+TEST(PlatformViewGeometry, AClipAroundTheViewIsNotReported) {
+  // A list's clip that holds the whole view: nothing to crop.
+  ViewLayer v({Scale(2, 2), Clip(0, 0, 400, 300), Translate(10, 10)}, {20, 20},
+              {200, 200});
+  EXPECT_FALSE(pv::ClipRectOf(v.layer).has_value());
+}
+
+TEST(PlatformViewGeometry, AClipIntoTheViewIsInOutputPixels) {
+  // At pixel ratio 2, a list clipped to logical rows 0..100, and a 100 x 100
+  // logical view scrolled to logical y = 50 inside it: its bottom half is cut.
+  ViewLayer v({Scale(2, 2), Clip(0, 0, 400, 100), Translate(0, 50)}, {0, 100},
+              {200, 200});
+  const auto c = pv::ClipRectOf(v.layer);
+  ASSERT_TRUE(c.has_value());
+  EXPECT_EQ(c->x, 0);
+  EXPECT_EQ(c->y, 0);
+  EXPECT_EQ(c->w, 800);
+  EXPECT_EQ(c->h, 200);
+}
+
+TEST(PlatformViewGeometry, AClipThatMissesTheViewIsEmpty) {
+  // Scrolled clean out of the list's clip but still in the scene.
+  ViewLayer v({Clip(0, 0, 100, 100), Clip(200, 200, 300, 300)}, {0, 0},
+              {50, 50});
+  const auto c = pv::ClipRectOf(v.layer);
+  ASSERT_TRUE(c.has_value());
+  EXPECT_EQ(c->w, 0);
+  EXPECT_EQ(c->h, 0);
 }

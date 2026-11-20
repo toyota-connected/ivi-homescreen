@@ -18,10 +18,12 @@
 
 #include <cmath>
 #include <cstddef>
+#include <optional>
 #include <vector>
 
 #include <shell/platform/embedder/embedder.h>
 
+#include "view/layer_geometry.h"
 #include "view/mutation_stack.h"
 
 /**
@@ -121,6 +123,53 @@ inline FlutterSize ContentSize(const FlutterLayer& layer,
   };
   return {layer.size.width > 0.0 ? snap(layer.size.width / s.x) : 0.0,
           layer.size.height > 0.0 ? snap(layer.size.height / s.y) : 0.0};
+}
+
+/**
+ * @brief The clip on @p layer's view, in output pixels.
+ *
+ * Empty when the view has no clip, or the clip does not cut into the view's
+ * rect, so a caller can keep its unclipped path for that case. A clip that
+ * misses the view entirely is returned as an empty rect, which clips the view
+ * away. Edges are rounded to the nearest pixel.
+ *
+ * A clip under a rotation or skew is not a rect on screen; its bounding box is
+ * used (see @c ComposedMutation::clip_exact).
+ */
+inline std::optional<RectI> ClipRectOf(const FlutterLayer& layer) {
+  if (layer.type != kFlutterLayerContentTypePlatformView ||
+      layer.platform_view == nullptr ||
+      layer.platform_view->mutations_count == 0) {
+    return std::nullopt;
+  }
+  const ComposedMutation composed = MutationStack::Compose(layer.platform_view);
+  if (!composed.has_clip) {
+    return std::nullopt;
+  }
+  const FlutterRect& c = composed.clip_rect;
+  if (!std::isfinite(c.left) || !std::isfinite(c.top) ||
+      !std::isfinite(c.right) || !std::isfinite(c.bottom)) {
+    return std::nullopt;
+  }
+  const double vx0 = layer.offset.x;
+  const double vy0 = layer.offset.y;
+  const double vx1 = vx0 + layer.size.width;
+  const double vy1 = vy0 + layer.size.height;
+  // Edges compared after rounding, the way they are drawn.
+  const auto px = [](const double v) {
+    return static_cast<int32_t>(std::lround(v));
+  };
+  const int32_t x0 = px(c.left);
+  const int32_t y0 = px(c.top);
+  const int32_t x1 = px(c.right);
+  const int32_t y1 = px(c.bottom);
+  if (x0 <= px(vx0) && y0 <= px(vy0) && x1 >= px(vx1) && y1 >= px(vy1)) {
+    return std::nullopt;  // the view is inside its clip
+  }
+  if (x1 <= x0 || y1 <= y0) {
+    return RectI{0, 0, 0, 0};
+  }
+  return RectI{x0, y0, x1 - x0, y1 - y0};
 }
 
 /**

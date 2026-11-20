@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -35,7 +36,9 @@
  *   x' = a*x + c*y + tx
  *   y' = b*x + d*y + ty
  *
- * @c clip_rect is in the composed (post-transform) coordinate space.
+ * @c clip_rect is in the composed (post-transform) coordinate space: the
+ * engine gives each clip in the space it was pushed in, under the transforms
+ * outside it, so each is mapped through those before it is intersected.
  */
 struct ComposedMutation {
   // Composed affine transform (only the 2D part of FlutterTransformation
@@ -52,11 +55,14 @@ struct ComposedMutation {
 
   // Intersection of all clip_rect mutations, in composed coordinates.
   // Starts as "unbounded" sentinel; @c has_clip flags whether it was
-  // ever narrowed.
+  // ever narrowed. A clip under a transform that turns it by other than a
+  // right angle, or under a perspective, is not a rect on screen; its
+  // bounding box is used instead and @c clip_exact is cleared.
   FlutterRect clip_rect{
       -std::numeric_limits<double>::max(), -std::numeric_limits<double>::max(),
       std::numeric_limits<double>::max(), std::numeric_limits<double>::max()};
   bool has_clip{false};
+  bool clip_exact{true};
 
   bool has_rounded_clip{false};
   bool has_perspective{false};
@@ -83,6 +89,30 @@ struct ComposedMutation {
 class MutationStack {
  public:
   /**
+   * @brief The bounding box of @p rect under the 2D part of @p m.
+   */
+  static FlutterRect MapRect(const ComposedMutation& m,
+                             const FlutterRect& rect) {
+    const double xs[2] = {rect.left, rect.right};
+    const double ys[2] = {rect.top, rect.bottom};
+    FlutterRect out{std::numeric_limits<double>::max(),
+                    std::numeric_limits<double>::max(),
+                    -std::numeric_limits<double>::max(),
+                    -std::numeric_limits<double>::max()};
+    for (const double x : xs) {
+      for (const double y : ys) {
+        const double px = m.a * x + m.c * y + m.tx;
+        const double py = m.b * x + m.d * y + m.ty;
+        out.left = std::min(out.left, px);
+        out.top = std::min(out.top, py);
+        out.right = std::max(out.right, px);
+        out.bottom = std::max(out.bottom, py);
+      }
+    }
+    return out;
+  }
+
+  /**
    * @brief Walk @p view's mutation list front-to-back and compose.
    *
    * Safe with null @p view or zero-length lists: returns an identity
@@ -102,14 +132,21 @@ class MutationStack {
         case kFlutterPlatformViewMutationTypeOpacity:
           r.opacity *= m->opacity;
           break;
-        case kFlutterPlatformViewMutationTypeClipRect:
+        case kFlutterPlatformViewMutationTypeClipRect: {
           r.has_clip = true;
-          r.clip_rect.left = std::max(r.clip_rect.left, m->clip_rect.left);
-          r.clip_rect.top = std::max(r.clip_rect.top, m->clip_rect.top);
-          r.clip_rect.right = std::min(r.clip_rect.right, m->clip_rect.right);
-          r.clip_rect.bottom =
-              std::min(r.clip_rect.bottom, m->clip_rect.bottom);
+          const FlutterRect c = MapRect(r, m->clip_rect);
+          r.clip_rect.left = std::max(r.clip_rect.left, c.left);
+          r.clip_rect.top = std::max(r.clip_rect.top, c.top);
+          r.clip_rect.right = std::min(r.clip_rect.right, c.right);
+          r.clip_rect.bottom = std::min(r.clip_rect.bottom, c.bottom);
+          const bool keeps_rect =
+              (std::abs(r.b) < 1e-6 && std::abs(r.c) < 1e-6) ||
+              (std::abs(r.a) < 1e-6 && std::abs(r.d) < 1e-6);
+          if (!keeps_rect || r.has_perspective) {
+            r.clip_exact = false;
+          }
           break;
+        }
         case kFlutterPlatformViewMutationTypeClipRoundedRect:
           r.has_rounded_clip = true;
           break;

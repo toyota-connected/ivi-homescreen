@@ -183,24 +183,23 @@ inline bool TransformSwapsAxes(const BufferTransform transform) {
   }
 }
 
-// Clip a layer to the view, which spans [0, view_w) x [0, view_h) in the same
-// coordinates as @p dst, and crop @p src to the part still shown. A zero-size
-// @p src means the whole buffer and is made explicit first. Returns false when
-// nothing of the layer is left, in which case @p src and @p dst are unchanged.
-inline bool ClipLayerToView(RectF* src,
+// Clip a layer to @p bounds, in the same coordinates as @p dst, and crop @p src
+// to the part still shown. A zero-size @p src means the whole buffer and is
+// made explicit first. Returns false when nothing of the layer is left, in
+// which case @p src and @p dst are unchanged.
+inline bool ClipLayerToRect(RectF* src,
                             RectI* dst,
                             const uint32_t buffer_w,
                             const uint32_t buffer_h,
                             const BufferTransform transform,
-                            const int32_t view_w,
-                            const int32_t view_h) {
-  if (dst->w <= 0 || dst->h <= 0 || view_w <= 0 || view_h <= 0) {
+                            const RectI& bounds) {
+  if (dst->w <= 0 || dst->h <= 0 || bounds.w <= 0 || bounds.h <= 0) {
     return false;
   }
-  const int32_t x0 = std::max(dst->x, 0);
-  const int32_t y0 = std::max(dst->y, 0);
-  const int32_t x1 = std::min(dst->x + dst->w, view_w);
-  const int32_t y1 = std::min(dst->y + dst->h, view_h);
+  const int32_t x0 = std::max(dst->x, bounds.x);
+  const int32_t y0 = std::max(dst->y, bounds.y);
+  const int32_t x1 = std::min(dst->x + dst->w, bounds.x + bounds.w);
+  const int32_t y1 = std::min(dst->y + dst->h, bounds.y + bounds.h);
   if (x1 <= x0 || y1 <= y0) {
     return false;
   }
@@ -229,6 +228,37 @@ inline bool ClipLayerToView(RectF* src,
   return true;
 }
 
+// Clip a layer to the view, which spans [0, view_w) x [0, view_h) in the same
+// coordinates as @p dst. See ClipLayerToRect.
+inline bool ClipLayerToView(RectF* src,
+                            RectI* dst,
+                            const uint32_t buffer_w,
+                            const uint32_t buffer_h,
+                            const BufferTransform transform,
+                            const int32_t view_w,
+                            const int32_t view_h) {
+  return ClipLayerToRect(src, dst, buffer_w, buffer_h, transform,
+                         RectI{0, 0, view_w, view_h});
+}
+
+// The part of the view a layer may cover, in view-local pixels: the whole view,
+// cut down to @p clip (output pixels) when there is one. Empty when the clip
+// misses the view.
+inline RectI ViewBounds(const RectI& view, const RectI* clip) {
+  RectI b{0, 0, view.w, view.h};
+  if (clip == nullptr) {
+    return b;
+  }
+  const int32_t x0 = std::max(0, clip->x - view.x);
+  const int32_t y0 = std::max(0, clip->y - view.y);
+  const int32_t x1 = std::min(view.w, clip->x + clip->w - view.x);
+  const int32_t y1 = std::min(view.h, clip->y + clip->h - view.y);
+  if (x1 <= x0 || y1 <= y0) {
+    return RectI{0, 0, 0, 0};
+  }
+  return RectI{x0, y0, x1 - x0, y1 - y0};
+}
+
 // Where and how to draw one layer of a view on an output.
 struct LayerPlacement {
   RectI dst;  // output pixels, top-left origin
@@ -239,8 +269,9 @@ struct LayerPlacement {
 // Place a layer of a view whose rect on the output is @p view (top-left
 // origin, output pixels). @p src and @p dst are the layer's own geometry --
 // @p dst in view-local pixels, and a zero-size @p dst meaning the whole view --
-// over a @p buffer_w x @p buffer_h image. The layer is clipped to the view.
-// Returns false when nothing of it is visible.
+// over a @p buffer_w x @p buffer_h image. The layer is clipped to the view,
+// and to @p clip (output pixels) when one is given. Returns false when nothing
+// of it is visible.
 inline bool PlaceLayer(RectF src,
                        RectI dst,
                        const BufferTransform transform,
@@ -248,15 +279,16 @@ inline bool PlaceLayer(RectF src,
                        const uint32_t buffer_w,
                        const uint32_t buffer_h,
                        const RectI& view,
-                       LayerPlacement* out) {
+                       LayerPlacement* out,
+                       const RectI* clip = nullptr) {
   if (buffer_w == 0 || buffer_h == 0) {
     return false;
   }
   if (dst.w <= 0 || dst.h <= 0) {
     dst = {0, 0, view.w, view.h};
   }
-  if (!ClipLayerToView(&src, &dst, buffer_w, buffer_h, transform, view.w,
-                       view.h)) {
+  if (!ClipLayerToRect(&src, &dst, buffer_w, buffer_h, transform,
+                       ViewBounds(view, clip))) {
     return false;
   }
   out->dst = {view.x + dst.x, view.y + dst.y, dst.w, dst.h};

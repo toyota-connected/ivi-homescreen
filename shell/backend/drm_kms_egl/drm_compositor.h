@@ -429,7 +429,8 @@ class DrmCompositor : public IFlipSink {
   // True for a texture the single-texture code paths draw as they always
   // have: whole across the view, not opaque.
   static bool IsWholeImage(
-      const std::optional<ICompositorSurface::GlLayerTexture>& t);
+      const std::optional<ICompositorSurface::GlLayerTexture>& t,
+      const FlutterLayer& layer);
 
   // Post-first-commit sanity probe. Confirms the kernel actually honored
   // the modeset by reading CRTC.ACTIVE + primary plane.FB_ID via

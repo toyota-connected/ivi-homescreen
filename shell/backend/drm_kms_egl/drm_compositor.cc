@@ -479,8 +479,11 @@ DrmCompositor::SingleLayerTexture(const ICompositorSurface& surface) {
 }
 
 bool DrmCompositor::IsWholeImage(
-    const std::optional<ICompositorSurface::GlLayerTexture>& t) {
-  return t && t->name != 0 && t->geometry.IsWhole() && !t->geometry.opaque;
+    const std::optional<ICompositorSurface::GlLayerTexture>& t,
+    const FlutterLayer& layer) {
+  // A clipped view is drawn layer by layer: that path crops to the clip.
+  return t && t->name != 0 && t->geometry.IsWhole() && !t->geometry.opaque &&
+         !ihs::platform_view::ClipRectOf(layer);
 }
 
 bool DrmCompositor::CompositeLayeredSurface(
@@ -496,12 +499,13 @@ bool DrmCompositor::CompositeLayeredSurface(
                    static_cast<int32_t>(layer->offset.y),
                    static_cast<int32_t>(layer->size.width),
                    static_cast<int32_t>(layer->size.height)};
+  const std::optional<RectI> clip = ihs::platform_view::ClipRectOf(*layer);
   return gl_compositor_->CompositeSurfaceLayers(
              target_fbo, *surface, view, fb_height, target_top_first, blend,
              [this, &surface](const ICompositorSurface::GlLayerTexture& t) {
                NoteGlComposited(surface, t);
              },
-             layer0, rotation) > 0;
+             layer0, rotation, clip ? &*clip : nullptr) > 0;
 }
 
 std::optional<DisplayRotation> DrmCompositor::GpuRotation() const {
@@ -2014,7 +2018,7 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
         surface_sp->SetScanoutPlane(0);
         surface_sp->OnPresent(layer);
         const auto first = SingleLayerTexture(*surface_sp);
-        if (!IsWholeImage(first)) {
+        if (!IsWholeImage(first, *layer)) {
           // FBO 0 of the gbm_surface: standard GL NDC, bottom-left origin.
           if (CompositeLayeredSurface(0, surface_sp, layer, target_h,
                                       /*target_top_first=*/false, blend,
@@ -2165,7 +2169,7 @@ bool DrmCompositor::CompositeLayersTurned(const GLuint fbo,
       surface_sp->SetScanoutPlane(0);
       surface_sp->OnPresent(layer);
       const auto first = SingleLayerTexture(*surface_sp);
-      if (!IsWholeImage(first)) {
+      if (!IsWholeImage(first, *layer)) {
         if (CompositeLayeredSurface(fbo, surface_sp, layer, target_h, top_first,
                                     blend, first ? &*first : nullptr, &rot)) {
           composited_any = true;
@@ -2696,7 +2700,7 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
       } else {
         surface_sp->OnPresent(layer);
         const auto first = SingleLayerTexture(*surface_sp);
-        if (!IsWholeImage(first)) {
+        if (!IsWholeImage(first, *layer)) {
           // comp.fbo is scanned out top row first (see below).
           surface_sp->SetScanoutPlane(0);
           if (CompositeLayeredSurface(comp.fbo, surface_sp, layer,
@@ -3566,7 +3570,7 @@ bool DrmCompositor::PresentLayersLocked(const FlutterLayer** layers,
         if (surface_sp) {
           surface_sp->OnPresent(flutter);
           const auto first = SingleLayerTexture(*surface_sp);
-          if (!IsWholeImage(first)) {
+          if (!IsWholeImage(first, *flutter)) {
             if (CompositeLayeredSurface(comp.fbo, surface_sp, flutter,
                                         /*fb_height=*/0,
                                         /*target_top_first=*/true, blend,
@@ -4050,6 +4054,8 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
                             static_cast<int32_t>(fl->offset.y),
                             static_cast<int32_t>(fl->size.width),
                             static_cast<int32_t>(fl->size.height)};
+      // Each layer's plane is cropped to the view's clip.
+      const std::optional<RectI> clip = ihs::platform_view::ClipRectOf(*fl);
       // One scene layer per layer of the view, bottom to top, each on a plane
       // of its own.
       const size_t pv_layer_count = surface->GetLayerCount();
@@ -4175,7 +4181,7 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
         LayerPlane place;
         if (!PlaceLayerOnPlane(ld.geometry.src, ld.geometry.dst,
                                ld.geometry.transform, buf_w, buf_h, view_rect,
-                               &place)) {
+                               &place, clip ? &*clip : nullptr)) {
           // Nothing of it shows. It takes no plane this present (a reused
           // layer is pruned below), and a frame it was handed goes straight
           // back: it will never be scanned out.

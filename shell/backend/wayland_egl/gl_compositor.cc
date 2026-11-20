@@ -590,7 +590,8 @@ size_t GlCompositor::CompositeSurfaceLayers(
     const std::function<void(const ICompositorSurface::GlLayerTexture&)>&
         on_drawn,
     const ICompositorSurface::GlLayerTexture* layer0,
-    const DisplayRotation* rotation) {
+    const DisplayRotation* rotation,
+    const RectI* clip) {
   size_t drawn = 0;
   const size_t count = surface.GetLayerCount();
   for (size_t i = 0; i < count; ++i) {
@@ -603,7 +604,7 @@ size_t GlCompositor::CompositeSurfaceLayers(
     LayerPlacement p;
     if (!PlaceLayer(g.src, g.dst, g.transform, g.opaque,
                     static_cast<uint32_t>(t.width),
-                    static_cast<uint32_t>(t.height), view, &p)) {
+                    static_cast<uint32_t>(t.height), view, &p, clip)) {
       continue;
     }
     // UvAffine counts rows from the buffer's first row in memory. A texture
