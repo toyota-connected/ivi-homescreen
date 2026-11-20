@@ -11,6 +11,7 @@ layout(push_constant) uniform PC {
   vec4 uv_u;  // u = dot(uv_u.xyz, (s, t, 1))
   vec4 uv_v;  // v = dot(uv_v.xyz, (s, t, 1))
   float opaque;
+  float alpha;
 } pc;
 layout(location = 0) out vec2 v_uv;
 void main() {

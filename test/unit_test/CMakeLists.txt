@@ -265,6 +265,7 @@ endif ()
 # needs neither. Skips itself without vkms + DRM master.
 if (TARGET drm-cxx)
     add_subdirectory(drm_flip_waker-test)
+    add_subdirectory(drm_plane_formats-test)
 endif ()
 # T1 — drives the real LeaseClient against a mock drm-lease-v1 compositor.
 # Needs no GPU/compositor, so it runs anywhere the lease client is built.

@@ -28,6 +28,7 @@
 #include <array>
 #include <cerrno>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <mutex>
 #include <optional>
@@ -2768,6 +2769,14 @@ bool VulkanDrmBackend::ReconcilePlatformViewLayers(
                    static_cast<int32_t>(fl.size.height)};
   // Each layer's plane is cropped to the view's clip.
   const std::optional<RectI> clip = ihs::platform_view::ClipRectOf(fl);
+  // And shown at the view's opacity, through the plane's "alpha". A plane
+  // without one would show the view opaque, so then the blend draws it.
+  const float alpha = ihs::platform_view::OpacityOf(fl);
+  if (alpha < 1.0f && !plane_formats_.AllHaveAlpha()) {
+    return false;
+  }
+  const auto plane_alpha =
+      static_cast<uint16_t>(std::lround(static_cast<double>(alpha) * 0xFFFF));
   // One scene layer per layer of the view, bottom to top, each on a plane of
   // its own.
   const size_t count = surface->GetLayerCount();
@@ -2865,6 +2874,7 @@ bool VulkanDrmBackend::ReconcilePlatformViewLayers(
                            static_cast<uint32_t>(place.dst.h));
     c.pv_plan_sig =
         MixShape(c.pv_plan_sig, (uint64_t{place.rotation} << 32U) | fourcc);
+    c.pv_plan_sig = MixShape(c.pv_plan_sig, plane_alpha);
 
     // The pool caches one fb_id per producer buffer and hands each back
     // through on_release. drm-cxx fires that at displacement rather than at
@@ -2891,6 +2901,11 @@ bool VulkanDrmBackend::ReconcilePlatformViewLayers(
       layer->set_dst_rect_if_changed(dst);
       layer->set_rotation_if_changed(place.rotation);
       layer->set_zpos_if_changed(zpos);
+      // Only once the view has faded: an opaque view's commits stay as
+      // they were. After that, every change, back to opaque included.
+      if (plane_alpha != 0xFFFF || layer->alpha_was_explicitly_set()) {
+        layer->set_alpha_if_changed(plane_alpha);
+      }
       if (!have_db) {
         continue;
       }
@@ -2953,6 +2968,14 @@ bool VulkanDrmBackend::ReconcilePlatformViewLayers(
       surface->OnScanoutRelease(db.buffer_id);
       CloseDmabufFds(&db);
       return false;
+    }
+    // Set on the layer rather than in desc: a layer marks its alpha as set
+    // only through set_alpha, and one that is not marked is never written
+    // back to opaque.
+    if (plane_alpha != 0xFFFF) {
+      if (auto* added = c.scene->find_by_identity_tag(tag); added != nullptr) {
+        added->set_alpha(plane_alpha);
+      }
     }
     c.plane_layer_keys.push_back(tag);
     c.plane_topology_changed = true;
@@ -3194,6 +3217,8 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
     // covers its rect. The defaults draw the whole image, blended.
     UvAffine uv{};
     bool opaque{false};
+    // The view's opacity; 1 for backing stores.
+    float alpha{1.0f};
   };
   std::vector<Draw> draws;
   // Images already moved to SHADER_READ_ONLY this frame, so a buffer shown by
@@ -3337,8 +3362,9 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
       // the view and oriented as the producer asked (ihs_pv_submit_layers);
       // a plain producer is one layer drawn whole.
       const RectI view{dx, dy, dw, dh};
-      // Each layer is cropped to the view's clip.
+      // Each layer is cropped to the view's clip and drawn at its opacity.
       const std::optional<RectI> clip = ihs::platform_view::ClipRectOf(*layer);
+      const float alpha = ihs::platform_view::OpacityOf(*layer);
       bool sampled = false;
       for (size_t li = 0, n = surface->GetLayerCount(); li < n; ++li) {
         const auto img = surface->GetLayerVulkanImage(li);
@@ -3406,7 +3432,7 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
              place.dst.h, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED,
              static_cast<VkSamplerYcbcrModelConversion>(img.ycbcr_model),
              static_cast<VkSamplerYcbcrRange>(img.ycbcr_range), place.uv,
-             place.opaque});
+             place.opaque, alpha});
         compositor_->presentation.Note(surface->GetPresentationSink(),
                                        img.frame, /*zero_copy=*/false);
         sampled = true;
@@ -3461,7 +3487,7 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
     for (const Draw& dr : draws) {
       layer_compositor_->DrawLayer(cmd, dr.src, dr.format, dr.ycbcr_model,
                                    dr.ycbcr_range, dr.dx, dr.dy, dr.dw, dr.dh,
-                                   dr.uv, dr.opaque);
+                                   dr.uv, dr.opaque, dr.alpha);
     }
     wl_vulkan::LayerCompositor::EndFrame(cmd);
   }

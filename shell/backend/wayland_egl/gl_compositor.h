@@ -97,6 +97,8 @@ class GlCompositor {
    * @param opaque       Draw alpha as 1, for an XRGB-style buffer whose alpha
    *                     channel is undefined, and a layer known to cover its
    *                     rect. Blending still follows @p blend.
+   * @param alpha        The view's opacity, in [0, 1]: scales the layer's
+   *                     premultiplied color.
    */
   void CompositeLayerToFbo(GLuint dst_fbo,
                            GLuint tex,
@@ -107,7 +109,8 @@ class GlCompositor {
                            GLsizei dst_w,
                            GLsizei dst_h,
                            bool blend,
-                           bool opaque);
+                           bool opaque,
+                           float alpha = 1.0f);
 
   /**
    * @brief Draw every layer of @p surface, bottom to top, into its view rect.
@@ -132,6 +135,11 @@ class GlCompositor {
    *                    Null draws as is. Bottom-left targets only.
    * @param clip        The view's clip, in the same space as @p view: each
    *                    layer is cropped to it. Null clips to the view only.
+   * @param alpha       The view's opacity, in [0, 1]. Below 1 every layer is
+   *                    drawn at it, and one that covers its rect blends rather
+   *                    than overwrites. Applied per layer: where two of a
+   *                    view's layers overlap, the lower one shows through,
+   *                    which a group opacity would not do.
    * @return            The number of layers drawn.
    *
    * Imports each layer's latest frame (GetLayerGlTexture), so it runs on the
@@ -148,7 +156,8 @@ class GlCompositor {
           on_drawn = nullptr,
       const ICompositorSurface::GlLayerTexture* layer0 = nullptr,
       const DisplayRotation* rotation = nullptr,
-      const RectI* clip = nullptr);
+      const RectI* clip = nullptr,
+      float alpha = 1.0f);
 
   /**
    * @brief Whether CompositeToFbo may take the glBlitFramebuffer path.
@@ -237,7 +246,8 @@ class GlCompositor {
                                 GLsizei dst_h,
                                 bool blend,
                                 const UvAffine& uv,
-                                bool opaque);
+                                bool opaque,
+                                float alpha);
   // @external selects the samplerExternalOES program and the
   // GL_TEXTURE_EXTERNAL_OES bind target, which planar YUV requires.
   void CompositeViaQuad(GLuint src_color_tex,
@@ -248,16 +258,19 @@ class GlCompositor {
                         bool blend,
                         const UvAffine& uv,
                         bool opaque,
-                        bool external);
+                        bool external,
+                        float alpha);
   // The texture coordinates the legacy flip_y flag stood for: a top-first
   // texture needs none, a bottom-first one (a GL render target) a V flip.
   static UvAffine UvForFlip(bool flip_y);
-  // Upload @p uv and @p opaque to a program's uniforms.
+  // Upload @p uv, @p opaque and @p alpha to a program's uniforms.
   static void SetLayerUniforms(GLint uni_uv_u,
                                GLint uni_uv_v,
                                GLint uni_opaque,
+                               GLint uni_alpha,
                                const UvAffine& uv,
-                               bool opaque);
+                               bool opaque,
+                               float alpha);
   void EmitPersistentQuadState();
   void TearDownPersistentQuadState();
 
@@ -265,6 +278,7 @@ class GlCompositor {
   GLint uni_uv_u_{-1};
   GLint uni_uv_v_{-1};
   GLint uni_opaque_{-1};
+  GLint uni_alpha_{-1};
 
   // The external-sampler variant. A planar YUV dma-buf is bound to
   // GL_TEXTURE_EXTERNAL_OES and can only be read through this program;
@@ -276,4 +290,5 @@ class GlCompositor {
   GLint uni_uv_u_external_{-1};
   GLint uni_uv_v_external_{-1};
   GLint uni_opaque_external_{-1};
+  GLint uni_alpha_external_{-1};
 };

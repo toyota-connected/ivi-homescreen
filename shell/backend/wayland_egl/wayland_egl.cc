@@ -1215,14 +1215,15 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
     } else if (layer->type == kFlutterLayerContentTypePlatformView &&
                layer->platform_view) {
       const auto composed = MutationStack::Compose(layer->platform_view);
-      if (composed.NeedsPluginComposite()) {
+      // Opacity, clip and scale are drawn below; these are not.
+      if (composed.has_rounded_clip || composed.has_perspective ||
+          !composed.IsAxisAligned()) {
         ihs::log::debug(
-            "EGL compositor: platform view {} has non-trivial mutations "
-            "(opacity={:.3f} rounded={} perspective={} axis_aligned={}); "
+            "EGL compositor: platform view {} has mutations the compositor "
+            "does not draw (rounded={} perspective={} axis_aligned={}); "
             "plugin OnPresent must apply them.",
-            layer->platform_view->identifier, composed.opacity,
-            composed.has_rounded_clip, composed.has_perspective,
-            composed.IsAxisAligned());
+            layer->platform_view->identifier, composed.has_rounded_clip,
+            composed.has_perspective, composed.IsAxisAligned());
       }
       // Snapshot the shared_ptr under the lock, drop the lock before the
       // OnPresent callback. Holding the mutex across plugin GL work would
@@ -1248,12 +1249,13 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
         const ICompositorSurface::GlLayerTexture first =
             one_layer ? surface.GetLayerGlTexture(0)
                       : ICompositorSurface::GlLayerTexture{};
-        // A clipped view is drawn layer by layer too: that path crops each
-        // layer to the clip.
+        // A clipped or translucent view is drawn layer by layer too: that
+        // path crops each layer to the clip and draws it at the opacity.
         const std::optional<RectI> clip =
             ihs::platform_view::ClipRectOf(*layer);
+        const float alpha = ihs::platform_view::OpacityOf(*layer);
         if (first.name != 0 && first.geometry.IsWhole() &&
-            !first.geometry.opaque && !clip) {
+            !first.geometry.opaque && !clip && alpha >= 1.0f) {
           NoteSampled(surface_sp, first);
           EnsureGlCapsProbed();
           const auto tex = first.name;
@@ -1306,7 +1308,7 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
                     NoteSampled(surface_sp, t);
                   },
                   one_layer ? &first : nullptr, /*rotation=*/nullptr,
-                  clip ? &*clip : nullptr) > 0) {
+                  clip ? &*clip : nullptr, alpha) > 0) {
             composited_any = true;
           }
         }
