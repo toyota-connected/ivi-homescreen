@@ -369,7 +369,8 @@ std::vector<uint8_t> DrawSurface(
     GlCompositor& compositor,
     const ICompositorSurface& surface,
     bool target_top_first,
-    const ICompositorSurface::GlLayerTexture* layer0 = nullptr) {
+    const ICompositorSurface::GlLayerTexture* layer0 = nullptr,
+    const RectI* clip = nullptr) {
   GLuint target = 0;
   glGenTextures(1, &target);
   glBindTexture(GL_TEXTURE_2D, target);
@@ -382,9 +383,9 @@ std::vector<uint8_t> DrawSurface(
                          target, 0);
   glClearColor(0, 0, 0, 0);
   glClear(GL_COLOR_BUFFER_BIT);
-  compositor.CompositeSurfaceLayers(fbo, surface, {0, 0, kW, kH}, kH,
-                                    target_top_first, /*blend_first=*/false,
-                                    nullptr, layer0);
+  compositor.CompositeSurfaceLayers(
+      fbo, surface, {0, 0, kW, kH}, kH, target_top_first, /*blend_first=*/false,
+      nullptr, layer0, /*rotation=*/nullptr, clip);
   std::vector<uint8_t> rows(Px(0, kH, kW));
   glBindFramebuffer(GL_FRAMEBUFFER, fbo);
   glReadPixels(0, 0, kW, kH, GL_RGBA, GL_UNSIGNED_BYTE, rows.data());
@@ -536,4 +537,42 @@ TEST_F(LayerDrawGlEs3, SamplerLeftOnUnit0DoesNotBlackOutTheLayer) {
 
 TEST_F(LayerDrawGlEs3, SamplerLeftOnUnit0DoesNotBlackOutTheLayerInAFrame) {
   DrawWithMipmapSamplerOnUnit0(/*in_frame=*/true);
+}
+
+// A whole-image view clipped to a 2 x 2 block at (1, 1): only that block is
+// drawn, and with the pixels that belong there, on either target.
+TEST_F(LayerDrawGl, AClippedViewDrawsOnlyInsideItsClip) {
+  std::vector<uint8_t> img(Px(0, kH, kW));
+  for (int i = 0; i < kW * kH; ++i) {
+    std::memcpy(&img[Px(i, 0, 0)], ColorOf(i).data(), 4);
+  }
+  const GLuint tex = MakeTexture(kW, kH, img);
+  LayeredSurface surface;
+  ICompositorSurface::GlLayerTexture whole;
+  whole.name = tex;
+  whole.width = kW;
+  whole.height = kH;
+  whole.top_first = true;
+  surface.layers = {whole};
+  const RectI clip{1, 1, 2, 2};
+
+  for (const bool target_top_first : {false, true}) {
+    SCOPED_TRACE(target_top_first ? "top-first target" : "window target");
+    const auto out =
+        DrawSurface(*compositor_, surface, target_top_first, nullptr, &clip);
+    for (int y = 0; y < kH; ++y) {
+      for (int x = 0; x < kW; ++x) {
+        const bool inside = x >= 1 && x < 3 && y >= 1 && y < 3;
+        std::array<uint8_t, 4> want{0, 0, 0, 0};
+        if (inside) {
+          want = ColorOf(y * kW + x);
+        }
+        EXPECT_TRUE(std::memcmp(&out[Px(x, y, kW)], want.data(), 4) == 0)
+            << "(" << x << ", " << y << "): got " << int(out[Px(x, y, kW)])
+            << "," << int(out[Px(x, y, kW) + 1]) << ","
+            << int(out[Px(x, y, kW) + 2]) << "," << int(out[Px(x, y, kW) + 3]);
+      }
+    }
+  }
+  glDeleteTextures(1, &tex);
 }

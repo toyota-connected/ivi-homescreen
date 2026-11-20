@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include <cmath>
 #include <vector>
 
 #include "gtest/gtest.h"
@@ -149,4 +150,62 @@ TEST(MutationStack, NullEntryIsSkipped) {
   FlutterPlatformView v = MakeView(list);
   const auto r = MutationStack::Compose(&v);
   EXPECT_FALSE(r.NeedsPluginComposite());
+}
+
+TEST(MutationStack, ClipIsMappedThroughTheTransformsOutsideIt) {
+  // The framework's pixel-ratio scale, a list scrolled to y = 20, and the
+  // list's clip in its own coordinates.
+  auto dpr = Scale(2, 2);
+  auto scroll = Translate(10, 20);
+  auto clip = ClipRect(0, 0, 50, 50);
+  std::vector<const FlutterPlatformViewMutation*> list{&dpr, &scroll, &clip};
+  FlutterPlatformView v = MakeView(list);
+  const auto r = MutationStack::Compose(&v);
+  ASSERT_TRUE(r.has_clip);
+  EXPECT_TRUE(r.clip_exact);
+  EXPECT_DOUBLE_EQ(r.clip_rect.left, 20);
+  EXPECT_DOUBLE_EQ(r.clip_rect.top, 40);
+  EXPECT_DOUBLE_EQ(r.clip_rect.right, 120);
+  EXPECT_DOUBLE_EQ(r.clip_rect.bottom, 140);
+}
+
+TEST(MutationStack, ClipIsNotMovedByTransformsInsideIt) {
+  auto clip = ClipRect(0, 0, 100, 100);
+  auto inner = Scale(2, 2);
+  std::vector<const FlutterPlatformViewMutation*> list{&clip, &inner};
+  FlutterPlatformView v = MakeView(list);
+  const auto r = MutationStack::Compose(&v);
+  EXPECT_DOUBLE_EQ(r.clip_rect.right, 100);
+  EXPECT_DOUBLE_EQ(r.clip_rect.bottom, 100);
+}
+
+TEST(MutationStack, ClipUnderAQuarterTurnStaysExact) {
+  FlutterPlatformViewMutation rot{};
+  rot.type = kFlutterPlatformViewMutationTypeTransformation;
+  rot.transformation = {0, -1, 0, 1, 0, 0, 0, 0, 1};
+  auto clip = ClipRect(0, 0, 40, 10);
+  std::vector<const FlutterPlatformViewMutation*> list{&rot, &clip};
+  FlutterPlatformView v = MakeView(list);
+  const auto r = MutationStack::Compose(&v);
+  EXPECT_TRUE(r.clip_exact);
+  EXPECT_DOUBLE_EQ(r.clip_rect.left, -10);
+  EXPECT_DOUBLE_EQ(r.clip_rect.right, 0);
+  EXPECT_DOUBLE_EQ(r.clip_rect.top, 0);
+  EXPECT_DOUBLE_EQ(r.clip_rect.bottom, 40);
+}
+
+TEST(MutationStack, ClipUnderARotationIsItsBoundingBox) {
+  const double k = std::sqrt(0.5);  // 45 degrees
+  FlutterPlatformViewMutation rot{};
+  rot.type = kFlutterPlatformViewMutationTypeTransformation;
+  rot.transformation = {k, -k, 0, k, k, 0, 0, 0, 1};
+  auto clip = ClipRect(0, 0, 10, 10);
+  std::vector<const FlutterPlatformViewMutation*> list{&rot, &clip};
+  FlutterPlatformView v = MakeView(list);
+  const auto r = MutationStack::Compose(&v);
+  EXPECT_FALSE(r.clip_exact);
+  EXPECT_NEAR(r.clip_rect.left, -10 * k, 1e-9);
+  EXPECT_NEAR(r.clip_rect.right, 10 * k, 1e-9);
+  EXPECT_NEAR(r.clip_rect.top, 0, 1e-9);
+  EXPECT_NEAR(r.clip_rect.bottom, 20 * k, 1e-9);
 }

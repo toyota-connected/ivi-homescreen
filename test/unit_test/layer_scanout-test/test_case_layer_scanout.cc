@@ -249,3 +249,20 @@ TEST(LayerScanout, BackoffSkipsARejectedShapeUntilTheRetry) {
   backoff.Accepted();
   EXPECT_TRUE(backoff.ShouldTry(7));
 }
+
+TEST(LayerScanout, PlaneIsCroppedToTheClip) {
+  // A 1920 x 1080 buffer drawn into a 960 x 540 view at (0, 100), clipped to
+  // the rows y >= 370 of the output: the view's bottom half.
+  const RectI clip{0, 370, 1920, 1080};
+  LayerPlane p;
+  ASSERT_TRUE(PlaceLayerOnPlane({}, {}, BufferTransform::kNormal, 1920, 1080,
+                                {0, 100, 960, 540}, &p, &clip));
+  EXPECT_EQ(p.dst.x, 0);
+  EXPECT_EQ(p.dst.y, 370);
+  EXPECT_EQ(p.dst.w, 960);
+  EXPECT_EQ(p.dst.h, 270);
+  // The bottom half of the buffer, in 16.16.
+  EXPECT_EQ(p.src.y, 540u << 16);
+  EXPECT_EQ(p.src.h, 540u << 16);
+  EXPECT_EQ(p.src.w, 1920u << 16);
+}
