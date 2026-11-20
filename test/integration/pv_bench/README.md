@@ -94,6 +94,8 @@ previous process has released DRM master gives a run that produces no report.
 | `PV_BENCH_SCALE` | `1` | the app wraps its view in `Transform.scale` by this factor, about its center |
 | `PV_BENCH_SCALE_ANIM` | *(unset)* | `1`: the app wraps its view in a `ScaleTransition` between 0.4 and 1.0 instead, two seconds each way |
 | `PV_BENCH_CLIP` | *(unset)* | `1`: the app wraps its view in a `ClipRect` that keeps the middle of the screen, half its width and height |
+| `PV_BENCH_OPACITY` | `1` | the app wraps its view in `Opacity` at this value |
+| `PV_BENCH_FADE` | *(unset)* | `1`: the app wraps its view in a `FadeTransition` instead: up from 0.2 to 1.0 over two seconds, a second at 1.0, and back down over two |
 
 `PV_BENCH_NO_PV=1` is the control: same Flutter content, no layer. The difference
 between the two runs is what the layer costs.
@@ -122,6 +124,16 @@ The view keeps its full-screen rect, and only the middle of it, half the
 output's width and height and centered, should show. The whole view showing
 is the bug in \#863. On a plane path the plane's destination rect should be
 that middle rect, and its source rect the matching part of the buffer.
+
+`PV_BENCH_OPACITY` and `PV_BENCH_FADE` are the same kind of check for an
+opacity, also read by the app. The producer's green and blue are fixed at 0x40
+and 0x80 and the app's background is black, so at `PV_BENCH_OPACITY=0.5` the
+view should read about 0x20 green and 0x40 blue wherever the overlay is not
+over it. A view at full strength is the bug in \#864. On a plane path the
+plane's `alpha` property should be half its range. `PV_BENCH_FADE=1` holds
+1.0 for a second each cycle, where Flutter drops the opacity, so a plane path
+also has to go back to opaque: its `alpha` should read the top of its range
+for that second.
 
 The app reports build/raster/total percentiles and exits. The producer reports
 submits per second and mean release-fence wait every second -- check that first.

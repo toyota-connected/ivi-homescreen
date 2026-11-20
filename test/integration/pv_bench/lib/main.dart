@@ -31,6 +31,11 @@
 //                       and 1.0 instead, two seconds each way
 //   PV_BENCH_CLIP       set to 1 to wrap it in a ClipRect that keeps only the
 //                       middle of the screen, half its width and height
+//   PV_BENCH_OPACITY    wrap the view in Opacity(PV_BENCH_OPACITY)
+//                       (default 1, no opacity)
+//   PV_BENCH_FADE       set to 1 to wrap it in a FadeTransition instead: up
+//                       from 0.2 to 1.0 over two seconds, a second at 1.0,
+//                       and back down over two
 
 import 'dart:async';
 import 'dart:ffi' as ffi;
@@ -202,7 +207,7 @@ class _PvBenchPageState extends State<PvBenchPage>
         children: <Widget>[
           if (widget.showPlatformView)
             Positioned.fill(
-                child: _clipped(_scaled(const _BenchPlatformView())))
+                child: _faded(_clipped(_scaled(const _BenchPlatformView()))))
           else
             const Center(
               child: Text('no platform view',
@@ -245,6 +250,61 @@ Widget _clipped(Widget child) {
     return child;
   }
   return ClipRect(clipper: _MiddleClipper(), child: child);
+}
+
+// An opacity on the view puts an opacity mutation on its layer, so a run can
+// check that each backend draws the view at it (#864).
+final double _pvOpacity =
+    double.tryParse(Platform.environment['PV_BENCH_OPACITY'] ?? '') ?? 1.0;
+final bool _pvFade = Platform.environment['PV_BENCH_FADE'] == '1';
+
+Widget _faded(Widget child) {
+  if (_pvFade) {
+    return _PulsingFade(child: child);
+  }
+  if (_pvOpacity == 1.0) {
+    return child;
+  }
+  return Opacity(opacity: _pvOpacity.clamp(0.0, 1.0), child: child);
+}
+
+class _PulsingFade extends StatefulWidget {
+  const _PulsingFade({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_PulsingFade> createState() => _PulsingFadeState();
+}
+
+class _PulsingFadeState extends State<_PulsingFade>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 5),
+  )..repeat();
+
+  // The second at 1.0 is there because Flutter drops the opacity at 1.0: the
+  // view is then opaque for long enough to check that it shows that way.
+  static final Animatable<double> _opacity = TweenSequence<double>([
+    TweenSequenceItem(tween: Tween<double>(begin: 0.2, end: 1.0), weight: 2),
+    TweenSequenceItem(tween: ConstantTween<double>(1.0), weight: 1),
+    TweenSequenceItem(tween: Tween<double>(begin: 1.0, end: 0.2), weight: 2),
+  ]);
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _opacity.animate(_pulse),
+      child: widget.child,
+    );
+  }
 }
 
 class _MiddleClipper extends CustomClipper<Rect> {
