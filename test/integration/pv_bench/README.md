@@ -87,6 +87,7 @@ previous process has released DRM master gives a run that produces no report.
 | `SUMMARY_FILE` | *(unset)* | the summary, written to a file as well as stdout |
 | `PV_BENCH_DRM_NODE` | *(unset)* | allocate on this node instead of probing |
 | `PV_BENCH_PAD_ROWS` | tile-rounded | rows of allocation headroom; 0 reproduces \#598 |
+| `PV_BENCH_TILED` | *(unset)* | `1`: take the backend's format order, which can grant a tiled buffer; by default a linear one is asked for first, since the CPU fill scrambles tiled content (\#872) |
 | `PV_BENCH_LAYERS` | `1` | layers per submit (1..3) through `ihs_pv_submit_layers`: the buffer whole, then cropped, placed and mirrored, then cropped, placed and turned a quarter |
 | `PV_BENCH_DRM_PLANE` | *(unset)* | prefer `DRM_PLANE`, keeping import and shm as fallbacks: measures direct scanout rather than composition. Offered only by `drm-kms-egl`; the run logs whether a plane was actually granted, so a fallback cannot be mistaken for a plane measurement |
 | `PV_BENCH_SHM` | *(unset)* | prefer `SOFTWARE_SHM` and fill the host's buffers (ABI 1.19) instead of the producer's own ring: the CPU floor, composited. One layer only. The per-second log's release timeouts should stay 0 |

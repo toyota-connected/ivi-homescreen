@@ -43,6 +43,7 @@
 #include <unistd.h>
 #include <cerrno>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdarg>
@@ -196,6 +197,24 @@ class BenchView {
     if (wanted.empty()) {
       Log("no packed RGB format offered; nothing this producer can fill");
       return false;
+    }
+    /*
+     * The grant is the first of these the backend offers, so the order here
+     * decides the layout. This producer writes every pixel on the CPU, and a
+     * tiled buffer filled through gbm_bo_map has come out scrambled (#872), so
+     * linear goes first. PV_BENCH_TILED=1 keeps the backend's order, for
+     * measuring the tiled import; a backend that offers nothing linear gets a
+     * tiled buffer either way.
+     */
+    const bool keep_tiled = [] {
+      const char* env = ::getenv("PV_BENCH_TILED");
+      return env != nullptr && env[0] == '1' && env[1] == '\0';
+    }();
+    if (!keep_tiled) {
+      std::stable_partition(wanted.begin(), wanted.end(),
+                            [](const IhsFormatModifier& f) {
+                              return f.modifier == DRM_FORMAT_MOD_LINEAR;
+                            });
     }
 
     if (!shm_ && !OpenGbm()) {
@@ -420,6 +439,8 @@ class BenchView {
        * fill below stays the same even when the buffer is tiled -- the driver
        * does the tiling on unmap, which costs the producer time but keeps the
        * shell measuring its own work rather than a format it cannot sample.
+       * That is the intent; on vc4 a UIF buffer filled this way still shows
+       * scrambled (#872), which is why Start asks for linear first.
        */
       const uint64_t modifier = format_.modifier;
       /*
