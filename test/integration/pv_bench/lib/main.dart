@@ -29,6 +29,8 @@
 //                       about its center (default 1, no transform)
 //   PV_BENCH_SCALE_ANIM set to 1 to wrap it in a ScaleTransition between 0.4
 //                       and 1.0 instead, two seconds each way
+//   PV_BENCH_CLIP       set to 1 to wrap it in a ClipRect that keeps only the
+//                       middle of the screen, half its width and height
 
 import 'dart:async';
 import 'dart:ffi' as ffi;
@@ -199,7 +201,8 @@ class _PvBenchPageState extends State<PvBenchPage>
         fit: StackFit.expand,
         children: <Widget>[
           if (widget.showPlatformView)
-            Positioned.fill(child: _scaled(const _BenchPlatformView()))
+            Positioned.fill(
+                child: _clipped(_scaled(const _BenchPlatformView())))
           else
             const Center(
               child: Text('no platform view',
@@ -232,6 +235,26 @@ class _PvBenchPageState extends State<PvBenchPage>
 final double _pvScale =
     double.tryParse(Platform.environment['PV_BENCH_SCALE'] ?? '') ?? 1.0;
 final bool _pvScaleAnim = Platform.environment['PV_BENCH_SCALE_ANIM'] == '1';
+
+// A clip on the view puts a clip mutation on its layer, so a run can check that
+// each backend crops the view to it (#863).
+final bool _pvClip = Platform.environment['PV_BENCH_CLIP'] == '1';
+
+Widget _clipped(Widget child) {
+  if (!_pvClip) {
+    return child;
+  }
+  return ClipRect(clipper: _MiddleClipper(), child: child);
+}
+
+class _MiddleClipper extends CustomClipper<Rect> {
+  @override
+  Rect getClip(Size size) => Rect.fromLTWH(
+      size.width / 4, size.height / 4, size.width / 2, size.height / 2);
+
+  @override
+  bool shouldReclip(_MiddleClipper oldClipper) => false;
+}
 
 Widget _scaled(Widget child) {
   if (_pvScaleAnim) {

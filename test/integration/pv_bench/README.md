@@ -92,6 +92,7 @@ previous process has released DRM master gives a run that produces no report.
 | `PV_BENCH_SHM` | *(unset)* | prefer `SOFTWARE_SHM` and fill the host's buffers (ABI 1.19) instead of the producer's own ring: the CPU floor, composited. One layer only. The per-second log's release timeouts should stay 0 |
 | `PV_BENCH_SCALE` | `1` | the app wraps its view in `Transform.scale` by this factor, about its center |
 | `PV_BENCH_SCALE_ANIM` | *(unset)* | `1`: the app wraps its view in a `ScaleTransition` between 0.4 and 1.0 instead, two seconds each way |
+| `PV_BENCH_CLIP` | *(unset)* | `1`: the app wraps its view in a `ClipRect` that keeps the middle of the screen, half its width and height |
 
 `PV_BENCH_NO_PV=1` is the control: same Flutter content, no layer. The difference
 between the two runs is what the layer costs.
@@ -114,6 +115,12 @@ rectangle's top-left corner, running off the bottom right, is the bug in
 `PV_BENCH_SCALE_ANIM=1` and a plane path, the plane's destination rect should
 move while its source rect stays the size of the producer's buffer: the
 producer is not resized while the scale animates.
+
+`PV_BENCH_CLIP=1` is the same kind of check for a clip, also read by the app.
+The view keeps its full-screen rect, and only the middle of it, half the
+output's width and height and centered, should show. The whole view showing
+is the bug in \#863. On a plane path the plane's destination rect should be
+that middle rect, and its source rect the matching part of the buffer.
 
 The app reports build/raster/total percentiles and exits. The producer reports
 submits per second and mean release-fence wait every second -- check that first.
