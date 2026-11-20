@@ -16,6 +16,7 @@
 
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <utility>
@@ -370,7 +371,8 @@ std::vector<uint8_t> DrawSurface(
     const ICompositorSurface& surface,
     bool target_top_first,
     const ICompositorSurface::GlLayerTexture* layer0 = nullptr,
-    const RectI* clip = nullptr) {
+    const RectI* clip = nullptr,
+    float alpha = 1.0f) {
   GLuint target = 0;
   glGenTextures(1, &target);
   glBindTexture(GL_TEXTURE_2D, target);
@@ -385,7 +387,7 @@ std::vector<uint8_t> DrawSurface(
   glClear(GL_COLOR_BUFFER_BIT);
   compositor.CompositeSurfaceLayers(
       fbo, surface, {0, 0, kW, kH}, kH, target_top_first, /*blend_first=*/false,
-      nullptr, layer0, /*rotation=*/nullptr, clip);
+      nullptr, layer0, /*rotation=*/nullptr, clip, alpha);
   std::vector<uint8_t> rows(Px(0, kH, kW));
   glBindFramebuffer(GL_FRAMEBUFFER, fbo);
   glReadPixels(0, 0, kW, kH, GL_RGBA, GL_UNSIGNED_BYTE, rows.data());
@@ -575,4 +577,103 @@ TEST_F(LayerDrawGl, AClippedViewDrawsOnlyInsideItsClip) {
     }
   }
   glDeleteTextures(1, &tex);
+}
+
+namespace {
+
+// Whether each channel of @p got is within 2 of @p want: the opacity goes
+// through a mediump multiply and an 8-bit target.
+bool Near(const uint8_t* got, const std::array<int, 4>& want) {
+  for (int k = 0; k < 4; ++k) {
+    if (std::abs(int(got[k]) - want[k]) > 2) {
+      return false;
+    }
+  }
+  return true;
+}
+
+}  // namespace
+
+// A whole-image view at opacity 0.5 over a cleared target: every pixel is its
+// premultiplied color at half, alpha included, on either target.
+TEST_F(LayerDrawGl, ATranslucentViewIsDrawnAtItsOpacity) {
+  std::vector<uint8_t> img(Px(0, kH, kW));
+  for (int i = 0; i < kW * kH; ++i) {
+    std::memcpy(&img[Px(i, 0, 0)], ColorOf(i).data(), 4);
+  }
+  const GLuint tex = MakeTexture(kW, kH, img);
+  LayeredSurface surface;
+  ICompositorSurface::GlLayerTexture whole;
+  whole.name = tex;
+  whole.width = kW;
+  whole.height = kH;
+  whole.top_first = true;
+  surface.layers = {whole};
+
+  for (const bool target_top_first : {false, true}) {
+    SCOPED_TRACE(target_top_first ? "top-first target" : "window target");
+    const auto out = DrawSurface(*compositor_, surface, target_top_first,
+                                 nullptr, nullptr, /*alpha=*/0.5f);
+    for (int i = 0; i < kW * kH; ++i) {
+      const auto c = ColorOf(i);
+      const std::array<int, 4> want = {c[0] / 2, c[1] / 2, c[2] / 2, 128};
+      const uint8_t* got = &out[Px(i, 0, 0)];
+      EXPECT_TRUE(Near(got, want))
+          << "pixel " << i << ": got " << int(got[0]) << "," << int(got[1])
+          << "," << int(got[2]) << "," << int(got[3]);
+    }
+  }
+  glDeleteTextures(1, &tex);
+}
+
+// A view of two layers at opacity 0.5: a background, and above it an opaque
+// 2 x 1 strip. At full opacity the strip would overwrite the background; at
+// 0.5 it blends over it like any other layer, so the background shows
+// through: 0.5 * strip + (1 - 0.5) * (0.5 * background).
+TEST_F(LayerDrawGl, AnOpaqueLayerOfATranslucentViewBlends) {
+  const std::array<uint8_t, 4> kBg = {200, 100, 0, 255};
+  const std::array<uint8_t, 4> kStrip = {0, 0, 240, 255};
+  std::vector<uint8_t> bg(Px(0, kH, kW));
+  for (int i = 0; i < kW * kH; ++i) {
+    std::memcpy(&bg[Px(i, 0, 0)], kBg.data(), 4);
+  }
+  std::vector<uint8_t> strip(8);
+  std::memcpy(&strip[0], kStrip.data(), 4);
+  std::memcpy(&strip[4], kStrip.data(), 4);
+  const GLuint bg_tex = MakeTexture(kW, kH, bg);
+  const GLuint strip_tex = MakeTexture(2, 1, strip);
+  LayeredSurface surface;
+  ICompositorSurface::GlLayerTexture base;
+  base.name = bg_tex;
+  base.width = kW;
+  base.height = kH;
+  base.top_first = true;
+  ICompositorSurface::GlLayerTexture top;
+  top.name = strip_tex;
+  top.width = 2;
+  top.height = 1;
+  top.top_first = true;
+  top.geometry.dst = {1, 1, 2, 1};
+  top.geometry.opaque = true;
+  surface.layers = {base, top};
+
+  const auto out =
+      DrawSurface(*compositor_, surface, /*target_top_first=*/false, nullptr,
+                  nullptr, /*alpha=*/0.5f);
+  for (int y = 0; y < kH; ++y) {
+    for (int x = 0; x < kW; ++x) {
+      const bool on_strip = y == 1 && (x == 1 || x == 2);
+      std::array<int, 4> want = {kBg[0] / 2, kBg[1] / 2, kBg[2] / 2, 128};
+      if (on_strip) {
+        want = {kStrip[0] / 2 + kBg[0] / 4, kStrip[1] / 2 + kBg[1] / 4,
+                kStrip[2] / 2 + kBg[2] / 4, 191};
+      }
+      const uint8_t* got = &out[Px(x, y, kW)];
+      EXPECT_TRUE(Near(got, want))
+          << "(" << x << ", " << y << "): got " << int(got[0]) << ","
+          << int(got[1]) << "," << int(got[2]) << "," << int(got[3]);
+    }
+  }
+  glDeleteTextures(1, &bg_tex);
+  glDeleteTextures(1, &strip_tex);
 }

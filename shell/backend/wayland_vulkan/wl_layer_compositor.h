@@ -81,7 +81,9 @@ class LayerCompositor {
   // @p uv maps the destination rect to texture coordinates, which is how a
   // source crop and a buffer transform are drawn; the default is the whole
   // image, upright. @p opaque draws alpha as 1, for a buffer whose alpha
-  // channel is undefined (XRGB).
+  // channel is undefined (XRGB). @p alpha is the view's opacity, in [0, 1].
+  // Every layer blends, so an opaque one at an opacity below 1 needs nothing
+  // more.
   //
   // A planar-YUV @p src_format is sampled through a VkSamplerYcbcrConversion of
   // @p ycbcr_model / @p ycbcr_range (built and cached on first use); packed RGB
@@ -97,7 +99,8 @@ class LayerCompositor {
                  int32_t dst_w,
                  int32_t dst_h,
                  const UvAffine& uv = UvAffine{},
-                 bool opaque = false);
+                 bool opaque = false,
+                 float alpha = 1.0f);
 
   static void EndFrame(VkCommandBuffer cmd);
 

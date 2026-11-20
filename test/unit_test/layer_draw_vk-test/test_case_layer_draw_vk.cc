@@ -272,7 +272,8 @@ class LayerDrawVk : public ::testing::Test {
                             const std::vector<uint8_t>& rgba,
                             const UvAffine& uv,
                             bool opaque,
-                            const std::array<float, 4>* backdrop = nullptr) {
+                            const std::array<float, 4>* backdrop = nullptr,
+                            float alpha = 1.0f) {
     std::string err;
     auto comp = wl_vulkan::LayerCompositor::Create(
         device_, kFormat, err,
@@ -338,9 +339,9 @@ class LayerDrawVk : public ::testing::Test {
               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     }
     EXPECT_TRUE(comp->BeginFrame(cmd, dst_view, kW, kH, /*frame=*/0));
-    comp->DrawLayer(cmd, src, kFormat,
-                    VK_SAMPLER_YCBCR_MODEL_CONVERSION_RGB_IDENTITY,
-                    VK_SAMPLER_YCBCR_RANGE_ITU_FULL, 0, 0, kW, kH, uv, opaque);
+    comp->DrawLayer(
+        cmd, src, kFormat, VK_SAMPLER_YCBCR_MODEL_CONVERSION_RGB_IDENTITY,
+        VK_SAMPLER_YCBCR_RANGE_ITU_FULL, 0, 0, kW, kH, uv, opaque, alpha);
     wl_vulkan::LayerCompositor::EndFrame(cmd);
     // The render pass leaves the target in GENERAL.
     Barrier(cmd, dst, VK_IMAGE_LAYOUT_GENERAL,
@@ -452,5 +453,26 @@ TEST_F(LayerDrawVk, OpaqueIgnoresTheBufferAlpha) {
     EXPECT_EQ(opaque[px], 0x40) << "pixel " << i;           // red: the layer
     EXPECT_EQ(opaque[px + 1], 0x00) << "pixel " << i;       // green: no white
     EXPECT_GT(translucent[px + 1], 0xe0) << "pixel " << i;  // white shows
+  }
+}
+
+// Over a white backdrop, an opaque layer drawn at opacity 0.5 lets half the
+// white through: the layer's premultiplied color at half, plus half the white.
+TEST_F(LayerDrawVk, ATranslucentLayerLetsTheBackdropThrough) {
+  std::vector<uint8_t> buffer(static_cast<size_t>(kW) * kH * 4, 0);
+  for (int i = 0; i < kW * kH; ++i) {
+    buffer[static_cast<size_t>(i) * 4] = 0x40;
+  }
+  const std::array<float, 4> white = {1, 1, 1, 1};
+  const auto out = Draw(kW, kH, buffer, UvAffine{}, /*opaque=*/true, &white,
+                        /*alpha=*/0.5f);
+  ASSERT_EQ(out.size(), static_cast<size_t>(kW) * kH * 4);
+  for (int i = 0; i < kW * kH; ++i) {
+    const auto px = static_cast<size_t>(i) * 4;
+    // 0x40 / 2 + 255 / 2 for red, 255 / 2 for green and blue.
+    EXPECT_NEAR(out[px], 0x20 + 128, 2) << "pixel " << i;
+    EXPECT_NEAR(out[px + 1], 128, 2) << "pixel " << i;
+    EXPECT_NEAR(out[px + 2], 128, 2) << "pixel " << i;
+    EXPECT_EQ(out[px + 3], 0xff) << "pixel " << i;
   }
 }

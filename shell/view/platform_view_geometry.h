@@ -126,6 +126,27 @@ inline FlutterSize ContentSize(const FlutterLayer& layer,
 }
 
 /**
+ * @brief The opacity of @p layer's view, in [0, 1].
+ *
+ * The product of every opacity mutation on the view (an Opacity or
+ * FadeTransition widget around it). 1 for a layer that is not a platform view,
+ * has no mutations, or whose opacity is within rounding of 1, so a caller can
+ * keep its opaque path for that case. Not a number reads as 1.
+ */
+inline float OpacityOf(const FlutterLayer& layer) {
+  if (layer.type != kFlutterLayerContentTypePlatformView ||
+      layer.platform_view == nullptr ||
+      layer.platform_view->mutations_count == 0) {
+    return 1.0f;
+  }
+  const double o = MutationStack::Compose(layer.platform_view).opacity;
+  if (!std::isfinite(o) || o >= 1.0 - 1e-6) {
+    return 1.0f;
+  }
+  return o <= 0.0 ? 0.0f : static_cast<float>(o);
+}
+
+/**
  * @brief The clip on @p layer's view, in output pixels.
  *
  * Empty when the view has no clip, or the clip does not cut into the view's

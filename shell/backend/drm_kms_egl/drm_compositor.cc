@@ -24,6 +24,7 @@
 #include <array>
 #include <cerrno>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <mutex>
@@ -481,9 +482,11 @@ DrmCompositor::SingleLayerTexture(const ICompositorSurface& surface) {
 bool DrmCompositor::IsWholeImage(
     const std::optional<ICompositorSurface::GlLayerTexture>& t,
     const FlutterLayer& layer) {
-  // A clipped view is drawn layer by layer: that path crops to the clip.
+  // A clipped or translucent view is drawn layer by layer: that path crops to
+  // the clip and draws at the opacity.
   return t && t->name != 0 && t->geometry.IsWhole() && !t->geometry.opaque &&
-         !ihs::platform_view::ClipRectOf(layer);
+         !ihs::platform_view::ClipRectOf(layer) &&
+         ihs::platform_view::OpacityOf(layer) >= 1.0f;
 }
 
 bool DrmCompositor::CompositeLayeredSurface(
@@ -505,7 +508,8 @@ bool DrmCompositor::CompositeLayeredSurface(
              [this, &surface](const ICompositorSurface::GlLayerTexture& t) {
                NoteGlComposited(surface, t);
              },
-             layer0, rotation, clip ? &*clip : nullptr) > 0;
+             layer0, rotation, clip ? &*clip : nullptr,
+             ihs::platform_view::OpacityOf(*layer)) > 0;
 }
 
 std::optional<DisplayRotation> DrmCompositor::GpuRotation() const {
@@ -3950,6 +3954,17 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   if (!scene_backoff_.ShouldTry(frame_shape)) {
     return PresentViaGlFallback(layers, layer_count);
   }
+  // A translucent view is shown through its plane's "alpha". A plane without
+  // one would show it opaque, so where any lacks it the frame is composited.
+  // Checked before any view's frame is taken.
+  if (!plane_formats_.AllHaveAlpha()) {
+    for (size_t i = 0; i < layer_count; ++i) {
+      if (layers[i] != nullptr &&
+          ihs::platform_view::OpacityOf(*layers[i]) < 1.0f) {
+        return PresentViaGlFallback(layers, layer_count);
+      }
+    }
+  }
 
   // Walk the FlutterLayer[] in z-order (Flutter's convention: layer 0
   // is bottom). Sync scene_'s layer set against the current frame: add
@@ -3973,6 +3988,7 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
     size_t pv_index;      // which layer of the view, 0 = its bottom
     LayerPlane pv_place;  // where it lands
     uint32_t pv_fourcc;   // the format to scan out as (see OpaqueScanoutFourcc)
+    uint16_t pv_alpha{0xFFFF};  // the view's opacity, as the plane's "alpha"
   };
   std::vector<FrameLayer> frame_layers;
   frame_layers.reserve(layer_count);
@@ -4054,8 +4070,11 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
                             static_cast<int32_t>(fl->offset.y),
                             static_cast<int32_t>(fl->size.width),
                             static_cast<int32_t>(fl->size.height)};
-      // Each layer's plane is cropped to the view's clip.
+      // Each layer's plane is cropped to the view's clip, and shown at the
+      // view's opacity.
       const std::optional<RectI> clip = ihs::platform_view::ClipRectOf(*fl);
+      const auto pv_alpha = static_cast<uint16_t>(std::lround(
+          static_cast<double>(ihs::platform_view::OpacityOf(*fl)) * 0xFFFF));
       // One scene layer per layer of the view, bottom to top, each on a plane
       // of its own.
       const size_t pv_layer_count = surface->GetLayerCount();
@@ -4195,8 +4214,8 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
             have_db ? (ld.geometry.opaque ? OpaqueScanoutFourcc(db.fourcc)
                                           : db.fourcc)
                     : 0;
-        frame_layers.push_back(
-            {fl, nullptr, nullptr, tag, db, surface, li, place, fourcc});
+        frame_layers.push_back({fl, nullptr, nullptr, tag, db, surface, li,
+                                place, fourcc, pv_alpha});
         frame_pv_tags.push_back(tag);
       }
     }
@@ -4508,6 +4527,11 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
         layer->set_dst_rect_if_changed(pv_dst);
         layer->set_rotation_if_changed(place.rotation);
         layer->set_zpos_if_changed(overlay_zpos);  // restack on reorder
+        // Only once the view has faded: an opaque view's commits stay as they
+        // were. After that, every change, back to opaque included.
+        if (fl.pv_alpha != 0xFFFF || layer->alpha_was_explicitly_set()) {
+          layer->set_alpha_if_changed(fl.pv_alpha);
+        }
         // This PV survives into the committed scene, so it drives the
         // connector's HDR_OUTPUT_METADATA (persisted metadata, steady across
         // reuse presents). A PV pruned above (replace_source fallback) never
@@ -4596,6 +4620,15 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
           fl.pv_surface->OnScanoutRelease(db.buffer_id);
         }
         return PresentViaGlFallback(layers, layer_count);
+      }
+      // Set on the layer rather than in desc: a layer marks its alpha as set
+      // only through set_alpha, and one that is not marked is never written
+      // back to opaque.
+      if (fl.pv_alpha != 0xFFFF) {
+        if (auto* added = scene_->find_by_identity_tag(fl.pv_tag);
+            added != nullptr) {
+          added->set_alpha(fl.pv_alpha);
+        }
       }
       scene_pv_tags_.push_back(fl.pv_tag);
       // Now committed into the scene, this PV drives the connector's

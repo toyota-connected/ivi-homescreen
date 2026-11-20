@@ -57,6 +57,7 @@ class PlaneFormats {
         continue;
       }
       tables_.push_back(p->format_table);
+      all_alpha_ = all_alpha_ && p->has_per_plane_alpha;
       for (const auto& fm : p->format_table.all()) {
         formats_.emplace_back(fm.fourcc, fm.modifier.value);
       }
@@ -91,6 +92,13 @@ class PlaneFormats {
   }
   // The card's dev_t, for a producer to allocate against.
   [[nodiscard]] uint64_t dev() const { return dev_; }
+  // Whether every one of those planes has an "alpha" property, so a
+  // translucent view shows at its opacity whichever plane it lands on. False
+  // when there are no planes. A plane without it shows the view opaque: the
+  // property is skipped, not refused.
+  [[nodiscard]] bool AllHaveAlpha() const {
+    return !tables_.empty() && all_alpha_;
+  }
 
   // Tell @p sink what layer @p layer_id, a frame of @p fourcc / @p modifier,
   // needs to reach a plane: nothing when it already could, else the formats
@@ -111,4 +119,5 @@ class PlaneFormats {
   uint64_t dev_{0};
   std::vector<drm::fmt::FormatTable> tables_;
   std::vector<FormatModifierPair> formats_;
+  bool all_alpha_{true};
 };

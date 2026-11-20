@@ -35,14 +35,15 @@ const auto& d() {
 
 // The per-draw push constants, laid out as the PC block in
 // shaders/composite.{vert,frag}: std430 puts each vec4 on a 16-byte boundary,
-// and the trailing float pads the block to 64 bytes, well inside the 128 every
+// and the trailing floats pad the block to 64 bytes, well inside the 128 every
 // device guarantees.
 struct LayerPush {
   std::array<float, 4> rect;  // destination, NDC x0, y0, x1, y1
   std::array<float, 4> uv_u;  // (a, c, tx, -)
   std::array<float, 4> uv_v;  // (b, d, ty, -)
   float opaque;
-  std::array<float, 3> pad;
+  float alpha;  // the view's opacity, scaling the premultiplied color
+  std::array<float, 2> pad;
 };
 static_assert(sizeof(LayerPush) == 64, "must match the shaders' PC block");
 
@@ -457,7 +458,8 @@ void LayerCompositor::DrawLayer(VkCommandBuffer cmd,
                                 int32_t dst_w,
                                 int32_t dst_h,
                                 const UvAffine& uv,
-                                bool opaque) {
+                                bool opaque,
+                                float alpha) {
   if (fb_width_ == 0 || fb_height_ == 0) {
     return;
   }
@@ -525,6 +527,7 @@ void LayerCompositor::DrawLayer(VkCommandBuffer cmd,
   push.uv_u = {uv.a, uv.c, uv.tx, 0.0f};
   push.uv_v = {uv.b, uv.d, uv.ty, 0.0f};
   push.opaque = opaque ? 1.0f : 0.0f;
+  push.alpha = alpha;
   d().vkCmdPushConstants(cmd, pipeline_layout, kPushStages, 0, sizeof(push),
                          &push);
   d().vkCmdDraw(cmd, 4, 1, 0, 0);

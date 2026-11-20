@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include <cmath>
 #include <vector>
 
 #include "gtest/gtest.h"
@@ -44,6 +45,13 @@ FlutterPlatformViewMutation Scale(double sx, double sy) {
 
 FlutterPlatformViewMutation Translate(double tx, double ty) {
   return Transform(1, 0, tx, 0, 1, ty);
+}
+
+FlutterPlatformViewMutation Opacity(double o) {
+  FlutterPlatformViewMutation m{};
+  m.type = kFlutterPlatformViewMutationTypeOpacity;
+  m.opacity = o;
+  return m;
 }
 
 FlutterPlatformViewMutation Clip(double l, double t, double r, double b) {
@@ -259,4 +267,36 @@ TEST(PlatformViewGeometry, AClipThatMissesTheViewIsEmpty) {
   ASSERT_TRUE(c.has_value());
   EXPECT_EQ(c->w, 0);
   EXPECT_EQ(c->h, 0);
+}
+
+TEST(PlatformViewGeometry, AViewWithNoOpacityIsOpaque) {
+  ViewLayer v({Scale(2, 2), Translate(10, 10)}, {20, 20}, {200, 200});
+  EXPECT_EQ(pv::OpacityOf(v.layer), 1.0f);
+  ViewLayer bare({}, {0, 0}, {10, 10});
+  EXPECT_EQ(pv::OpacityOf(bare.layer), 1.0f);
+}
+
+TEST(PlatformViewGeometry, NestedOpacitiesMultiply) {
+  // A FadeTransition at 0.5 inside an Opacity at 0.5.
+  ViewLayer v({Scale(2, 2), Opacity(0.5), Translate(10, 10), Opacity(0.5)},
+              {20, 20}, {200, 200});
+  EXPECT_FLOAT_EQ(pv::OpacityOf(v.layer), 0.25f);
+}
+
+TEST(PlatformViewGeometry, OpacityIsKeptInRange) {
+  // Within rounding of 1 reads as 1, so the opaque paths stay in use.
+  ViewLayer near_one({Opacity(1.0 - 1e-9)}, {0, 0}, {10, 10});
+  EXPECT_EQ(pv::OpacityOf(near_one.layer), 1.0f);
+  ViewLayer zero({Opacity(0.0)}, {0, 0}, {10, 10});
+  EXPECT_EQ(pv::OpacityOf(zero.layer), 0.0f);
+  ViewLayer negative({Opacity(-0.5)}, {0, 0}, {10, 10});
+  EXPECT_EQ(pv::OpacityOf(negative.layer), 0.0f);
+  ViewLayer nan({Opacity(std::nan(""))}, {0, 0}, {10, 10});
+  EXPECT_EQ(pv::OpacityOf(nan.layer), 1.0f);
+}
+
+TEST(PlatformViewGeometry, ABackingStoreIsOpaque) {
+  ViewLayer v({Opacity(0.5)}, {0, 0}, {10, 10});
+  v.layer.type = kFlutterLayerContentTypeBackingStore;
+  EXPECT_EQ(pv::OpacityOf(v.layer), 1.0f);
 }

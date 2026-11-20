@@ -427,7 +427,8 @@ class DrmCompositor : public IFlipSink {
       const ICompositorSurface& surface);
 
   // True for a texture the single-texture code paths draw as they always
-  // have: whole across the view, not opaque.
+  // have: whole across the view, not opaque, on a view with no clip and full
+  // opacity.
   static bool IsWholeImage(
       const std::optional<ICompositorSurface::GlLayerTexture>& t,
       const FlutterLayer& layer);
