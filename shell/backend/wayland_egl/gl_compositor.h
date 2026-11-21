@@ -69,14 +69,16 @@ class GlCompositor {
     size_t part_count{0};
     // Or the quad as two triangles given outright: each vertex in the
     // viewport's NDC, at (s, t) of the quad, with m 1 where the mask is worked
-    // out. For a quad that is not its viewport's rect (a transformed view).
-    // Takes precedence over parts.
+    // out and w its homogeneous w (1 without a perspective). For a quad that
+    // is not its viewport's rect (a transformed view). Takes precedence over
+    // parts.
     struct Vertex {
       float x{0};
       float y{0};
       float s{0};
       float t{0};
       float m{0};
+      float w{1};
     };
     std::array<Vertex, 6> verts{};
     size_t vert_count{0};
@@ -186,8 +188,8 @@ class GlCompositor {
    *                    each layer's corners outside it are cut away, and a
    *                    layer that covers its rect blends rather than
    *                    overwrites. Null leaves corners square.
-   * @param map         The view reaches the output through a rotation, skew
-   *                    or mirror: its own pixels, [0, @p view.w) x
+   * @param map         The view reaches the output through a rotation, skew,
+   *                    mirror or perspective: its own pixels, [0, @p view.w) x
    *                    [0, @p view.h), go to the same space as @p view through
    *                    this, and each layer is drawn as the quad it makes
    *                    there, clipped to @p clip. Null draws each layer as a
@@ -211,7 +213,7 @@ class GlCompositor {
       const RectI* clip = nullptr,
       float alpha = 1.0f,
       const RoundedRect* rounded = nullptr,
-      const ViewAffine* map = nullptr);
+      const ViewMap* map = nullptr);
 
   /**
    * @brief Whether CompositeToFbo may take the glBlitFramebuffer path.
@@ -278,6 +280,9 @@ class GlCompositor {
   // The vertices of a quad drawn as pieces (QuadMask::parts), rewritten for
   // each such draw.
   GLuint parts_vbo_{0};
+  // The vertex array object the self-contained programs draw with, where the
+  // context has them. See CompositeViaQuadProgram.
+  GLuint quad_vao_{0};
   GLint attr_pos_{-1};
   GLint attr_uv_{-1};
   GLint uni_tex_{-1};
@@ -308,6 +313,7 @@ class GlCompositor {
     GLint attr_pos{-1};
     GLint attr_uv{-1};
     GLint attr_mask{-1};
+    GLint attr_w{-1};
     GLint uni_tex{-1};
     GLint uni_uv_u{-1};
     GLint uni_uv_v{-1};
@@ -345,7 +351,7 @@ class GlCompositor {
                              const RectI* clip,
                              float alpha,
                              const RoundedRect* rounded,
-                             const ViewAffine& map);
+                             const ViewMap& map);
   // @external selects the samplerExternalOES program and the
   // GL_TEXTURE_EXTERNAL_OES bind target, which planar YUV requires.
   void CompositeViaQuad(GLuint src_color_tex,

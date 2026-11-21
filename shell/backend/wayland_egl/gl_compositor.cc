@@ -43,42 +43,53 @@ constexpr GLenum kDrawFramebuffer = 0x8CA9;
 // source crop and a buffer transform are one affine away.
 //
 // Every shader here is built twice, with IHS_MASK 0 and 1 (ShaderSource). The
-// masked build cuts a quad's corners to a rounded clip; the other has none of
-// that code, so a quad without a clip pays nothing for it. With the mask,
-// v_pos is the point in the clip's space (QuadMask::pos), through an affine
-// that takes the same turns as the texture coordinates.
+// masked build cuts a quad's corners to a rounded clip and draws quads given
+// vertex by vertex (QuadMask): the pieces of a rounded layer, and the quad of
+// a transformed view. The other has none of that code, so a quad without
+// either pays nothing for it.
+//
+// A vertex of the masked build carries its homogeneous w (a_w), 1 except
+// under a perspective. Its position is given already divided by w, and the
+// varyings are (s, t, 1) / w, which are affine on the screen: the fragment
+// divides them back out, so (s, t) are exact at every pixel, and the texture
+// coordinates (u_uv_*) and the point in the clip's space (u_pos_*, given over
+// w0 and scaled back by 1 / w the same way) are worked out there. Not left to
+// the GPU's perspective-correct interpolation: v3d's GLES interpolated these
+// affinely when the w was in gl_Position.
 constexpr char kVertSrc[] =
     "attribute vec2 a_pos;\n"
     "attribute vec2 a_uv;\n"
+    "#if IHS_MASK\n"
+    "attribute float a_mask;\n"
+    "attribute float a_w;\n"
+    "varying vec3 v_stq;\n"
+    "varying float v_mask;\n"
+    "#else\n"
     "uniform vec3 u_uv_u;\n"
     "uniform vec3 u_uv_v;\n"
     "varying vec2 v_uv;\n"
-    "#if IHS_MASK\n"
-    "attribute float a_mask;\n"
-    "uniform vec3 u_pos_u;\n"
-    "uniform vec3 u_pos_v;\n"
-    "varying vec2 v_pos;\n"
-    "varying float v_mask;\n"
     "#endif\n"
     "void main() {\n"
     "  vec3 st = vec3(a_uv.x, 1.0 - a_uv.y, 1.0);\n"
-    "  v_uv = vec2(dot(u_uv_u, st), dot(u_uv_v, st));\n"
     "#if IHS_MASK\n"
-    "  v_pos = vec2(dot(u_pos_u, st), dot(u_pos_v, st));\n"
+    "  v_stq = st / a_w;\n"
     "  v_mask = a_mask;\n"
+    "#else\n"
+    "  v_uv = vec2(dot(u_uv_u, st), dot(u_uv_v, st));\n"
     "#endif\n"
     "  gl_Position = vec4(a_pos, 0.0, 1.0);\n"
     "}\n";
 
 constexpr char kFragPrecision[] = "precision mediump float;\n";
 
-// The share of a pixel inside a rounded rect, for a pixel the quad's crop has
-// already put inside its bounding box: only the corners are left to cut, with
-// about a pixel of edge. v_mask is 0 on the pieces of the quad no corner
-// reaches (QuadMask::parts), which skip the rest. A corner with a zero radius
-// is square. Positions are in pixels, up to a few thousand, which mediump
-// cannot place to a pixel, so this runs in highp where the GPU has it. Without
-// the mask it is 1.
+// Uv() is the pixel's texture coordinates. Coverage() is the share of the
+// pixel inside a rounded rect, for a pixel the quad's crop has already put
+// inside its bounding box: only the corners are left to cut, with about a
+// pixel of edge. v_mask is 0 on the pieces of the quad no corner reaches
+// (QuadMask::parts), which skip the rest. A corner with a zero radius is
+// square. Positions are in pixels, up to a few thousand, which mediump cannot
+// place to a pixel, so the masked build works in highp where the GPU has it.
+// Without the mask, Coverage() is 1.
 constexpr char kMaskSrc[] =
     "#if IHS_MASK\n"
     "#ifdef GL_FRAGMENT_PRECISION_HIGH\n"
@@ -86,14 +97,24 @@ constexpr char kMaskSrc[] =
     "#else\n"
     "#define MASKP mediump\n"
     "#endif\n"
-    "varying MASKP vec2 v_pos;\n"
+    "varying MASKP vec3 v_stq;\n"
     "varying float v_mask;\n"
+    "uniform MASKP vec3 u_uv_u;\n"
+    "uniform MASKP vec3 u_uv_v;\n"
+    "uniform MASKP vec3 u_pos_u;\n"
+    "uniform MASKP vec3 u_pos_v;\n"
     "uniform MASKP vec4 u_rrect;\n"         // left, top, right, bottom
     "uniform MASKP vec4 u_radii_top;\n"     // upper left x y, upper right x y
     "uniform MASKP vec4 u_radii_bottom;\n"  // lower left x y, lower right x y
+    "MASKP vec3 St() { return vec3(v_stq.xy / v_stq.z, 1.0); }\n"
+    "MASKP vec2 Uv() {\n"
+    "  MASKP vec3 st = St();\n"
+    "  return vec2(dot(u_uv_u, st), dot(u_uv_v, st));\n"
+    "}\n"
     "float Coverage() {\n"
     "  if (v_mask < 0.5) return 1.0;\n"
-    "  MASKP vec2 p = v_pos;\n"
+    "  MASKP vec3 st = St();\n"
+    "  MASKP vec2 p = vec2(dot(u_pos_u, st), dot(u_pos_v, st)) * v_stq.z;\n"
     "  bool left = p.x < 0.5 * (u_rrect.x + u_rrect.z);\n"
     "  bool top = p.y < 0.5 * (u_rrect.y + u_rrect.w);\n"
     "  MASKP vec4 pair = top ? u_radii_top : u_radii_bottom;\n"
@@ -107,6 +128,8 @@ constexpr char kMaskSrc[] =
     "  return clamp(0.5 - (k - 1.0) * min(r.x, r.y), 0.0, 1.0);\n"
     "}\n"
     "#else\n"
+    "varying vec2 v_uv;\n"
+    "vec2 Uv() { return v_uv; }\n"
     "float Coverage() { return 1.0; }\n"
     "#endif\n";
 
@@ -115,12 +138,11 @@ constexpr char kMaskSrc[] =
 // color is premultiplied, so it and the mask's coverage scale all four
 // channels.
 constexpr char kFragBody[] =
-    "varying vec2 v_uv;\n"
     "uniform sampler2D u_tex;\n"
     "uniform float u_opaque;\n"
     "uniform float u_alpha;\n"
     "void main() {\n"
-    "  vec4 c = texture2D(u_tex, v_uv);\n"
+    "  vec4 c = texture2D(u_tex, Uv());\n"
     "  gl_FragColor =\n"
     "      vec4(c.rgb, mix(c.a, 1.0, u_opaque)) * (u_alpha * Coverage());\n"
     "}\n";
@@ -133,12 +155,11 @@ constexpr char kFragBody[] =
 constexpr char kFragExtension[] =
     "#extension GL_OES_EGL_image_external : require\n";
 constexpr char kFragBodyExternal[] =
-    "varying vec2 v_uv;\n"
     "uniform samplerExternalOES u_tex;\n"
     "uniform float u_opaque;\n"
     "uniform float u_alpha;\n"
     "void main() {\n"
-    "  vec4 c = texture2D(u_tex, v_uv);\n"
+    "  vec4 c = texture2D(u_tex, Uv());\n"
     "  gl_FragColor =\n"
     "      vec4(c.rgb, mix(c.a, 1.0, u_opaque)) * (u_alpha * Coverage());\n"
     "}\n";
@@ -185,6 +206,10 @@ GlCompositor::~GlCompositor() {
   }
   if (parts_vbo_) {
     glDeleteBuffers(1, &parts_vbo_);
+  }
+  if (quad_vao_ != 0 && caps_ != nullptr &&
+      caps_->delete_vertex_arrays != nullptr) {
+    caps_->delete_vertex_arrays(1, &quad_vao_);
   }
   if (program_) {
     glDeleteProgram(program_);
@@ -328,6 +353,7 @@ GlCompositor::QuadProgram GlCompositor::BuildQuadProgram(const bool external,
   p.attr_pos = glGetAttribLocation(p.id, "a_pos");
   p.attr_uv = glGetAttribLocation(p.id, "a_uv");
   p.attr_mask = glGetAttribLocation(p.id, "a_mask");
+  p.attr_w = glGetAttribLocation(p.id, "a_w");
   p.uni_tex = glGetUniformLocation(p.id, "u_tex");
   p.uni_uv_u = glGetUniformLocation(p.id, "u_uv_u");
   p.uni_uv_v = glGetUniformLocation(p.id, "u_uv_v");
@@ -500,6 +526,22 @@ void GlCompositor::CompositeViaQuadProgram(const QuadProgram& p,
   glUseProgram(p.id);
   glActiveTexture(GL_TEXTURE0);
   UnbindSampler0(caps_);
+  // Draw in a vertex array object of our own, and put back the one that was
+  // bound. Flutter's renderer shares this context, and the object it leaves
+  // bound can carry an instancing divisor on an attribute these programs
+  // read per vertex: on a Pi 5 it gave every vertex the first one's w.
+  // Binding our own leaves its state alone; changing its divisors would put
+  // the renderer's cache of it out of step.
+  GLint prev_vao = 0;
+  const bool own_vao = caps_ != nullptr && caps_->bind_vertex_array != nullptr;
+  if (own_vao) {
+    constexpr GLenum kVertexArrayBinding = 0x85B5;  // GL_VERTEX_ARRAY_BINDING
+    glGetIntegerv(kVertexArrayBinding, &prev_vao);
+    if (quad_vao_ == 0) {
+      caps_->gen_vertex_arrays(1, &quad_vao_);
+    }
+    caps_->bind_vertex_array(quad_vao_);
+  }
   if (p.uni_tex >= 0) {
     glUniform1i(p.uni_tex, 0);
   }
@@ -515,8 +557,9 @@ void GlCompositor::CompositeViaQuadProgram(const QuadProgram& p,
     glDisable(GL_BLEND);
   }
   // A quad in pieces is one draw of two triangles a piece, each vertex
-  // (x, y, u, v, m) with m 1 on a corner box. A whole quad is the shared strip,
-  // and a masked program reads m as 1 over all of it.
+  // (x, y, u, v, m, w) with m 1 on a corner box and w its homogeneous w. A
+  // whole quad is the shared strip, and a masked program reads m and w as 1
+  // over all of it.
   const bool given = mask != nullptr && mask->vert_count > 0;
   const bool parts = given || (mask != nullptr && mask->part_count > 0);
   GLsizei count = 4;
@@ -526,7 +569,7 @@ void GlCompositor::CompositeViaQuadProgram(const QuadProgram& p,
     if (parts_vbo_ == 0) {
       glGenBuffers(1, &parts_vbo_);
     }
-    constexpr size_t kPerVertex = 5;
+    constexpr size_t kPerVertex = 6;
     std::array<GLfloat, 7 * 6 * kPerVertex> verts{};
     size_t n = 0;
     for (size_t i = 0; given && i < mask->vert_count; ++i) {
@@ -536,6 +579,7 @@ void GlCompositor::CompositeViaQuadProgram(const QuadProgram& p,
       verts[n++] = v.s;
       verts[n++] = 1.0f - v.t;
       verts[n++] = v.m;
+      verts[n++] = v.w;
     }
     for (size_t i = 0; !given && i < mask->part_count; ++i) {
       const QuadMask::Part& q = mask->parts[i];
@@ -547,6 +591,7 @@ void GlCompositor::CompositeViaQuadProgram(const QuadProgram& p,
         verts[n++] = s;
         verts[n++] = 1.0f - t;
         verts[n++] = m;
+        verts[n++] = 1.0f;
       };
       vertex(q.s0, q.t0);
       vertex(q.s1, q.t0);
@@ -587,6 +632,17 @@ void GlCompositor::CompositeViaQuadProgram(const QuadProgram& p,
       glVertexAttrib1f(static_cast<GLuint>(p.attr_mask), 1.0f);
     }
   }
+  if (p.attr_w >= 0) {
+    if (parts) {
+      glEnableVertexAttribArray(static_cast<GLuint>(p.attr_w));
+      // NOLINTNEXTLINE(performance-no-int-to-ptr)
+      glVertexAttribPointer(static_cast<GLuint>(p.attr_w), 1, GL_FLOAT,
+                            GL_FALSE, stride,
+                            reinterpret_cast<const void*>(5 * sizeof(GLfloat)));
+    } else {
+      glVertexAttrib1f(static_cast<GLuint>(p.attr_w), 1.0f);
+    }
+  }
   glViewport(dst_x, dst_y, dst_w, dst_h);
   glBindTexture(target, tex);
   glDrawArrays(mode, 0, count);
@@ -600,7 +656,13 @@ void GlCompositor::CompositeViaQuadProgram(const QuadProgram& p,
   if (p.attr_mask >= 0 && parts) {
     glDisableVertexAttribArray(static_cast<GLuint>(p.attr_mask));
   }
+  if (p.attr_w >= 0 && parts) {
+    glDisableVertexAttribArray(static_cast<GLuint>(p.attr_w));
+  }
   glBindBuffer(GL_ARRAY_BUFFER, 0);
+  if (own_vao) {
+    caps_->bind_vertex_array(static_cast<GLuint>(prev_vao));
+  }
   glUseProgram(0);
   // Blend is left off rather than as this draw wanted it. This path clears
   // persistent_state_emitted_, so EndFrame will not tear anything down, and an
@@ -827,7 +889,7 @@ bool GlCompositor::CompositeLayerThrough(
     const RectI* clip,
     const float alpha,
     const RoundedRect* rounded,
-    const ViewAffine& map) {
+    const ViewMap& map) {
   const auto& g = t.geometry;
   QuadPlacement q;
   if (!PlaceLayerThrough(
@@ -846,12 +908,14 @@ bool GlCompositor::CompositeLayerThrough(
   if (rounded != nullptr) {
     mask.rect = *rounded;
   }
-  mask.pos.a = static_cast<float>(q.edge_s[0]);
-  mask.pos.b = static_cast<float>(q.edge_s[1]);
-  mask.pos.c = static_cast<float>(q.edge_t[0]);
-  mask.pos.d = static_cast<float>(q.edge_t[1]);
-  mask.pos.tx = static_cast<float>(q.origin[0]);
-  mask.pos.ty = static_cast<float>(q.origin[1]);
+  // The point times w, over w at the corner at (0, 0): the shader scales it
+  // by that corner's w over the pixel's, which leaves the point.
+  mask.pos.a = static_cast<float>(q.edge_s[0] / q.w0);
+  mask.pos.b = static_cast<float>(q.edge_s[1] / q.w0);
+  mask.pos.c = static_cast<float>(q.edge_t[0] / q.w0);
+  mask.pos.d = static_cast<float>(q.edge_t[1] / q.w0);
+  mask.pos.tx = static_cast<float>(q.origin[0] / q.w0);
+  mask.pos.ty = static_cast<float>(q.origin[1] / q.w0);
   RectI vp = q.bounds;
   if (rotation != nullptr) {
     vp = rotation->ToPanel(vp);
@@ -877,6 +941,8 @@ bool GlCompositor::CompositeLayerThrough(
     v.s = static_cast<float>(s);
     v.t = static_cast<float>(tt);
     v.m = m;
+    // Relative to the corner at (0, 0), as the mask's position is.
+    v.w = static_cast<float>(q.W(s, tt) / q.w0);
   }
   mask.vert_count = n;
   const GLint gl_y = target_top_first ? vp.y : fb_height - vp.y - vp.h;
@@ -903,7 +969,7 @@ size_t GlCompositor::CompositeSurfaceLayers(
     const RectI* clip,
     float alpha,
     const RoundedRect* rounded,
-    const ViewAffine* map) {
+    const ViewMap* map) {
   // A transformed view is drawn through the self-contained programs. Without
   // them it falls back to the rect, as it was drawn before.
   if (map != nullptr && (!EnsureQuad() || mask_.id == 0)) {

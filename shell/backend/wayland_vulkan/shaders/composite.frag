@@ -21,6 +21,8 @@ layout(push_constant) uniform PC {
   vec4 uv_v;
   float opaque;
   float alpha;
+  vec2 edge_t;        // the vertex shader's; here only for the layout
+  vec4 persp;         // likewise
   vec4 rrect;         // left, top, right, bottom
   vec4 radii_top;     // upper left x y, upper right x y
   vec4 radii_bottom;  // lower left x y, lower right x y

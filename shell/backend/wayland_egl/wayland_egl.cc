@@ -1215,15 +1215,14 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
     } else if (layer->type == kFlutterLayerContentTypePlatformView &&
                layer->platform_view) {
       const auto composed = MutationStack::Compose(layer->platform_view);
-      // Opacity, clips, scale, rotation, skew and one rounded clip are drawn
+      // Opacity, clips, every transform and one rounded clip are drawn
       // below; these are not.
-      if (!composed.rounded_clip_exact || composed.has_perspective) {
+      if (!composed.rounded_clip_exact) {
         ihs::log::debug(
             "EGL compositor: platform view {} has mutations the compositor "
-            "does not draw (rounded_exact={} perspective={}); plugin "
-            "OnPresent must apply them.",
-            layer->platform_view->identifier, composed.rounded_clip_exact,
-            composed.has_perspective);
+            "does not draw (rounded_exact={}); plugin OnPresent must apply "
+            "them.",
+            layer->platform_view->identifier, composed.rounded_clip_exact);
       }
       // Snapshot the shared_ptr under the lock, drop the lock before the
       // OnPresent callback. Holding the mutex across plugin GL work would

@@ -74,15 +74,20 @@ class LayerCompositor {
                   uint32_t height,
                   uint64_t frame);
 
-  // A layer of a view under a rotation, skew or mirror: the parallelogram it
-  // is drawn as, in framebuffer pixels (its corner at (s, t) = (0, 0) and its
-  // edges along s and t), and the rect it is clipped to. (s, t) run over the
-  // layer as they do over a destination rect, so the texture coordinates are
-  // the same.
+  // A layer of a view under a rotation, skew, mirror or perspective: the quad
+  // it is drawn as, in framebuffer pixels times w (its corner at (s, t) =
+  // (0, 0) and its edges along s and t), w at that corner and its steps along
+  // s and t, and the rect it is clipped to. Without a perspective w is 1 and
+  // the quad a parallelogram. (s, t) run over the layer as they do over a
+  // destination rect, so the texture coordinates are the same. As
+  // QuadPlacement (view/layer_geometry.h).
   struct Quad {
     std::array<double, 2> origin{};
     std::array<double, 2> edge_s{};
     std::array<double, 2> edge_t{};
+    double w0{1};
+    double ws{0};
+    double wt{0};
     RectI scissor;
   };
 

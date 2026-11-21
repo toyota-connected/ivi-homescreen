@@ -39,15 +39,17 @@ const auto& d() {
 // std430 puts each vec4 on a 16-byte boundary, so two pad floats follow alpha.
 // 112 bytes, inside the 128 every device guarantees.
 struct LayerPush {
-  // The destination quad in NDC: its corner at (s, t) = (0, 0) and its edge
-  // along s, then (edge_t below) its edge along t. A rect has its edges along
-  // the axes.
+  // The destination quad in clip space times w: its corner at (s, t) =
+  // (0, 0) and its edge along s, then (edge_t below) its edge along t; persp
+  // gives w as (w0, ws, wt, -). A rect has its edges along the axes and w 1,
+  // which makes it the rect in NDC.
   std::array<float, 4> rect;
   std::array<float, 4> uv_u;  // (a, c, tx, -)
   std::array<float, 4> uv_v;  // (b, d, ty, -)
   float opaque;
   float alpha;  // the view's opacity, scaling the premultiplied color
   std::array<float, 2> edge_t;
+  std::array<float, 4> persp;
   // The rounded clip in framebuffer pixels: its rect (left, top, right,
   // bottom), then its corner radii (x, y) upper left, upper right, lower left,
   // lower right. All radii zero is no clip.
@@ -55,7 +57,8 @@ struct LayerPush {
   std::array<float, 4> radii_top;
   std::array<float, 4> radii_bottom;
 };
-static_assert(sizeof(LayerPush) == 112, "must match the shaders' PC block");
+// 128 bytes is the most push constant space Vulkan guarantees.
+static_assert(sizeof(LayerPush) == 128, "must match the shaders' PC block");
 
 constexpr VkShaderStageFlags kPushStages =
     VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -568,6 +571,7 @@ void LayerCompositor::DrawLayer(VkCommandBuffer cmd,
   LayerPush push{};
   push.opaque = opaque ? 1.0f : 0.0f;
   push.alpha = alpha;
+  push.persp = {1.0f, 0.0f, 0.0f, 0.0f};
   if (clip != nullptr) {
     const RectF& b = clip->rect;
     const auto& r = clip->radii;
@@ -622,15 +626,23 @@ void LayerCompositor::DrawLayer(VkCommandBuffer cmd,
     d().vkCmdSetScissor(cmd, 0, 1, &cut);
     VkPipeline want = clip != nullptr ? pipeline_mask : pipeline;
     d().vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, want);
-    const auto ndc_x = [fw](const double v) {
-      return static_cast<float>(2.0 * v / fw);
+    // Pixels times w into clip space times w: x * w maps to
+    // (2 x / fw - 1) * w, affine in (s, t) like x * w itself. All of it over
+    // the corner at (0, 0)'s w, which leaves the picture as it is and keeps
+    // the numbers near 1.
+    const double k = 1.0 / quad->w0;
+    const auto to_clip = [k](const double v, const double size,
+                             const double w) {
+      return static_cast<float>((2.0 * v / size - w) * k);
     };
-    const auto ndc_y = [fh](const double v) {
-      return static_cast<float>(2.0 * v / fh);
-    };
-    push.rect = {ndc_x(quad->origin[0]) - 1.0f, ndc_y(quad->origin[1]) - 1.0f,
-                 ndc_x(quad->edge_s[0]), ndc_y(quad->edge_s[1])};
-    push.edge_t = {ndc_x(quad->edge_t[0]), ndc_y(quad->edge_t[1])};
+    push.rect = {to_clip(quad->origin[0], fw, quad->w0),
+                 to_clip(quad->origin[1], fh, quad->w0),
+                 to_clip(quad->edge_s[0], fw, quad->ws),
+                 to_clip(quad->edge_s[1], fh, quad->ws)};
+    push.edge_t = {to_clip(quad->edge_t[0], fw, quad->wt),
+                   to_clip(quad->edge_t[1], fh, quad->wt)};
+    push.persp = {1.0f, static_cast<float>(quad->ws * k),
+                  static_cast<float>(quad->wt * k), 0.0f};
     push.uv_u = {uv.a, uv.c, uv.tx, 0.0f};
     push.uv_v = {uv.b, uv.d, uv.ty, 0.0f};
     d().vkCmdPushConstants(

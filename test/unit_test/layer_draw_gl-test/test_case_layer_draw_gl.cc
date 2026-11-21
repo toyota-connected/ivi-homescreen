@@ -816,12 +816,13 @@ std::vector<uint8_t> DrawThrough(GlCompositor& compositor,
                                  const ICompositorSurface& surface,
                                  int view_w,
                                  int view_h,
-                                 const ViewAffine& map,
+                                 const ViewMap& map,
                                  int w,
                                  int h,
                                  bool target_top_first,
                                  const DisplayRotation* rotation,
-                                 const RectI* clip) {
+                                 const RectI* clip,
+                                 const RoundedRect* rounded = nullptr) {
   GLuint target = 0;
   glGenTextures(1, &target);
   glBindTexture(GL_TEXTURE_2D, target);
@@ -837,7 +838,7 @@ std::vector<uint8_t> DrawThrough(GlCompositor& compositor,
   compositor.CompositeSurfaceLayers(fbo, surface, {0, 0, view_w, view_h}, h,
                                     target_top_first,
                                     /*blend_first=*/false, nullptr, nullptr,
-                                    rotation, clip, 1.0f, nullptr, &map);
+                                    rotation, clip, 1.0f, rounded, &map);
   std::vector<uint8_t> rows(Px(0, h, w));
   glBindFramebuffer(GL_FRAMEBUFFER, fbo);
   glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, rows.data());
@@ -885,7 +886,7 @@ TEST_F(LayerDrawGl, ARotatedViewIsDrawnTurned) {
   whole.height = kRh;
   whole.top_first = true;
   surface.layers = {whole};
-  ViewAffine map;
+  ViewMap map;
   map.a = 0;
   map.b = 1;
   map.c = -1;
@@ -953,7 +954,7 @@ TEST_F(LayerDrawGl, AnEighthTurnLeavesTheBoundsCornersAlone) {
   surface.layers = {whole};
   // About the view's center (4, 4), to the target's center (8, 8).
   const double k = std::sqrt(0.5);
-  ViewAffine map;
+  ViewMap map;
   map.a = k;
   map.b = k;
   map.c = -k;
@@ -984,7 +985,7 @@ TEST_F(LayerDrawGl, ARotatedViewIsClipped) {
   whole.height = kRh;
   whole.top_first = true;
   surface.layers = {whole};
-  ViewAffine map;
+  ViewMap map;
   map.a = 0;
   map.b = 1;
   map.c = -1;
@@ -1007,5 +1008,128 @@ TEST_F(LayerDrawGl, ARotatedViewIsClipped) {
   }
   EXPECT_EQ(drawn_past, 0);
   EXPECT_EQ(missing, 0);
+  glDeleteTextures(1, &tex);
+}
+
+// A view under a perspective, w = 1 + x / 20: its right edge is drawn at half
+// its distance, a trapezoid. Each output pixel inside it samples the view's
+// pixel the perspective puts there, which interpolating the texture
+// coordinates across the screen would not: the draw has to divide by w per
+// pixel. On either target, and on a display turned a quarter turn.
+TEST_F(LayerDrawGl, APerspectiveViewIsSampledPerspectiveCorrect) {
+  const std::vector<uint8_t> img = Ramp(kRw, kRh);
+  const GLuint tex = MakeTexture(kRw, kRh, img);
+  LayeredSurface surface;
+  ICompositorSurface::GlLayerTexture whole;
+  whole.name = tex;
+  whole.width = kRw;
+  whole.height = kRh;
+  whole.top_first = true;
+  surface.layers = {whole};
+  ViewMap map;
+  map.g = 1.0 / kRw;
+  // The trapezoid fits a render space kRw / 2 wide and kRh tall.
+  constexpr int kOw = kRw / 2;
+  constexpr int kOh = kRh;
+
+  struct Case {
+    int degrees;
+    bool top_first;
+  };
+  for (const Case c : {Case{0, false}, Case{0, true}, Case{90, false}}) {
+    SCOPED_TRACE(::testing::Message()
+                 << c.degrees << " degrees, "
+                 << (c.top_first ? "top-first" : "window") << " target");
+    const DisplayRotation rot{c.degrees, kOw, kOh, c.degrees % 180 ? kOh : kOw,
+                              c.degrees % 180 ? kOw : kOh};
+    const int pw = rot.panel_w;
+    const int ph = rot.panel_h;
+    const auto out =
+        DrawThrough(*compositor_, surface, kRw, kRh, map, pw, ph, c.top_first,
+                    c.degrees != 0 ? &rot : nullptr, nullptr);
+    int checked = 0;
+    int wrong = 0;
+    for (int ry = 0; ry < kOh; ++ry) {
+      for (int rx = 0; rx < kOw; ++rx) {
+        // The view's point under render pixel (rx, ry)'s center: x / w = px
+        // with w = 1 + x / kRw.
+        const double px = rx + 0.5;
+        const double py = ry + 0.5;
+        const double w = 1.0 / (1.0 - px / kRw);
+        const double x = px * w;
+        const double y = py * w;
+        double qx = px;
+        double qy = py;
+        if (c.degrees != 0) {
+          rot.ToPanel(px, py, &qx, &qy);
+        }
+        const uint8_t* got =
+            &out[Px(static_cast<int>(qx), static_cast<int>(qy), pw)];
+        // Away from the edges and from texel boundaries, where rounding
+        // could pick either side.
+        const bool inside =
+            x > 0.6 && x < kRw - 0.6 && y > 0.6 && y < kRh - 0.6;
+        const bool outside = y > kRh + 1.0;
+        const double fx = x - std::floor(x);
+        const double fy = y - std::floor(y);
+        if (outside) {
+          wrong += got[3] != 0 ? 1 : 0;
+          continue;
+        }
+        if (!inside || fx < 0.05 || fx > 0.95 || fy < 0.05 || fy > 0.95) {
+          continue;
+        }
+        ++checked;
+        const uint8_t* want =
+            &img[Px(static_cast<int>(x), static_cast<int>(y), kRw)];
+        if (std::memcmp(got, want, 4) != 0) {
+          if (wrong++ < 3) {
+            ADD_FAILURE() << "render (" << rx << ", " << ry << ") got "
+                          << int{got[0]} << "," << int{got[1]} << " want "
+                          << int{want[0]} << "," << int{want[1]};
+          }
+        }
+      }
+    }
+    EXPECT_GT(checked, 30);
+    EXPECT_EQ(wrong, 0);
+  }
+  glDeleteTextures(1, &tex);
+}
+
+// The same perspective view under a rounded clip in output pixels: the clip's
+// corner is cut where the clip is, not where an affine guess at the pixel's
+// position would put it.
+TEST_F(LayerDrawGl, ARoundedClipCutsAPerspectiveView) {
+  const std::vector<uint8_t> img = Ramp(kRw, kRh);
+  const GLuint tex = MakeTexture(kRw, kRh, img);
+  LayeredSurface surface;
+  ICompositorSurface::GlLayerTexture whole;
+  whole.name = tex;
+  whole.width = kRw;
+  whole.height = kRh;
+  whole.top_first = true;
+  surface.layers = {whole};
+  ViewMap map;
+  map.g = 1.0 / kRw;
+  constexpr int kOw = kRw / 2;
+  constexpr int kOh = kRh;
+  // Its upper right corner, at the trapezoid's narrow side, where w is
+  // largest: (kOw, 0).
+  RoundedRect rounded;
+  rounded.rect = {0, 0, kOw, kOh};
+  rounded.radii[1] = {4, 4};
+  const auto out = DrawThrough(*compositor_, surface, kRw, kRh, map, kOw, kOh,
+                               false, nullptr, nullptr, &rounded);
+  EXPECT_EQ(out[Px(kOw - 1, 0, kOw) + 3], 0) << "the corner is cut";
+  EXPECT_EQ(out[Px(kOw - 2, 2, kOw) + 3], 255) << "inside the curve";
+  EXPECT_EQ(out[Px(0, 0, kOw) + 3], 255) << "the other corner is square";
+  // On the curve, partly covered. At these pixels w is 1.6 to 1.9, and the
+  // point not divided by it would be well outside the curve and fully cut.
+  for (const auto& [x, y] : {std::pair{kOw - 1, 1}, std::pair{kOw - 3, 0}}) {
+    const uint8_t a = out[Px(x, y, kOw) + 3];
+    EXPECT_GT(a, 0) << x << "," << y;
+    EXPECT_LT(a, 255) << x << "," << y;
+  }
   glDeleteTextures(1, &tex);
 }

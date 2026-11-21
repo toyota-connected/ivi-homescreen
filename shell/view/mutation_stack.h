@@ -34,23 +34,27 @@
  * what visual effects they still need to apply themselves.
  *
  * Coordinate convention matches Flutter: row-major 3x3, applied as
- *   x' = a*x + c*y + tx
- *   y' = b*x + d*y + ty
+ *   w  = g*x + h*y + i
+ *   x' = (a*x + c*y + tx) / w
+ *   y' = (b*x + d*y + ty) / w
+ * where the last row is (0, 0, 1) unless a perspective was composed in.
  *
  * @c clip_rect is in the composed (post-transform) coordinate space: the
  * engine gives each clip in the space it was pushed in, under the transforms
  * outside it, so each is mapped through those before it is intersected.
  */
 struct ComposedMutation {
-  // Composed affine transform (only the 2D part of FlutterTransformation
-  // is retained; pers0/pers1/pers2 are checked for non-identity and
-  // reported via @c has_perspective).
+  // Composed transform: the whole 3x3 matrix. @c has_perspective says
+  // whether any mutation had a perspective row.
   double a{1.0};
   double b{0.0};
   double c{0.0};
   double d{1.0};
   double tx{0.0};
   double ty{0.0};
+  double g{0.0};
+  double h{0.0};
+  double i{1.0};
 
   double opacity{1.0};
 
@@ -103,7 +107,9 @@ struct ComposedMutation {
 class MutationStack {
  public:
   /**
-   * @brief The bounding box of @p rect under the 2D part of @p m.
+   * @brief The bounding box of @p rect under @p m. Under a perspective a
+   * corner can reach past the horizon (w not above 0), where the rect has no
+   * bounding box; it is then unbounded.
    */
   static FlutterRect MapRect(const ComposedMutation& m,
                              const FlutterRect& rect) {
@@ -115,8 +121,15 @@ class MutationStack {
                     -std::numeric_limits<double>::max()};
     for (const double x : xs) {
       for (const double y : ys) {
-        const double px = m.a * x + m.c * y + m.tx;
-        const double py = m.b * x + m.d * y + m.ty;
+        const double w = m.g * x + m.h * y + m.i;
+        if (!(w > 1e-9)) {
+          return {-std::numeric_limits<double>::max(),
+                  -std::numeric_limits<double>::max(),
+                  std::numeric_limits<double>::max(),
+                  std::numeric_limits<double>::max()};
+        }
+        const double px = (m.a * x + m.c * y + m.tx) / w;
+        const double py = (m.b * x + m.d * y + m.ty) / w;
         out.left = std::min(out.left, px);
         out.top = std::min(out.top, py);
         out.right = std::max(out.right, px);
@@ -216,24 +229,29 @@ class MutationStack {
         }
         case kFlutterPlatformViewMutationTypeTransformation: {
           const FlutterTransformation& t = m->transformation;
-          // Multiply running affine by this one. Ignore perspective but
-          // flag it so callers know the 2D part is an approximation.
+          // The running matrix times this one, all nine entries.
           if (std::abs(t.pers0) > 1e-6 || std::abs(t.pers1) > 1e-6 ||
               std::abs(t.pers2 - 1.0) > 1e-6) {
             r.has_perspective = true;
           }
-          const double na = r.a * t.scaleX + r.c * t.skewY;
-          const double nb = r.b * t.scaleX + r.d * t.skewY;
-          const double nc = r.a * t.skewX + r.c * t.scaleY;
-          const double nd = r.b * t.skewX + r.d * t.scaleY;
-          const double ntx = r.a * t.transX + r.c * t.transY + r.tx;
-          const double nty = r.b * t.transX + r.d * t.transY + r.ty;
+          const double na = r.a * t.scaleX + r.c * t.skewY + r.tx * t.pers0;
+          const double nc = r.a * t.skewX + r.c * t.scaleY + r.tx * t.pers1;
+          const double ntx = r.a * t.transX + r.c * t.transY + r.tx * t.pers2;
+          const double nb = r.b * t.scaleX + r.d * t.skewY + r.ty * t.pers0;
+          const double nd = r.b * t.skewX + r.d * t.scaleY + r.ty * t.pers1;
+          const double nty = r.b * t.transX + r.d * t.transY + r.ty * t.pers2;
+          const double ng = r.g * t.scaleX + r.h * t.skewY + r.i * t.pers0;
+          const double nh = r.g * t.skewX + r.h * t.scaleY + r.i * t.pers1;
+          const double ni = r.g * t.transX + r.h * t.transY + r.i * t.pers2;
           r.a = na;
           r.b = nb;
           r.c = nc;
           r.d = nd;
           r.tx = ntx;
           r.ty = nty;
+          r.g = ng;
+          r.h = nh;
+          r.i = ni;
           break;
         }
       }

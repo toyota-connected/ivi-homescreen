@@ -588,3 +588,30 @@ TEST_F(LayerDrawVk, AQuadLeavesWhatItDoesNotCover) {
   EXPECT_EQ(At(clipped, 1, 1)[1], At(buffer, 1, 1)[1]) << "inside the scissor";
   EXPECT_EQ(At(clipped, 2, 1)[1], 0xff) << "past it, the backdrop";
 }
+
+// A quad under a perspective, w = 1 + s: its right edge at half its
+// distance. Pixel (1, 0)'s center, (1.5, 0.5), is at (s, t) = (3/7, 5/21).
+// The sampler filters, so it reads red 50 + 40 * (5 s - 1.5), about 76, and
+// green 10 + 80 * (3 t - 0.5), about 27. Interpolating the texture
+// coordinates across the screen would put it at s = 0.6, red 110. The pixels
+// past the quad keep the backdrop.
+TEST_F(LayerDrawVk, APerspectiveQuadIsSampledPerspectiveCorrect) {
+  const std::vector<uint8_t> buffer = Ramp();
+  const std::array<float, 4> white = {1, 1, 1, 1};
+  wl_vulkan::LayerCompositor::Quad q;
+  q.origin = {0, 0};
+  q.edge_s = {kW, 0};
+  q.edge_t = {0, kH};
+  q.w0 = 1;
+  q.ws = 1;
+  q.wt = 0;
+  q.scissor = {0, 0, kW, kH};
+  const auto out = Draw(kW, kH, buffer, UvAffine{}, /*opaque=*/true, &white,
+                        1.0f, nullptr, &q);
+  ASSERT_EQ(out.size(), buffer.size());
+  EXPECT_NEAR(At(out, 1, 0)[0], 50 + 40 * (5 * 3.0 / 7 - 1.5), 2)
+      << "perspective correct";
+  EXPECT_NEAR(At(out, 1, 0)[1], 10 + 80 * (3 * 5.0 / 21 - 0.5), 2);
+  EXPECT_EQ(At(out, 4, 2)[1], 0xff) << "past the quad, the backdrop";
+  EXPECT_EQ(At(out, 3, 0)[1], 0xff) << "right of its right edge";
+}

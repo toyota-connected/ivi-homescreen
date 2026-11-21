@@ -3028,15 +3028,13 @@ void WaylandVulkanBackend::WarnMissingPlatformView(
 
 bool WaylandVulkanBackend::PresentPlatformView(const FlutterLayer* layer) {
   const auto composed = MutationStack::Compose(layer->platform_view);
-  // Opacity, clips, scale, rotation, skew and one rounded clip are drawn by
-  // the compositor; these are not.
-  if (!composed.rounded_clip_exact || composed.has_perspective) {
+  // Opacity, clips, every transform and one rounded clip are drawn by the
+  // compositor; these are not.
+  if (!composed.rounded_clip_exact) {
     ihs::log::debug(
         "Vulkan compositor: platform view {} has mutations the compositor "
-        "does not draw (rounded_exact={} perspective={}); plugin OnPresent "
-        "must apply them.",
-        layer->platform_view->identifier, composed.rounded_clip_exact,
-        composed.has_perspective);
+        "does not draw (rounded_exact={}); plugin OnPresent must apply them.",
+        layer->platform_view->identifier, composed.rounded_clip_exact);
   }
   std::shared_ptr<ICompositorSurface> surface;
   {
@@ -3276,8 +3274,8 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
       const RectI view{dx, dy, dw, dh};
       // Each layer is cropped to the view's clip, its corners cut to the
       // rounded clip, and drawn at the view's opacity. A view under a
-      // rotation, skew or mirror is drawn through its transform, its clips
-      // tested against where it really is.
+      // rotation, skew, mirror or perspective is drawn through its transform,
+      // its clips tested against where it really is.
       const std::optional<ihs::platform_view::TransformedView> transformed =
           ihs::platform_view::TransformedViewOf(*layer, PresentPixelRatio());
       const std::optional<RectI> clip =
@@ -3305,8 +3303,8 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
                                  clip ? &*clip : nullptr)) {
             continue;  // entirely outside its clip
           }
-          quad = wl_vulkan::LayerCompositor::Quad{q.origin, q.edge_s, q.edge_t,
-                                                  q.bounds};
+          quad = wl_vulkan::LayerCompositor::Quad{
+              q.origin, q.edge_s, q.edge_t, q.w0, q.ws, q.wt, q.bounds};
           place.dst = q.bounds;
           place.uv = q.uv;
           place.opaque = q.opaque;

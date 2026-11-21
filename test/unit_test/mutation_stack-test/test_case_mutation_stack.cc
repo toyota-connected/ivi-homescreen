@@ -295,3 +295,56 @@ TEST(MutationStack, OfTwoRoundedClipsTheInnermostIsKept) {
   EXPECT_DOUBLE_EQ(r.rounded_clip.rect.left, 10);
   EXPECT_DOUBLE_EQ(r.rounded_clip.upper_left_corner_radius.width, 5);
 }
+
+namespace {
+
+// A perspective with w = p0 * x + p1 * y + 1.
+FlutterPlatformViewMutation Perspective(double p0, double p1) {
+  FlutterPlatformViewMutation m{};
+  m.type = kFlutterPlatformViewMutationTypeTransformation;
+  m.transformation = {1, 0, 0, 0, 1, 0, p0, p1, 1};
+  return m;
+}
+
+}  // namespace
+
+TEST(MutationStack, APerspectiveIsComposedWhole) {
+  // translate(100, 0) outside w = 1 + x / 100: (10, 0) goes to
+  // (10 / 1.1, 0) and then 100 across.
+  auto t = Translate(100, 0);
+  auto p = Perspective(0.01, 0);
+  std::vector<const FlutterPlatformViewMutation*> list{&t, &p};
+  FlutterPlatformView v = MakeView(list);
+  const auto r = MutationStack::Compose(&v);
+  EXPECT_TRUE(r.has_perspective);
+  EXPECT_DOUBLE_EQ(r.g, 0.01);
+  EXPECT_DOUBLE_EQ(r.h, 0.0);
+  EXPECT_DOUBLE_EQ(r.i, 1.0);
+  const double w = r.g * 10 + r.h * 0 + r.i;
+  EXPECT_NEAR((r.a * 10 + r.c * 0 + r.tx) / w, 100 + 10 / 1.1, 1e-9);
+  EXPECT_NEAR((r.b * 10 + r.d * 0 + r.ty) / w, 0, 1e-9);
+}
+
+TEST(MutationStack, ClipUnderAPerspectiveIsItsProjectedBounds) {
+  auto p = Perspective(0.01, 0);
+  auto clip = ClipRect(0, 0, 10, 10);
+  std::vector<const FlutterPlatformViewMutation*> list{&p, &clip};
+  FlutterPlatformView v = MakeView(list);
+  const auto r = MutationStack::Compose(&v);
+  EXPECT_FALSE(r.clip_exact);
+  EXPECT_NEAR(r.clip_rect.left, 0, 1e-9);
+  EXPECT_NEAR(r.clip_rect.right, 10 / 1.1, 1e-9);
+  EXPECT_NEAR(r.clip_rect.bottom, 10, 1e-9) << "the left edge, at w = 1";
+}
+
+TEST(MutationStack, AClipPastTheHorizonIsUnbounded) {
+  // w = 1 - x / 5 is below 0 at the clip's right edge.
+  auto p = Perspective(-0.2, 0);
+  auto clip = ClipRect(0, 0, 10, 10);
+  std::vector<const FlutterPlatformViewMutation*> list{&p, &clip};
+  FlutterPlatformView v = MakeView(list);
+  const auto r = MutationStack::Compose(&v);
+  EXPECT_FALSE(r.clip_exact);
+  EXPECT_LT(r.clip_rect.left, -1e300);
+  EXPECT_GT(r.clip_rect.right, 1e300);
+}
