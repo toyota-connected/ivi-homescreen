@@ -15,6 +15,7 @@
  */
 
 #include <cmath>
+#include <utility>
 #include <vector>
 
 #include "gtest/gtest.h"
@@ -354,4 +355,79 @@ TEST(PlatformViewGeometry, CornersOutsideTheClipRectAreNotReported) {
 TEST(PlatformViewGeometry, SquareCornersAreNotReported) {
   ViewLayer v({RRect(0, 0, 100, 100, 0.25)}, {0, 0}, {100, 100});
   EXPECT_FALSE(pv::RoundedClipOf(v.layer).has_value());
+}
+
+namespace {
+
+// Flutter's rotation by a quarter turn clockwise: (x, y) -> (-y, x).
+FlutterPlatformViewMutation QuarterTurn() {
+  return Transform(0, -1, 0, 1, 0, 0);
+}
+
+}  // namespace
+
+TEST(PlatformViewGeometry, AnUntransformedViewNeedsNoMap) {
+  ViewLayer plain({}, {10, 20}, {300, 200});
+  EXPECT_FALSE(pv::TransformedViewOf(plain.layer, 1.0).has_value());
+  // A positive scale is a rect on the output: ScaleLayer's job.
+  ViewLayer scaled({Scale(2, 2), Translate(5, 5), Scale(0.5, 0.5)}, {10, 10},
+                   {200, 100});
+  EXPECT_FALSE(pv::TransformedViewOf(scaled.layer, 2.0).has_value());
+}
+
+TEST(PlatformViewGeometry, ARotatedViewMapsItsOwnPixels) {
+  // 100x50 logical at ratio 2, turned a quarter turn about its origin at
+  // (100, 50): the engine reports the bounds' origin and the unturned size.
+  ViewLayer v({Scale(2, 2), Translate(100, 50), QuarterTurn()}, {100, 100},
+              {200, 100});
+  const auto t = pv::TransformedViewOf(v.layer, 2.0);
+  ASSERT_TRUE(t.has_value());
+  EXPECT_EQ(t->width, 200);
+  EXPECT_EQ(t->height, 100);
+  // Its own pixel (x, y) lands at (200 - y, 100 + x).
+  for (const auto& [x, y] : {std::pair{0, 0}, std::pair{200, 0},
+                             std::pair{0, 100}, std::pair{37, 61}}) {
+    const auto p = t->map.Map(x, y);
+    EXPECT_NEAR(p[0], 200 - y, 1e-9) << x << "," << y;
+    EXPECT_NEAR(p[1], 100 + x, 1e-9) << x << "," << y;
+  }
+  EXPECT_FALSE(t->clip.has_value());
+  // Not a scale: ScaleLayer leaves it alone.
+  EXPECT_TRUE(pv::AppScaleOf(v.layer, 2.0).IsIdentity());
+}
+
+TEST(PlatformViewGeometry, AMirroredViewIsTransformed) {
+  ViewLayer v({Translate(300, 0), Scale(-1, 1)}, {0, 0}, {300, 200});
+  const auto t = pv::TransformedViewOf(v.layer, 1.0);
+  ASSERT_TRUE(t.has_value());
+  const auto p = t->map.Map(0, 0);
+  EXPECT_DOUBLE_EQ(p[0], 300);
+  EXPECT_DOUBLE_EQ(t->map.Map(300, 0)[0], 0);
+}
+
+TEST(PlatformViewGeometry, ATransformedViewIsClippedWhereItReallyIs) {
+  // The quarter-turned view covers (100, 100) to (200, 300). The engine's
+  // offset and size say (100, 100) to (300, 200), which the clip at y = 250
+  // would miss.
+  ViewLayer v(
+      {Scale(2, 2), Clip(0, 0, 500, 125), Translate(100, 50), QuarterTurn()},
+      {100, 100}, {200, 100});
+  EXPECT_FALSE(pv::ClipRectOf(v.layer).has_value());
+  const auto t = pv::TransformedViewOf(v.layer, 2.0);
+  ASSERT_TRUE(t.has_value());
+  ASSERT_TRUE(t->clip.has_value());
+  EXPECT_EQ(t->clip->y + t->clip->h, 250);
+}
+
+TEST(PlatformViewGeometry, PerspectiveAndBadInputAreNotMapped) {
+  ViewLayer persp({Transform(1, 0, 0, 0, 1, 0, 0.001, 0, 1), QuarterTurn()},
+                  {0, 0}, {100, 100});
+  EXPECT_FALSE(pv::TransformedViewOf(persp.layer, 1.0).has_value());
+  ViewLayer turned({QuarterTurn()}, {0, 0}, {100, 100});
+  EXPECT_FALSE(pv::TransformedViewOf(turned.layer, 0.0).has_value());
+  EXPECT_FALSE(pv::TransformedViewOf(turned.layer, NAN).has_value());
+  ViewLayer flat({Transform(1, 1, 0, 1, 1, 0)}, {0, 0}, {100, 100});
+  EXPECT_FALSE(pv::TransformedViewOf(flat.layer, 1.0).has_value());
+  ViewLayer empty({QuarterTurn()}, {0, 0}, {0, 100});
+  EXPECT_FALSE(pv::TransformedViewOf(empty.layer, 1.0).has_value());
 }

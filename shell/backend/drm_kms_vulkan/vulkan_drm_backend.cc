@@ -2776,8 +2776,10 @@ bool VulkanDrmBackend::ReconcilePlatformViewLayers(
     return false;
   }
   // A plane has no rounded corners: a view whose rounded clip cuts into it is
-  // drawn by the blend, which has.
-  if (ihs::platform_view::RoundedClipOf(fl)) {
+  // drawn by the blend, which has. Nor does it turn by any angle or skew, so
+  // a view under a rotation, skew or mirror is drawn by the blend too.
+  if (ihs::platform_view::RoundedClipOf(fl) ||
+      ihs::platform_view::IsTransformed(fl)) {
     return false;
   }
   const auto plane_alpha =
@@ -3226,6 +3228,8 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
     float alpha{1.0f};
     // The view's rounded clip; none for backing stores.
     std::optional<RoundedRect> rounded{};
+    // A layer of a transformed view is drawn as this quad, not the rect.
+    std::optional<wl_vulkan::LayerCompositor::Quad> quad{};
   };
   std::vector<Draw> draws;
   // Images already moved to SHADER_READ_ONLY this frame, so a buffer shown by
@@ -3370,10 +3374,17 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
       // a plain producer is one layer drawn whole.
       const RectI view{dx, dy, dw, dh};
       // Each layer is cropped to the view's clip, its corners cut to the
-      // rounded clip, and drawn at the view's opacity.
-      const std::optional<RectI> clip = ihs::platform_view::ClipRectOf(*layer);
+      // rounded clip, and drawn at the view's opacity. A view under a
+      // rotation, skew or mirror is drawn through its transform, its clips
+      // tested against where it really is.
+      const std::optional<ihs::platform_view::TransformedView> transformed =
+          ihs::platform_view::TransformedViewOf(*layer, PresentPixelRatio());
+      const std::optional<RectI> clip =
+          transformed ? transformed->clip
+                      : ihs::platform_view::ClipRectOf(*layer);
       const std::optional<RoundedRect> rounded =
-          ihs::platform_view::RoundedClipOf(*layer);
+          transformed ? transformed->rounded
+                      : ihs::platform_view::RoundedClipOf(*layer);
       const float alpha = ihs::platform_view::OpacityOf(*layer);
       bool sampled = false;
       for (size_t li = 0, n = surface->GetLayerCount(); li < n; ++li) {
@@ -3383,10 +3394,26 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
         }
         const auto& g = img.geometry;
         LayerPlacement place;
-        if (!PlaceLayer(g.src, g.dst, g.transform, g.opaque,
-                        static_cast<uint32_t>(img.width),
-                        static_cast<uint32_t>(img.height), view, &place,
-                        clip ? &*clip : nullptr)) {
+        std::optional<wl_vulkan::LayerCompositor::Quad> quad;
+        if (transformed) {
+          QuadPlacement q;
+          if (!PlaceLayerThrough(g.src, g.dst, g.transform, g.opaque,
+                                 static_cast<uint32_t>(img.width),
+                                 static_cast<uint32_t>(img.height),
+                                 transformed->width, transformed->height,
+                                 transformed->map, &q,
+                                 clip ? &*clip : nullptr)) {
+            continue;  // entirely outside its clip
+          }
+          quad = wl_vulkan::LayerCompositor::Quad{q.origin, q.edge_s, q.edge_t,
+                                                  q.bounds};
+          place.dst = q.bounds;
+          place.uv = q.uv;
+          place.opaque = q.opaque;
+        } else if (!PlaceLayer(g.src, g.dst, g.transform, g.opaque,
+                               static_cast<uint32_t>(img.width),
+                               static_cast<uint32_t>(img.height), view, &place,
+                               clip ? &*clip : nullptr)) {
           continue;  // entirely outside the view or its clip
         }
         if (!img.top_first) {
@@ -3442,7 +3469,7 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
              place.dst.h, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED,
              static_cast<VkSamplerYcbcrModelConversion>(img.ycbcr_model),
              static_cast<VkSamplerYcbcrRange>(img.ycbcr_range), place.uv,
-             place.opaque, alpha, rounded});
+             place.opaque, alpha, rounded, quad});
         compositor_->presentation.Note(surface->GetPresentationSink(),
                                        img.frame, /*zero_copy=*/false);
         sampled = true;
@@ -3495,10 +3522,10 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
   if (layer_compositor_->BeginFrame(cmd, target_view, width, height, frame)) {
     opened = true;
     for (const Draw& dr : draws) {
-      layer_compositor_->DrawLayer(cmd, dr.src, dr.format, dr.ycbcr_model,
-                                   dr.ycbcr_range, dr.dx, dr.dy, dr.dw, dr.dh,
-                                   dr.uv, dr.opaque, dr.alpha,
-                                   dr.rounded ? &*dr.rounded : nullptr);
+      layer_compositor_->DrawLayer(
+          cmd, dr.src, dr.format, dr.ycbcr_model, dr.ycbcr_range, dr.dx, dr.dy,
+          dr.dw, dr.dh, dr.uv, dr.opaque, dr.alpha,
+          dr.rounded ? &*dr.rounded : nullptr, dr.quad ? &*dr.quad : nullptr);
     }
     wl_vulkan::LayerCompositor::EndFrame(cmd);
   }

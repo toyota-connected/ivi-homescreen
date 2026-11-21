@@ -20,7 +20,10 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <limits>
 #include <optional>
+#include <utility>
 #include <vector>
 
 #include <shell/platform/embedder/embedder.h>
@@ -42,8 +45,10 @@
  * applied is the composed scale over the pixel ratio, and the drawn size is
  * the layer size times that.
  *
- * Only positive axis-aligned transforms are corrected here. Rotation, skew,
- * mirroring and perspective are left as the engine reports them.
+ * A positive axis-aligned scale is corrected in the layer (@c ScaleLayer).
+ * A rotation, skew or mirror cannot be shown as a rect at all, and is drawn
+ * through the map @c TransformedViewOf gives. Perspective is left as the engine
+ * reports it.
  */
 namespace ihs::platform_view {
 
@@ -149,24 +154,12 @@ inline float OpacityOf(const FlutterLayer& layer) {
 }
 
 /**
- * @brief The rounded clip on @p layer's view, in output pixels.
- *
- * Empty when the view has none, or when its corners do not cut into the part
- * of the view that shows (the view's rect inside its clip rect), so a caller
- * can keep its unrounded path for that case. The clip's bounding box is part
- * of @c ClipRectOf either way; this adds only the corners.
- *
- * With more than one rounded clip, or one under a rotation or skew, this is
- * the innermost one still a rounded rect on screen, and some corners are
- * drawn square (see @c ComposedMutation::rounded_clip_exact).
+ * @brief The rounded clip of @p composed, for a view whose bounds on the
+ * output are @p view (output pixels). See @c RoundedClipOf.
  */
-inline std::optional<RoundedRect> RoundedClipOf(const FlutterLayer& layer) {
-  if (layer.type != kFlutterLayerContentTypePlatformView ||
-      layer.platform_view == nullptr ||
-      layer.platform_view->mutations_count == 0) {
-    return std::nullopt;
-  }
-  const ComposedMutation composed = MutationStack::Compose(layer.platform_view);
+inline std::optional<RoundedRect> RoundedClipIn(
+    const ComposedMutation& composed,
+    const FlutterRect& view) {
   if (!composed.has_rounded_mask) {
     return std::nullopt;
   }
@@ -187,10 +180,10 @@ inline std::optional<RoundedRect> RoundedClipOf(const FlutterLayer& layer) {
   // The part of the view that shows: its rect inside the clip rect, which
   // holds this clip's bounding box.
   const FlutterRect& cr = composed.clip_rect;
-  const double x0 = std::max(layer.offset.x, cr.left);
-  const double y0 = std::max(layer.offset.y, cr.top);
-  const double x1 = std::min(layer.offset.x + layer.size.width, cr.right);
-  const double y1 = std::min(layer.offset.y + layer.size.height, cr.bottom);
+  const double x0 = std::max(view.left, cr.left);
+  const double y0 = std::max(view.top, cr.top);
+  const double x1 = std::min(view.right, cr.right);
+  const double y1 = std::min(view.bottom, cr.bottom);
   if (x1 <= x0 || y1 <= y0) {
     return std::nullopt;  // nothing shows; the clip rect drops it
   }
@@ -219,6 +212,65 @@ inline std::optional<RoundedRect> RoundedClipOf(const FlutterLayer& layer) {
 }
 
 /**
+ * @brief The rounded clip on @p layer's view, in output pixels.
+ *
+ * Empty when the view has none, or when its corners do not cut into the part
+ * of the view that shows (the view's rect inside its clip rect), so a caller
+ * can keep its unrounded path for that case. The clip's bounding box is part
+ * of @c ClipRectOf either way; this adds only the corners.
+ *
+ * With more than one rounded clip, or one under a rotation or skew, this is
+ * the innermost one still a rounded rect on screen, and some corners are
+ * drawn square (see @c ComposedMutation::rounded_clip_exact).
+ */
+inline std::optional<RoundedRect> RoundedClipOf(const FlutterLayer& layer) {
+  if (layer.type != kFlutterLayerContentTypePlatformView ||
+      layer.platform_view == nullptr ||
+      layer.platform_view->mutations_count == 0) {
+    return std::nullopt;
+  }
+  return RoundedClipIn(
+      MutationStack::Compose(layer.platform_view),
+      {layer.offset.x, layer.offset.y, layer.offset.x + layer.size.width,
+       layer.offset.y + layer.size.height});
+}
+
+/**
+ * @brief The clip of @p composed, for a view whose bounds on the output
+ * are @p view (output pixels). See @c ClipRectOf.
+ */
+inline std::optional<RectI> ClipRectIn(const ComposedMutation& composed,
+                                       const FlutterRect& view) {
+  if (!composed.has_clip) {
+    return std::nullopt;
+  }
+  const FlutterRect& c = composed.clip_rect;
+  if (!std::isfinite(c.left) || !std::isfinite(c.top) ||
+      !std::isfinite(c.right) || !std::isfinite(c.bottom)) {
+    return std::nullopt;
+  }
+  const double vx0 = view.left;
+  const double vy0 = view.top;
+  const double vx1 = view.right;
+  const double vy1 = view.bottom;
+  // Edges compared after rounding, the way they are drawn.
+  const auto px = [](const double v) {
+    return static_cast<int32_t>(std::lround(v));
+  };
+  const int32_t x0 = px(c.left);
+  const int32_t y0 = px(c.top);
+  const int32_t x1 = px(c.right);
+  const int32_t y1 = px(c.bottom);
+  if (x0 <= px(vx0) && y0 <= px(vy0) && x1 >= px(vx1) && y1 >= px(vy1)) {
+    return std::nullopt;  // the view is inside its clip
+  }
+  if (x1 <= x0 || y1 <= y0) {
+    return RectI{0, 0, 0, 0};
+  }
+  return RectI{x0, y0, x1 - x0, y1 - y0};
+}
+
+/**
  * @brief The clip on @p layer's view, in output pixels.
  *
  * Empty when the view has no clip, or the clip does not cut into the view's
@@ -235,34 +287,103 @@ inline std::optional<RectI> ClipRectOf(const FlutterLayer& layer) {
       layer.platform_view->mutations_count == 0) {
     return std::nullopt;
   }
+  return ClipRectIn(
+      MutationStack::Compose(layer.platform_view),
+      {layer.offset.x, layer.offset.y, layer.offset.x + layer.size.width,
+       layer.offset.y + layer.size.height});
+}
+
+/// A view that reaches the output through a rotation, skew or mirror.
+struct TransformedView {
+  /// The view's own pixels to output pixels.
+  ViewAffine map;
+  /// The view's size in its own pixels: the size the engine gives its layer.
+  int32_t width{0};
+  int32_t height{0};
+  /// Its clip and rounded clip in output pixels, as from @c ClipRectOf and
+  /// @c RoundedClipOf but tested against where the view really is.
+  std::optional<RectI> clip;
+  std::optional<RoundedRect> rounded;
+};
+
+/**
+ * @brief Whether @p layer's view is under a rotation, skew or mirror, which no
+ * rect on the output can show. A caller deciding whether a rect will do (a
+ * plane, a blit) needs only this; @c TransformedViewOf gives the map.
+ */
+inline bool IsTransformed(const FlutterLayer& layer) {
+  if (layer.type != kFlutterLayerContentTypePlatformView ||
+      layer.platform_view == nullptr ||
+      layer.platform_view->mutations_count == 0) {
+    return false;
+  }
   const ComposedMutation composed = MutationStack::Compose(layer.platform_view);
-  if (!composed.has_clip) {
+  return !composed.has_perspective && !composed.IsAxisAligned();
+}
+
+/**
+ * @brief How @p layer's view reaches the output, when no rect can show it.
+ *
+ * The engine gives the layer the origin of the transformed view's bounding box
+ * and the size it was laid out at, which is right only for a positive
+ * axis-aligned scale (@c ScaleLayer). Under a rotation, skew or mirror the view
+ * is a parallelogram, and this is the map that draws it, from the composed
+ * transform: that maps the view's logical rect, at its own origin, to output
+ * pixels, so the map from its own pixels divides out the pixel ratio.
+ *
+ * Empty for any other view, for a perspective (drawn flat, as before), and
+ * when the pixel ratio is unknown or the transform flattens the view.
+ */
+inline std::optional<TransformedView> TransformedViewOf(
+    const FlutterLayer& layer,
+    const double pixel_ratio) {
+  if (layer.type != kFlutterLayerContentTypePlatformView ||
+      layer.platform_view == nullptr ||
+      layer.platform_view->mutations_count == 0 ||
+      !std::isfinite(pixel_ratio) || pixel_ratio <= 0.0) {
     return std::nullopt;
   }
-  const FlutterRect& c = composed.clip_rect;
-  if (!std::isfinite(c.left) || !std::isfinite(c.top) ||
-      !std::isfinite(c.right) || !std::isfinite(c.bottom)) {
+  const ComposedMutation composed = MutationStack::Compose(layer.platform_view);
+  if (composed.has_perspective || composed.IsAxisAligned()) {
     return std::nullopt;
   }
-  const double vx0 = layer.offset.x;
-  const double vy0 = layer.offset.y;
-  const double vx1 = vx0 + layer.size.width;
-  const double vy1 = vy0 + layer.size.height;
-  // Edges compared after rounding, the way they are drawn.
-  const auto px = [](const double v) {
-    return static_cast<int32_t>(std::lround(v));
-  };
-  const int32_t x0 = px(c.left);
-  const int32_t y0 = px(c.top);
-  const int32_t x1 = px(c.right);
-  const int32_t y1 = px(c.bottom);
-  if (x0 <= px(vx0) && y0 <= px(vy0) && x1 >= px(vx1) && y1 >= px(vy1)) {
-    return std::nullopt;  // the view is inside its clip
+  TransformedView v;
+  v.map = {composed.a / pixel_ratio,
+           composed.b / pixel_ratio,
+           composed.c / pixel_ratio,
+           composed.d / pixel_ratio,
+           composed.tx,
+           composed.ty};
+  const ViewAffine& m = v.map;
+  const double det = m.a * m.d - m.b * m.c;
+  if (!std::isfinite(m.a) || !std::isfinite(m.b) || !std::isfinite(m.c) ||
+      !std::isfinite(m.d) || !std::isfinite(m.tx) || !std::isfinite(m.ty) ||
+      std::abs(det) < 1e-9) {
+    return std::nullopt;
   }
-  if (x1 <= x0 || y1 <= y0) {
-    return RectI{0, 0, 0, 0};
+  if (!std::isfinite(layer.size.width) || !std::isfinite(layer.size.height) ||
+      layer.size.width < 1.0 || layer.size.height < 1.0 ||
+      layer.size.width > 1 << 24 || layer.size.height > 1 << 24) {
+    return std::nullopt;
   }
-  return RectI{x0, y0, x1 - x0, y1 - y0};
+  v.width = static_cast<int32_t>(std::lround(layer.size.width));
+  v.height = static_cast<int32_t>(std::lround(layer.size.height));
+  // Its bounds on the output, for the clips' tests.
+  FlutterRect bounds{
+      std::numeric_limits<double>::max(), std::numeric_limits<double>::max(),
+      -std::numeric_limits<double>::max(), -std::numeric_limits<double>::max()};
+  for (const auto& [x, y] :
+       {std::pair{0, 0}, std::pair{v.width, 0}, std::pair{0, v.height},
+        std::pair{v.width, v.height}}) {
+    const auto p = m.Map(x, y);
+    bounds.left = std::min(bounds.left, p[0]);
+    bounds.top = std::min(bounds.top, p[1]);
+    bounds.right = std::max(bounds.right, p[0]);
+    bounds.bottom = std::max(bounds.bottom, p[1]);
+  }
+  v.clip = ClipRectIn(composed, bounds);
+  v.rounded = RoundedClipIn(composed, bounds);
+  return v;
 }
 
 /**

@@ -38,10 +38,15 @@
 //                       and back down over two
 //   PV_BENCH_RADIUS     wrap the view in a ClipRRect with corners of this
 //                       radius, in logical pixels (default 0, no clip)
+//   PV_BENCH_ROTATE     wrap the view in Transform.rotate by this many
+//                       degrees about its center (default 0)
+//   PV_BENCH_ROTATE_ANIM set to 1 to wrap it in a RotationTransition instead:
+//                       one turn every eight seconds
 
 import 'dart:async';
 import 'dart:ffi' as ffi;
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -209,8 +214,8 @@ class _PvBenchPageState extends State<PvBenchPage>
         children: <Widget>[
           if (widget.showPlatformView)
             Positioned.fill(
-                child: _faded(
-                    _rounded(_clipped(_scaled(const _BenchPlatformView())))))
+                child: _faded(_rounded(_clipped(
+                    _rotated(_scaled(const _BenchPlatformView()))))))
           else
             const Center(
               child: Text('no platform view',
@@ -323,6 +328,50 @@ Widget _rounded(Widget child) {
     borderRadius: BorderRadius.circular(_pvRadius),
     child: child,
   );
+}
+
+// A rotation of the view puts a transform the shell cannot show as a rect on
+// its layer, so a run can check that each backend draws it turned (#866).
+final double _pvRotate =
+    double.tryParse(Platform.environment['PV_BENCH_ROTATE'] ?? '') ?? 0.0;
+final bool _pvRotateAnim = Platform.environment['PV_BENCH_ROTATE_ANIM'] == '1';
+
+Widget _rotated(Widget child) {
+  if (_pvRotateAnim) {
+    return _Spinning(child: child);
+  }
+  if (_pvRotate == 0.0) {
+    return child;
+  }
+  return Transform.rotate(angle: _pvRotate * math.pi / 180.0, child: child);
+}
+
+class _Spinning extends StatefulWidget {
+  const _Spinning({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_Spinning> createState() => _SpinningState();
+}
+
+class _SpinningState extends State<_Spinning>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _turn = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 8),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _turn.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RotationTransition(turns: _turn, child: widget.child);
+  }
 }
 
 class _MiddleClipper extends CustomClipper<Rect> {

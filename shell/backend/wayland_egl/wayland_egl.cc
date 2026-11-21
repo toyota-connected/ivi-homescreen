@@ -1215,16 +1215,15 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
     } else if (layer->type == kFlutterLayerContentTypePlatformView &&
                layer->platform_view) {
       const auto composed = MutationStack::Compose(layer->platform_view);
-      // Opacity, clip, scale and one rounded clip are drawn below; these are
-      // not.
-      if (!composed.rounded_clip_exact || composed.has_perspective ||
-          !composed.IsAxisAligned()) {
+      // Opacity, clips, scale, rotation, skew and one rounded clip are drawn
+      // below; these are not.
+      if (!composed.rounded_clip_exact || composed.has_perspective) {
         ihs::log::debug(
             "EGL compositor: platform view {} has mutations the compositor "
-            "does not draw (rounded_exact={} perspective={} axis_aligned={}); "
-            "plugin OnPresent must apply them.",
+            "does not draw (rounded_exact={} perspective={}); plugin "
+            "OnPresent must apply them.",
             layer->platform_view->identifier, composed.rounded_clip_exact,
-            composed.has_perspective, composed.IsAxisAligned());
+            composed.has_perspective);
       }
       // Snapshot the shared_ptr under the lock, drop the lock before the
       // OnPresent callback. Holding the mutex across plugin GL work would
@@ -1250,16 +1249,22 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
         const ICompositorSurface::GlLayerTexture first =
             one_layer ? surface.GetLayerGlTexture(0)
                       : ICompositorSurface::GlLayerTexture{};
-        // A clipped, rounded or translucent view is drawn layer by layer too:
-        // that path crops each layer to the clip, cuts its corners and draws
-        // it at the opacity.
+        // A clipped, rounded, translucent or transformed view is drawn layer
+        // by layer too: that path crops each layer to the clip, cuts its
+        // corners, draws it at the opacity and through the view's transform.
+        // A transformed view's clips are tested against where it really is.
+        const std::optional<ihs::platform_view::TransformedView> transformed =
+            ihs::platform_view::TransformedViewOf(*layer, PresentPixelRatio());
         const std::optional<RectI> clip =
-            ihs::platform_view::ClipRectOf(*layer);
+            transformed ? transformed->clip
+                        : ihs::platform_view::ClipRectOf(*layer);
         const std::optional<RoundedRect> rounded =
-            ihs::platform_view::RoundedClipOf(*layer);
+            transformed ? transformed->rounded
+                        : ihs::platform_view::RoundedClipOf(*layer);
         const float alpha = ihs::platform_view::OpacityOf(*layer);
         if (first.name != 0 && first.geometry.IsWhole() &&
-            !first.geometry.opaque && !clip && !rounded && alpha >= 1.0f) {
+            !first.geometry.opaque && !clip && !rounded && alpha >= 1.0f &&
+            !transformed) {
           NoteSampled(surface_sp, first);
           EnsureGlCapsProbed();
           const auto tex = first.name;
@@ -1298,10 +1303,14 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
           }
           composited_any = true;
         } else {
-          const RectI view{static_cast<int32_t>(layer->offset.x),
-                           static_cast<int32_t>(layer->offset.y),
-                           static_cast<int32_t>(layer->size.width),
-                           static_cast<int32_t>(layer->size.height)};
+          // A transformed view is given in its own pixels, with the map that
+          // takes them to the output.
+          const RectI view =
+              transformed ? RectI{0, 0, transformed->width, transformed->height}
+                          : RectI{static_cast<int32_t>(layer->offset.x),
+                                  static_cast<int32_t>(layer->offset.y),
+                                  static_cast<int32_t>(layer->size.width),
+                                  static_cast<int32_t>(layer->size.height)};
           // Layer 0 was imported above for a one-layer surface; draw that
           // frame rather than importing over it.
           if (m_gl_compositor->CompositeSurfaceLayers(
@@ -1312,8 +1321,8 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
                     NoteSampled(surface_sp, t);
                   },
                   one_layer ? &first : nullptr, /*rotation=*/nullptr,
-                  clip ? &*clip : nullptr, alpha,
-                  rounded ? &*rounded : nullptr) > 0) {
+                  clip ? &*clip : nullptr, alpha, rounded ? &*rounded : nullptr,
+                  transformed ? &transformed->map : nullptr) > 0) {
             composited_any = true;
           }
         }

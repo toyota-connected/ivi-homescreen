@@ -379,3 +379,119 @@ inline size_t SplitRoundedCorners(const RectI& dst,
   add(xs[0], ys[1], xs[3], ys[2], false);
   return n;
 }
+
+// An affine map of a view's own pixels to output pixels:
+//
+//   x' = a * x + c * y + tx
+//   y' = b * x + d * y + ty
+//
+// For a view under a rotation, skew or mirror, which no rect on the output can
+// show.
+struct ViewAffine {
+  double a{1};
+  double b{0};
+  double c{0};
+  double d{1};
+  double tx{0};
+  double ty{0};
+
+  [[nodiscard]] std::array<double, 2> Map(const double x,
+                                          const double y) const {
+    return {a * x + c * y + tx, b * x + d * y + ty};
+  }
+};
+
+// Where one layer of a transformed view lands: a parallelogram on the output,
+// its corner at (s, t) = (0, 0) and its edges along s and t, in output pixels.
+// (s, t) run over the layer as for LayerPlacement, so @c uv maps them to
+// texture coordinates the same way. @c bounds holds the parallelogram, rounded
+// out to whole pixels and cut down to the clip; a draw clipped to it shows
+// what the clip lets through.
+struct QuadPlacement {
+  std::array<double, 2> origin{};
+  std::array<double, 2> edge_s{};
+  std::array<double, 2> edge_t{};
+  UvAffine uv;
+  RectI bounds;
+  bool opaque{false};
+
+  // The output point at (s, t).
+  [[nodiscard]] std::array<double, 2> At(const double s, const double t) const {
+    return {origin[0] + s * edge_s[0] + t * edge_t[0],
+            origin[1] + s * edge_s[1] + t * edge_t[1]};
+  }
+};
+
+// Place a layer of a view that spans [0, view_w) x [0, view_h) in its own
+// pixels and reaches the output through @p map. @p src and @p dst are the
+// layer's geometry as for PlaceLayer, @p dst in the view's own pixels. The
+// layer is cropped to the view there, and its bounds are cut down to @p clip
+// (output pixels) when one is given. Returns false when nothing of it can show.
+inline bool PlaceLayerThrough(RectF src,
+                              RectI dst,
+                              const BufferTransform transform,
+                              const bool opaque,
+                              const uint32_t buffer_w,
+                              const uint32_t buffer_h,
+                              const int32_t view_w,
+                              const int32_t view_h,
+                              const ViewAffine& map,
+                              QuadPlacement* out,
+                              const RectI* clip = nullptr) {
+  if (buffer_w == 0 || buffer_h == 0 || view_w <= 0 || view_h <= 0) {
+    return false;
+  }
+  if (dst.w <= 0 || dst.h <= 0) {
+    dst = {0, 0, view_w, view_h};
+  }
+  if (!ClipLayerToView(&src, &dst, buffer_w, buffer_h, transform, view_w,
+                       view_h)) {
+    return false;
+  }
+  QuadPlacement q;
+  q.origin = map.Map(dst.x, dst.y);
+  q.edge_s = {map.a * dst.w, map.b * dst.w};
+  q.edge_t = {map.c * dst.h, map.d * dst.h};
+  double x0 = q.origin[0];
+  double y0 = q.origin[1];
+  double x1 = x0;
+  double y1 = y0;
+  for (const auto& [s, t] :
+       {std::pair{1.0, 0.0}, std::pair{0.0, 1.0}, std::pair{1.0, 1.0}}) {
+    const auto p = q.At(s, t);
+    x0 = std::min(x0, p[0]);
+    y0 = std::min(y0, p[1]);
+    x1 = std::max(x1, p[0]);
+    y1 = std::max(y1, p[1]);
+  }
+  if (!std::isfinite(x0) || !std::isfinite(y0) || !std::isfinite(x1) ||
+      !std::isfinite(y1)) {
+    return false;
+  }
+  // Clamped well inside int32_t before the cast; an output is far smaller.
+  constexpr double kLimit = 1 << 24;
+  const auto lo = [&](const double v) {
+    return static_cast<int32_t>(std::clamp(std::floor(v), -kLimit, kLimit));
+  };
+  const auto hi = [&](const double v) {
+    return static_cast<int32_t>(std::clamp(std::ceil(v), -kLimit, kLimit));
+  };
+  int32_t bx0 = lo(x0);
+  int32_t by0 = lo(y0);
+  int32_t bx1 = hi(x1);
+  int32_t by1 = hi(y1);
+  if (clip != nullptr) {
+    bx0 = std::max(bx0, clip->x);
+    by0 = std::max(by0, clip->y);
+    bx1 = std::min(bx1, clip->x + clip->w);
+    by1 = std::min(by1, clip->y + clip->h);
+  }
+  if (bx1 <= bx0 || by1 <= by0) {
+    return false;
+  }
+  q.bounds = {bx0, by0, bx1 - bx0, by1 - by0};
+  q.uv = UvForLayer(src, buffer_w, buffer_h, transform);
+  q.opaque = opaque;
+  *out = q;
+  return true;
+}

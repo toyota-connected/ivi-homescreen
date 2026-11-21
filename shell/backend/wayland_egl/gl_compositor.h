@@ -67,6 +67,19 @@ class GlCompositor {
     };
     std::array<Part, 7> parts{};
     size_t part_count{0};
+    // Or the quad as two triangles given outright: each vertex in the
+    // viewport's NDC, at (s, t) of the quad, with m 1 where the mask is worked
+    // out. For a quad that is not its viewport's rect (a transformed view).
+    // Takes precedence over parts.
+    struct Vertex {
+      float x{0};
+      float y{0};
+      float s{0};
+      float t{0};
+      float m{0};
+    };
+    std::array<Vertex, 6> verts{};
+    size_t vert_count{0};
   };
 
   explicit GlCompositor(const GlCaps* caps);
@@ -173,6 +186,12 @@ class GlCompositor {
    *                    each layer's corners outside it are cut away, and a
    *                    layer that covers its rect blends rather than
    *                    overwrites. Null leaves corners square.
+   * @param map         The view reaches the output through a rotation, skew
+   *                    or mirror: its own pixels, [0, @p view.w) x
+   *                    [0, @p view.h), go to the same space as @p view through
+   *                    this, and each layer is drawn as the quad it makes
+   *                    there, clipped to @p clip. Null draws each layer as a
+   *                    rect in @p view.
    * @return            The number of layers drawn.
    *
    * Imports each layer's latest frame (GetLayerGlTexture), so it runs on the
@@ -191,7 +210,8 @@ class GlCompositor {
       const DisplayRotation* rotation = nullptr,
       const RectI* clip = nullptr,
       float alpha = 1.0f,
-      const RoundedRect* rounded = nullptr);
+      const RoundedRect* rounded = nullptr,
+      const ViewAffine* map = nullptr);
 
   /**
    * @brief Whether CompositeToFbo may take the glBlitFramebuffer path.
@@ -313,6 +333,19 @@ class GlCompositor {
                                bool opaque,
                                float alpha,
                                const QuadMask* mask);
+  // One layer of a transformed view (CompositeSurfaceLayers' @p map), drawn
+  // as its quad. False when nothing of it shows.
+  bool CompositeLayerThrough(GLuint dst_fbo,
+                             const ICompositorSurface::GlLayerTexture& t,
+                             const RectI& view,
+                             GLint fb_height,
+                             bool target_top_first,
+                             bool under,
+                             const DisplayRotation* rotation,
+                             const RectI* clip,
+                             float alpha,
+                             const RoundedRect* rounded,
+                             const ViewAffine& map);
   // @external selects the samplerExternalOES program and the
   // GL_TEXTURE_EXTERNAL_OES bind target, which planar YUV requires.
   void CompositeViaQuad(GLuint src_color_tex,

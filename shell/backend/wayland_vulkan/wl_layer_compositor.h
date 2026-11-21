@@ -17,6 +17,7 @@
 #ifndef SHELL_BACKEND_WAYLAND_VULKAN_WL_LAYER_COMPOSITOR_H_
 #define SHELL_BACKEND_WAYLAND_VULKAN_WL_LAYER_COMPOSITOR_H_
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -73,6 +74,18 @@ class LayerCompositor {
                   uint32_t height,
                   uint64_t frame);
 
+  // A layer of a view under a rotation, skew or mirror: the parallelogram it
+  // is drawn as, in framebuffer pixels (its corner at (s, t) = (0, 0) and its
+  // edges along s and t), and the rect it is clipped to. (s, t) run over the
+  // layer as they do over a destination rect, so the texture coordinates are
+  // the same.
+  struct Quad {
+    std::array<double, 2> origin{};
+    std::array<double, 2> edge_s{};
+    std::array<double, 2> edge_t{};
+    RectI scissor;
+  };
+
   // Blend one layer: sample @p src_image (already in SHADER_READ_ONLY_OPTIMAL,
   // of format @p src_format — the view must match the image's own format) into
   // the destination rect (pixels, top-left origin — matches the blit path, no Y
@@ -90,6 +103,9 @@ class LayerCompositor {
   // @p ycbcr_model / @p ycbcr_range (built and cached on first use); packed RGB
   // formats ignore those and use the plain sampler. A layer whose YUV program
   // cannot be built is skipped.
+  //
+  // @p quad, when given, is drawn instead of the destination rect: a layer of
+  // a transformed view. @p uv then maps the quad's (s, t).
   void DrawLayer(VkCommandBuffer cmd,
                  VkImage src_image,
                  VkFormat src_format,
@@ -102,7 +118,8 @@ class LayerCompositor {
                  const UvAffine& uv = UvAffine{},
                  bool opaque = false,
                  float alpha = 1.0f,
-                 const RoundedRect* rounded = nullptr);
+                 const RoundedRect* rounded = nullptr,
+                 const Quad* quad = nullptr);
 
   static void EndFrame(VkCommandBuffer cmd);
 
