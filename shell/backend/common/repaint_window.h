@@ -116,10 +116,14 @@ enum class FlipVerdict { kUnjudged, kOnTime, kMissed };
 }
 
 // The window after a flip. A commit that missed its vblank widens it by a
-// millisecond, up to half a refresh: the work behind the commit (the
-// composite, or fences it waits on) needed more of the refresh than the
-// window left. A flip on time eases it back toward @base_ns, by a 256th of the
-// excess (at least 10 us), so a burst of load lets go over a few seconds.
+// millisecond, up to three quarters of a refresh: the work behind the commit
+// (the composite, or fences it waits on) needed more of the refresh than the
+// window left. Half a refresh is not always enough: a v3d compositing a full
+// 1280x1440 frame from linear buffers, which it copies before it can sample
+// them, needs 9 to 12 ms of it (#880). The quarter left is still room for a
+// producer's buffer to land. A flip on time eases it back toward @base_ns, by a
+// 256th of the excess (at least 10 us), so a burst of load lets go over a few
+// seconds.
 [[nodiscard]] constexpr uint64_t AdaptRepaintWindowNs(const uint64_t window_ns,
                                                       const uint64_t base_ns,
                                                       const uint64_t period_ns,
@@ -127,7 +131,8 @@ enum class FlipVerdict { kUnjudged, kOnTime, kMissed };
   if (base_ns == 0 || period_ns == 0) {
     return window_ns;  // off, or nothing to size it against
   }
-  const uint64_t cap = period_ns / 2 > base_ns ? period_ns / 2 : base_ns;
+  const uint64_t cap =
+      period_ns / 4 * 3 > base_ns ? period_ns / 4 * 3 : base_ns;
   if (missed) {
     const uint64_t wider = window_ns + 1'000'000;
     return wider < cap ? wider : cap;
