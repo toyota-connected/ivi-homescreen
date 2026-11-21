@@ -695,6 +695,8 @@ class WaylandVulkanBackend final : public Backend {
   // overwrite blits — required so a platform view under a transparent Flutter
   // overlay is not erased to black. Null falls back to the blit path.
   std::unique_ptr<wl_vulkan::LayerCompositor> layer_compositor_;
+  // The swapchain present's layer compositor could not be built; not retried.
+  bool layer_compositor_failed_{false};
 
   // Build (or rebuild after a resize) the ring of dma-buf image+wl_buffer
   // slots at @p w x @p h. Returns false (and clears dmabuf_present_active_) on

@@ -2635,15 +2635,18 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
       break;
     }
   }
-  if (has_platform_view && !layer_compositor_) {
+  // Built once: a failure is not retried every frame.
+  if (has_platform_view && !layer_compositor_ && !layer_compositor_failed_) {
     std::string comp_err;
     layer_compositor_ = wl_vulkan::LayerCompositor::Create(
         device_, surface_format_.format, comp_err);
     if (!layer_compositor_) {
+      layer_compositor_failed_ = true;
       ihs::log::warn(
           "[WaylandVulkanBackend] layer compositor unavailable ({}); platform "
-          "view falls back to overwrite blit (a transparent overlay may erase "
-          "it)",
+          "views fall back to an overwrite blit (a transparent overlay may "
+          "erase them, and their opacity, rounded clips and transforms are "
+          "not drawn)",
           comp_err);
     }
   }
@@ -3437,6 +3440,32 @@ void WaylandVulkanBackend::BlitPlatformViewVulkan(VkCommandBuffer cmd,
   }
   if (!surface) {
     return;
+  }
+  // A blit copies: it cannot blend, cut corners or turn. A view whose
+  // mutations need any of that is drawn without them here, and said so once
+  // for each.
+  {
+    static bool warned_opacity = false;
+    static bool warned_rounded = false;
+    static bool warned_transform = false;
+    const auto warn_once = [](bool& warned, const char* what) {
+      if (!warned) {
+        warned = true;
+        ihs::log::warn(
+            "[WaylandVulkanBackend] the blit fallback cannot draw a platform "
+            "view's {}; it is drawn without it",
+            what);
+      }
+    };
+    if (ihs::platform_view::OpacityOf(*layer) < 1.0f) {
+      warn_once(warned_opacity, "opacity");
+    }
+    if (ihs::platform_view::RoundedClipOf(*layer).has_value()) {
+      warn_once(warned_rounded, "rounded clip");
+    }
+    if (ihs::platform_view::IsTransformed(*layer)) {
+      warn_once(warned_transform, "rotation, skew or perspective");
+    }
   }
   // Each layer of the view, bottom to top. A blit crops and scales, and can
   // mirror by reversing edges, but cannot rotate: a layer turned a quarter is
