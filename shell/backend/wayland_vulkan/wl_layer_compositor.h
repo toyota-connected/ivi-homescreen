@@ -83,7 +83,8 @@ class LayerCompositor {
   // image, upright. @p opaque draws alpha as 1, for a buffer whose alpha
   // channel is undefined (XRGB). @p alpha is the view's opacity, in [0, 1].
   // Every layer blends, so an opaque one at an opacity below 1 needs nothing
-  // more.
+  // more. @p rounded is the view's rounded clip in framebuffer pixels: the
+  // layer's corners outside it are cut away. Null leaves them square.
   //
   // A planar-YUV @p src_format is sampled through a VkSamplerYcbcrConversion of
   // @p ycbcr_model / @p ycbcr_range (built and cached on first use); packed RGB
@@ -100,7 +101,8 @@ class LayerCompositor {
                  int32_t dst_h,
                  const UvAffine& uv = UvAffine{},
                  bool opaque = false,
-                 float alpha = 1.0f);
+                 float alpha = 1.0f,
+                 const RoundedRect* rounded = nullptr);
 
   static void EndFrame(VkCommandBuffer cmd);
 
@@ -137,6 +139,7 @@ class LayerCompositor {
     VkDescriptorSetLayout set_layout{VK_NULL_HANDLE};
     VkPipelineLayout pipeline_layout{VK_NULL_HANDLE};
     VkPipeline pipeline{VK_NULL_HANDLE};
+    VkPipeline pipeline_mask{VK_NULL_HANDLE};  // with a rounded clip
     // False for a cached negative result: the device could not build the
     // program (no samplerYcbcrConversion / no linear ycbcr filtering), so the
     // handles are null and the lookup returns nullptr without reattempting the
@@ -155,6 +158,12 @@ class LayerCompositor {
   VkDescriptorSetLayout set_layout_{VK_NULL_HANDLE};
   VkPipelineLayout pipeline_layout_{VK_NULL_HANDLE};
   VkPipeline pipeline_{VK_NULL_HANDLE};
+  // pipeline_ built to cut a layer's corners to a rounded clip. Null if it
+  // could not be built; such a layer is then drawn with square corners.
+  VkPipeline pipeline_mask_{VK_NULL_HANDLE};
+  // Says once that a rounded clip is being drawn square.
+  void WarnNoMask();
+  bool warned_no_mask_{false};
   VkSampler sampler_{VK_NULL_HANDLE};
   std::vector<YuvProgram> yuv_programs_;
 

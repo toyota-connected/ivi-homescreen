@@ -18,6 +18,7 @@
 
 #include <GLES2/gl2.h>
 
+#include <array>
 #include <cstddef>
 #include <functional>
 
@@ -42,6 +43,32 @@
  */
 class GlCompositor {
  public:
+  /**
+   * @brief A rounded rect to cut a quad's corners to.
+   *
+   * @c pos maps the quad's (s, t) to the space @c rect is in, pixels with a
+   * top-left origin, the way a UvAffine maps it to texture coordinates. The
+   * pixels outside the rounded rect's corners are cut away; the quad's own
+   * crop is expected to have dealt with its straight edges.
+   */
+  struct QuadMask {
+    UvAffine pos{};
+    RoundedRect rect{};
+    // Where the quad is drawn as pieces, each a rect of its (s, t) and whether
+    // it is a box around a corner, the only place the mask can cut. The pieces
+    // go in one draw, and outside the corner boxes the mask is not worked out.
+    // With none, the mask is worked out over the whole quad.
+    struct Part {
+      float s0{0};
+      float t0{0};
+      float s1{0};
+      float t1{0};
+      bool corner{false};
+    };
+    std::array<Part, 7> parts{};
+    size_t part_count{0};
+  };
+
   explicit GlCompositor(const GlCaps* caps);
   ~GlCompositor();
 
@@ -99,6 +126,7 @@ class GlCompositor {
    *                     rect. Blending still follows @p blend.
    * @param alpha        The view's opacity, in [0, 1]: scales the layer's
    *                     premultiplied color.
+   * @param mask         A rounded rect to cut the layer's corners to, or null.
    */
   void CompositeLayerToFbo(GLuint dst_fbo,
                            GLuint tex,
@@ -110,7 +138,8 @@ class GlCompositor {
                            GLsizei dst_h,
                            bool blend,
                            bool opaque,
-                           float alpha = 1.0f);
+                           float alpha = 1.0f,
+                           const QuadMask* mask = nullptr);
 
   /**
    * @brief Draw every layer of @p surface, bottom to top, into its view rect.
@@ -140,6 +169,10 @@ class GlCompositor {
    *                    than overwrites. Applied per layer: where two of a
    *                    view's layers overlap, the lower one shows through,
    *                    which a group opacity would not do.
+   * @param rounded     The view's rounded clip, in the same space as @p view:
+   *                    each layer's corners outside it are cut away, and a
+   *                    layer that covers its rect blends rather than
+   *                    overwrites. Null leaves corners square.
    * @return            The number of layers drawn.
    *
    * Imports each layer's latest frame (GetLayerGlTexture), so it runs on the
@@ -157,7 +190,8 @@ class GlCompositor {
       const ICompositorSurface::GlLayerTexture* layer0 = nullptr,
       const DisplayRotation* rotation = nullptr,
       const RectI* clip = nullptr,
-      float alpha = 1.0f);
+      float alpha = 1.0f,
+      const RoundedRect* rounded = nullptr);
 
   /**
    * @brief Whether CompositeToFbo may take the glBlitFramebuffer path.
@@ -221,6 +255,9 @@ class GlCompositor {
   bool quad_initialized_{false};
   GLuint program_{0};
   GLuint vbo_{0};
+  // The vertices of a quad drawn as pieces (QuadMask::parts), rewritten for
+  // each such draw.
+  GLuint parts_vbo_{0};
   GLint attr_pos_{-1};
   GLint attr_uv_{-1};
   GLint uni_tex_{-1};
@@ -235,19 +272,47 @@ class GlCompositor {
   GLuint bound_tex_{0};
 
   bool EnsureQuad();
-  // Links the samplerExternalOES variant of the quad program, used for YUV
-  // platform-view frames (planar or packed). Leaves program_external_ at 0 when
-  // the driver lacks GL_OES_EGL_image_external.
-  void BuildExternalProgram();
-  void CompositeViaQuadExternal(GLuint tex,
-                                GLint dst_x,
-                                GLint dst_y,
-                                GLsizei dst_w,
-                                GLsizei dst_h,
-                                bool blend,
-                                const UvAffine& uv,
-                                bool opaque,
-                                float alpha);
+  // The uniforms of a program's rounded-rect mask (kMaskSrc).
+  struct MaskUniforms {
+    GLint pos_u{-1};
+    GLint pos_v{-1};
+    GLint rrect{-1};
+    GLint radii_top{-1};
+    GLint radii_bottom{-1};
+  };
+  // A quad program drawn outside the frame-batched path: the external-sampler
+  // one, and the two built to cut corners to a rounded clip. id 0 is a program
+  // that is not there.
+  struct QuadProgram {
+    GLuint id{0};
+    GLint attr_pos{-1};
+    GLint attr_uv{-1};
+    GLint attr_mask{-1};
+    GLint uni_tex{-1};
+    GLint uni_uv_u{-1};
+    GLint uni_uv_v{-1};
+    GLint uni_opaque{-1};
+    GLint uni_alpha{-1};
+    MaskUniforms mask;
+  };
+  // Builds mask_, and when the driver has GL_OES_EGL_image_external, external_
+  // and external_mask_. One that cannot be built is left at id 0.
+  void BuildSelfContainedPrograms();
+  static QuadProgram BuildQuadProgram(bool external, bool mask);
+  // Draws with @p p, its texture bound to @p target, setting up and tearing
+  // down all of its own state.
+  void CompositeViaQuadProgram(const QuadProgram& p,
+                               GLenum target,
+                               GLuint tex,
+                               GLint dst_x,
+                               GLint dst_y,
+                               GLsizei dst_w,
+                               GLsizei dst_h,
+                               bool blend,
+                               const UvAffine& uv,
+                               bool opaque,
+                               float alpha,
+                               const QuadMask* mask);
   // @external selects the samplerExternalOES program and the
   // GL_TEXTURE_EXTERNAL_OES bind target, which planar YUV requires.
   void CompositeViaQuad(GLuint src_color_tex,
@@ -259,7 +324,8 @@ class GlCompositor {
                         const UvAffine& uv,
                         bool opaque,
                         bool external,
-                        float alpha);
+                        float alpha,
+                        const QuadMask* mask);
   // The texture coordinates the legacy flip_y flag stood for: a top-first
   // texture needs none, a bottom-first one (a GL render target) a V flip.
   static UvAffine UvForFlip(bool flip_y);
@@ -271,6 +337,9 @@ class GlCompositor {
                                const UvAffine& uv,
                                bool opaque,
                                float alpha);
+  static MaskUniforms GetMaskUniforms(GLuint program);
+  // Upload @p mask to a masked program's mask uniforms.
+  static void SetMaskUniforms(const MaskUniforms& u, const QuadMask& mask);
   void EmitPersistentQuadState();
   void TearDownPersistentQuadState();
 
@@ -283,12 +352,8 @@ class GlCompositor {
   // The external-sampler variant. A planar YUV dma-buf is bound to
   // GL_TEXTURE_EXTERNAL_OES and can only be read through this program;
   // sampling it with the sampler2D one yields the luma plane in red.
-  GLuint program_external_{0};
-  GLint attr_pos_external_{-1};
-  GLint attr_uv_external_{-1};
-  GLint uni_tex_external_{-1};
-  GLint uni_uv_u_external_{-1};
-  GLint uni_uv_v_external_{-1};
-  GLint uni_opaque_external_{-1};
-  GLint uni_alpha_external_{-1};
+  QuadProgram external_;
+  // program_ and external_ built to cut corners to a rounded clip.
+  QuadProgram mask_;
+  QuadProgram external_mask_;
 };

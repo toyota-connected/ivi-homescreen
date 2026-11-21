@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <optional>
@@ -144,6 +146,76 @@ inline float OpacityOf(const FlutterLayer& layer) {
     return 1.0f;
   }
   return o <= 0.0 ? 0.0f : static_cast<float>(o);
+}
+
+/**
+ * @brief The rounded clip on @p layer's view, in output pixels.
+ *
+ * Empty when the view has none, or when its corners do not cut into the part
+ * of the view that shows (the view's rect inside its clip rect), so a caller
+ * can keep its unrounded path for that case. The clip's bounding box is part
+ * of @c ClipRectOf either way; this adds only the corners.
+ *
+ * With more than one rounded clip, or one under a rotation or skew, this is
+ * the innermost one still a rounded rect on screen, and some corners are
+ * drawn square (see @c ComposedMutation::rounded_clip_exact).
+ */
+inline std::optional<RoundedRect> RoundedClipOf(const FlutterLayer& layer) {
+  if (layer.type != kFlutterLayerContentTypePlatformView ||
+      layer.platform_view == nullptr ||
+      layer.platform_view->mutations_count == 0) {
+    return std::nullopt;
+  }
+  const ComposedMutation composed = MutationStack::Compose(layer.platform_view);
+  if (!composed.has_rounded_mask) {
+    return std::nullopt;
+  }
+  const FlutterRoundedRect& rr = composed.rounded_clip;
+  const std::array<FlutterSize, 4> radii = {
+      rr.upper_left_corner_radius, rr.upper_right_corner_radius,
+      rr.lower_right_corner_radius, rr.lower_left_corner_radius};
+  for (const FlutterSize& r : radii) {
+    if (!std::isfinite(r.width) || !std::isfinite(r.height)) {
+      return std::nullopt;
+    }
+  }
+  const FlutterRect& c = rr.rect;
+  if (!std::isfinite(c.left) || !std::isfinite(c.top) ||
+      !std::isfinite(c.right) || !std::isfinite(c.bottom)) {
+    return std::nullopt;
+  }
+  // The part of the view that shows: its rect inside the clip rect, which
+  // holds this clip's bounding box.
+  const FlutterRect& cr = composed.clip_rect;
+  const double x0 = std::max(layer.offset.x, cr.left);
+  const double y0 = std::max(layer.offset.y, cr.top);
+  const double x1 = std::min(layer.offset.x + layer.size.width, cr.right);
+  const double y1 = std::min(layer.offset.y + layer.size.height, cr.bottom);
+  if (x1 <= x0 || y1 <= y0) {
+    return std::nullopt;  // nothing shows; the clip rect drops it
+  }
+  // A corner cuts in when the shown part reaches into its square, the radii
+  // across from the clip's own corner. Half a pixel of slack: a corner that
+  // small is not drawn.
+  constexpr double kSlack = 0.5;
+  const bool ul = x0 < c.left + radii[0].width - kSlack &&
+                  y0 < c.top + radii[0].height - kSlack;
+  const bool ur = x1 > c.right - radii[1].width + kSlack &&
+                  y0 < c.top + radii[1].height - kSlack;
+  const bool lr = x1 > c.right - radii[2].width + kSlack &&
+                  y1 > c.bottom - radii[2].height + kSlack;
+  const bool ll = x0 < c.left + radii[3].width - kSlack &&
+                  y1 > c.bottom - radii[3].height + kSlack;
+  if (!ul && !ur && !lr && !ll) {
+    return std::nullopt;
+  }
+  RoundedRect out;
+  out.rect = {c.left, c.top, c.right - c.left, c.bottom - c.top};
+  for (size_t i = 0; i < radii.size(); ++i) {
+    out.radii[i] = {static_cast<float>(std::max(0.0, radii[i].width)),
+                    static_cast<float>(std::max(0.0, radii[i].height))};
+  }
+  return out;
 }
 
 /**

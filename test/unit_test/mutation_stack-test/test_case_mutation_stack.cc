@@ -66,6 +66,26 @@ FlutterPlatformViewMutation RoundedRect() {
   return m;
 }
 
+// A rounded clip with each corner's radius given as one number, upper left
+// first, clockwise.
+FlutterPlatformViewMutation RRect(double l,
+                                  double t,
+                                  double r,
+                                  double b,
+                                  double ul,
+                                  double ur,
+                                  double lr,
+                                  double ll) {
+  FlutterPlatformViewMutation m{};
+  m.type = kFlutterPlatformViewMutationTypeClipRoundedRect;
+  m.clip_rounded_rect.rect = {l, t, r, b};
+  m.clip_rounded_rect.upper_left_corner_radius = {ul, ul};
+  m.clip_rounded_rect.upper_right_corner_radius = {ur, ur};
+  m.clip_rounded_rect.lower_right_corner_radius = {lr, lr};
+  m.clip_rounded_rect.lower_left_corner_radius = {ll, ll};
+  return m;
+}
+
 }  // namespace
 
 TEST(MutationStack, EmptyOrNullProducesIdentity) {
@@ -208,4 +228,70 @@ TEST(MutationStack, ClipUnderARotationIsItsBoundingBox) {
   EXPECT_NEAR(r.clip_rect.right, 10 * k, 1e-9);
   EXPECT_NEAR(r.clip_rect.top, 0, 1e-9);
   EXPECT_NEAR(r.clip_rect.bottom, 20 * k, 1e-9);
+}
+
+TEST(MutationStack, RoundedClipIsMappedThroughTheTransformsOutsideIt) {
+  // The pixel ratio, a card moved to (10, 20), and the card's rounded clip in
+  // its own coordinates: the rect moves and scales, and so do the radii.
+  auto dpr = Scale(2, 2);
+  auto move = Translate(10, 20);
+  auto card = RRect(0, 0, 100, 50, 8, 8, 8, 8);
+  std::vector<const FlutterPlatformViewMutation*> list{&dpr, &move, &card};
+  FlutterPlatformView v = MakeView(list);
+  const auto r = MutationStack::Compose(&v);
+  ASSERT_TRUE(r.has_rounded_mask);
+  EXPECT_TRUE(r.rounded_clip_exact);
+  EXPECT_DOUBLE_EQ(r.rounded_clip.rect.left, 20);
+  EXPECT_DOUBLE_EQ(r.rounded_clip.rect.top, 40);
+  EXPECT_DOUBLE_EQ(r.rounded_clip.rect.right, 220);
+  EXPECT_DOUBLE_EQ(r.rounded_clip.rect.bottom, 140);
+  EXPECT_DOUBLE_EQ(r.rounded_clip.upper_left_corner_radius.width, 16);
+  EXPECT_DOUBLE_EQ(r.rounded_clip.lower_right_corner_radius.height, 16);
+  // Its bounding box is part of the plain clip, for paths with no corners.
+  ASSERT_TRUE(r.has_clip);
+  EXPECT_DOUBLE_EQ(r.clip_rect.left, 20);
+  EXPECT_DOUBLE_EQ(r.clip_rect.bottom, 140);
+}
+
+TEST(MutationStack, AMirroredRoundedClipKeepsEachCornerWhereItShows) {
+  // Flipped left to right: the radius drawn at the upper left is the one the
+  // clip gave its upper right.
+  auto mirror = Scale(-1, 1);
+  auto card = RRect(0, 0, 100, 50, 1, 2, 3, 4);
+  std::vector<const FlutterPlatformViewMutation*> list{&mirror, &card};
+  FlutterPlatformView v = MakeView(list);
+  const auto r = MutationStack::Compose(&v);
+  ASSERT_TRUE(r.has_rounded_mask);
+  EXPECT_DOUBLE_EQ(r.rounded_clip.upper_left_corner_radius.width, 2);
+  EXPECT_DOUBLE_EQ(r.rounded_clip.upper_right_corner_radius.width, 1);
+  EXPECT_DOUBLE_EQ(r.rounded_clip.lower_right_corner_radius.width, 4);
+  EXPECT_DOUBLE_EQ(r.rounded_clip.lower_left_corner_radius.width, 3);
+  EXPECT_DOUBLE_EQ(r.rounded_clip.rect.left, -100);
+}
+
+TEST(MutationStack, ARotatedRoundedClipIsOnlyItsBoundingBox) {
+  const double k = std::sqrt(0.5);
+  FlutterPlatformViewMutation turn{};
+  turn.type = kFlutterPlatformViewMutationTypeTransformation;
+  turn.transformation = {k, -k, 0, k, k, 0, 0, 0, 1};
+  auto card = RRect(0, 0, 10, 10, 2, 2, 2, 2);
+  std::vector<const FlutterPlatformViewMutation*> list{&turn, &card};
+  FlutterPlatformView v = MakeView(list);
+  const auto r = MutationStack::Compose(&v);
+  EXPECT_TRUE(r.has_rounded_clip);
+  EXPECT_FALSE(r.has_rounded_mask);
+  EXPECT_FALSE(r.rounded_clip_exact);
+  EXPECT_TRUE(r.has_clip);
+}
+
+TEST(MutationStack, OfTwoRoundedClipsTheInnermostIsKept) {
+  auto outer = RRect(0, 0, 100, 100, 20, 20, 20, 20);
+  auto inner = RRect(10, 10, 60, 60, 5, 5, 5, 5);
+  std::vector<const FlutterPlatformViewMutation*> list{&outer, &inner};
+  FlutterPlatformView v = MakeView(list);
+  const auto r = MutationStack::Compose(&v);
+  ASSERT_TRUE(r.has_rounded_mask);
+  EXPECT_FALSE(r.rounded_clip_exact);
+  EXPECT_DOUBLE_EQ(r.rounded_clip.rect.left, 10);
+  EXPECT_DOUBLE_EQ(r.rounded_clip.upper_left_corner_radius.width, 5);
 }

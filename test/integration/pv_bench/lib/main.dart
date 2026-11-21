@@ -36,6 +36,8 @@
 //   PV_BENCH_FADE       set to 1 to wrap it in a FadeTransition instead: up
 //                       from 0.2 to 1.0 over two seconds, a second at 1.0,
 //                       and back down over two
+//   PV_BENCH_RADIUS     wrap the view in a ClipRRect with corners of this
+//                       radius, in logical pixels (default 0, no clip)
 
 import 'dart:async';
 import 'dart:ffi' as ffi;
@@ -207,7 +209,8 @@ class _PvBenchPageState extends State<PvBenchPage>
         children: <Widget>[
           if (widget.showPlatformView)
             Positioned.fill(
-                child: _faded(_clipped(_scaled(const _BenchPlatformView()))))
+                child: _faded(
+                    _rounded(_clipped(_scaled(const _BenchPlatformView())))))
           else
             const Center(
               child: Text('no platform view',
@@ -305,6 +308,21 @@ class _PulsingFadeState extends State<_PulsingFade>
       child: widget.child,
     );
   }
+}
+
+// A rounded clip on the view puts a rounded-rect clip mutation on its layer,
+// so a run can check that each backend cuts the view's corners (#867).
+final double _pvRadius =
+    double.tryParse(Platform.environment['PV_BENCH_RADIUS'] ?? '') ?? 0.0;
+
+Widget _rounded(Widget child) {
+  if (_pvRadius <= 0.0) {
+    return child;
+  }
+  return ClipRRect(
+    borderRadius: BorderRadius.circular(_pvRadius),
+    child: child,
+  );
 }
 
 class _MiddleClipper extends CustomClipper<Rect> {

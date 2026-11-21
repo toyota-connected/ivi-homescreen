@@ -95,6 +95,7 @@ previous process has released DRM master gives a run that produces no report.
 | `PV_BENCH_SCALE_ANIM` | *(unset)* | `1`: the app wraps its view in a `ScaleTransition` between 0.4 and 1.0 instead, two seconds each way |
 | `PV_BENCH_CLIP` | *(unset)* | `1`: the app wraps its view in a `ClipRect` that keeps the middle of the screen, half its width and height |
 | `PV_BENCH_OPACITY` | `1` | the app wraps its view in `Opacity` at this value |
+| `PV_BENCH_RADIUS` | `0` | the app wraps its view in a `ClipRRect` with corners of this radius, in logical pixels |
 | `PV_BENCH_FADE` | *(unset)* | `1`: the app wraps its view in a `FadeTransition` instead: up from 0.2 to 1.0 over two seconds, a second at 1.0, and back down over two |
 
 `PV_BENCH_NO_PV=1` is the control: same Flutter content, no layer. The difference
@@ -134,6 +135,13 @@ plane's `alpha` property should be half its range. `PV_BENCH_FADE=1` holds
 1.0 for a second each cycle, where Flutter drops the opacity, so a plane path
 also has to go back to opaque: its `alpha` should read the top of its range
 for that second.
+
+`PV_BENCH_RADIUS` is the same kind of check for a rounded clip, also read by
+the app. On a full-screen view the output's corners should show the app's
+black background, cut along a curve of that radius times the pixel ratio, and
+everything else the view. Square corners are the bug in \#867. No plane has
+rounded corners, so on a plane path the view should not get one: the frame is
+composited instead.
 
 The app reports build/raster/total percentiles and exits. The producer reports
 submits per second and mean release-fence wait every second -- check that first.

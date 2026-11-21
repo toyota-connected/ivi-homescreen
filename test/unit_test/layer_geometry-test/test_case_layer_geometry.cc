@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <utility>
@@ -292,4 +293,131 @@ TEST(LayerGeometry, ViewBoundsIsTheClipInViewPixels) {
   EXPECT_EQ(b.y, 0);
   EXPECT_EQ(b.w, 200);
   EXPECT_EQ(b.h, 50);
+}
+
+TEST(LayerGeometry, SubUvKeepsEachPixelsTextureCoordinates) {
+  UvAffine uv;
+  uv.a = 0.0f;
+  uv.b = 0.5f;
+  uv.c = -0.25f;
+  uv.d = 0.0f;
+  uv.tx = 0.75f;
+  uv.ty = 0.125f;
+  const RectI dst{10, 20, 200, 100};
+  const RectI sub{60, 70, 40, 30};
+  const UvAffine s = SubUv(uv, dst, sub);
+  for (const auto& [px, py] : {std::pair{60.0, 70.0}, std::pair{100.0, 100.0},
+                               std::pair{77.5, 81.25}}) {
+    const double s_dst = (px - dst.x) / dst.w;
+    const double t_dst = (py - dst.y) / dst.h;
+    const double s_sub = (px - sub.x) / sub.w;
+    const double t_sub = (py - sub.y) / sub.h;
+    EXPECT_NEAR(s.U(s_sub, t_sub), uv.U(s_dst, t_dst), 1e-6);
+    EXPECT_NEAR(s.V(s_sub, t_sub), uv.V(s_dst, t_dst), 1e-6);
+  }
+}
+
+namespace {
+
+RoundedRect Rounded(const RectF& rect, const float rx, const float ry) {
+  RoundedRect r;
+  r.rect = rect;
+  for (auto& c : r.radii) {
+    c = {rx, ry};
+  }
+  return r;
+}
+
+// Every pixel of dst is in exactly one piece, and only pieces that touch a
+// corner box are marked as corners.
+void ExpectExactCover(const RectI& dst,
+                      const std::array<RoundedPiece, 7>& pieces,
+                      const size_t n) {
+  std::vector<int> hits(static_cast<size_t>(dst.w) * static_cast<size_t>(dst.h),
+                        0);
+  for (size_t k = 0; k < n; ++k) {
+    const RectI& p = pieces[k].rect;
+    ASSERT_GT(p.w, 0);
+    ASSERT_GT(p.h, 0);
+    ASSERT_GE(p.x, dst.x);
+    ASSERT_GE(p.y, dst.y);
+    ASSERT_LE(p.x + p.w, dst.x + dst.w);
+    ASSERT_LE(p.y + p.h, dst.y + dst.h);
+    for (int y = p.y; y < p.y + p.h; ++y) {
+      for (int x = p.x; x < p.x + p.w; ++x) {
+        ++hits[static_cast<size_t>(y - dst.y) * static_cast<size_t>(dst.w) +
+               static_cast<size_t>(x - dst.x)];
+      }
+    }
+  }
+  for (const int h : hits) {
+    ASSERT_EQ(h, 1);
+  }
+}
+
+}  // namespace
+
+TEST(LayerGeometry, SplitPutsOnlyTheCornerBoxesUnderTheMask) {
+  const RectI dst{0, 0, 1280, 1440};
+  const RoundedRect clip = Rounded({0, 0, 1280, 1440}, 120.0f, 120.0f);
+  std::array<RoundedPiece, 7> pieces;
+  const size_t n = SplitRoundedCorners(dst, clip, pieces);
+  ASSERT_EQ(n, 7u);
+  ExpectExactCover(dst, pieces, n);
+  int masked = 0;
+  for (size_t k = 0; k < n; ++k) {
+    if (pieces[k].corner) {
+      EXPECT_EQ(pieces[k].rect.w, 120);
+      EXPECT_EQ(pieces[k].rect.h, 120);
+      masked += pieces[k].rect.w * pieces[k].rect.h;
+    }
+  }
+  EXPECT_EQ(masked, 4 * 120 * 120);
+}
+
+TEST(LayerGeometry, SplitRoundsTheCornerBoxesOut) {
+  // A fractional clip: the box reaches every pixel the curve touches.
+  const RectI dst{10, 10, 100, 100};
+  const RoundedRect clip = Rounded({10.25, 10.25, 99.5, 99.5}, 20.5f, 10.5f);
+  std::array<RoundedPiece, 7> pieces;
+  const size_t n = SplitRoundedCorners(dst, clip, pieces);
+  ExpectExactCover(dst, pieces, n);
+  ASSERT_TRUE(pieces[0].corner);
+  EXPECT_EQ(pieces[0].rect.x, 10);
+  EXPECT_EQ(pieces[0].rect.w, 21);  // ceil(10.25 + 20.5) - 10
+  EXPECT_EQ(pieces[0].rect.h, 11);  // ceil(10.25 + 10.5) - 10
+}
+
+TEST(LayerGeometry, SplitGivesTheCornersTheRowWhenTheyMeet) {
+  // Corners wider than half the rect: no plain column between them.
+  const RectI dst{0, 0, 100, 400};
+  const RoundedRect clip = Rounded({0, 0, 100, 400}, 70.0f, 30.0f);
+  std::array<RoundedPiece, 7> pieces;
+  const size_t n = SplitRoundedCorners(dst, clip, pieces);
+  ExpectExactCover(dst, pieces, n);
+  ASSERT_EQ(n, 5u);
+  for (size_t k = 0; k < n; ++k) {
+    EXPECT_EQ(pieces[k].corner, pieces[k].rect.h == 30) << k;
+  }
+}
+
+TEST(LayerGeometry, SplitOfALayerInsideTheMiddleNeedsNoMask) {
+  // A layer that the corners do not reach is one plain piece.
+  const RectI dst{200, 200, 300, 300};
+  const RoundedRect clip = Rounded({0, 0, 1000, 1000}, 50.0f, 50.0f);
+  std::array<RoundedPiece, 7> pieces;
+  const size_t n = SplitRoundedCorners(dst, clip, pieces);
+  ASSERT_EQ(n, 1u);
+  EXPECT_FALSE(pieces[0].corner);
+  EXPECT_EQ(pieces[0].rect.w, 300);
+}
+
+TEST(LayerGeometry, SubUvOfAnEmptyRectIsTheSame) {
+  UvAffine uv;
+  uv.a = 0.5f;
+  uv.tx = 0.25f;
+  const UvAffine s = SubUv(uv, {0, 0, 0, 10}, {0, 0, 0, 10});
+  EXPECT_EQ(s.a, uv.a);
+  EXPECT_EQ(s.tx, uv.tx);
+  EXPECT_FALSE(std::isnan(s.U(0.5, 0.5)));
 }

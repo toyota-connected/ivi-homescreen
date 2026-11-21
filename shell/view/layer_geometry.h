@@ -17,7 +17,11 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstddef>
 #include <cstdint>
+#include <utility>
 
 // Where a layer's pixels come from and where they land: a crop of its buffer,
 // a transform, and a destination rect. The same description drives the GL and
@@ -45,6 +49,14 @@ struct RectF {
   double y{0};
   double w{0};
   double h{0};
+};
+
+// A rounded rect: a rect and the radii of its corners, each (x, y), clockwise
+// from the upper left. Zero radii are square corners.
+struct RoundedRect {
+  RectF rect;
+  std::array<std::array<float, 2>, 4> radii{};  // upper left, upper right,
+                                                // lower right, lower left
 };
 
 // A rect in whole destination pixels, top-left origin.
@@ -295,4 +307,75 @@ inline bool PlaceLayer(RectF src,
   out->uv = UvForLayer(src, buffer_w, buffer_h, transform);
   out->opaque = opaque;
   return true;
+}
+
+// @p uv for the part @p sub of the destination rect @p dst: the same texture
+// coordinates at every pixel, with (s, t) running over @p sub instead. An empty
+// @p dst has no (s, t) to map, and gives back @p uv.
+inline UvAffine SubUv(const UvAffine& uv, const RectI& dst, const RectI& sub) {
+  if (dst.w <= 0 || dst.h <= 0) {
+    return uv;
+  }
+  const double s0 = static_cast<double>(sub.x - dst.x) / dst.w;
+  const double t0 = static_cast<double>(sub.y - dst.y) / dst.h;
+  const double sw = static_cast<double>(sub.w) / dst.w;
+  const double th = static_cast<double>(sub.h) / dst.h;
+  UvAffine out;
+  out.a = static_cast<float>(uv.a * sw);
+  out.b = static_cast<float>(uv.b * sw);
+  out.c = static_cast<float>(uv.c * th);
+  out.d = static_cast<float>(uv.d * th);
+  out.tx = uv.U(s0, t0);
+  out.ty = uv.V(s0, t0);
+  return out;
+}
+
+// A part of a layer's destination rect, and whether a corner of its rounded
+// clip may cut it.
+struct RoundedPiece {
+  RectI rect;
+  bool corner{false};
+};
+
+// Split @p dst into the four boxes around @p clip's corners, rounded out to
+// whole pixels, and the rest, which no corner reaches. Only the corners need
+// the mask; the rest draws like a layer without one. Writes up to seven pieces,
+// none empty, that cover @p dst exactly, and returns how many. Where two
+// corners' boxes meet, the corners take the whole row or column.
+inline size_t SplitRoundedCorners(const RectI& dst,
+                                  const RoundedRect& clip,
+                                  std::array<RoundedPiece, 7>& out) {
+  // Upper left, upper right, lower right, lower left.
+  const auto& r = clip.radii;
+  const auto split = [](const double lo_edge, const double hi_edge,
+                        const int32_t lo, const int32_t hi) {
+    auto a = static_cast<int32_t>(std::clamp(
+        std::ceil(lo_edge), static_cast<double>(lo), static_cast<double>(hi)));
+    auto b = static_cast<int32_t>(std::clamp(
+        std::floor(hi_edge), static_cast<double>(lo), static_cast<double>(hi)));
+    return std::array<int32_t, 4>{lo, a, std::max(a, b), hi};
+  };
+  const std::array<int32_t, 4> xs =
+      split(clip.rect.x + std::max(r[0][0], r[3][0]),
+            clip.rect.x + clip.rect.w - std::max(r[1][0], r[2][0]), dst.x,
+            dst.x + dst.w);
+  const std::array<int32_t, 4> ys =
+      split(clip.rect.y + std::max(r[0][1], r[1][1]),
+            clip.rect.y + clip.rect.h - std::max(r[3][1], r[2][1]), dst.y,
+            dst.y + dst.h);
+  size_t n = 0;
+  const auto add = [&](const int32_t x0, const int32_t y0, const int32_t x1,
+                       const int32_t y1, const bool corner) {
+    if (x1 > x0 && y1 > y0) {
+      out[n++] = RoundedPiece{RectI{x0, y0, x1 - x0, y1 - y0}, corner};
+    }
+  };
+  for (const auto& [y0, y1] :
+       {std::pair{ys[0], ys[1]}, std::pair{ys[2], ys[3]}}) {
+    add(xs[0], y0, xs[1], y1, true);
+    add(xs[1], y0, xs[2], y1, false);
+    add(xs[2], y0, xs[3], y1, true);
+  }
+  add(xs[0], ys[1], xs[3], ys[2], false);
+  return n;
 }

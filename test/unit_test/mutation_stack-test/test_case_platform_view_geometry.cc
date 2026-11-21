@@ -54,6 +54,21 @@ FlutterPlatformViewMutation Opacity(double o) {
   return m;
 }
 
+FlutterPlatformViewMutation RRect(double l,
+                                  double t,
+                                  double r,
+                                  double b,
+                                  double radius) {
+  FlutterPlatformViewMutation m{};
+  m.type = kFlutterPlatformViewMutationTypeClipRoundedRect;
+  m.clip_rounded_rect.rect = {l, t, r, b};
+  m.clip_rounded_rect.upper_left_corner_radius = {radius, radius};
+  m.clip_rounded_rect.upper_right_corner_radius = {radius, radius};
+  m.clip_rounded_rect.lower_right_corner_radius = {radius, radius};
+  m.clip_rounded_rect.lower_left_corner_radius = {radius, radius};
+  return m;
+}
+
 FlutterPlatformViewMutation Clip(double l, double t, double r, double b) {
   FlutterPlatformViewMutation m{};
   m.type = kFlutterPlatformViewMutationTypeClipRect;
@@ -299,4 +314,44 @@ TEST(PlatformViewGeometry, ABackingStoreIsOpaque) {
   ViewLayer v({Opacity(0.5)}, {0, 0}, {10, 10});
   v.layer.type = kFlutterLayerContentTypeBackingStore;
   EXPECT_EQ(pv::OpacityOf(v.layer), 1.0f);
+}
+
+TEST(PlatformViewGeometry, NoRoundedClipMeansNone) {
+  ViewLayer v({Scale(2, 2), Clip(0, 0, 50, 50)}, {0, 0}, {100, 100});
+  EXPECT_FALSE(pv::RoundedClipOf(v.layer).has_value());
+}
+
+TEST(PlatformViewGeometry, ARoundedClipThatCutsTheViewIsInOutputPixels) {
+  // A 100 x 50 logical card with 8-point corners at pixel ratio 2, the view
+  // filling it.
+  ViewLayer v({Scale(2, 2), RRect(0, 0, 100, 50, 8)}, {0, 0}, {200, 100});
+  const auto r = pv::RoundedClipOf(v.layer);
+  ASSERT_TRUE(r.has_value());
+  EXPECT_DOUBLE_EQ(r->rect.x, 0);
+  EXPECT_DOUBLE_EQ(r->rect.w, 200);
+  EXPECT_DOUBLE_EQ(r->rect.h, 100);
+  for (const auto& corner : r->radii) {
+    EXPECT_FLOAT_EQ(corner[0], 16);
+    EXPECT_FLOAT_EQ(corner[1], 16);
+  }
+}
+
+TEST(PlatformViewGeometry, ARoundedClipWhoseCornersMissTheViewIsNotReported) {
+  // The view sits in the middle of a big rounded card, clear of its corners.
+  ViewLayer v({RRect(0, 0, 400, 400, 20)}, {100, 100}, {200, 200});
+  EXPECT_FALSE(pv::RoundedClipOf(v.layer).has_value());
+}
+
+TEST(PlatformViewGeometry, CornersOutsideTheClipRectAreNotReported) {
+  // A rounded card, and inside it a plain clip that keeps its middle: the
+  // part that shows never reaches a corner.
+  ViewLayer v({RRect(0, 0, 100, 100, 10), Clip(20, 20, 80, 80)}, {0, 0},
+              {100, 100});
+  EXPECT_FALSE(pv::RoundedClipOf(v.layer).has_value());
+  EXPECT_TRUE(pv::ClipRectOf(v.layer).has_value());
+}
+
+TEST(PlatformViewGeometry, SquareCornersAreNotReported) {
+  ViewLayer v({RRect(0, 0, 100, 100, 0.25)}, {0, 0}, {100, 100});
+  EXPECT_FALSE(pv::RoundedClipOf(v.layer).has_value());
 }

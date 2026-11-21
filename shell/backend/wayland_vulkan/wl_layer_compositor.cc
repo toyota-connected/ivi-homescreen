@@ -17,6 +17,7 @@
 #include "backend/wayland_vulkan/wl_layer_compositor.h"
 
 #include <array>
+#include <cstddef>
 
 #include "logging/logging.h"
 
@@ -34,9 +35,9 @@ const auto& d() {
 }
 
 // The per-draw push constants, laid out as the PC block in
-// shaders/composite.{vert,frag}: std430 puts each vec4 on a 16-byte boundary,
-// and the trailing floats pad the block to 64 bytes, well inside the 128 every
-// device guarantees.
+// shaders/composite.frag (the vertex shader reads the first part of it):
+// std430 puts each vec4 on a 16-byte boundary, so two pad floats follow alpha.
+// 112 bytes, inside the 128 every device guarantees.
 struct LayerPush {
   std::array<float, 4> rect;  // destination, NDC x0, y0, x1, y1
   std::array<float, 4> uv_u;  // (a, c, tx, -)
@@ -44,8 +45,14 @@ struct LayerPush {
   float opaque;
   float alpha;  // the view's opacity, scaling the premultiplied color
   std::array<float, 2> pad;
+  // The rounded clip in framebuffer pixels: its rect (left, top, right,
+  // bottom), then its corner radii (x, y) upper left, upper right, lower left,
+  // lower right. All radii zero is no clip.
+  std::array<float, 4> rrect;
+  std::array<float, 4> radii_top;
+  std::array<float, 4> radii_bottom;
 };
-static_assert(sizeof(LayerPush) == 64, "must match the shaders' PC block");
+static_assert(sizeof(LayerPush) == 112, "must match the shaders' PC block");
 
 constexpr VkShaderStageFlags kPushStages =
     VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -80,10 +87,13 @@ bool IsYuvFormat(VkFormat format) {
 // dynamic viewport/scissor, positions from gl_VertexIndex, no vertex input) and
 // the same shaders; they differ only in the layout — the YUV one references the
 // immutable-ycbcr-sampler set layout, which bakes the conversion into sampling.
-// Returns VK_NULL_HANDLE on failure.
+// @p mask sets the fragment shader's kMask, which cuts the corners to a rounded
+// clip; without it that code is compiled out. Returns VK_NULL_HANDLE on
+// failure.
 VkPipeline MakePipeline(VkDevice device,
                         VkRenderPass render_pass,
-                        VkPipelineLayout layout) {
+                        VkPipelineLayout layout,
+                        bool mask) {
   VkShaderModule vs = MakeModule(device, kVertSpv, sizeof(kVertSpv));
   VkShaderModule fs = MakeModule(device, kFragSpv, sizeof(kFragSpv));
   std::array<VkPipelineShaderStageCreateInfo, 2> stages{};
@@ -95,6 +105,14 @@ VkPipeline MakePipeline(VkDevice device,
   stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
   stages[1].module = fs;
   stages[1].pName = "main";
+  const VkBool32 mask_value = mask ? VK_TRUE : VK_FALSE;
+  const VkSpecializationMapEntry mask_entry{0, 0, sizeof(VkBool32)};
+  VkSpecializationInfo spec{};
+  spec.mapEntryCount = 1;
+  spec.pMapEntries = &mask_entry;
+  spec.dataSize = sizeof(mask_value);
+  spec.pData = &mask_value;
+  stages[1].pSpecializationInfo = &spec;
 
   VkPipelineVertexInputStateCreateInfo vi{};
   vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -279,11 +297,16 @@ std::unique_ptr<LayerCompositor> LayerCompositor::Create(VkDevice device,
   // Graphics pipeline (see MakePipeline): full quad, premultiplied src-over
   // blend, dynamic viewport/scissor, no vertex input. The YUV variants are
   // built lazily against their own layouts in GetOrCreateYuvProgram.
-  c->pipeline_ = MakePipeline(device, c->render_pass_, c->pipeline_layout_);
+  c->pipeline_ = MakePipeline(device, c->render_pass_, c->pipeline_layout_,
+                              /*mask=*/false);
   if (c->pipeline_ == VK_NULL_HANDLE) {
     err = "vkCreateGraphicsPipelines failed";
     return nullptr;
   }
+  // The same for a layer with a rounded clip. Not fatal: without it such a
+  // layer is drawn with square corners.
+  c->pipeline_mask_ =
+      MakePipeline(device, c->render_pass_, c->pipeline_layout_, /*mask=*/true);
 
   // One descriptor pool per ring slot, recycled in BeginFrame.
   for (auto& fr : c->ring_) {
@@ -323,6 +346,9 @@ LayerCompositor::~LayerCompositor() {
     if (p.pipeline != VK_NULL_HANDLE) {
       d().vkDestroyPipeline(device_, p.pipeline, nullptr);
     }
+    if (p.pipeline_mask != VK_NULL_HANDLE) {
+      d().vkDestroyPipeline(device_, p.pipeline_mask, nullptr);
+    }
     if (p.pipeline_layout != VK_NULL_HANDLE) {
       d().vkDestroyPipelineLayout(device_, p.pipeline_layout, nullptr);
     }
@@ -338,6 +364,9 @@ LayerCompositor::~LayerCompositor() {
   }
   if (pipeline_ != VK_NULL_HANDLE) {
     d().vkDestroyPipeline(device_, pipeline_, nullptr);
+  }
+  if (pipeline_mask_ != VK_NULL_HANDLE) {
+    d().vkDestroyPipeline(device_, pipeline_mask_, nullptr);
   }
   if (pipeline_layout_ != VK_NULL_HANDLE) {
     d().vkDestroyPipelineLayout(device_, pipeline_layout_, nullptr);
@@ -459,7 +488,8 @@ void LayerCompositor::DrawLayer(VkCommandBuffer cmd,
                                 int32_t dst_h,
                                 const UvAffine& uv,
                                 bool opaque,
-                                float alpha) {
+                                float alpha,
+                                const RoundedRect* rounded) {
   if (fb_width_ == 0 || fb_height_ == 0) {
     return;
   }
@@ -468,7 +498,15 @@ void LayerCompositor::DrawLayer(VkCommandBuffer cmd,
   // builds) the program whose immutable ycbcr sampler bakes the conversion, and
   // its view carries the same conversion. With an immutable sampler the
   // descriptor write leaves the sampler null (the layout supplies it).
+  // A rounded clip takes the pipeline built to cut corners; one that could not
+  // be built leaves them square.
+  const RoundedRect* clip = rounded;
+  if (clip != nullptr && pipeline_mask_ == VK_NULL_HANDLE) {
+    WarnNoMask();
+    clip = nullptr;
+  }
   VkPipeline pipeline = pipeline_;
+  VkPipeline pipeline_mask = pipeline_mask_;
   VkPipelineLayout pipeline_layout = pipeline_layout_;
   VkDescriptorSetLayout set_layout = set_layout_;
   VkSampler sampler = sampler_;
@@ -479,7 +517,12 @@ void LayerCompositor::DrawLayer(VkCommandBuffer cmd,
     if (prog == nullptr) {
       return;  // conversion/pipeline unavailable — skip rather than draw wrong
     }
+    if (clip != nullptr && prog->pipeline_mask == VK_NULL_HANDLE) {
+      WarnNoMask();
+      clip = nullptr;
+    }
     pipeline = prog->pipeline;
+    pipeline_mask = prog->pipeline_mask;
     pipeline_layout = prog->pipeline_layout;
     set_layout = prog->set_layout;
     sampler = VK_NULL_HANDLE;  // immutable in the layout
@@ -512,25 +555,58 @@ void LayerCompositor::DrawLayer(VkCommandBuffer cmd,
   w.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
   w.pImageInfo = &ii;
   d().vkUpdateDescriptorSets(device_, 1, &w, 0, nullptr);
-  d().vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
   d().vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                               pipeline_layout, 0, 1, &set, 0, nullptr);
 
-  // Destination rect -> NDC (top-left origin, y down; matches the blit path).
   const auto fw = static_cast<float>(fb_width_);
   const auto fh = static_cast<float>(fb_height_);
+  const RectI whole{dst_x, dst_y, dst_w, dst_h};
   LayerPush push{};
-  push.rect = {2.0f * static_cast<float>(dst_x) / fw - 1.0f,
-               2.0f * static_cast<float>(dst_y) / fh - 1.0f,
-               2.0f * static_cast<float>(dst_x + dst_w) / fw - 1.0f,
-               2.0f * static_cast<float>(dst_y + dst_h) / fh - 1.0f};
-  push.uv_u = {uv.a, uv.c, uv.tx, 0.0f};
-  push.uv_v = {uv.b, uv.d, uv.ty, 0.0f};
   push.opaque = opaque ? 1.0f : 0.0f;
   push.alpha = alpha;
-  d().vkCmdPushConstants(cmd, pipeline_layout, kPushStages, 0, sizeof(push),
-                         &push);
-  d().vkCmdDraw(cmd, 4, 1, 0, 0);
+  if (clip != nullptr) {
+    const RectF& b = clip->rect;
+    const auto& r = clip->radii;
+    push.rrect = {static_cast<float>(b.x), static_cast<float>(b.y),
+                  static_cast<float>(b.x + b.w), static_cast<float>(b.y + b.h)};
+    push.radii_top = {r[0][0], r[0][1], r[1][0], r[1][1]};
+    push.radii_bottom = {r[3][0], r[3][1], r[2][0], r[2][1]};
+  }
+  // Draws the part @p sub of the destination rect. Without the mask the
+  // pipeline reads none of the clip's fields, so only the part before them is
+  // pushed.
+  VkPipeline bound = VK_NULL_HANDLE;
+  const auto draw = [&](const RectI& sub, const bool masked) {
+    VkPipeline want = masked ? pipeline_mask : pipeline;
+    if (want != bound) {
+      d().vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, want);
+      bound = want;
+    }
+    // Destination rect -> NDC (top-left origin, y down; matches the blit
+    // path).
+    push.rect = {2.0f * static_cast<float>(sub.x) / fw - 1.0f,
+                 2.0f * static_cast<float>(sub.y) / fh - 1.0f,
+                 2.0f * static_cast<float>(sub.x + sub.w) / fw - 1.0f,
+                 2.0f * static_cast<float>(sub.y + sub.h) / fh - 1.0f};
+    const UvAffine u = SubUv(uv, whole, sub);
+    push.uv_u = {u.a, u.c, u.tx, 0.0f};
+    push.uv_v = {u.b, u.d, u.ty, 0.0f};
+    d().vkCmdPushConstants(cmd, pipeline_layout, kPushStages, 0,
+                           masked ? sizeof(push) : offsetof(LayerPush, rrect),
+                           &push);
+    d().vkCmdDraw(cmd, 4, 1, 0, 0);
+  };
+  // Only the boxes around a rounded clip's corners take the mask, which costs
+  // every pixel it covers; the rest draws with the plain pipeline.
+  if (clip == nullptr) {
+    draw(whole, false);
+    return;
+  }
+  std::array<RoundedPiece, 7> pieces;
+  const size_t n = SplitRoundedCorners(whole, *clip, pieces);
+  for (size_t k = 0; k < n; ++k) {
+    draw(pieces[k].rect, pieces[k].corner);
+  }
 }
 
 const LayerCompositor::YuvProgram* LayerCompositor::GetOrCreateYuvProgram(
@@ -675,7 +751,8 @@ const LayerCompositor::YuvProgram* LayerCompositor::GetOrCreateYuvProgram(
     return fail("vkCreatePipelineLayout");
   }
 
-  prog.pipeline = MakePipeline(device_, render_pass_, prog.pipeline_layout);
+  prog.pipeline = MakePipeline(device_, render_pass_, prog.pipeline_layout,
+                               /*mask=*/false);
   if (prog.pipeline == VK_NULL_HANDLE) {
     d().vkDestroyPipelineLayout(device_, prog.pipeline_layout, nullptr);
     d().vkDestroyDescriptorSetLayout(device_, prog.set_layout, nullptr);
@@ -688,9 +765,23 @@ const LayerCompositor::YuvProgram* LayerCompositor::GetOrCreateYuvProgram(
     return fail("vkCreateGraphicsPipelines");
   }
 
+  // As for RGB: not fatal, a rounded clip is then drawn square.
+  prog.pipeline_mask = MakePipeline(device_, render_pass_, prog.pipeline_layout,
+                                    /*mask=*/true);
   prog.ok = true;
   yuv_programs_.push_back(prog);
   return &yuv_programs_.back();
+}
+
+void LayerCompositor::WarnNoMask() {
+  if (warned_no_mask_) {
+    return;
+  }
+  warned_no_mask_ = true;
+  ihs::log::warn(
+      "[wl_vulkan] the rounded-clip pipeline could not be built; platform "
+      "views "
+      "with rounded corners are drawn square");
 }
 
 void LayerCompositor::EndFrame(VkCommandBuffer cmd) {

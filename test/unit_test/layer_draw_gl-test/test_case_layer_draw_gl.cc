@@ -31,6 +31,7 @@
 #include "backend/wayland_egl/gl_caps.h"
 #include "backend/wayland_egl/gl_compositor.h"
 #include "view/compositor_surface_interface.h"
+#include "view/display_rotation.h"
 #include "view/layer_geometry.h"
 
 namespace {
@@ -676,4 +677,132 @@ TEST_F(LayerDrawGl, AnOpaqueLayerOfATranslucentViewBlends) {
   }
   glDeleteTextures(1, &bg_tex);
   glDeleteTextures(1, &strip_tex);
+}
+
+namespace {
+
+constexpr int kRw = 20;  // the render space of the rounded-clip tests
+constexpr int kRh = 12;
+
+// Draw `surface` across a kRw x kRh view with `rounded` into a target of
+// w x h, through `rotation` when it is not null, and read it back top row
+// first.
+std::vector<uint8_t> DrawRounded(GlCompositor& compositor,
+                                 const ICompositorSurface& surface,
+                                 int w,
+                                 int h,
+                                 bool target_top_first,
+                                 const DisplayRotation* rotation,
+                                 const RoundedRect& rounded) {
+  GLuint target = 0;
+  glGenTextures(1, &target);
+  glBindTexture(GL_TEXTURE_2D, target);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+               nullptr);
+  GLuint fbo = 0;
+  glGenFramebuffers(1, &fbo);
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                         target, 0);
+  glClearColor(0, 0, 0, 0);
+  glClear(GL_COLOR_BUFFER_BIT);
+  compositor.CompositeSurfaceLayers(fbo, surface, {0, 0, kRw, kRh}, h,
+                                    target_top_first, /*blend_first=*/false,
+                                    nullptr, nullptr, rotation, nullptr, 1.0f,
+                                    &rounded);
+  std::vector<uint8_t> rows(Px(0, h, w));
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+  glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, rows.data());
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  glDeleteFramebuffers(1, &fbo);
+  glDeleteTextures(1, &target);
+  if (target_top_first) {
+    return rows;
+  }
+  std::vector<uint8_t> top_down(rows.size());
+  for (int y = 0; y < h; ++y) {
+    std::memcpy(&top_down[Px(0, y, w)], &rows[Px(0, h - 1 - y, w)],
+                Px(w, 0, 0));
+  }
+  return top_down;
+}
+
+}  // namespace
+
+// A view clipped to its own rect with only the upper left corner rounded, at
+// a radius of 6: the pixels outside the curve are cut away, one on it is
+// partly covered, the ones past it show, and the other three corners stay
+// square. On either target,
+// and turned onto a panel a quarter turn either way, where each render pixel
+// is looked for where the turn puts it.
+TEST_F(LayerDrawGl, ARoundedClipCutsOnlyItsCorners) {
+  const std::array<uint8_t, 4> kColor = {40, 160, 220, 255};
+  std::vector<uint8_t> img(Px(0, kRh, kRw));
+  for (int i = 0; i < kRw * kRh; ++i) {
+    std::memcpy(&img[Px(i, 0, 0)], kColor.data(), 4);
+  }
+  const GLuint tex = MakeTexture(kRw, kRh, img);
+  LayeredSurface surface;
+  ICompositorSurface::GlLayerTexture whole;
+  whole.name = tex;
+  whole.width = kRw;
+  whole.height = kRh;
+  whole.top_first = true;
+  surface.layers = {whole};
+  RoundedRect rounded;
+  rounded.rect = {0, 0, kRw, kRh};
+  rounded.radii[0] = {6, 6};
+
+  struct Case {
+    int degrees;
+    bool top_first;
+  };
+  for (const Case c : {Case{0, false}, Case{0, true}, Case{90, false},
+                       Case{270, false}, Case{90, true}}) {
+    SCOPED_TRACE(::testing::Message()
+                 << c.degrees << " degrees, "
+                 << (c.top_first ? "top-first" : "window") << " target");
+    const DisplayRotation rot{c.degrees, kRw, kRh, c.degrees % 180 ? kRh : kRw,
+                              c.degrees % 180 ? kRw : kRh};
+    const int pw = rot.panel_w;
+    const int ph = rot.panel_h;
+    const auto out = DrawRounded(*compositor_, surface, pw, ph, c.top_first,
+                                 c.degrees != 0 ? &rot : nullptr, rounded);
+    // The panel pixel showing render pixel (x, y).
+    const auto at = [&](int x, int y) -> const uint8_t* {
+      double px = x + 0.5;
+      double py = y + 0.5;
+      if (c.degrees != 0) {
+        rot.ToPanel(x + 0.5, y + 0.5, &px, &py);
+      }
+      return &out[Px(static_cast<int>(px), static_cast<int>(py), pw)];
+    };
+    EXPECT_EQ(at(0, 0)[3], 0) << "the rounded corner is cut away";
+    EXPECT_EQ(at(1, 0)[3], 0) << "and the pixel beside it, outside the curve";
+    // (1, 1) is on the curve: neither cut nor whole.
+    EXPECT_GT(at(1, 1)[3], 0);
+    EXPECT_LT(at(1, 1)[3], 255);
+    EXPECT_EQ(at(3, 3)[3], 255) << "past the curve the view shows";
+    EXPECT_EQ(at(6, 0)[3], 255) << "past the corner along the top edge";
+    EXPECT_EQ(at(0, 6)[3], 255) << "and down the left edge";
+    for (const auto& [x, y] :
+         {std::pair{kRw - 1, 0}, std::pair{kRw - 1, kRh - 1},
+          std::pair{0, kRh - 1}}) {
+      EXPECT_TRUE(std::memcmp(at(x, y), kColor.data(), 4) == 0)
+          << "square corner (" << x << ", " << y << ")";
+    }
+    // Outside the corner's box the quad is drawn in pieces without the mask:
+    // every pixel there is the view, with no seam between the pieces.
+    int off = 0;
+    for (int y = 0; y < kRh; ++y) {
+      for (int x = 0; x < kRw; ++x) {
+        if ((x >= 6 || y >= 6) &&
+            std::memcmp(at(x, y), kColor.data(), 4) != 0) {
+          ++off;
+        }
+      }
+    }
+    EXPECT_EQ(off, 0) << "pixels outside the corner box that are not the view";
+  }
+  glDeleteTextures(1, &tex);
 }
