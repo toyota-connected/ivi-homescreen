@@ -791,6 +791,18 @@ TEST_F(LayerDrawGl, ARoundedClipCutsOnlyItsCorners) {
       EXPECT_TRUE(std::memcmp(at(x, y), kColor.data(), 4) == 0)
           << "square corner (" << x << ", " << y << ")";
     }
+    // Outside the corner's box the quad is drawn in pieces without the mask:
+    // every pixel there is the view, with no seam between the pieces.
+    int off = 0;
+    for (int y = 0; y < kRh; ++y) {
+      for (int x = 0; x < kRw; ++x) {
+        if ((x >= 6 || y >= 6) &&
+            std::memcmp(at(x, y), kColor.data(), 4) != 0) {
+          ++off;
+        }
+      }
+    }
+    EXPECT_EQ(off, 0) << "pixels outside the corner box that are not the view";
   }
   glDeleteTextures(1, &tex);
 }

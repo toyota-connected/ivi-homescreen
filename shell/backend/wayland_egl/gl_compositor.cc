@@ -20,7 +20,9 @@
 
 #include <GLES2/gl2ext.h>  // GL_TEXTURE_EXTERNAL_OES
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstring>
 #include <string>
 #include <string_view>
@@ -51,15 +53,18 @@ constexpr char kVertSrc[] =
     "uniform vec3 u_uv_v;\n"
     "varying vec2 v_uv;\n"
     "#if IHS_MASK\n"
+    "attribute float a_mask;\n"
     "uniform vec3 u_pos_u;\n"
     "uniform vec3 u_pos_v;\n"
     "varying vec2 v_pos;\n"
+    "varying float v_mask;\n"
     "#endif\n"
     "void main() {\n"
     "  vec3 st = vec3(a_uv.x, 1.0 - a_uv.y, 1.0);\n"
     "  v_uv = vec2(dot(u_uv_u, st), dot(u_uv_v, st));\n"
     "#if IHS_MASK\n"
     "  v_pos = vec2(dot(u_pos_u, st), dot(u_pos_v, st));\n"
+    "  v_mask = a_mask;\n"
     "#endif\n"
     "  gl_Position = vec4(a_pos, 0.0, 1.0);\n"
     "}\n";
@@ -68,9 +73,11 @@ constexpr char kFragPrecision[] = "precision mediump float;\n";
 
 // The share of a pixel inside a rounded rect, for a pixel the quad's crop has
 // already put inside its bounding box: only the corners are left to cut, with
-// about a pixel of edge. A corner with a zero radius is square. Positions are
-// in pixels, up to a few thousand, which mediump cannot place to a pixel, so
-// this runs in highp where the GPU has it. Without the mask it is 1.
+// about a pixel of edge. v_mask is 0 on the pieces of the quad no corner
+// reaches (QuadMask::parts), which skip the rest. A corner with a zero radius
+// is square. Positions are in pixels, up to a few thousand, which mediump
+// cannot place to a pixel, so this runs in highp where the GPU has it. Without
+// the mask it is 1.
 constexpr char kMaskSrc[] =
     "#if IHS_MASK\n"
     "#ifdef GL_FRAGMENT_PRECISION_HIGH\n"
@@ -79,10 +86,12 @@ constexpr char kMaskSrc[] =
     "#define MASKP mediump\n"
     "#endif\n"
     "varying MASKP vec2 v_pos;\n"
+    "varying float v_mask;\n"
     "uniform MASKP vec4 u_rrect;\n"         // left, top, right, bottom
     "uniform MASKP vec4 u_radii_top;\n"     // upper left x y, upper right x y
     "uniform MASKP vec4 u_radii_bottom;\n"  // lower left x y, lower right x y
     "float Coverage() {\n"
+    "  if (v_mask < 0.5) return 1.0;\n"
     "  MASKP vec2 p = v_pos;\n"
     "  bool left = p.x < 0.5 * (u_rrect.x + u_rrect.z);\n"
     "  bool top = p.y < 0.5 * (u_rrect.y + u_rrect.w);\n"
@@ -172,6 +181,9 @@ GlCompositor::GlCompositor(const GlCaps* caps) : caps_(caps) {}
 GlCompositor::~GlCompositor() {
   if (vbo_) {
     glDeleteBuffers(1, &vbo_);
+  }
+  if (parts_vbo_) {
+    glDeleteBuffers(1, &parts_vbo_);
   }
   if (program_) {
     glDeleteProgram(program_);
@@ -314,6 +326,7 @@ GlCompositor::QuadProgram GlCompositor::BuildQuadProgram(const bool external,
   }
   p.attr_pos = glGetAttribLocation(p.id, "a_pos");
   p.attr_uv = glGetAttribLocation(p.id, "a_uv");
+  p.attr_mask = glGetAttribLocation(p.id, "a_mask");
   p.uni_tex = glGetUniformLocation(p.id, "u_tex");
   p.uni_uv_u = glGetUniformLocation(p.id, "u_uv_u");
   p.uni_uv_v = glGetUniformLocation(p.id, "u_uv_v");
@@ -500,28 +513,82 @@ void GlCompositor::CompositeViaQuadProgram(const QuadProgram& p,
   } else {
     glDisable(GL_BLEND);
   }
-  glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+  // A quad in pieces is one draw of two triangles a piece, each vertex
+  // (x, y, u, v, m) with m 1 on a corner box. A whole quad is the shared strip,
+  // and a masked program reads m as 1 over all of it.
+  const bool parts = mask != nullptr && mask->part_count > 0;
+  GLsizei count = 4;
+  GLenum mode = GL_TRIANGLE_STRIP;
+  GLsizei stride = 4 * sizeof(GLfloat);
+  if (parts) {
+    if (parts_vbo_ == 0) {
+      glGenBuffers(1, &parts_vbo_);
+    }
+    constexpr size_t kPerVertex = 5;
+    std::array<GLfloat, 7 * 6 * kPerVertex> verts{};
+    size_t n = 0;
+    for (size_t i = 0; i < mask->part_count; ++i) {
+      const QuadMask::Part& q = mask->parts[i];
+      const GLfloat m = q.corner ? 1.0f : 0.0f;
+      // (s, t) runs over the viewport with t down; a_uv's v and NDC y run up.
+      const auto vertex = [&](const float s, const float t) {
+        verts[n++] = 2.0f * s - 1.0f;
+        verts[n++] = 1.0f - 2.0f * t;
+        verts[n++] = s;
+        verts[n++] = 1.0f - t;
+        verts[n++] = m;
+      };
+      vertex(q.s0, q.t0);
+      vertex(q.s1, q.t0);
+      vertex(q.s0, q.t1);
+      vertex(q.s0, q.t1);
+      vertex(q.s1, q.t0);
+      vertex(q.s1, q.t1);
+    }
+    glBindBuffer(GL_ARRAY_BUFFER, parts_vbo_);
+    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(n * sizeof(GLfloat)),
+                 verts.data(), GL_STREAM_DRAW);
+    count = static_cast<GLsizei>(n / kPerVertex);
+    mode = GL_TRIANGLES;
+    stride = kPerVertex * sizeof(GLfloat);
+  } else {
+    glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+  }
   if (p.attr_pos >= 0) {
     glEnableVertexAttribArray(static_cast<GLuint>(p.attr_pos));
     glVertexAttribPointer(static_cast<GLuint>(p.attr_pos), 2, GL_FLOAT,
-                          GL_FALSE, 4 * sizeof(GLfloat), nullptr);
+                          GL_FALSE, stride, nullptr);
   }
   if (p.attr_uv >= 0) {
     glEnableVertexAttribArray(static_cast<GLuint>(p.attr_uv));
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     glVertexAttribPointer(static_cast<GLuint>(p.attr_uv), 2, GL_FLOAT, GL_FALSE,
-                          4 * sizeof(GLfloat),
+                          stride,
                           reinterpret_cast<const void*>(2 * sizeof(GLfloat)));
+  }
+  if (p.attr_mask >= 0) {
+    if (parts) {
+      glEnableVertexAttribArray(static_cast<GLuint>(p.attr_mask));
+      // NOLINTNEXTLINE(performance-no-int-to-ptr)
+      glVertexAttribPointer(static_cast<GLuint>(p.attr_mask), 1, GL_FLOAT,
+                            GL_FALSE, stride,
+                            reinterpret_cast<const void*>(4 * sizeof(GLfloat)));
+    } else {
+      glVertexAttrib1f(static_cast<GLuint>(p.attr_mask), 1.0f);
+    }
   }
   glViewport(dst_x, dst_y, dst_w, dst_h);
   glBindTexture(target, tex);
-  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  glDrawArrays(mode, 0, count);
   glBindTexture(target, 0);
   if (p.attr_pos >= 0) {
     glDisableVertexAttribArray(static_cast<GLuint>(p.attr_pos));
   }
   if (p.attr_uv >= 0) {
     glDisableVertexAttribArray(static_cast<GLuint>(p.attr_uv));
+  }
+  if (p.attr_mask >= 0 && parts) {
+    glDisableVertexAttribArray(static_cast<GLuint>(p.attr_mask));
   }
   glBindBuffer(GL_ARRAY_BUFFER, 0);
   glUseProgram(0);
@@ -776,8 +843,19 @@ size_t GlCompositor::CompositeSurfaceLayers(
     // The rounded clip is in render pixels, like p.dst before it turns: the
     // mask's position affine takes (s, t) there, and from here on takes every
     // turn the texture coordinates do.
+    //
+    // Only the boxes around the corners need the mask, so the quad is drawn
+    // in pieces and the mask worked out only in those boxes. The pieces stay
+    // one draw: a driver that cannot sample a linear buffer (v3d) samples a
+    // tiled copy, and refreshes the copy for every draw that reads an imported
+    // buffer, since it cannot know whether the producer wrote it. As separate
+    // draws, a 1280x1440 view on a Pi 5 took seven copies a frame and fell to
+    // 30 frames a second.
     QuadMask mask;
+    std::array<RoundedPiece, 7> pieces;
+    size_t piece_count = 0;
     if (rounded != nullptr) {
+      piece_count = SplitRoundedCorners(p.dst, *rounded, pieces);
       mask.rect = *rounded;
       mask.pos.a = static_cast<float>(p.dst.w);
       mask.pos.b = 0.0f;
@@ -802,6 +880,34 @@ size_t GlCompositor::CompositeSurfaceLayers(
         a->c = -a->c;
         a->ty += a->d;
         a->d = -a->d;
+      }
+    }
+    // Each piece into the quad's (s, t) as drawn: the mask's position affine
+    // takes (s, t) to render pixels, so its inverse brings a piece back. Turns
+    // and row flips keep a rect a rect.
+    if (rounded != nullptr) {
+      const UvAffine& m = mask.pos;
+      const double det =
+          static_cast<double>(m.a) * m.d - static_cast<double>(m.b) * m.c;
+      if (std::abs(det) > 1e-12 && piece_count > 0) {
+        const auto st = [&](const double x, const double y) {
+          const double dx = x - m.tx;
+          const double dy = y - m.ty;
+          return std::array<double, 2>{(m.d * dx - m.c * dy) / det,
+                                       (m.a * dy - m.b * dx) / det};
+        };
+        for (size_t k = 0; k < piece_count; ++k) {
+          const RectI& r = pieces[k].rect;
+          const auto a = st(r.x, r.y);
+          const auto b = st(r.x + r.w, r.y + r.h);
+          QuadMask::Part& q = mask.parts[k];
+          q.s0 = static_cast<float>(std::clamp(std::min(a[0], b[0]), 0.0, 1.0));
+          q.s1 = static_cast<float>(std::clamp(std::max(a[0], b[0]), 0.0, 1.0));
+          q.t0 = static_cast<float>(std::clamp(std::min(a[1], b[1]), 0.0, 1.0));
+          q.t1 = static_cast<float>(std::clamp(std::max(a[1], b[1]), 0.0, 1.0));
+          q.corner = pieces[k].corner;
+        }
+        mask.part_count = piece_count;
       }
     }
     // A layer that covers its rect overwrites what is under it, unless the

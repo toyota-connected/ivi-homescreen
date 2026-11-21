@@ -18,6 +18,7 @@
 
 #include <GLES2/gl2.h>
 
+#include <array>
 #include <cstddef>
 #include <functional>
 
@@ -53,6 +54,19 @@ class GlCompositor {
   struct QuadMask {
     UvAffine pos{};
     RoundedRect rect{};
+    // Where the quad is drawn as pieces, each a rect of its (s, t) and whether
+    // it is a box around a corner, the only place the mask can cut. The pieces
+    // go in one draw, and outside the corner boxes the mask is not worked out.
+    // With none, the mask is worked out over the whole quad.
+    struct Part {
+      float s0{0};
+      float t0{0};
+      float s1{0};
+      float t1{0};
+      bool corner{false};
+    };
+    std::array<Part, 7> parts{};
+    size_t part_count{0};
   };
 
   explicit GlCompositor(const GlCaps* caps);
@@ -241,6 +255,9 @@ class GlCompositor {
   bool quad_initialized_{false};
   GLuint program_{0};
   GLuint vbo_{0};
+  // The vertices of a quad drawn as pieces (QuadMask::parts), rewritten for
+  // each such draw.
+  GLuint parts_vbo_{0};
   GLint attr_pos_{-1};
   GLint attr_uv_{-1};
   GLint uni_tex_{-1};
@@ -270,6 +287,7 @@ class GlCompositor {
     GLuint id{0};
     GLint attr_pos{-1};
     GLint attr_uv{-1};
+    GLint attr_mask{-1};
     GLint uni_tex{-1};
     GLint uni_uv_u{-1};
     GLint uni_uv_v{-1};

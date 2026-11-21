@@ -505,7 +505,8 @@ void LayerCompositor::DrawLayer(VkCommandBuffer cmd,
     WarnNoMask();
     clip = nullptr;
   }
-  VkPipeline pipeline = clip != nullptr ? pipeline_mask_ : pipeline_;
+  VkPipeline pipeline = pipeline_;
+  VkPipeline pipeline_mask = pipeline_mask_;
   VkPipelineLayout pipeline_layout = pipeline_layout_;
   VkDescriptorSetLayout set_layout = set_layout_;
   VkSampler sampler = sampler_;
@@ -520,7 +521,8 @@ void LayerCompositor::DrawLayer(VkCommandBuffer cmd,
       WarnNoMask();
       clip = nullptr;
     }
-    pipeline = clip != nullptr ? prog->pipeline_mask : prog->pipeline;
+    pipeline = prog->pipeline;
+    pipeline_mask = prog->pipeline_mask;
     pipeline_layout = prog->pipeline_layout;
     set_layout = prog->set_layout;
     sampler = VK_NULL_HANDLE;  // immutable in the layout
@@ -553,25 +555,15 @@ void LayerCompositor::DrawLayer(VkCommandBuffer cmd,
   w.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
   w.pImageInfo = &ii;
   d().vkUpdateDescriptorSets(device_, 1, &w, 0, nullptr);
-  d().vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
   d().vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                               pipeline_layout, 0, 1, &set, 0, nullptr);
 
-  // Destination rect -> NDC (top-left origin, y down; matches the blit path).
   const auto fw = static_cast<float>(fb_width_);
   const auto fh = static_cast<float>(fb_height_);
+  const RectI whole{dst_x, dst_y, dst_w, dst_h};
   LayerPush push{};
-  push.rect = {2.0f * static_cast<float>(dst_x) / fw - 1.0f,
-               2.0f * static_cast<float>(dst_y) / fh - 1.0f,
-               2.0f * static_cast<float>(dst_x + dst_w) / fw - 1.0f,
-               2.0f * static_cast<float>(dst_y + dst_h) / fh - 1.0f};
-  push.uv_u = {uv.a, uv.c, uv.tx, 0.0f};
-  push.uv_v = {uv.b, uv.d, uv.ty, 0.0f};
   push.opaque = opaque ? 1.0f : 0.0f;
   push.alpha = alpha;
-  // Without a clip the pipeline reads none of the clip's fields, so only the
-  // part before them is pushed.
-  uint32_t push_bytes = offsetof(LayerPush, rrect);
   if (clip != nullptr) {
     const RectF& b = clip->rect;
     const auto& r = clip->radii;
@@ -579,11 +571,42 @@ void LayerCompositor::DrawLayer(VkCommandBuffer cmd,
                   static_cast<float>(b.x + b.w), static_cast<float>(b.y + b.h)};
     push.radii_top = {r[0][0], r[0][1], r[1][0], r[1][1]};
     push.radii_bottom = {r[3][0], r[3][1], r[2][0], r[2][1]};
-    push_bytes = sizeof(push);
   }
-  d().vkCmdPushConstants(cmd, pipeline_layout, kPushStages, 0, push_bytes,
-                         &push);
-  d().vkCmdDraw(cmd, 4, 1, 0, 0);
+  // Draws the part @p sub of the destination rect. Without the mask the
+  // pipeline reads none of the clip's fields, so only the part before them is
+  // pushed.
+  VkPipeline bound = VK_NULL_HANDLE;
+  const auto draw = [&](const RectI& sub, const bool masked) {
+    VkPipeline want = masked ? pipeline_mask : pipeline;
+    if (want != bound) {
+      d().vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, want);
+      bound = want;
+    }
+    // Destination rect -> NDC (top-left origin, y down; matches the blit
+    // path).
+    push.rect = {2.0f * static_cast<float>(sub.x) / fw - 1.0f,
+                 2.0f * static_cast<float>(sub.y) / fh - 1.0f,
+                 2.0f * static_cast<float>(sub.x + sub.w) / fw - 1.0f,
+                 2.0f * static_cast<float>(sub.y + sub.h) / fh - 1.0f};
+    const UvAffine u = SubUv(uv, whole, sub);
+    push.uv_u = {u.a, u.c, u.tx, 0.0f};
+    push.uv_v = {u.b, u.d, u.ty, 0.0f};
+    d().vkCmdPushConstants(cmd, pipeline_layout, kPushStages, 0,
+                           masked ? sizeof(push) : offsetof(LayerPush, rrect),
+                           &push);
+    d().vkCmdDraw(cmd, 4, 1, 0, 0);
+  };
+  // Only the boxes around a rounded clip's corners take the mask, which costs
+  // every pixel it covers; the rest draws with the plain pipeline.
+  if (clip == nullptr) {
+    draw(whole, false);
+    return;
+  }
+  std::array<RoundedPiece, 7> pieces;
+  const size_t n = SplitRoundedCorners(whole, *clip, pieces);
+  for (size_t k = 0; k < n; ++k) {
+    draw(pieces[k].rect, pieces[k].corner);
+  }
 }
 
 const LayerCompositor::YuvProgram* LayerCompositor::GetOrCreateYuvProgram(
