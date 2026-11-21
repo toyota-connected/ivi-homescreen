@@ -51,6 +51,10 @@ class GlCompositor {
    * pixels outside the rounded rect's corners are cut away; the quad's own
    * crop is expected to have dealt with its straight edges.
    */
+  // An edge distance far enough that the edge leaves the pixel whole, and
+  // inside mediump's range.
+  static constexpr float kNoEdge = 1.0e4f;
+
   struct QuadMask {
     UvAffine pos{};
     RoundedRect rect{};
@@ -69,8 +73,10 @@ class GlCompositor {
     size_t part_count{0};
     // Or the quad as two triangles given outright: each vertex in the
     // viewport's NDC, at (s, t) of the quad, with m 1 where the mask is worked
-    // out and w its homogeneous w (1 without a perspective). For a quad that
-    // is not its viewport's rect (a transformed view). Takes precedence over
+    // out, w its homogeneous w (1 without a perspective) and edge its distance
+    // in pixels to each of the quad's edges (s = 0, s = 1, t = 0, t = 1),
+    // above 0 inside, or kNoEdge for an edge left hard. For a quad that is
+    // not its viewport's rect (a transformed view). Takes precedence over
     // parts.
     struct Vertex {
       float x{0};
@@ -79,9 +85,12 @@ class GlCompositor {
       float t{0};
       float m{0};
       float w{1};
+      std::array<float, 4> edge{kNoEdge, kNoEdge, kNoEdge, kNoEdge};
     };
     std::array<Vertex, 6> verts{};
     size_t vert_count{0};
+    // Where (s, t) is held when sampled: s0, t0, s1, t1 (SampleClamp).
+    std::array<float, 4> st_clamp{0, 0, 1, 1};
   };
 
   explicit GlCompositor(const GlCaps* caps);
@@ -304,6 +313,7 @@ class GlCompositor {
     GLint rrect{-1};
     GLint radii_top{-1};
     GLint radii_bottom{-1};
+    GLint st_clamp{-1};
   };
   // A quad program drawn outside the frame-batched path: the external-sampler
   // one, and the two built to cut corners to a rounded clip. id 0 is a program
@@ -314,6 +324,7 @@ class GlCompositor {
     GLint attr_uv{-1};
     GLint attr_mask{-1};
     GLint attr_w{-1};
+    GLint attr_edge{-1};
     GLint uni_tex{-1};
     GLint uni_uv_u{-1};
     GLint uni_uv_v{-1};

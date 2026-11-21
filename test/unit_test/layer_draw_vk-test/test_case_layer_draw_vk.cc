@@ -615,3 +615,84 @@ TEST_F(LayerDrawVk, APerspectiveQuadIsSampledPerspectiveCorrect) {
   EXPECT_EQ(At(out, 4, 2)[1], 0xff) << "past the quad, the backdrop";
   EXPECT_EQ(At(out, 3, 0)[1], 0xff) << "right of its right edge";
 }
+
+namespace {
+
+// The skewed quad x = 3 s + 2 t, y = 3 t, smoothed on every edge: grown as
+// PlaceLayerThrough grows a view's own edges.
+wl_vulkan::LayerCompositor::Quad SmoothedSkew() {
+  QuadPlacement p;
+  p.origin = {0, 0};
+  p.edge_s = {3, 0};
+  p.edge_t = {2, kH};
+  wl_vulkan::LayerCompositor::Quad q;
+  q.origin = p.origin;
+  q.edge_s = p.edge_s;
+  q.edge_t = p.edge_t;
+  q.scissor = {0, 0, kW, kH};
+  q.grow = GrowForEdges(p, 0xf, 1.0);
+  return q;
+}
+
+std::vector<uint8_t> SolidBuffer(uint8_t r, uint8_t g, uint8_t b) {
+  std::vector<uint8_t> buffer(static_cast<size_t>(kW) * kH * 4, 0);
+  for (size_t i = 0; i < buffer.size(); i += 4) {
+    buffer[i] = r;
+    buffer[i + 1] = g;
+    buffer[i + 2] = b;
+    buffer[i + 3] = 0xff;
+  }
+  return buffer;
+}
+
+}  // namespace
+
+// A black quad over white with its edges smoothed: each pixel its slanted
+// left edge, x = 2 y / 3, crosses is covered in the share of it inside the
+// edge. Pixel (0, 1) has a twelfth of it inside, (1, 1) eleven twelfths and
+// (1, 2) a third, which the distance to the edge gives as 0.08, 0.92 and 0.36.
+// Drawn whole, (0, 1) is all white and the others all black.
+TEST_F(LayerDrawVk, ASmoothedQuadCoversThePixelsItsEdgesCross) {
+  const std::array<float, 4> white = {1, 1, 1, 1};
+  const auto q = SmoothedSkew();
+  const auto out = Draw(kW, kH, SolidBuffer(0, 0, 0), UvAffine{},
+                        /*opaque=*/true, &white, 1.0f, nullptr, &q);
+  ASSERT_EQ(out.size(), static_cast<size_t>(kW) * kH * 4);
+  // The backdrop's share of each pixel is what is left uncovered.
+  EXPECT_NEAR(At(out, 0, 1)[1], 255 * (1 - 1.0 / 12), 8) << "a twelfth";
+  EXPECT_NEAR(At(out, 1, 1)[1], 255 * (1 - 11.0 / 12), 8) << "eleven twelfths";
+  EXPECT_NEAR(At(out, 1, 2)[1], 255 * (1 - 1.0 / 3), 12) << "a third";
+  EXPECT_EQ(At(out, 2, 1)[1], 0) << "well inside";
+  EXPECT_EQ(At(out, 0, 2)[1], 0xff) << "well outside";
+}
+
+// Past a smoothed edge the quad samples its crop's own texels: here the
+// middle three columns of a buffer whose outer two are red. Sampling is held
+// half a texel inside the crop, so a filtered sample at its edge does not
+// reach the red either.
+TEST_F(LayerDrawVk, ASmoothedQuadSamplesOnlyItsCrop) {
+  std::vector<uint8_t> buffer = SolidBuffer(0, 0, 0xff);
+  for (int y = 0; y < kH; ++y) {
+    for (const int x : {0, kW - 1}) {
+      uint8_t* p = &buffer[(static_cast<size_t>(y) * kW + x) * 4];
+      p[0] = 0xff;
+      p[2] = 0;
+    }
+  }
+  UvAffine crop;
+  crop.a = 3.0f / kW;
+  crop.tx = 1.0f / kW;
+  const std::array<float, 4> black = {0, 0, 0, 1};
+  const auto q = SmoothedSkew();
+  const auto out =
+      Draw(kW, kH, buffer, crop, /*opaque=*/true, &black, 1.0f, nullptr, &q);
+  ASSERT_EQ(out.size(), static_cast<size_t>(kW) * kH * 4);
+  int blue = 0;
+  for (int y = 0; y < kH; ++y) {
+    for (int x = 0; x < kW; ++x) {
+      EXPECT_LE(At(out, x, y)[0], 1) << "red at " << x << "," << y;
+      blue += At(out, x, y)[2] > 0 ? 1 : 0;
+    }
+  }
+  EXPECT_GT(blue, 8);
+}

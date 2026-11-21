@@ -56,14 +56,21 @@ constexpr GLenum kDrawFramebuffer = 0x8CA9;
 // w0 and scaled back by 1 / w the same way) are worked out there. Not left to
 // the GPU's perspective-correct interpolation: v3d's GLES interpolated these
 // affinely when the w was in gl_Position.
+//
+// a_edge is the vertex's distance in pixels to each of the quad's edges
+// (s = 0, s = 1, t = 0, t = 1), above 0 inside. The edges are straight on the
+// screen, so the distances are affine there and interpolate exactly. An edge
+// left hard is given far away (kNoEdge).
 constexpr char kVertSrc[] =
     "attribute vec2 a_pos;\n"
     "attribute vec2 a_uv;\n"
     "#if IHS_MASK\n"
     "attribute float a_mask;\n"
     "attribute float a_w;\n"
+    "attribute vec4 a_edge;\n"
     "varying vec3 v_stq;\n"
     "varying float v_mask;\n"
+    "varying vec4 v_edge;\n"
     "#else\n"
     "uniform vec3 u_uv_u;\n"
     "uniform vec3 u_uv_v;\n"
@@ -74,6 +81,7 @@ constexpr char kVertSrc[] =
     "#if IHS_MASK\n"
     "  v_stq = st / a_w;\n"
     "  v_mask = a_mask;\n"
+    "  v_edge = a_edge;\n"
     "#else\n"
     "  v_uv = vec2(dot(u_uv_u, st), dot(u_uv_v, st));\n"
     "#endif\n"
@@ -82,13 +90,17 @@ constexpr char kVertSrc[] =
 
 constexpr char kFragPrecision[] = "precision mediump float;\n";
 
-// Uv() is the pixel's texture coordinates. Coverage() is the share of the
-// pixel inside a rounded rect, for a pixel the quad's crop has already put
-// inside its bounding box: only the corners are left to cut, with about a
-// pixel of edge. v_mask is 0 on the pieces of the quad no corner reaches
-// (QuadMask::parts), which skip the rest. A corner with a zero radius is
-// square. Positions are in pixels, up to a few thousand, which mediump cannot
-// place to a pixel, so the masked build works in highp where the GPU has it.
+// Uv() is the pixel's texture coordinates, with (s, t) held to u_st_clamp
+// (SampleClamp): past a smoothed edge the quad is drawn a pixel wider, and
+// what is drawn there is the edge's own texels, not the buffer's beyond a
+// crop. Coverage() is the share of the pixel inside the quad's smoothed
+// edges, half a pixel either side of each, times Round(). Round() is the share
+// inside a rounded rect, for a pixel the quad's crop has already put inside
+// its bounding box: only the corners are left to cut, with about a pixel of
+// edge. v_mask is 0 on the pieces of the quad no corner reaches
+// (QuadMask::parts), which skip it. A corner with a zero radius is square.
+// Positions are in pixels, up to a few thousand, which mediump cannot place
+// to a pixel, so the masked build works in highp where the GPU has it.
 // Without the mask, Coverage() is 1.
 constexpr char kMaskSrc[] =
     "#if IHS_MASK\n"
@@ -99,6 +111,8 @@ constexpr char kMaskSrc[] =
     "#endif\n"
     "varying MASKP vec3 v_stq;\n"
     "varying float v_mask;\n"
+    "varying MASKP vec4 v_edge;\n"
+    "uniform MASKP vec4 u_st_clamp;\n"  // s0, t0, s1, t1
     "uniform MASKP vec3 u_uv_u;\n"
     "uniform MASKP vec3 u_uv_v;\n"
     "uniform MASKP vec3 u_pos_u;\n"
@@ -108,10 +122,11 @@ constexpr char kMaskSrc[] =
     "uniform MASKP vec4 u_radii_bottom;\n"  // lower left x y, lower right x y
     "MASKP vec3 St() { return vec3(v_stq.xy / v_stq.z, 1.0); }\n"
     "MASKP vec2 Uv() {\n"
-    "  MASKP vec3 st = St();\n"
+    "  MASKP vec3 st = vec3(clamp(St().xy, u_st_clamp.xy, u_st_clamp.zw),\n"
+    "                       1.0);\n"
     "  return vec2(dot(u_uv_u, st), dot(u_uv_v, st));\n"
     "}\n"
-    "float Coverage() {\n"
+    "float Round() {\n"
     "  if (v_mask < 0.5) return 1.0;\n"
     "  MASKP vec3 st = St();\n"
     "  MASKP vec2 p = vec2(dot(u_pos_u, st), dot(u_pos_v, st)) * v_stq.z;\n"
@@ -126,6 +141,10 @@ constexpr char kMaskSrc[] =
     "      (top ? d.y >= 0.0 : d.y <= 0.0)) return 1.0;\n"
     "  MASKP float k = length(d / r);\n"
     "  return clamp(0.5 - (k - 1.0) * min(r.x, r.y), 0.0, 1.0);\n"
+    "}\n"
+    "float Coverage() {\n"
+    "  MASKP vec4 e = clamp(v_edge + 0.5, 0.0, 1.0);\n"
+    "  return e.x * e.y * e.z * e.w * Round();\n"
     "}\n"
     "#else\n"
     "varying vec2 v_uv;\n"
@@ -354,6 +373,7 @@ GlCompositor::QuadProgram GlCompositor::BuildQuadProgram(const bool external,
   p.attr_uv = glGetAttribLocation(p.id, "a_uv");
   p.attr_mask = glGetAttribLocation(p.id, "a_mask");
   p.attr_w = glGetAttribLocation(p.id, "a_w");
+  p.attr_edge = glGetAttribLocation(p.id, "a_edge");
   p.uni_tex = glGetUniformLocation(p.id, "u_tex");
   p.uni_uv_u = glGetUniformLocation(p.id, "u_uv_u");
   p.uni_uv_v = glGetUniformLocation(p.id, "u_uv_v");
@@ -372,6 +392,7 @@ GlCompositor::MaskUniforms GlCompositor::GetMaskUniforms(const GLuint program) {
   u.rrect = glGetUniformLocation(program, "u_rrect");
   u.radii_top = glGetUniformLocation(program, "u_radii_top");
   u.radii_bottom = glGetUniformLocation(program, "u_radii_bottom");
+  u.st_clamp = glGetUniformLocation(program, "u_st_clamp");
   return u;
 }
 
@@ -393,6 +414,10 @@ void GlCompositor::SetMaskUniforms(const MaskUniforms& u, const QuadMask& m) {
   }
   if (u.radii_bottom >= 0) {
     glUniform4f(u.radii_bottom, r[3][0], r[3][1], r[2][0], r[2][1]);
+  }
+  if (u.st_clamp >= 0) {
+    glUniform4f(u.st_clamp, m.st_clamp[0], m.st_clamp[1], m.st_clamp[2],
+                m.st_clamp[3]);
   }
 }
 
@@ -557,9 +582,10 @@ void GlCompositor::CompositeViaQuadProgram(const QuadProgram& p,
     glDisable(GL_BLEND);
   }
   // A quad in pieces is one draw of two triangles a piece, each vertex
-  // (x, y, u, v, m, w) with m 1 on a corner box and w its homogeneous w. A
-  // whole quad is the shared strip, and a masked program reads m and w as 1
-  // over all of it.
+  // (x, y, u, v, m, w, edge[4]) with m 1 on a corner box, w its homogeneous w
+  // and edge its distance to each smoothed edge. A whole quad is the shared
+  // strip, and a masked program reads m and w as 1 over all of it, and its
+  // edges as hard.
   const bool given = mask != nullptr && mask->vert_count > 0;
   const bool parts = given || (mask != nullptr && mask->part_count > 0);
   GLsizei count = 4;
@@ -569,7 +595,7 @@ void GlCompositor::CompositeViaQuadProgram(const QuadProgram& p,
     if (parts_vbo_ == 0) {
       glGenBuffers(1, &parts_vbo_);
     }
-    constexpr size_t kPerVertex = 6;
+    constexpr size_t kPerVertex = 10;
     std::array<GLfloat, 7 * 6 * kPerVertex> verts{};
     size_t n = 0;
     for (size_t i = 0; given && i < mask->vert_count; ++i) {
@@ -580,6 +606,9 @@ void GlCompositor::CompositeViaQuadProgram(const QuadProgram& p,
       verts[n++] = 1.0f - v.t;
       verts[n++] = v.m;
       verts[n++] = v.w;
+      for (const float e : v.edge) {
+        verts[n++] = e;
+      }
     }
     for (size_t i = 0; !given && i < mask->part_count; ++i) {
       const QuadMask::Part& q = mask->parts[i];
@@ -592,6 +621,9 @@ void GlCompositor::CompositeViaQuadProgram(const QuadProgram& p,
         verts[n++] = 1.0f - t;
         verts[n++] = m;
         verts[n++] = 1.0f;
+        for (int e = 0; e < 4; ++e) {
+          verts[n++] = kNoEdge;
+        }
       };
       vertex(q.s0, q.t0);
       vertex(q.s1, q.t0);
@@ -643,6 +675,18 @@ void GlCompositor::CompositeViaQuadProgram(const QuadProgram& p,
       glVertexAttrib1f(static_cast<GLuint>(p.attr_w), 1.0f);
     }
   }
+  if (p.attr_edge >= 0) {
+    if (parts) {
+      glEnableVertexAttribArray(static_cast<GLuint>(p.attr_edge));
+      // NOLINTNEXTLINE(performance-no-int-to-ptr)
+      glVertexAttribPointer(static_cast<GLuint>(p.attr_edge), 4, GL_FLOAT,
+                            GL_FALSE, stride,
+                            reinterpret_cast<const void*>(6 * sizeof(GLfloat)));
+    } else {
+      glVertexAttrib4f(static_cast<GLuint>(p.attr_edge), kNoEdge, kNoEdge,
+                       kNoEdge, kNoEdge);
+    }
+  }
   glViewport(dst_x, dst_y, dst_w, dst_h);
   glBindTexture(target, tex);
   glDrawArrays(mode, 0, count);
@@ -658,6 +702,9 @@ void GlCompositor::CompositeViaQuadProgram(const QuadProgram& p,
   }
   if (p.attr_w >= 0 && parts) {
     glDisableVertexAttribArray(static_cast<GLuint>(p.attr_w));
+  }
+  if (p.attr_edge >= 0 && parts) {
+    glDisableVertexAttribArray(static_cast<GLuint>(p.attr_edge));
   }
   glBindBuffer(GL_ARRAY_BUFFER, 0);
   if (own_vao) {
@@ -921,10 +968,12 @@ bool GlCompositor::CompositeLayerThrough(
     vp = rotation->ToPanel(vp);
   }
   const float m = rounded != nullptr ? 1.0f : 0.0f;
+  // The quad as drawn, grown past its smoothed edges, as two triangles.
+  const auto corners = q.GrownCorners();
   size_t n = 0;
-  for (const auto& [s, tt] :
-       {std::pair{0.0, 0.0}, std::pair{1.0, 0.0}, std::pair{0.0, 1.0},
-        std::pair{0.0, 1.0}, std::pair{1.0, 0.0}, std::pair{1.0, 1.0}}) {
+  for (const size_t k : {0U, 1U, 2U, 2U, 1U, 3U}) {
+    const double s = corners[k][0];
+    const double tt = corners[k][1];
     const auto p = q.At(s, tt);
     double px = p[0];
     double py = p[1];
@@ -943,13 +992,24 @@ bool GlCompositor::CompositeLayerThrough(
     v.m = m;
     // Relative to the corner at (0, 0), as the mask's position is.
     v.w = static_cast<float>(q.W(s, tt) / q.w0);
+    // In output pixels, which a turn of the display does not change.
+    const auto e = EdgeDistances(q, p[0], p[1]);
+    for (size_t i = 0; i < e.size(); ++i) {
+      v.edge[i] = q.grow[i] > 0 ? static_cast<float>(e[i]) : kNoEdge;
+    }
   }
   mask.vert_count = n;
+  const auto held = SampleClamp(q, static_cast<uint32_t>(t.width),
+                                static_cast<uint32_t>(t.height));
+  for (size_t i = 0; i < held.size(); ++i) {
+    mask.st_clamp[i] = static_cast<float>(held[i]);
+  }
   const GLint gl_y = target_top_first ? vp.y : fb_height - vp.y - vp.h;
   // Outside the quad nothing is drawn, so inside it the rule is a rect's: an
-  // opaque layer overwrites what is under it unless the view is translucent or
-  // its corners are cut.
-  const bool blend = under && (!q.opaque || alpha < 1.0f || rounded != nullptr);
+  // opaque layer overwrites what is under it unless the view is translucent,
+  // its corners are cut or its edges smoothed.
+  const bool blend = under && (!q.opaque || alpha < 1.0f ||
+                               rounded != nullptr || q.Smoothed());
   CompositeLayerToFbo(dst_fbo, t.name, t.external, q.uv, vp.x, gl_y, vp.w, vp.h,
                       blend, q.opaque, alpha, &mask);
   return true;

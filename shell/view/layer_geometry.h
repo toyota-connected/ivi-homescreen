@@ -21,6 +21,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <utility>
 
 // Where a layer's pixels come from and where they land: a crop of its buffer,
@@ -420,8 +421,16 @@ struct ViewMap {
 // as for LayerPlacement, so @c uv maps them to texture coordinates the same
 // way; a draw that divides by w per pixel, as a GPU's perspective-correct
 // interpolation does, samples each pixel right. @c bounds holds the quad,
-// rounded out to whole pixels and cut down to the clip; a draw clipped to it
-// shows what the clip lets through.
+// grown as @c grow says, rounded out to whole pixels and cut down to the clip;
+// a draw clipped to it shows what the clip lets through.
+//
+// The quad's edges are drawn smooth where they are the view's own edges: a
+// pixel the edge crosses is covered in part, and is drawn with that share of
+// its color. @c grow says how far past each such edge the quad is drawn, in
+// units of s or t (s = 0, s = 1, t = 0, t = 1), far enough that the pixels it
+// crosses are all drawn; 0 is an edge left hard. Only the view's own edges
+// are smoothed: where two layers of a view meet, both smoothed would let what
+// is under them show through the seam.
 struct QuadPlacement {
   std::array<double, 2> origin{};
   std::array<double, 2> edge_s{};
@@ -432,6 +441,12 @@ struct QuadPlacement {
   UvAffine uv;
   RectI bounds;
   bool opaque{false};
+  std::array<double, 4> grow{};
+
+  // Whether any edge is smoothed, which leaves the layer translucent there.
+  [[nodiscard]] bool Smoothed() const {
+    return grow[0] > 0 || grow[1] > 0 || grow[2] > 0 || grow[3] > 0;
+  }
 
   // w at (s, t), above 0 over the whole quad.
   [[nodiscard]] double W(const double s, const double t) const {
@@ -443,7 +458,136 @@ struct QuadPlacement {
     return {(origin[0] + s * edge_s[0] + t * edge_t[0]) / w,
             (origin[1] + s * edge_s[1] + t * edge_t[1]) / w};
   }
+  // The corners of the quad as drawn, grown past its smoothed edges:
+  // (s0, t0), (s1, t0), (s0, t1), (s1, t1) in (s, t).
+  [[nodiscard]] std::array<std::array<double, 2>, 4> GrownCorners() const {
+    const double s0 = -grow[0];
+    const double s1 = 1.0 + grow[1];
+    const double t0 = -grow[2];
+    const double t1 = 1.0 + grow[3];
+    return {{{s0, t0}, {s1, t0}, {s0, t1}, {s1, t1}}};
+  }
 };
+
+// Where (s, t) is held when the layer is sampled: (s0, t0, s1, t1). Half a
+// texel inside a smoothed edge, so that a pixel drawn past it, or sampled at
+// it, filters only the layer's own texels and not the buffer beyond its crop;
+// 0 and 1 at an edge left hard, where the next layer takes over. @p q.uv must
+// be the one sampled with, and @p buffer_w x @p buffer_h the buffer's size.
+inline std::array<double, 4> SampleClamp(const QuadPlacement& q,
+                                         const uint32_t buffer_w,
+                                         const uint32_t buffer_h) {
+  // Texels along s and along t.
+  const double ns = std::abs(q.uv.a) * buffer_w + std::abs(q.uv.b) * buffer_h;
+  const double nt = std::abs(q.uv.c) * buffer_w + std::abs(q.uv.d) * buffer_h;
+  const double hs = ns > 1.0 ? 0.5 / ns : 0.5;
+  const double ht = nt > 1.0 ? 0.5 / nt : 0.5;
+  return {q.grow[0] > 0 ? hs : 0.0, q.grow[2] > 0 ? ht : 0.0,
+          q.grow[1] > 0 ? 1.0 - hs : 1.0, q.grow[3] > 0 ? 1.0 - ht : 1.0};
+}
+
+// The distance in output pixels from (x, y) to each edge of @p q's quad, the
+// lines through its corners (s = 0, s = 1, t = 0, t = 1), above 0 on the
+// quad's side. The quad's edges are straight on the output under a
+// perspective as well, so each distance is affine in (x, y): worked out at the
+// corners of a draw, it can be interpolated linearly over the screen. An edge
+// of no length gives 0.
+inline std::array<double, 4> EdgeDistances(const QuadPlacement& q,
+                                           const double x,
+                                           const double y) {
+  const auto c00 = q.At(0, 0);
+  const auto c10 = q.At(1, 0);
+  const auto c01 = q.At(0, 1);
+  const auto c11 = q.At(1, 1);
+  // The line through a and b, signed so that @p inside, a point of the quad
+  // off it, is above 0.
+  const auto dist = [x, y](const std::array<double, 2>& a,
+                           const std::array<double, 2>& b,
+                           const std::array<double, 2>& inside) {
+    const double nx = a[1] - b[1];
+    const double ny = b[0] - a[0];
+    const double len = std::hypot(nx, ny);
+    if (!(len > 1e-12)) {
+      return 0.0;
+    }
+    const double side = nx * (inside[0] - a[0]) + ny * (inside[1] - a[1]);
+    const double sign = side < 0 ? -1.0 : 1.0;
+    return sign * (nx * (x - a[0]) + ny * (y - a[1])) / len;
+  };
+  // The quad's center is inside it whatever the corners' order.
+  const auto mid = q.At(0.5, 0.5);
+  return {dist(c00, c01, mid), dist(c10, c11, mid), dist(c00, c10, mid),
+          dist(c01, c11, mid)};
+}
+
+// How far past each of the quad's edges flagged in @p edges (bit 0 s = 0,
+// bit 1 s = 1, bit 2 t = 0, bit 3 t = 1) it must be drawn for the edge to
+// move out by @p px output pixels, in units of s or t (QuadPlacement::grow).
+// Taken at both ends of the edge, which under a perspective move out by
+// different amounts, and the larger kept. Held to the size of the quad, and
+// to where w stays above half its value at the edge, so a grown corner never
+// reaches past the horizon.
+inline std::array<double, 4> GrowForEdges(const QuadPlacement& q,
+                                          const unsigned edges,
+                                          const double px) {
+  std::array<double, 4> grow{};
+  // How far one unit of s (along_s) or t moves the point at (s, t) off the
+  // edge through it along the other, in output pixels.
+  const auto rate = [&q](const double s, const double t, const bool along_s) {
+    const double w = q.W(s, t);
+    const auto p = q.At(s, t);
+    const std::array<double, 2> ds = {(q.edge_s[0] - p[0] * q.ws) / w,
+                                      (q.edge_s[1] - p[1] * q.ws) / w};
+    const std::array<double, 2> dt = {(q.edge_t[0] - p[0] * q.wt) / w,
+                                      (q.edge_t[1] - p[1] * q.wt) / w};
+    const auto& move = along_s ? ds : dt;
+    const auto& edge = along_s ? dt : ds;
+    const double len = std::hypot(edge[0], edge[1]);
+    if (!(len > 1e-12)) {
+      return 0.0;
+    }
+    return std::abs(move[0] * edge[1] - move[1] * edge[0]) / len;
+  };
+  for (unsigned e = 0; e < 4; ++e) {
+    if ((edges & (1U << e)) == 0) {
+      continue;
+    }
+    const bool along_s = e < 2;
+    const double at = (e % 2 == 0) ? 0.0 : 1.0;
+    double g = 0;
+    double w_room = std::numeric_limits<double>::infinity();
+    for (const double other : {0.0, 1.0}) {
+      const double s = along_s ? at : other;
+      const double t = along_s ? other : at;
+      const double r = rate(s, t, along_s);
+      g = std::max(g, r > 1e-12 ? px / r : 1.0);
+      // w changes by -dw per unit outward; keep it above half.
+      const double dw = (e % 2 == 0 ? 1.0 : -1.0) * (along_s ? q.ws : q.wt);
+      if (dw > 0) {
+        w_room = std::min(w_room, 0.5 * q.W(s, t) / dw);
+      }
+    }
+    grow[e] = std::min({g, 1.0, w_room});
+  }
+  // Grown on both sides a corner meets, its w falls by both; keep the
+  // corners in front of the viewer, giving up the smoothing if they cannot be.
+  for (int tries = 0; tries < 8; ++tries) {
+    bool ok = true;
+    for (const auto& [s, t] :
+         {std::pair{-grow[0], -grow[2]}, std::pair{1.0 + grow[1], -grow[2]},
+          std::pair{-grow[0], 1.0 + grow[3]},
+          std::pair{1.0 + grow[1], 1.0 + grow[3]}}) {
+      ok = ok && q.W(s, t) > 1e-9;
+    }
+    if (ok) {
+      return grow;
+    }
+    for (double& g : grow) {
+      g *= 0.5;
+    }
+  }
+  return {};
+}
 
 // Place a layer of a view that spans [0, view_w) x [0, view_h) in its own
 // pixels and reaches the output through @p map. @p src and @p dst are the
@@ -489,14 +633,22 @@ inline bool PlaceLayerThrough(RectF src,
       return false;
     }
   }
-  const auto o = q.At(0, 0);
+  // The edges of the layer that are the view's own are smoothed, grown by a
+  // pixel: the pixels they cross reach half a pixel past them.
+  unsigned edges = 0;
+  edges |= dst.x <= 0 ? 1U : 0U;
+  edges |= dst.x + dst.w >= view_w ? 2U : 0U;
+  edges |= dst.y <= 0 ? 4U : 0U;
+  edges |= dst.y + dst.h >= view_h ? 8U : 0U;
+  q.grow = GrowForEdges(q, edges, 1.0);
+  const auto corners = q.GrownCorners();
+  const auto o = q.At(corners[0][0], corners[0][1]);
   double x0 = o[0];
   double y0 = o[1];
   double x1 = x0;
   double y1 = y0;
-  for (const auto& [s, t] :
-       {std::pair{1.0, 0.0}, std::pair{0.0, 1.0}, std::pair{1.0, 1.0}}) {
-    const auto p = q.At(s, t);
+  for (size_t k = 1; k < corners.size(); ++k) {
+    const auto p = q.At(corners[k][0], corners[k][1]);
     x0 = std::min(x0, p[0]);
     y0 = std::min(y0, p[1]);
     x1 = std::max(x1, p[0]);

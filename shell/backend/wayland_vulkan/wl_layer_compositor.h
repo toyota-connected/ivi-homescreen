@@ -79,7 +79,8 @@ class LayerCompositor {
   // (0, 0) and its edges along s and t), w at that corner and its steps along
   // s and t, and the rect it is clipped to. Without a perspective w is 1 and
   // the quad a parallelogram. (s, t) run over the layer as they do over a
-  // destination rect, so the texture coordinates are the same. As
+  // destination rect, so the texture coordinates are the same. grow is how
+  // far past each edge it is drawn, which smooths that edge. As
   // QuadPlacement (view/layer_geometry.h).
   struct Quad {
     std::array<double, 2> origin{};
@@ -89,6 +90,7 @@ class LayerCompositor {
     double ws{0};
     double wt{0};
     RectI scissor;
+    std::array<double, 4> grow{};
   };
 
   // Blend one layer: sample @p src_image (already in SHADER_READ_ONLY_OPTIMAL,
