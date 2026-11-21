@@ -482,12 +482,14 @@ DrmCompositor::SingleLayerTexture(const ICompositorSurface& surface) {
 bool DrmCompositor::IsWholeImage(
     const std::optional<ICompositorSurface::GlLayerTexture>& t,
     const FlutterLayer& layer) {
-  // A clipped, rounded or translucent view is drawn layer by layer: that path
-  // crops to the clip, cuts the corners and draws at the opacity.
+  // A clipped, rounded, translucent or transformed view is drawn layer by
+  // layer: that path crops to the clip, cuts the corners, draws at the opacity
+  // and through the view's transform.
   return t && t->name != 0 && t->geometry.IsWhole() && !t->geometry.opaque &&
          !ihs::platform_view::ClipRectOf(layer) &&
          !ihs::platform_view::RoundedClipOf(layer) &&
-         ihs::platform_view::OpacityOf(layer) >= 1.0f;
+         ihs::platform_view::OpacityOf(layer) >= 1.0f &&
+         !ihs::platform_view::IsTransformed(layer);
 }
 
 bool DrmCompositor::CompositeLayeredSurface(
@@ -499,13 +501,23 @@ bool DrmCompositor::CompositeLayeredSurface(
     bool blend,
     const ICompositorSurface::GlLayerTexture* layer0,
     const DisplayRotation* rotation) {
-  const RectI view{static_cast<int32_t>(layer->offset.x),
-                   static_cast<int32_t>(layer->offset.y),
-                   static_cast<int32_t>(layer->size.width),
-                   static_cast<int32_t>(layer->size.height)};
-  const std::optional<RectI> clip = ihs::platform_view::ClipRectOf(*layer);
+  // A view under a rotation, skew or mirror is given in its own pixels, with
+  // the map that takes them to the output; its clips are tested against
+  // where it really is.
+  const std::optional<ihs::platform_view::TransformedView> transformed =
+      ihs::platform_view::TransformedViewOf(*layer,
+                                            backend_->PresentPixelRatio());
+  const RectI view = transformed
+                         ? RectI{0, 0, transformed->width, transformed->height}
+                         : RectI{static_cast<int32_t>(layer->offset.x),
+                                 static_cast<int32_t>(layer->offset.y),
+                                 static_cast<int32_t>(layer->size.width),
+                                 static_cast<int32_t>(layer->size.height)};
+  const std::optional<RectI> clip =
+      transformed ? transformed->clip : ihs::platform_view::ClipRectOf(*layer);
   const std::optional<RoundedRect> rounded =
-      ihs::platform_view::RoundedClipOf(*layer);
+      transformed ? transformed->rounded
+                  : ihs::platform_view::RoundedClipOf(*layer);
   return gl_compositor_->CompositeSurfaceLayers(
              target_fbo, *surface, view, fb_height, target_top_first, blend,
              [this, &surface](const ICompositorSurface::GlLayerTexture& t) {
@@ -513,7 +525,8 @@ bool DrmCompositor::CompositeLayeredSurface(
              },
              layer0, rotation, clip ? &*clip : nullptr,
              ihs::platform_view::OpacityOf(*layer),
-             rounded ? &*rounded : nullptr) > 0;
+             rounded ? &*rounded : nullptr,
+             transformed ? &transformed->map : nullptr) > 0;
 }
 
 std::optional<DisplayRotation> DrmCompositor::GpuRotation() const {
@@ -3963,14 +3976,16 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   // Checked before any view's frame is taken.
   //
   // A plane has no rounded corners at all, so a view whose rounded clip cuts
-  // into it is composited too.
+  // into it is composited too, as is one under a rotation, skew or mirror,
+  // which a plane cannot turn to.
   const bool all_alpha = plane_formats_.AllHaveAlpha();
   for (size_t i = 0; i < layer_count; ++i) {
     if (layers[i] == nullptr) {
       continue;
     }
     if ((!all_alpha && ihs::platform_view::OpacityOf(*layers[i]) < 1.0f) ||
-        ihs::platform_view::RoundedClipOf(*layers[i])) {
+        ihs::platform_view::RoundedClipOf(*layers[i]) ||
+        ihs::platform_view::IsTransformed(*layers[i])) {
       return PresentViaGlFallback(layers, layer_count);
     }
   }

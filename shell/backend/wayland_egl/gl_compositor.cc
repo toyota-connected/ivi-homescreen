@@ -26,6 +26,7 @@
 #include <cstring>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "backend/wayland_egl/gl_caps.h"
 #include "logging.h"
@@ -516,7 +517,8 @@ void GlCompositor::CompositeViaQuadProgram(const QuadProgram& p,
   // A quad in pieces is one draw of two triangles a piece, each vertex
   // (x, y, u, v, m) with m 1 on a corner box. A whole quad is the shared strip,
   // and a masked program reads m as 1 over all of it.
-  const bool parts = mask != nullptr && mask->part_count > 0;
+  const bool given = mask != nullptr && mask->vert_count > 0;
+  const bool parts = given || (mask != nullptr && mask->part_count > 0);
   GLsizei count = 4;
   GLenum mode = GL_TRIANGLE_STRIP;
   GLsizei stride = 4 * sizeof(GLfloat);
@@ -527,7 +529,15 @@ void GlCompositor::CompositeViaQuadProgram(const QuadProgram& p,
     constexpr size_t kPerVertex = 5;
     std::array<GLfloat, 7 * 6 * kPerVertex> verts{};
     size_t n = 0;
-    for (size_t i = 0; i < mask->part_count; ++i) {
+    for (size_t i = 0; given && i < mask->vert_count; ++i) {
+      const QuadMask::Vertex& v = mask->verts[i];
+      verts[n++] = v.x;
+      verts[n++] = v.y;
+      verts[n++] = v.s;
+      verts[n++] = 1.0f - v.t;
+      verts[n++] = v.m;
+    }
+    for (size_t i = 0; !given && i < mask->part_count; ++i) {
       const QuadMask::Part& q = mask->parts[i];
       const GLfloat m = q.corner ? 1.0f : 0.0f;
       // (s, t) runs over the viewport with t down; a_uv's v and NDC y run up.
@@ -806,6 +816,79 @@ void GlCompositor::CompositeLayerToFbo(GLuint dst_fbo,
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
+bool GlCompositor::CompositeLayerThrough(
+    const GLuint dst_fbo,
+    const ICompositorSurface::GlLayerTexture& t,
+    const RectI& view,
+    const GLint fb_height,
+    const bool target_top_first,
+    const bool under,
+    const DisplayRotation* rotation,
+    const RectI* clip,
+    const float alpha,
+    const RoundedRect* rounded,
+    const ViewAffine& map) {
+  const auto& g = t.geometry;
+  QuadPlacement q;
+  if (!PlaceLayerThrough(
+          g.src, g.dst, g.transform, g.opaque, static_cast<uint32_t>(t.width),
+          static_cast<uint32_t>(t.height), view.w, view.h, map, &q, clip)) {
+    return false;
+  }
+  if (!t.top_first) {
+    q.uv = FlipRows(q.uv);
+  }
+  // The texture coordinates and the mask's position both run over the quad's
+  // own (s, t), which no turn of the display changes: only where the quad's
+  // corners land does. The viewport is the quad's bounds, so the quad is
+  // clipped to them, and to the clip with them.
+  QuadMask mask;
+  if (rounded != nullptr) {
+    mask.rect = *rounded;
+  }
+  mask.pos.a = static_cast<float>(q.edge_s[0]);
+  mask.pos.b = static_cast<float>(q.edge_s[1]);
+  mask.pos.c = static_cast<float>(q.edge_t[0]);
+  mask.pos.d = static_cast<float>(q.edge_t[1]);
+  mask.pos.tx = static_cast<float>(q.origin[0]);
+  mask.pos.ty = static_cast<float>(q.origin[1]);
+  RectI vp = q.bounds;
+  if (rotation != nullptr) {
+    vp = rotation->ToPanel(vp);
+  }
+  const float m = rounded != nullptr ? 1.0f : 0.0f;
+  size_t n = 0;
+  for (const auto& [s, tt] :
+       {std::pair{0.0, 0.0}, std::pair{1.0, 0.0}, std::pair{0.0, 1.0},
+        std::pair{0.0, 1.0}, std::pair{1.0, 0.0}, std::pair{1.0, 1.0}}) {
+    const auto p = q.At(s, tt);
+    double px = p[0];
+    double py = p[1];
+    if (rotation != nullptr) {
+      rotation->ToPanel(p[0], p[1], &px, &py);
+    }
+    // Panel pixels, top-left origin, into the viewport's NDC. On a target
+    // whose GL y = 0 is its top row, NDC y runs down the panel; otherwise up.
+    QuadMask::Vertex& v = mask.verts[n++];
+    v.x = static_cast<float>(2.0 * (px - vp.x) / vp.w - 1.0);
+    v.y = static_cast<float>(target_top_first
+                                 ? 2.0 * (py - vp.y) / vp.h - 1.0
+                                 : 2.0 * (vp.y + vp.h - py) / vp.h - 1.0);
+    v.s = static_cast<float>(s);
+    v.t = static_cast<float>(tt);
+    v.m = m;
+  }
+  mask.vert_count = n;
+  const GLint gl_y = target_top_first ? vp.y : fb_height - vp.y - vp.h;
+  // Outside the quad nothing is drawn, so inside it the rule is a rect's: an
+  // opaque layer overwrites what is under it unless the view is translucent or
+  // its corners are cut.
+  const bool blend = under && (!q.opaque || alpha < 1.0f || rounded != nullptr);
+  CompositeLayerToFbo(dst_fbo, t.name, t.external, q.uv, vp.x, gl_y, vp.w, vp.h,
+                      blend, q.opaque, alpha, &mask);
+  return true;
+}
+
 size_t GlCompositor::CompositeSurfaceLayers(
     GLuint dst_fbo,
     const ICompositorSurface& surface,
@@ -819,13 +902,37 @@ size_t GlCompositor::CompositeSurfaceLayers(
     const DisplayRotation* rotation,
     const RectI* clip,
     float alpha,
-    const RoundedRect* rounded) {
+    const RoundedRect* rounded,
+    const ViewAffine* map) {
+  // A transformed view is drawn through the self-contained programs. Without
+  // them it falls back to the rect, as it was drawn before.
+  if (map != nullptr && (!EnsureQuad() || mask_.id == 0)) {
+    static bool warned = false;
+    if (!warned) {
+      warned = true;
+      ihs::log::warn(
+          "GlCompositor: the program for transformed platform views could not "
+          "be built; rotated and skewed views are drawn upright");
+    }
+    map = nullptr;
+  }
   size_t drawn = 0;
   const size_t count = surface.GetLayerCount();
   for (size_t i = 0; i < count; ++i) {
     const ICompositorSurface::GlLayerTexture t =
         i == 0 && layer0 != nullptr ? *layer0 : surface.GetLayerGlTexture(i);
     if (t.name == 0) {
+      continue;
+    }
+    if (map != nullptr && (!t.external || external_mask_.id != 0)) {
+      if (CompositeLayerThrough(dst_fbo, t, view, fb_height, target_top_first,
+                                blend_first || drawn > 0, rotation, clip, alpha,
+                                rounded, *map)) {
+        ++drawn;
+        if (on_drawn) {
+          on_drawn(t);
+        }
+      }
       continue;
     }
     const auto& g = t.geometry;

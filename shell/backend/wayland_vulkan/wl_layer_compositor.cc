@@ -39,12 +39,15 @@ const auto& d() {
 // std430 puts each vec4 on a 16-byte boundary, so two pad floats follow alpha.
 // 112 bytes, inside the 128 every device guarantees.
 struct LayerPush {
-  std::array<float, 4> rect;  // destination, NDC x0, y0, x1, y1
+  // The destination quad in NDC: its corner at (s, t) = (0, 0) and its edge
+  // along s, then (edge_t below) its edge along t. A rect has its edges along
+  // the axes.
+  std::array<float, 4> rect;
   std::array<float, 4> uv_u;  // (a, c, tx, -)
   std::array<float, 4> uv_v;  // (b, d, ty, -)
   float opaque;
   float alpha;  // the view's opacity, scaling the premultiplied color
-  std::array<float, 2> pad;
+  std::array<float, 2> edge_t;
   // The rounded clip in framebuffer pixels: its rect (left, top, right,
   // bottom), then its corner radii (x, y) upper left, upper right, lower left,
   // lower right. All radii zero is no clip.
@@ -489,7 +492,8 @@ void LayerCompositor::DrawLayer(VkCommandBuffer cmd,
                                 const UvAffine& uv,
                                 bool opaque,
                                 float alpha,
-                                const RoundedRect* rounded) {
+                                const RoundedRect* rounded,
+                                const Quad* quad) {
   if (fb_width_ == 0 || fb_height_ == 0) {
     return;
   }
@@ -584,10 +588,13 @@ void LayerCompositor::DrawLayer(VkCommandBuffer cmd,
     }
     // Destination rect -> NDC (top-left origin, y down; matches the blit
     // path).
-    push.rect = {2.0f * static_cast<float>(sub.x) / fw - 1.0f,
-                 2.0f * static_cast<float>(sub.y) / fh - 1.0f,
-                 2.0f * static_cast<float>(sub.x + sub.w) / fw - 1.0f,
-                 2.0f * static_cast<float>(sub.y + sub.h) / fh - 1.0f};
+    const float x0 = 2.0f * static_cast<float>(sub.x) / fw - 1.0f;
+    const float y0 = 2.0f * static_cast<float>(sub.y) / fh - 1.0f;
+    push.rect = {x0, y0,
+                 2.0f * static_cast<float>(sub.x + sub.w) / fw - 1.0f - x0,
+                 0.0f};
+    push.edge_t = {0.0f,
+                   2.0f * static_cast<float>(sub.y + sub.h) / fh - 1.0f - y0};
     const UvAffine u = SubUv(uv, whole, sub);
     push.uv_u = {u.a, u.c, u.tx, 0.0f};
     push.uv_v = {u.b, u.d, u.ty, 0.0f};
@@ -596,6 +603,44 @@ void LayerCompositor::DrawLayer(VkCommandBuffer cmd,
                            &push);
     d().vkCmdDraw(cmd, 4, 1, 0, 0);
   };
+  // A layer of a transformed view is its quad, clipped by the scissor; a
+  // rounded clip is worked out over all of it. The scissor goes back to the
+  // whole framebuffer after, as BeginFrame left it.
+  if (quad != nullptr) {
+    const int32_t sx0 = std::max(0, quad->scissor.x);
+    const int32_t sy0 = std::max(0, quad->scissor.y);
+    const int32_t sx1 = std::min(static_cast<int32_t>(fb_width_),
+                                 quad->scissor.x + quad->scissor.w);
+    const int32_t sy1 = std::min(static_cast<int32_t>(fb_height_),
+                                 quad->scissor.y + quad->scissor.h);
+    if (sx1 <= sx0 || sy1 <= sy0) {
+      return;
+    }
+    const VkRect2D cut{
+        {sx0, sy0},
+        {static_cast<uint32_t>(sx1 - sx0), static_cast<uint32_t>(sy1 - sy0)}};
+    d().vkCmdSetScissor(cmd, 0, 1, &cut);
+    VkPipeline want = clip != nullptr ? pipeline_mask : pipeline;
+    d().vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, want);
+    const auto ndc_x = [fw](const double v) {
+      return static_cast<float>(2.0 * v / fw);
+    };
+    const auto ndc_y = [fh](const double v) {
+      return static_cast<float>(2.0 * v / fh);
+    };
+    push.rect = {ndc_x(quad->origin[0]) - 1.0f, ndc_y(quad->origin[1]) - 1.0f,
+                 ndc_x(quad->edge_s[0]), ndc_y(quad->edge_s[1])};
+    push.edge_t = {ndc_x(quad->edge_t[0]), ndc_y(quad->edge_t[1])};
+    push.uv_u = {uv.a, uv.c, uv.tx, 0.0f};
+    push.uv_v = {uv.b, uv.d, uv.ty, 0.0f};
+    d().vkCmdPushConstants(
+        cmd, pipeline_layout, kPushStages, 0,
+        clip != nullptr ? sizeof(push) : offsetof(LayerPush, rrect), &push);
+    d().vkCmdDraw(cmd, 4, 1, 0, 0);
+    const VkRect2D all{{0, 0}, {fb_width_, fb_height_}};
+    d().vkCmdSetScissor(cmd, 0, 1, &all);
+    return;
+  }
   // Only the boxes around a rounded clip's corners take the mask, which costs
   // every pixel it covers; the rest draws with the plain pipeline.
   if (clip == nullptr) {

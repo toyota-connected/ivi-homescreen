@@ -3028,16 +3028,15 @@ void WaylandVulkanBackend::WarnMissingPlatformView(
 
 bool WaylandVulkanBackend::PresentPlatformView(const FlutterLayer* layer) {
   const auto composed = MutationStack::Compose(layer->platform_view);
-  // Opacity, clip, scale and one rounded clip are drawn by the compositor;
-  // these are not.
-  if (!composed.rounded_clip_exact || composed.has_perspective ||
-      !composed.IsAxisAligned()) {
+  // Opacity, clips, scale, rotation, skew and one rounded clip are drawn by
+  // the compositor; these are not.
+  if (!composed.rounded_clip_exact || composed.has_perspective) {
     ihs::log::debug(
         "Vulkan compositor: platform view {} has mutations the compositor "
-        "does not draw (rounded_exact={} perspective={} axis_aligned={}); "
-        "plugin OnPresent must apply them.",
+        "does not draw (rounded_exact={} perspective={}); plugin OnPresent "
+        "must apply them.",
         layer->platform_view->identifier, composed.rounded_clip_exact,
-        composed.has_perspective, composed.IsAxisAligned());
+        composed.has_perspective);
   }
   std::shared_ptr<ICompositorSurface> surface;
   {
@@ -3197,6 +3196,8 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
     float alpha{1.0f};
     // The view's rounded clip; none for backing stores.
     std::optional<RoundedRect> rounded{};
+    // A layer of a transformed view is drawn as this quad, not the rect.
+    std::optional<wl_vulkan::LayerCompositor::Quad> quad{};
   };
   std::vector<Draw> draws;
   draws.reserve(count);
@@ -3274,10 +3275,17 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
       // a plain producer is one layer drawn whole.
       const RectI view{dx, dy, dw, dh};
       // Each layer is cropped to the view's clip, its corners cut to the
-      // rounded clip, and drawn at the view's opacity.
-      const std::optional<RectI> clip = ihs::platform_view::ClipRectOf(*layer);
+      // rounded clip, and drawn at the view's opacity. A view under a
+      // rotation, skew or mirror is drawn through its transform, its clips
+      // tested against where it really is.
+      const std::optional<ihs::platform_view::TransformedView> transformed =
+          ihs::platform_view::TransformedViewOf(*layer, PresentPixelRatio());
+      const std::optional<RectI> clip =
+          transformed ? transformed->clip
+                      : ihs::platform_view::ClipRectOf(*layer);
       const std::optional<RoundedRect> rounded =
-          ihs::platform_view::RoundedClipOf(*layer);
+          transformed ? transformed->rounded
+                      : ihs::platform_view::RoundedClipOf(*layer);
       const float alpha = ihs::platform_view::OpacityOf(*layer);
       for (size_t li = 0, n = surface->GetLayerCount(); li < n; ++li) {
         const auto img = surface->GetLayerVulkanImage(li);
@@ -3286,10 +3294,26 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
         }
         const auto& g = img.geometry;
         LayerPlacement place;
-        if (!PlaceLayer(g.src, g.dst, g.transform, g.opaque,
-                        static_cast<uint32_t>(img.width),
-                        static_cast<uint32_t>(img.height), view, &place,
-                        clip ? &*clip : nullptr)) {
+        std::optional<wl_vulkan::LayerCompositor::Quad> quad;
+        if (transformed) {
+          QuadPlacement q;
+          if (!PlaceLayerThrough(g.src, g.dst, g.transform, g.opaque,
+                                 static_cast<uint32_t>(img.width),
+                                 static_cast<uint32_t>(img.height),
+                                 transformed->width, transformed->height,
+                                 transformed->map, &q,
+                                 clip ? &*clip : nullptr)) {
+            continue;  // entirely outside its clip
+          }
+          quad = wl_vulkan::LayerCompositor::Quad{q.origin, q.edge_s, q.edge_t,
+                                                  q.bounds};
+          place.dst = q.bounds;
+          place.uv = q.uv;
+          place.opaque = q.opaque;
+        } else if (!PlaceLayer(g.src, g.dst, g.transform, g.opaque,
+                               static_cast<uint32_t>(img.width),
+                               static_cast<uint32_t>(img.height), view, &place,
+                               clip ? &*clip : nullptr)) {
           continue;  // entirely outside the view or its clip
         }
         if (!img.top_first) {
@@ -3349,7 +3373,7 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
              place.dst.h, nullptr,
              static_cast<VkSamplerYcbcrModelConversion>(img.ycbcr_model),
              static_cast<VkSamplerYcbcrRange>(img.ycbcr_range), place.uv,
-             place.opaque, alpha, rounded});
+             place.opaque, alpha, rounded, quad});
       }
       if (const int64_t us = ivi::pv_latency::FirstCompositeLatencyUs(
               layer->platform_view->identifier);
@@ -3368,10 +3392,10 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
   // still runs so the backing stores are restored regardless.
   if (layer_compositor_->BeginFrame(cmd, target_view, width, height, frame)) {
     for (const Draw& dr : draws) {
-      layer_compositor_->DrawLayer(cmd, dr.src, dr.format, dr.ycbcr_model,
-                                   dr.ycbcr_range, dr.dx, dr.dy, dr.dw, dr.dh,
-                                   dr.uv, dr.opaque, dr.alpha,
-                                   dr.rounded ? &*dr.rounded : nullptr);
+      layer_compositor_->DrawLayer(
+          cmd, dr.src, dr.format, dr.ycbcr_model, dr.ycbcr_range, dr.dx, dr.dy,
+          dr.dw, dr.dh, dr.uv, dr.opaque, dr.alpha,
+          dr.rounded ? &*dr.rounded : nullptr, dr.quad ? &*dr.quad : nullptr);
     }
     wl_vulkan::LayerCompositor::EndFrame(cmd);
   } else {

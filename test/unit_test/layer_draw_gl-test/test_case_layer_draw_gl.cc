@@ -806,3 +806,206 @@ TEST_F(LayerDrawGl, ARoundedClipCutsOnlyItsCorners) {
   }
   glDeleteTextures(1, &tex);
 }
+
+namespace {
+
+// Draw `surface`, a view of view_w x view_h in its own pixels, through `map`
+// into a target of w x h, clipped to `clip` when not null, through `rotation`
+// when not null, and read it back top row first.
+std::vector<uint8_t> DrawThrough(GlCompositor& compositor,
+                                 const ICompositorSurface& surface,
+                                 int view_w,
+                                 int view_h,
+                                 const ViewAffine& map,
+                                 int w,
+                                 int h,
+                                 bool target_top_first,
+                                 const DisplayRotation* rotation,
+                                 const RectI* clip) {
+  GLuint target = 0;
+  glGenTextures(1, &target);
+  glBindTexture(GL_TEXTURE_2D, target);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+               nullptr);
+  GLuint fbo = 0;
+  glGenFramebuffers(1, &fbo);
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                         target, 0);
+  glClearColor(0, 0, 0, 0);
+  glClear(GL_COLOR_BUFFER_BIT);
+  compositor.CompositeSurfaceLayers(fbo, surface, {0, 0, view_w, view_h}, h,
+                                    target_top_first,
+                                    /*blend_first=*/false, nullptr, nullptr,
+                                    rotation, clip, 1.0f, nullptr, &map);
+  std::vector<uint8_t> rows(Px(0, h, w));
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+  glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, rows.data());
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  glDeleteFramebuffers(1, &fbo);
+  glDeleteTextures(1, &target);
+  if (target_top_first) {
+    return rows;
+  }
+  std::vector<uint8_t> top_down(rows.size());
+  for (int y = 0; y < h; ++y) {
+    std::memcpy(&top_down[Px(0, h - 1 - y, w)], &rows[Px(0, y, w)],
+                Px(w, 0, 0));
+  }
+  return top_down;
+}
+
+// A view whose every pixel has its own color: red from x, green from y.
+std::vector<uint8_t> Ramp(int w, int h) {
+  std::vector<uint8_t> img(Px(0, h, w));
+  for (int y = 0; y < h; ++y) {
+    for (int x = 0; x < w; ++x) {
+      uint8_t* p = &img[Px(x, y, w)];
+      p[0] = static_cast<uint8_t>(10 * x + 5);
+      p[1] = static_cast<uint8_t>(20 * y + 5);
+      p[2] = 99;
+      p[3] = 255;
+    }
+  }
+  return img;
+}
+
+}  // namespace
+
+// A view turned a quarter turn, (x, y) -> (kRh - y, x): every output pixel is
+// the view's pixel the turn puts there. On either target, and on a display
+// itself turned a quarter turn either way.
+TEST_F(LayerDrawGl, ARotatedViewIsDrawnTurned) {
+  const std::vector<uint8_t> img = Ramp(kRw, kRh);
+  const GLuint tex = MakeTexture(kRw, kRh, img);
+  LayeredSurface surface;
+  ICompositorSurface::GlLayerTexture whole;
+  whole.name = tex;
+  whole.width = kRw;
+  whole.height = kRh;
+  whole.top_first = true;
+  surface.layers = {whole};
+  ViewAffine map;
+  map.a = 0;
+  map.b = 1;
+  map.c = -1;
+  map.d = 0;
+  map.tx = kRh;
+  map.ty = 0;
+  // The turned view fills a render space kRh wide and kRw tall.
+  constexpr int kOw = kRh;
+  constexpr int kOh = kRw;
+
+  struct Case {
+    int degrees;
+    bool top_first;
+  };
+  for (const Case c : {Case{0, false}, Case{0, true}, Case{90, false},
+                       Case{270, false}, Case{90, true}}) {
+    SCOPED_TRACE(::testing::Message()
+                 << c.degrees << " degrees, "
+                 << (c.top_first ? "top-first" : "window") << " target");
+    const DisplayRotation rot{c.degrees, kOw, kOh, c.degrees % 180 ? kOh : kOw,
+                              c.degrees % 180 ? kOw : kOh};
+    const int pw = rot.panel_w;
+    const int ph = rot.panel_h;
+    const auto out =
+        DrawThrough(*compositor_, surface, kRw, kRh, map, pw, ph, c.top_first,
+                    c.degrees != 0 ? &rot : nullptr, nullptr);
+    int wrong = 0;
+    for (int ry = 0; ry < kOh; ++ry) {
+      for (int rx = 0; rx < kOw; ++rx) {
+        double px = rx + 0.5;
+        double py = ry + 0.5;
+        if (c.degrees != 0) {
+          rot.ToPanel(rx + 0.5, ry + 0.5, &px, &py);
+        }
+        const uint8_t* got =
+            &out[Px(static_cast<int>(px), static_cast<int>(py), pw)];
+        // Render pixel (rx, ry) is the view's pixel (ry, kRh - 1 - rx).
+        const uint8_t* want = &img[Px(ry, kRh - 1 - rx, kRw)];
+        if (std::memcmp(got, want, 4) != 0) {
+          if (wrong++ < 3) {
+            ADD_FAILURE() << "render (" << rx << ", " << ry << ") got "
+                          << int{got[0]} << "," << int{got[1]} << " want "
+                          << int{want[0]} << "," << int{want[1]};
+          }
+        }
+      }
+    }
+    EXPECT_EQ(wrong, 0);
+  }
+  glDeleteTextures(1, &tex);
+}
+
+// An eighth of a turn about the target's center: the view is a diamond, and
+// the corners of its bounding box stay as they were.
+TEST_F(LayerDrawGl, AnEighthTurnLeavesTheBoundsCornersAlone) {
+  constexpr int kV = 8;
+  const std::vector<uint8_t> img = Ramp(kV, kV);
+  const GLuint tex = MakeTexture(kV, kV, img);
+  LayeredSurface surface;
+  ICompositorSurface::GlLayerTexture whole;
+  whole.name = tex;
+  whole.width = kV;
+  whole.height = kV;
+  whole.top_first = true;
+  surface.layers = {whole};
+  // About the view's center (4, 4), to the target's center (8, 8).
+  const double k = std::sqrt(0.5);
+  ViewAffine map;
+  map.a = k;
+  map.b = k;
+  map.c = -k;
+  map.d = k;
+  map.tx = 8 - (k * 4 - k * 4);
+  map.ty = 8 - (k * 4 + k * 4);
+  const auto out = DrawThrough(*compositor_, surface, kV, kV, map, 16, 16,
+                               false, nullptr, nullptr);
+  // The diamond's corners are 4 * sqrt(2) from (8, 8) along the axes.
+  EXPECT_EQ(out[Px(8, 8, 16) + 3], 255) << "the center";
+  EXPECT_EQ(out[Px(8, 3, 16) + 3], 255) << "near the top corner";
+  EXPECT_EQ(out[Px(3, 3, 16) + 3], 0) << "the bounds' upper left";
+  EXPECT_EQ(out[Px(12, 3, 16) + 3], 0) << "the bounds' upper right";
+  EXPECT_EQ(out[Px(3, 12, 16) + 3], 0) << "the bounds' lower left";
+  EXPECT_EQ(out[Px(12, 12, 16) + 3], 0) << "the bounds' lower right";
+  glDeleteTextures(1, &tex);
+}
+
+// The turned view under a clip: rows past it are not drawn, and the rows
+// above it are the turned view.
+TEST_F(LayerDrawGl, ARotatedViewIsClipped) {
+  const std::vector<uint8_t> img = Ramp(kRw, kRh);
+  const GLuint tex = MakeTexture(kRw, kRh, img);
+  LayeredSurface surface;
+  ICompositorSurface::GlLayerTexture whole;
+  whole.name = tex;
+  whole.width = kRw;
+  whole.height = kRh;
+  whole.top_first = true;
+  surface.layers = {whole};
+  ViewAffine map;
+  map.a = 0;
+  map.b = 1;
+  map.c = -1;
+  map.d = 0;
+  map.tx = kRh;
+  const RectI clip{0, 0, kRh, 10};
+  const auto out = DrawThrough(*compositor_, surface, kRw, kRh, map, kRh, kRw,
+                               false, nullptr, &clip);
+  int drawn_past = 0;
+  int missing = 0;
+  for (int y = 0; y < kRw; ++y) {
+    for (int x = 0; x < kRh; ++x) {
+      const uint8_t* got = &out[Px(x, y, kRh)];
+      drawn_past += y >= 10 && got[3] != 0 ? 1 : 0;
+      // Above the clip, the turned view's pixel (y, kRh - 1 - x).
+      missing +=
+          y < 10 && std::memcmp(got, &img[Px(y, kRh - 1 - x, kRw)], 4) != 0 ? 1
+                                                                            : 0;
+    }
+  }
+  EXPECT_EQ(drawn_past, 0);
+  EXPECT_EQ(missing, 0);
+  glDeleteTextures(1, &tex);
+}

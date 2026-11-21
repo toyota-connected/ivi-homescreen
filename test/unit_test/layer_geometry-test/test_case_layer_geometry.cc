@@ -421,3 +421,78 @@ TEST(LayerGeometry, SubUvOfAnEmptyRectIsTheSame) {
   EXPECT_EQ(s.tx, uv.tx);
   EXPECT_FALSE(std::isnan(s.U(0.5, 0.5)));
 }
+
+TEST(LayerGeometry, PlaceThroughTheIdentityIsTheRect) {
+  QuadPlacement q;
+  ASSERT_TRUE(PlaceLayerThrough({}, {}, BufferTransform::kNormal, true, 64, 32,
+                                64, 32, ViewAffine{}, &q));
+  EXPECT_DOUBLE_EQ(q.At(1, 1)[0], 64);
+  EXPECT_DOUBLE_EQ(q.At(1, 1)[1], 32);
+  EXPECT_EQ(q.bounds.w, 64);
+  EXPECT_EQ(q.bounds.h, 32);
+  EXPECT_TRUE(q.opaque);
+}
+
+TEST(LayerGeometry, PlaceThroughATurnTurnsTheQuad) {
+  // A quarter turn: (x, y) -> (200 - y, 100 + x).
+  ViewAffine m;
+  m.a = 0;
+  m.b = 1;
+  m.c = -1;
+  m.d = 0;
+  m.tx = 200;
+  m.ty = 100;
+  QuadPlacement q;
+  ASSERT_TRUE(PlaceLayerThrough({}, {}, BufferTransform::kNormal, false, 200,
+                                100, 200, 100, m, &q));
+  EXPECT_DOUBLE_EQ(q.At(0, 0)[0], 200);
+  EXPECT_DOUBLE_EQ(q.At(0, 0)[1], 100);
+  EXPECT_DOUBLE_EQ(q.At(1, 0)[0], 200);  // s runs down the output
+  EXPECT_DOUBLE_EQ(q.At(1, 0)[1], 300);
+  EXPECT_DOUBLE_EQ(q.At(0, 1)[0], 100);  // and t to the left
+  EXPECT_EQ(q.bounds.x, 100);
+  EXPECT_EQ(q.bounds.y, 100);
+  EXPECT_EQ(q.bounds.w, 100);
+  EXPECT_EQ(q.bounds.h, 200);
+  // The texture coordinates still run over the layer, not the bounds.
+  EXPECT_FLOAT_EQ(q.uv.U(1, 0), 1);
+  EXPECT_FLOAT_EQ(q.uv.V(0, 1), 1);
+}
+
+TEST(LayerGeometry, PlaceThroughRoundsTheBoundsOutAndClipsThem) {
+  // An eighth of a turn about (50, 50).
+  const double k = std::sqrt(0.5);
+  ViewAffine m;
+  m.a = k;
+  m.b = k;
+  m.c = -k;
+  m.d = k;
+  m.tx = 50;
+  m.ty = 50;
+  QuadPlacement q;
+  ASSERT_TRUE(PlaceLayerThrough({}, {}, BufferTransform::kNormal, false, 10, 10,
+                                10, 10, m, &q));
+  // Corners at x 50 - 7.07 .. 50 + 7.07, y 50 .. 50 + 14.14.
+  EXPECT_EQ(q.bounds.x, 42);
+  EXPECT_EQ(q.bounds.y, 50);
+  EXPECT_EQ(q.bounds.x + q.bounds.w, 58);
+  EXPECT_EQ(q.bounds.y + q.bounds.h, 65);
+  const RectI clip{0, 0, 100, 55};
+  ASSERT_TRUE(PlaceLayerThrough({}, {}, BufferTransform::kNormal, false, 10, 10,
+                                10, 10, m, &q, &clip));
+  EXPECT_EQ(q.bounds.y + q.bounds.h, 55);
+  const RectI away{0, 0, 10, 10};
+  EXPECT_FALSE(PlaceLayerThrough({}, {}, BufferTransform::kNormal, false, 10,
+                                 10, 10, 10, m, &q, &away));
+}
+
+TEST(LayerGeometry, PlaceThroughCropsTheLayerToTheViewFirst) {
+  // A layer hanging off the right of a 100x100 view: only its left half is
+  // drawn, from the left half of its buffer.
+  QuadPlacement q;
+  ASSERT_TRUE(PlaceLayerThrough({}, {50, 0, 100, 100}, BufferTransform::kNormal,
+                                false, 100, 100, 100, 100, ViewAffine{}, &q));
+  EXPECT_DOUBLE_EQ(q.origin[0], 50);
+  EXPECT_DOUBLE_EQ(q.At(1, 1)[0], 100);
+  EXPECT_FLOAT_EQ(q.uv.U(1, 0), 0.5f);
+}

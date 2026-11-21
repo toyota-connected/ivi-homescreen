@@ -267,14 +267,16 @@ class LayerDrawVk : public ::testing::Test {
   // Draw a bw x bh buffer (rows first-row-first, as a dma-buf import is) into
   // a kW x kH target through `uv`, and read the target back top row first.
   // `backdrop` prefills the target (kPreserve) so blending is visible.
-  std::vector<uint8_t> Draw(int bw,
-                            int bh,
-                            const std::vector<uint8_t>& rgba,
-                            const UvAffine& uv,
-                            bool opaque,
-                            const std::array<float, 4>* backdrop = nullptr,
-                            float alpha = 1.0f,
-                            const RoundedRect* rounded = nullptr) {
+  std::vector<uint8_t> Draw(
+      int bw,
+      int bh,
+      const std::vector<uint8_t>& rgba,
+      const UvAffine& uv,
+      bool opaque,
+      const std::array<float, 4>* backdrop = nullptr,
+      float alpha = 1.0f,
+      const RoundedRect* rounded = nullptr,
+      const wl_vulkan::LayerCompositor::Quad* quad = nullptr) {
     std::string err;
     auto comp = wl_vulkan::LayerCompositor::Create(
         device_, kFormat, err,
@@ -343,7 +345,7 @@ class LayerDrawVk : public ::testing::Test {
     comp->DrawLayer(cmd, src, kFormat,
                     VK_SAMPLER_YCBCR_MODEL_CONVERSION_RGB_IDENTITY,
                     VK_SAMPLER_YCBCR_RANGE_ITU_FULL, 0, 0, kW, kH, uv, opaque,
-                    alpha, rounded);
+                    alpha, rounded, quad);
     wl_vulkan::LayerCompositor::EndFrame(cmd);
     // The render pass leaves the target in GENERAL.
     Barrier(cmd, dst, VK_IMAGE_LAYOUT_GENERAL,
@@ -503,4 +505,86 @@ TEST_F(LayerDrawVk, ARoundedClipCutsOnlyItsCorners) {
   EXPECT_EQ(px(kW - 1, 0)[1], 0x00) << "upper right is square";
   EXPECT_EQ(px(0, kH - 1)[1], 0x00) << "lower left is square";
   EXPECT_EQ(px(1, 1)[1], 0x00) << "the middle shows the layer";
+}
+
+namespace {
+
+// A kW x kH image whose every pixel has its own color: red from x, green
+// from y.
+std::vector<uint8_t> Ramp() {
+  std::vector<uint8_t> buffer(static_cast<size_t>(kW) * kH * 4, 0);
+  for (int y = 0; y < kH; ++y) {
+    for (int x = 0; x < kW; ++x) {
+      uint8_t* p =
+          &buffer[(static_cast<size_t>(y) * kW + static_cast<size_t>(x)) * 4];
+      p[0] = static_cast<uint8_t>(40 * x + 10);
+      p[1] = static_cast<uint8_t>(80 * y + 10);
+      p[3] = 0xff;
+    }
+  }
+  return buffer;
+}
+
+const uint8_t* At(const std::vector<uint8_t>& img, int x, int y) {
+  return &img[(static_cast<size_t>(y) * kW + static_cast<size_t>(x)) * 4];
+}
+
+}  // namespace
+
+// A layer drawn as a quad: mirrored, and turned half a turn. Every pixel is
+// the image's pixel the quad puts there.
+TEST_F(LayerDrawVk, AQuadDrawsTheLayerThroughIt) {
+  const std::vector<uint8_t> buffer = Ramp();
+  wl_vulkan::LayerCompositor::Quad mirror;
+  mirror.origin = {kW, 0};
+  mirror.edge_s = {-kW, 0};
+  mirror.edge_t = {0, kH};
+  mirror.scissor = {0, 0, kW, kH};
+  wl_vulkan::LayerCompositor::Quad half = mirror;
+  half.origin = {kW, kH};
+  half.edge_t = {0, -kH};
+  for (const auto& [quad, flip_y] :
+       {std::pair{&mirror, false}, std::pair{&half, true}}) {
+    SCOPED_TRACE(flip_y ? "half turn" : "mirror");
+    const auto out = Draw(kW, kH, buffer, UvAffine{}, /*opaque=*/true, nullptr,
+                          1.0f, nullptr, quad);
+    ASSERT_EQ(out.size(), buffer.size());
+    for (int y = 0; y < kH; ++y) {
+      for (int x = 0; x < kW; ++x) {
+        const uint8_t* want = At(buffer, kW - 1 - x, flip_y ? kH - 1 - y : y);
+        EXPECT_EQ(At(out, x, y)[0], want[0]) << x << "," << y;
+        EXPECT_EQ(At(out, x, y)[1], want[1]) << x << "," << y;
+      }
+    }
+  }
+}
+
+// A skewed quad: the pixels outside the parallelogram keep the backdrop, and
+// the scissor cuts the quad.
+TEST_F(LayerDrawVk, AQuadLeavesWhatItDoesNotCover) {
+  const std::vector<uint8_t> buffer = Ramp();
+  const std::array<float, 4> white = {1, 1, 1, 1};
+  wl_vulkan::LayerCompositor::Quad skew;
+  skew.origin = {0, 0};
+  skew.edge_s = {3, 0};
+  skew.edge_t = {2, kH};
+  skew.scissor = {0, 0, kW, kH};
+  const auto out = Draw(kW, kH, buffer, UvAffine{}, /*opaque=*/true, &white,
+                        1.0f, nullptr, &skew);
+  ASSERT_EQ(out.size(), buffer.size());
+  EXPECT_EQ(At(out, 0, 2)[1], 0xff) << "left of the slanted edge";
+  EXPECT_EQ(At(out, 4, 0)[1], 0xff) << "right of the quad";
+  // (2.5, 1.5) is at (s, t) = (0.5, 0.5): the image's middle pixel.
+  EXPECT_EQ(At(out, 2, 1)[0], At(buffer, 2, 1)[0]);
+  EXPECT_EQ(At(out, 2, 1)[1], At(buffer, 2, 1)[1]);
+
+  wl_vulkan::LayerCompositor::Quad cut = skew;
+  cut.edge_t = {0, kH};
+  cut.edge_s = {kW, 0};
+  cut.scissor = {0, 0, 2, kH};
+  const auto clipped = Draw(kW, kH, buffer, UvAffine{}, /*opaque=*/true, &white,
+                            1.0f, nullptr, &cut);
+  ASSERT_EQ(clipped.size(), buffer.size());
+  EXPECT_EQ(At(clipped, 1, 1)[1], At(buffer, 1, 1)[1]) << "inside the scissor";
+  EXPECT_EQ(At(clipped, 2, 1)[1], 0xff) << "past it, the backdrop";
 }
