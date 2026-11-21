@@ -122,6 +122,9 @@ struct Slot {
   void* map_data = nullptr;
   uint64_t modifier = DRM_FORMAT_MOD_INVALID;
   uint32_t planes = 1;
+  /* The rows allocated, which can be more than the frame's (see AllocRing). A
+   * tiled buffer is described at this height and cropped to the frame. */
+  uint32_t alloc_height = 0;
   int release_fence = -1;
   bool submitted = false;
   /* A SOFTWARE_SHM buffer: the host's, mapped with mmap rather than gbm, and
@@ -201,10 +204,11 @@ class BenchView {
     /*
      * The grant is the first of these the backend offers, so the order here
      * decides the layout. This producer writes every pixel on the CPU, and a
-     * tiled buffer filled through gbm_bo_map has come out scrambled (#872), so
-     * linear goes first. PV_BENCH_TILED=1 keeps the backend's order, for
-     * measuring the tiled import; a backend that offers nothing linear gets a
-     * tiled buffer either way.
+     * tiled buffer filled through gbm_bo_map is tiled again on every unmap: at
+     * 1280x1440 on a Pi 5 that is 4 to 5 ms a frame against 1 to 2 for a
+     * linear one. So linear goes first. PV_BENCH_TILED=1 keeps the backend's
+     * order, for measuring the tiled import; a backend that offers nothing
+     * linear gets a tiled buffer either way.
      */
     const bool keep_tiled = [] {
       const char* env = ::getenv("PV_BENCH_TILED");
@@ -439,8 +443,6 @@ class BenchView {
        * fill below stays the same even when the buffer is tiled -- the driver
        * does the tiling on unmap, which costs the producer time but keeps the
        * shell measuring its own work rather than a format it cannot sample.
-       * That is the intent; on vc4 a UIF buffer filled this way still shows
-       * scrambled (#872), which is why Start asks for linear first.
        */
       const uint64_t modifier = format_.modifier;
       /*
@@ -455,7 +457,11 @@ class BenchView {
        * tile and add one more.
        *
        * PV_BENCH_PAD_ROWS overrides it, which is how the number above was
-       * found: at 0 every frame failed to import, at 64 none did.
+       * found: at 0 every frame failed to import, at 64 none did. (A Pi 5 on
+       * Mesa's v3d imports a UIF buffer at the frame's own height too.)
+       *
+       * A tiled buffer allocated taller is laid out for its full height, so
+       * Submit describes it at that height and crops it to the frame (#876).
        */
       constexpr uint32_t kTileRows = 64;
       const char* pad_env = ::getenv("PV_BENCH_PAD_ROWS");
@@ -513,6 +519,7 @@ class BenchView {
       s.map_stride = map_stride ? map_stride : s.stride;
       s.modifier = gbm_bo_get_modifier(s.bo);
       s.planes = static_cast<uint32_t>(gbm_bo_get_plane_count(s.bo));
+      s.alloc_height = alloc_height;
       if (s.modifier != DRM_FORMAT_MOD_LINEAR) {
         // A held map of a tiled buffer is a staging copy the buffer never
         // sees. The map above proved it can be mapped; Fill maps it again.
@@ -598,7 +605,16 @@ class BenchView {
     f.color_space = IHS_COLOR_SPACE_DEFAULT;
     f.color_range = IHS_COLOR_RANGE_DEFAULT;
     f.width = width_;
-    f.height = height_;
+    /*
+     * A tiled buffer's layout depends on its height, not only on its stride:
+     * a reader that takes it for a shorter image than it was allocated as
+     * reads its blocks from the wrong places (#876). So it is described at the
+     * height it was allocated at and cropped back to the frame below. A
+     * linear one is the same either way and keeps the frame's height.
+     */
+    const bool described_tall = s.modifier != DRM_FORMAT_MOD_LINEAR &&
+                                s.alloc_height > height_ && !s.shm;
+    f.height = described_tall ? s.alloc_height : height_;
     f.plane_count = 1;
     f.hdr = nullptr;
     f.buffer_id = frame % static_cast<uint32_t>(slots_.size());
@@ -613,9 +629,21 @@ class BenchView {
       return;
     }
 
+    if (described_tall && ihs_pv_submit_layers == nullptr) {
+      /* No way to crop: submit the frame's height and live with the old
+       * picture rather than show the padding rows. */
+      if (!warned_no_crop_) {
+        warned_no_crop_ = true;
+        Log("this shell has no ihs_pv_submit_layers to crop a tiled buffer "
+            "with; it may show scrambled (#876)");
+      }
+      f.height = height_;
+    }
     int release_fence = -1;
-    const int rc = layers_ > 1 ? SubmitLayers(f, &release_fence, frame + 1ULL)
-                               : ihs_pv_submit(view_, &f, -1, &release_fence);
+    const bool layered =
+        layers_ > 1 || (f.height != height_ && ihs_pv_submit_layers != nullptr);
+    const int rc = layered ? SubmitLayers(f, &release_fence, frame + 1ULL)
+                           : ihs_pv_submit(view_, &f, -1, &release_fence);
     if (rc != IHS_PV_OK) {
       /*
        * The dup is gone either way: submit consumes plane_fd whatever it
@@ -665,6 +693,12 @@ class BenchView {
       layers[i].frame = &frames[i];
       layers[i].acquire_fence_fd = -1;
       layers[i].layer_id = i;
+    }
+    // A buffer described taller than the frame: the bottom layer shows only
+    // the frame's rows. The others crop inside them already.
+    if (base.height != height_) {
+      layers[0].src_w = fixed(width_);
+      layers[0].src_h = fixed(height_);
     }
     if (n > 1) {
       layers[1].src_w = fixed(width_ / 2);
@@ -790,6 +824,7 @@ class BenchView {
   IhsPlatformView* const view_;
   const uint32_t width_;
   const uint32_t height_;
+  bool warned_no_crop_ = false;
   IhsFormatModifier format_{};
   int drm_fd_ = -1;
   gbm_device* gbm_ = nullptr;
