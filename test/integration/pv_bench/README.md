@@ -96,6 +96,8 @@ previous process has released DRM master gives a run that produces no report.
 | `PV_BENCH_CLIP` | *(unset)* | `1`: the app wraps its view in a `ClipRect` that keeps the middle of the screen, half its width and height |
 | `PV_BENCH_OPACITY` | `1` | the app wraps its view in `Opacity` at this value |
 | `PV_BENCH_RADIUS` | `0` | the app wraps its view in a `ClipRRect` with corners of this radius, in logical pixels |
+| `PV_BENCH_ROTATE` | `0` | the app wraps its view in `Transform.rotate` by this many degrees about its center |
+| `PV_BENCH_ROTATE_ANIM` | *(unset)* | `1`: the app wraps its view in a `RotationTransition` instead, one turn every eight seconds |
 | `PV_BENCH_FADE` | *(unset)* | `1`: the app wraps its view in a `FadeTransition` instead: up from 0.2 to 1.0 over two seconds, a second at 1.0, and back down over two |
 
 `PV_BENCH_NO_PV=1` is the control: same Flutter content, no layer. The difference
@@ -142,6 +144,15 @@ black background, cut along a curve of that radius times the pixel ratio, and
 everything else the view. Square corners are the bug in \#867. No plane has
 rounded corners, so on a plane path the view should not get one: the frame is
 composited instead.
+
+`PV_BENCH_ROTATE` and `PV_BENCH_ROTATE_ANIM` are the same kind of check for a
+rotation, also read by the app. At `PV_BENCH_ROTATE=30` the view should be
+turned 30 degrees clockwise about the output's center, with the app's black
+background in the corners it uncovers. An upright view, or one shifted toward
+the corner of its bounding box, is the bug in \#866. No plane turns by an
+arbitrary angle, so on a plane path the frame is composited instead. They go
+inside the clip and the rounded clip, so with `PV_BENCH_CLIP` or
+`PV_BENCH_RADIUS` the turned view is cut by an upright clip.
 
 The app reports build/raster/total percentiles and exits. The producer reports
 submits per second and mean release-fence wait every second -- check that first.
