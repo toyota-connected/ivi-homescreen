@@ -115,18 +115,24 @@ TEST(RepaintWindow, AFlipARefreshLateMissedItsVblank) {
   EXPECT_FALSE(MissedVblank(0, target + kPeriod, kPeriod)) << "no target";
 }
 
-TEST(RepaintWindow, AMissWidensTheWindowUpToHalfARefresh) {
+TEST(RepaintWindow, AMissWidensTheWindowUpToThreeQuartersOfARefresh) {
   uint64_t w = kWindow;
   w = AdaptRepaintWindowNs(w, kWindow, kPeriod, /*missed=*/true);
   EXPECT_EQ(w, kWindow + kMs);
+  // Past half a refresh: a v3d compositing linear buffers needs 9 to 12 ms of
+  // a 60 Hz refresh (#880).
+  for (int i = 0; i < 4; ++i) {
+    w = AdaptRepaintWindowNs(w, kWindow, kPeriod, true);
+  }
+  EXPECT_GT(w, kPeriod / 2);
   for (int i = 0; i < 10; ++i) {
     w = AdaptRepaintWindowNs(w, kWindow, kPeriod, true);
   }
-  EXPECT_EQ(w, kPeriod / 2) << "capped at half a refresh";
+  EXPECT_EQ(w, kPeriod / 4 * 3) << "capped at three quarters of a refresh";
 }
 
 TEST(RepaintWindow, FlipsOnTimeEaseItBackToTheBase) {
-  uint64_t w = kPeriod / 2;
+  uint64_t w = kPeriod / 4 * 3;
   int frames = 0;
   while (w > kWindow && frames < 10'000) {
     w = AdaptRepaintWindowNs(w, kWindow, kPeriod, /*missed=*/false);
