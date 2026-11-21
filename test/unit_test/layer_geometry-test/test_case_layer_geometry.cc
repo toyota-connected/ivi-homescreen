@@ -425,7 +425,7 @@ TEST(LayerGeometry, SubUvOfAnEmptyRectIsTheSame) {
 TEST(LayerGeometry, PlaceThroughTheIdentityIsTheRect) {
   QuadPlacement q;
   ASSERT_TRUE(PlaceLayerThrough({}, {}, BufferTransform::kNormal, true, 64, 32,
-                                64, 32, ViewAffine{}, &q));
+                                64, 32, ViewMap{}, &q));
   EXPECT_DOUBLE_EQ(q.At(1, 1)[0], 64);
   EXPECT_DOUBLE_EQ(q.At(1, 1)[1], 32);
   EXPECT_EQ(q.bounds.w, 64);
@@ -435,7 +435,7 @@ TEST(LayerGeometry, PlaceThroughTheIdentityIsTheRect) {
 
 TEST(LayerGeometry, PlaceThroughATurnTurnsTheQuad) {
   // A quarter turn: (x, y) -> (200 - y, 100 + x).
-  ViewAffine m;
+  ViewMap m;
   m.a = 0;
   m.b = 1;
   m.c = -1;
@@ -462,7 +462,7 @@ TEST(LayerGeometry, PlaceThroughATurnTurnsTheQuad) {
 TEST(LayerGeometry, PlaceThroughRoundsTheBoundsOutAndClipsThem) {
   // An eighth of a turn about (50, 50).
   const double k = std::sqrt(0.5);
-  ViewAffine m;
+  ViewMap m;
   m.a = k;
   m.b = k;
   m.c = -k;
@@ -491,8 +491,34 @@ TEST(LayerGeometry, PlaceThroughCropsTheLayerToTheViewFirst) {
   // drawn, from the left half of its buffer.
   QuadPlacement q;
   ASSERT_TRUE(PlaceLayerThrough({}, {50, 0, 100, 100}, BufferTransform::kNormal,
-                                false, 100, 100, 100, 100, ViewAffine{}, &q));
+                                false, 100, 100, 100, 100, ViewMap{}, &q));
   EXPECT_DOUBLE_EQ(q.origin[0], 50);
   EXPECT_DOUBLE_EQ(q.At(1, 1)[0], 100);
   EXPECT_FLOAT_EQ(q.uv.U(1, 0), 0.5f);
+}
+
+TEST(LayerGeometry, PlaceThroughAPerspectiveProjectsTheCorners) {
+  // w = 1 + x / 100 on a 100x50 view: the right edge at half its distance.
+  ViewMap m;
+  m.g = 0.01;
+  QuadPlacement q;
+  ASSERT_TRUE(PlaceLayerThrough({}, {}, BufferTransform::kNormal, false, 100,
+                                50, 100, 50, m, &q));
+  EXPECT_DOUBLE_EQ(q.W(0, 0), 1);
+  EXPECT_DOUBLE_EQ(q.W(1, 0), 2);
+  EXPECT_DOUBLE_EQ(q.At(1, 0)[0], 50);
+  EXPECT_DOUBLE_EQ(q.At(1, 1)[1], 25);
+  EXPECT_DOUBLE_EQ(q.At(0, 1)[1], 50);
+  EXPECT_EQ(q.bounds.w, 50);
+  EXPECT_EQ(q.bounds.h, 50);
+  // The texture coordinates still run over the layer.
+  EXPECT_FLOAT_EQ(q.uv.U(1, 0), 1);
+}
+
+TEST(LayerGeometry, PlaceThroughDropsALayerPastTheHorizon) {
+  ViewMap m;
+  m.g = -0.02;  // w = 0 halfway across a 100 wide view
+  QuadPlacement q;
+  EXPECT_FALSE(PlaceLayerThrough({}, {}, BufferTransform::kNormal, false, 100,
+                                 50, 100, 50, m, &q));
 }

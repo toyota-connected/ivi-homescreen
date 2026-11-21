@@ -380,45 +380,68 @@ inline size_t SplitRoundedCorners(const RectI& dst,
   return n;
 }
 
-// An affine map of a view's own pixels to output pixels:
+// A map of a view's own pixels to output pixels, projective in general:
 //
-//   x' = a * x + c * y + tx
-//   y' = b * x + d * y + ty
+//   w  = g * x + h * y + i
+//   x' = (a * x + c * y + tx) / w
+//   y' = (b * x + d * y + ty) / w
 //
-// For a view under a rotation, skew or mirror, which no rect on the output can
-// show.
-struct ViewAffine {
+// For a view under a rotation, skew, mirror or perspective, which no rect on
+// the output can show. Without a perspective the last row is (0, 0, 1) and
+// the map is affine.
+struct ViewMap {
   double a{1};
   double b{0};
   double c{0};
   double d{1};
   double tx{0};
   double ty{0};
+  double g{0};
+  double h{0};
+  double i{1};
 
+  // w at (x, y): above 0 where the point is in front of the viewer.
+  [[nodiscard]] double W(const double x, const double y) const {
+    return g * x + h * y + i;
+  }
+  // The output point for (x, y). Meaningful only where W is above 0.
   [[nodiscard]] std::array<double, 2> Map(const double x,
                                           const double y) const {
-    return {a * x + c * y + tx, b * x + d * y + ty};
+    const double w = W(x, y);
+    return {(a * x + c * y + tx) / w, (b * x + d * y + ty) / w};
   }
 };
 
-// Where one layer of a transformed view lands: a parallelogram on the output,
-// its corner at (s, t) = (0, 0) and its edges along s and t, in output pixels.
-// (s, t) run over the layer as for LayerPlacement, so @c uv maps them to
-// texture coordinates the same way. @c bounds holds the parallelogram, rounded
-// out to whole pixels and cut down to the clip; a draw clipped to it shows
-// what the clip lets through.
+// Where one layer of a transformed view lands: a quad on the output, in
+// homogeneous output pixels. Its corner at (s, t) = (0, 0) and its edges
+// along s and t give the point times w, and w0, ws and wt give w, both
+// affine in (s, t); the point itself is the one divided by the other. Without
+// a perspective w is 1 and the quad a parallelogram. (s, t) run over the layer
+// as for LayerPlacement, so @c uv maps them to texture coordinates the same
+// way; a draw that divides by w per pixel, as a GPU's perspective-correct
+// interpolation does, samples each pixel right. @c bounds holds the quad,
+// rounded out to whole pixels and cut down to the clip; a draw clipped to it
+// shows what the clip lets through.
 struct QuadPlacement {
   std::array<double, 2> origin{};
   std::array<double, 2> edge_s{};
   std::array<double, 2> edge_t{};
+  double w0{1};
+  double ws{0};
+  double wt{0};
   UvAffine uv;
   RectI bounds;
   bool opaque{false};
 
+  // w at (s, t), above 0 over the whole quad.
+  [[nodiscard]] double W(const double s, const double t) const {
+    return w0 + s * ws + t * wt;
+  }
   // The output point at (s, t).
   [[nodiscard]] std::array<double, 2> At(const double s, const double t) const {
-    return {origin[0] + s * edge_s[0] + t * edge_t[0],
-            origin[1] + s * edge_s[1] + t * edge_t[1]};
+    const double w = W(s, t);
+    return {(origin[0] + s * edge_s[0] + t * edge_t[0]) / w,
+            (origin[1] + s * edge_s[1] + t * edge_t[1]) / w};
   }
 };
 
@@ -426,7 +449,8 @@ struct QuadPlacement {
 // pixels and reaches the output through @p map. @p src and @p dst are the
 // layer's geometry as for PlaceLayer, @p dst in the view's own pixels. The
 // layer is cropped to the view there, and its bounds are cut down to @p clip
-// (output pixels) when one is given. Returns false when nothing of it can show.
+// (output pixels) when one is given. Returns false when nothing of it can show,
+// or when part of it is past the horizon of a perspective.
 inline bool PlaceLayerThrough(RectF src,
                               RectI dst,
                               const BufferTransform transform,
@@ -435,7 +459,7 @@ inline bool PlaceLayerThrough(RectF src,
                               const uint32_t buffer_h,
                               const int32_t view_w,
                               const int32_t view_h,
-                              const ViewAffine& map,
+                              const ViewMap& map,
                               QuadPlacement* out,
                               const RectI* clip = nullptr) {
   if (buffer_w == 0 || buffer_h == 0 || view_w <= 0 || view_h <= 0) {
@@ -449,11 +473,25 @@ inline bool PlaceLayerThrough(RectF src,
     return false;
   }
   QuadPlacement q;
-  q.origin = map.Map(dst.x, dst.y);
+  q.origin = {map.a * dst.x + map.c * dst.y + map.tx,
+              map.b * dst.x + map.d * dst.y + map.ty};
   q.edge_s = {map.a * dst.w, map.b * dst.w};
   q.edge_t = {map.c * dst.h, map.d * dst.h};
-  double x0 = q.origin[0];
-  double y0 = q.origin[1];
+  q.w0 = map.W(dst.x, dst.y);
+  q.ws = map.g * dst.w;
+  q.wt = map.h * dst.h;
+  // w is affine in (s, t), so above 0 at the four corners is above 0
+  // everywhere between. A layer that reaches past the horizon has no picture
+  // there to draw.
+  for (const auto& [s, t] : {std::pair{0.0, 0.0}, std::pair{1.0, 0.0},
+                             std::pair{0.0, 1.0}, std::pair{1.0, 1.0}}) {
+    if (!(q.W(s, t) > 1e-9)) {
+      return false;
+    }
+  }
+  const auto o = q.At(0, 0);
+  double x0 = o[0];
+  double y0 = o[1];
   double x1 = x0;
   double y1 = y0;
   for (const auto& [s, t] :

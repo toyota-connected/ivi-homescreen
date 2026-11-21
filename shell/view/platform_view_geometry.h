@@ -46,9 +46,8 @@
  * the layer size times that.
  *
  * A positive axis-aligned scale is corrected in the layer (@c ScaleLayer).
- * A rotation, skew or mirror cannot be shown as a rect at all, and is drawn
- * through the map @c TransformedViewOf gives. Perspective is left as the engine
- * reports it.
+ * A rotation, skew, mirror or perspective cannot be shown as a rect at all,
+ * and is drawn through the map @c TransformedViewOf gives.
  */
 namespace ihs::platform_view {
 
@@ -293,10 +292,11 @@ inline std::optional<RectI> ClipRectOf(const FlutterLayer& layer) {
        layer.offset.y + layer.size.height});
 }
 
-/// A view that reaches the output through a rotation, skew or mirror.
+/// A view that reaches the output through a rotation, skew, mirror or
+/// perspective.
 struct TransformedView {
   /// The view's own pixels to output pixels.
-  ViewAffine map;
+  ViewMap map;
   /// The view's size in its own pixels: the size the engine gives its layer.
   int32_t width{0};
   int32_t height{0};
@@ -307,9 +307,10 @@ struct TransformedView {
 };
 
 /**
- * @brief Whether @p layer's view is under a rotation, skew or mirror, which no
- * rect on the output can show. A caller deciding whether a rect will do (a
- * plane, a blit) needs only this; @c TransformedViewOf gives the map.
+ * @brief Whether @p layer's view is under a rotation, skew, mirror or
+ * perspective, which no rect on the output can show. A caller deciding whether
+ * a rect will do (a plane, a blit) needs only this; @c TransformedViewOf gives
+ * the map.
  */
 inline bool IsTransformed(const FlutterLayer& layer) {
   if (layer.type != kFlutterLayerContentTypePlatformView ||
@@ -318,7 +319,7 @@ inline bool IsTransformed(const FlutterLayer& layer) {
     return false;
   }
   const ComposedMutation composed = MutationStack::Compose(layer.platform_view);
-  return !composed.has_perspective && !composed.IsAxisAligned();
+  return composed.has_perspective || !composed.IsAxisAligned();
 }
 
 /**
@@ -327,12 +328,14 @@ inline bool IsTransformed(const FlutterLayer& layer) {
  * The engine gives the layer the origin of the transformed view's bounding box
  * and the size it was laid out at, which is right only for a positive
  * axis-aligned scale (@c ScaleLayer). Under a rotation, skew or mirror the view
- * is a parallelogram, and this is the map that draws it, from the composed
- * transform: that maps the view's logical rect, at its own origin, to output
- * pixels, so the map from its own pixels divides out the pixel ratio.
+ * is a parallelogram, and under a perspective a quad, and this is the map that
+ * draws it, from the composed transform: that maps the view's logical rect, at
+ * its own origin, to output pixels, so the map from its own pixels divides out
+ * the pixel ratio.
  *
- * Empty for any other view, for a perspective (drawn flat, as before), and
- * when the pixel ratio is unknown or the transform flattens the view.
+ * Empty for any other view, when the pixel ratio is unknown, when the
+ * transform flattens the view, and when a corner of the view is past the
+ * horizon of a perspective (drawn flat, as before).
  */
 inline std::optional<TransformedView> TransformedViewOf(
     const FlutterLayer& layer,
@@ -344,21 +347,31 @@ inline std::optional<TransformedView> TransformedViewOf(
     return std::nullopt;
   }
   const ComposedMutation composed = MutationStack::Compose(layer.platform_view);
-  if (composed.has_perspective || composed.IsAxisAligned()) {
+  if (!composed.has_perspective && composed.IsAxisAligned()) {
     return std::nullopt;
   }
+  // The pixel ratio scales the view's own x and y, so it divides the
+  // matrix's first two columns.
   TransformedView v;
-  v.map = {composed.a / pixel_ratio,
-           composed.b / pixel_ratio,
-           composed.c / pixel_ratio,
-           composed.d / pixel_ratio,
-           composed.tx,
-           composed.ty};
-  const ViewAffine& m = v.map;
-  const double det = m.a * m.d - m.b * m.c;
-  if (!std::isfinite(m.a) || !std::isfinite(m.b) || !std::isfinite(m.c) ||
-      !std::isfinite(m.d) || !std::isfinite(m.tx) || !std::isfinite(m.ty) ||
-      std::abs(det) < 1e-9) {
+  v.map.a = composed.a / pixel_ratio;
+  v.map.b = composed.b / pixel_ratio;
+  v.map.g = composed.g / pixel_ratio;
+  v.map.c = composed.c / pixel_ratio;
+  v.map.d = composed.d / pixel_ratio;
+  v.map.h = composed.h / pixel_ratio;
+  v.map.tx = composed.tx;
+  v.map.ty = composed.ty;
+  v.map.i = composed.i;
+  const ViewMap& m = v.map;
+  const double det = m.a * (m.d * m.i - m.ty * m.h) -
+                     m.c * (m.b * m.i - m.ty * m.g) +
+                     m.tx * (m.b * m.h - m.d * m.g);
+  for (const double e : {m.a, m.b, m.c, m.d, m.tx, m.ty, m.g, m.h, m.i}) {
+    if (!std::isfinite(e)) {
+      return std::nullopt;
+    }
+  }
+  if (std::abs(det) < 1e-9) {
     return std::nullopt;
   }
   if (!std::isfinite(layer.size.width) || !std::isfinite(layer.size.height) ||
@@ -375,6 +388,9 @@ inline std::optional<TransformedView> TransformedViewOf(
   for (const auto& [x, y] :
        {std::pair{0, 0}, std::pair{v.width, 0}, std::pair{0, v.height},
         std::pair{v.width, v.height}}) {
+    if (!(m.W(x, y) > 1e-9)) {
+      return std::nullopt;  // past the horizon: no bounds, nothing to draw
+    }
     const auto p = m.Map(x, y);
     bounds.left = std::min(bounds.left, p[0]);
     bounds.top = std::min(bounds.top, p[1]);

@@ -42,6 +42,8 @@
 //                       degrees about its center (default 0)
 //   PV_BENCH_ROTATE_ANIM set to 1 to wrap it in a RotationTransition instead:
 //                       one turn every eight seconds
+//   PV_BENCH_PERSPECTIVE tilt the view this many degrees about its vertical
+//                       axis, in perspective (default 0)
 
 import 'dart:async';
 import 'dart:ffi' as ffi;
@@ -214,8 +216,8 @@ class _PvBenchPageState extends State<PvBenchPage>
         children: <Widget>[
           if (widget.showPlatformView)
             Positioned.fill(
-                child: _faded(_rounded(_clipped(
-                    _rotated(_scaled(const _BenchPlatformView()))))))
+                child: _faded(_rounded(_clipped(_rotated(
+                    _tilted(_scaled(const _BenchPlatformView())))))))
           else
             const Center(
               child: Text('no platform view',
@@ -344,6 +346,24 @@ Widget _rotated(Widget child) {
     return child;
   }
   return Transform.rotate(angle: _pvRotate * math.pi / 180.0, child: child);
+}
+
+// A perspective on the view puts a transform with a perspective row on its
+// layer, so a run can check that each backend draws it in perspective (#868).
+final double _pvPerspective =
+    double.tryParse(Platform.environment['PV_BENCH_PERSPECTIVE'] ?? '') ?? 0.0;
+
+Widget _tilted(Widget child) {
+  if (_pvPerspective == 0.0) {
+    return child;
+  }
+  return Transform(
+    alignment: Alignment.center,
+    transform: Matrix4.identity()
+      ..setEntry(3, 2, 0.001)
+      ..rotateY(_pvPerspective * math.pi / 180.0),
+    child: child,
+  );
 }
 
 class _Spinning extends StatefulWidget {

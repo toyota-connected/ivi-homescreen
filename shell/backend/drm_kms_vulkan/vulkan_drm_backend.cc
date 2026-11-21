@@ -2777,7 +2777,8 @@ bool VulkanDrmBackend::ReconcilePlatformViewLayers(
   }
   // A plane has no rounded corners: a view whose rounded clip cuts into it is
   // drawn by the blend, which has. Nor does it turn by any angle or skew, so
-  // a view under a rotation, skew or mirror is drawn by the blend too.
+  // a view under a rotation, skew, mirror or perspective is drawn by the blend
+  // too.
   if (ihs::platform_view::RoundedClipOf(fl) ||
       ihs::platform_view::IsTransformed(fl)) {
     return false;
@@ -3375,8 +3376,8 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
       const RectI view{dx, dy, dw, dh};
       // Each layer is cropped to the view's clip, its corners cut to the
       // rounded clip, and drawn at the view's opacity. A view under a
-      // rotation, skew or mirror is drawn through its transform, its clips
-      // tested against where it really is.
+      // rotation, skew, mirror or perspective is drawn through its transform,
+      // its clips tested against where it really is.
       const std::optional<ihs::platform_view::TransformedView> transformed =
           ihs::platform_view::TransformedViewOf(*layer, PresentPixelRatio());
       const std::optional<RectI> clip =
@@ -3405,8 +3406,8 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
                                  clip ? &*clip : nullptr)) {
             continue;  // entirely outside its clip
           }
-          quad = wl_vulkan::LayerCompositor::Quad{q.origin, q.edge_s, q.edge_t,
-                                                  q.bounds};
+          quad = wl_vulkan::LayerCompositor::Quad{
+              q.origin, q.edge_s, q.edge_t, q.w0, q.ws, q.wt, q.bounds};
           place.dst = q.bounds;
           place.uv = q.uv;
           place.opaque = q.opaque;

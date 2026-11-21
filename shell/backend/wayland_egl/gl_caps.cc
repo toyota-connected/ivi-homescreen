@@ -18,6 +18,7 @@
 #include "logging/logging.h"
 
 #include <cstring>
+#include <string>
 #include <string_view>
 
 #include "backend/gl_extensions.h"
@@ -128,10 +129,36 @@ void GlCaps::Probe() {
     bind_sampler = reinterpret_cast<BindSamplerFn>(Resolve("glBindSampler"));
   }
 
+  // Resolve the vertex array object entry points, all three or none.
+  bind_vertex_array = nullptr;
+  gen_vertex_arrays = nullptr;
+  delete_vertex_arrays = nullptr;
+  const char* suffix = nullptr;
+  if (is_es3) {
+    suffix = "";
+  } else if (ihs::gl::ExtensionSupported(exts, "GL_OES_vertex_array_object")) {
+    suffix = "OES";
+  }
+  if (suffix != nullptr) {
+    const std::string s(suffix);
+    bind_vertex_array = reinterpret_cast<BindVertexArrayFn>(
+        Resolve(("glBindVertexArray" + s).c_str()));
+    gen_vertex_arrays = reinterpret_cast<GenVertexArraysFn>(
+        Resolve(("glGenVertexArrays" + s).c_str()));
+    delete_vertex_arrays = reinterpret_cast<DeleteVertexArraysFn>(
+        Resolve(("glDeleteVertexArrays" + s).c_str()));
+    if (!bind_vertex_array || !gen_vertex_arrays || !delete_vertex_arrays) {
+      bind_vertex_array = nullptr;
+      gen_vertex_arrays = nullptr;
+      delete_vertex_arrays = nullptr;
+    }
+  }
+
   ihs::log::debug(
       "GlCaps: ES{}.{} rgb8={} packed_ds={} blit={} msaa_rb={} max_samples={} "
-      "fb0_samples={} bind_sampler={}",
+      "fb0_samples={} bind_sampler={} vao={}",
       context_major, context_minor, has_rgb8_rgba8, has_packed_depth_stencil,
       has_blit_framebuffer, has_multisampled_renderbuffer, max_samples,
-      default_fb_samples, bind_sampler != nullptr);
+      default_fb_samples, bind_sampler != nullptr,
+      bind_vertex_array != nullptr);
 }

@@ -419,10 +419,32 @@ TEST(PlatformViewGeometry, ATransformedViewIsClippedWhereItReallyIs) {
   EXPECT_EQ(t->clip->y + t->clip->h, 250);
 }
 
-TEST(PlatformViewGeometry, PerspectiveAndBadInputAreNotMapped) {
-  ViewLayer persp({Transform(1, 0, 0, 0, 1, 0, 0.001, 0, 1), QuarterTurn()},
-                  {0, 0}, {100, 100});
-  EXPECT_FALSE(pv::TransformedViewOf(persp.layer, 1.0).has_value());
+TEST(PlatformViewGeometry, APerspectiveIsMapped) {
+  // w = 1 + x / 1000 on a 100x100 view: its right edge is drawn at
+  // 100 / 1.1 from the left, and half as far down at the bottom.
+  ViewLayer persp({Transform(1, 0, 0, 0, 1, 0, 0.001, 0, 1)}, {0, 0},
+                  {100, 100});
+  EXPECT_TRUE(pv::IsTransformed(persp.layer));
+  const auto t = pv::TransformedViewOf(persp.layer, 1.0);
+  ASSERT_TRUE(t.has_value());
+  EXPECT_NEAR(t->map.Map(100, 0)[0], 100 / 1.1, 1e-9);
+  EXPECT_NEAR(t->map.Map(100, 100)[1], 100 / 1.1, 1e-9);
+  // At a pixel ratio of 2 the view's own pixels are twice as many, and land
+  // in the same places.
+  ViewLayer at2({Scale(2, 2), Transform(1, 0, 0, 0, 1, 0, 0.001, 0, 1)}, {0, 0},
+                {200, 200});
+  const auto t2 = pv::TransformedViewOf(at2.layer, 2.0);
+  ASSERT_TRUE(t2.has_value());
+  EXPECT_NEAR(t2->map.Map(200, 0)[0], 2 * 100 / 1.1, 1e-9);
+}
+
+TEST(PlatformViewGeometry, AViewPastTheHorizonIsNotMapped) {
+  // w = 1 - x / 50 is 0 halfway across and below it after.
+  ViewLayer v({Transform(1, 0, 0, 0, 1, 0, -0.02, 0, 1)}, {0, 0}, {100, 100});
+  EXPECT_FALSE(pv::TransformedViewOf(v.layer, 1.0).has_value());
+}
+
+TEST(PlatformViewGeometry, BadInputIsNotMapped) {
   ViewLayer turned({QuarterTurn()}, {0, 0}, {100, 100});
   EXPECT_FALSE(pv::TransformedViewOf(turned.layer, 0.0).has_value());
   EXPECT_FALSE(pv::TransformedViewOf(turned.layer, NAN).has_value());

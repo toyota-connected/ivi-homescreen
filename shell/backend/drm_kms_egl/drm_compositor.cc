@@ -501,9 +501,9 @@ bool DrmCompositor::CompositeLayeredSurface(
     bool blend,
     const ICompositorSurface::GlLayerTexture* layer0,
     const DisplayRotation* rotation) {
-  // A view under a rotation, skew or mirror is given in its own pixels, with
-  // the map that takes them to the output; its clips are tested against
-  // where it really is.
+  // A view under a rotation, skew, mirror or perspective is given in its own
+  // pixels, with the map that takes them to the output; its clips are tested
+  // against where it really is.
   const std::optional<ihs::platform_view::TransformedView> transformed =
       ihs::platform_view::TransformedViewOf(*layer,
                                             backend_->PresentPixelRatio());
@@ -3976,8 +3976,8 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   // Checked before any view's frame is taken.
   //
   // A plane has no rounded corners at all, so a view whose rounded clip cuts
-  // into it is composited too, as is one under a rotation, skew or mirror,
-  // which a plane cannot turn to.
+  // into it is composited too, as is one under a rotation, skew, mirror or
+  // perspective, which a plane cannot turn to.
   const bool all_alpha = plane_formats_.AllHaveAlpha();
   for (size_t i = 0; i < layer_count; ++i) {
     if (layers[i] == nullptr) {

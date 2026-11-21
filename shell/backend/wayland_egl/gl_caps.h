@@ -72,9 +72,18 @@ struct GlCaps {
 
   using BindSamplerFn = void(GL_APIENTRY*)(GLuint unit, GLuint sampler);
 
+  // Vertex array objects: ES3 core, or GL_OES_vertex_array_object.
+  using BindVertexArrayFn = void(GL_APIENTRY*)(GLuint array);
+  using GenVertexArraysFn = void(GL_APIENTRY*)(GLsizei n, GLuint* arrays);
+  using DeleteVertexArraysFn = void(GL_APIENTRY*)(GLsizei n,
+                                                  const GLuint* arrays);
+
   BlitFramebufferFn blit_framebuffer{nullptr};
   RenderbufferStorageMultisampleFn renderbuffer_storage_multisample{nullptr};
   BindSamplerFn bind_sampler{nullptr};
+  BindVertexArrayFn bind_vertex_array{nullptr};
+  GenVertexArraysFn gen_vertex_arrays{nullptr};
+  DeleteVertexArraysFn delete_vertex_arrays{nullptr};
 
   /**
    * @brief Probe the current GL context. Safe to call more than once.
