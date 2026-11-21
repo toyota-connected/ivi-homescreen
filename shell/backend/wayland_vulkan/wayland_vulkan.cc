@@ -3304,7 +3304,7 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
             continue;  // entirely outside its clip
           }
           quad = wl_vulkan::LayerCompositor::Quad{
-              q.origin, q.edge_s, q.edge_t, q.w0, q.ws, q.wt, q.bounds};
+              q.origin, q.edge_s, q.edge_t, q.w0, q.ws, q.wt, q.bounds, q.grow};
           place.dst = q.bounds;
           place.uv = q.uv;
           place.opaque = q.opaque;

@@ -965,7 +965,7 @@ TEST_F(LayerDrawGl, AnEighthTurnLeavesTheBoundsCornersAlone) {
                                false, nullptr, nullptr);
   // The diamond's corners are 4 * sqrt(2) from (8, 8) along the axes.
   EXPECT_EQ(out[Px(8, 8, 16) + 3], 255) << "the center";
-  EXPECT_EQ(out[Px(8, 3, 16) + 3], 255) << "near the top corner";
+  EXPECT_EQ(out[Px(8, 4, 16) + 3], 255) << "near the top corner";
   EXPECT_EQ(out[Px(3, 3, 16) + 3], 0) << "the bounds' upper left";
   EXPECT_EQ(out[Px(12, 3, 16) + 3], 0) << "the bounds' upper right";
   EXPECT_EQ(out[Px(3, 12, 16) + 3], 0) << "the bounds' lower left";
@@ -1065,11 +1065,16 @@ TEST_F(LayerDrawGl, APerspectiveViewIsSampledPerspectiveCorrect) {
         }
         const uint8_t* got =
             &out[Px(static_cast<int>(qx), static_cast<int>(qy), pw)];
-        // Away from the edges and from texel boundaries, where rounding
-        // could pick either side.
-        const bool inside =
-            x > 0.6 && x < kRw - 0.6 && y > 0.6 && y < kRh - 0.6;
-        const bool outside = y > kRh + 1.0;
+        // Away from the edges, which cover part of the pixels they cross,
+        // and from texel boundaries, where rounding could pick either side.
+        // The bottom edge, y = kRh, is the line from (0, kRh) to
+        // (kRw / 2, kRh / 2) on the output.
+        const double below = (kRh - py - px * kRh / kRw) /
+                             std::hypot(1.0, static_cast<double>(kRh) / kRw);
+        const bool inside = px > 1.0 && px < kOw - 1.0 && py > 1.0 &&
+                            below > 1.0 && x > 0.6 && x < kRw - 0.6 &&
+                            y > 0.6 && y < kRh - 0.6;
+        const bool outside = below < -1.0;
         const double fx = x - std::floor(x);
         const double fy = y - std::floor(y);
         if (outside) {
@@ -1131,5 +1136,172 @@ TEST_F(LayerDrawGl, ARoundedClipCutsAPerspectiveView) {
     EXPECT_GT(a, 0) << x << "," << y;
     EXPECT_LT(a, 255) << x << "," << y;
   }
+  glDeleteTextures(1, &tex);
+}
+
+namespace {
+
+// An eighth of a turn of a kV x kV view about its center, to the center of a
+// 2 kV x 2 kV target: a diamond.
+constexpr int kV = 8;
+ViewMap EighthTurn() {
+  const double k = std::sqrt(0.5);
+  ViewMap map;
+  map.a = k;
+  map.b = k;
+  map.c = -k;
+  map.d = k;
+  map.tx = kV;
+  map.ty = kV - 2 * k * kV / 2;
+  return map;
+}
+
+// The share of output pixel (x, y) that the diamond covers, from 16 x 16
+// samples, and the distance from its center to the nearest of the diamond's
+// corners.
+double DiamondCoverage(int x, int y, double* corner_distance) {
+  const double k = std::sqrt(0.5);
+  const ViewMap m = EighthTurn();
+  int in = 0;
+  for (int j = 0; j < 16; ++j) {
+    for (int i = 0; i < 16; ++i) {
+      const double dx = x + (i + 0.5) / 16 - m.tx;
+      const double dy = y + (j + 0.5) / 16 - m.ty;
+      const double vx = k * (dx + dy);
+      const double vy = k * (dy - dx);
+      in += vx >= 0 && vx <= kV && vy >= 0 && vy <= kV ? 1 : 0;
+    }
+  }
+  *corner_distance = 1e9;
+  for (const auto& [vx, vy] : {std::pair{0, 0}, std::pair{kV, 0},
+                               std::pair{0, kV}, std::pair{kV, kV}}) {
+    const auto c = m.Map(vx, vy);
+    *corner_distance =
+        std::min(*corner_distance, std::hypot(x + 0.5 - c[0], y + 0.5 - c[1]));
+  }
+  return in / 256.0;
+}
+
+std::vector<uint8_t> Solid(int w, int h, uint8_t r, uint8_t g, uint8_t b) {
+  std::vector<uint8_t> img(Px(0, h, w));
+  for (size_t i = 0; i < img.size(); i += 4) {
+    img[i] = r;
+    img[i + 1] = g;
+    img[i + 2] = b;
+    img[i + 3] = 255;
+  }
+  return img;
+}
+
+}  // namespace
+
+// A view turned an eighth of a turn: each pixel its edges cross is covered in
+// the share of it inside them, not all or nothing. Away from the corners,
+// where the coverage of two edges is taken as the product of each, within a
+// tenth of the exact share.
+TEST_F(LayerDrawGl, ATurnedViewsEdgesCoverThePixelsTheyCross) {
+  const GLuint tex = MakeTexture(kV, kV, Solid(kV, kV, 255, 255, 255));
+  LayeredSurface surface;
+  ICompositorSurface::GlLayerTexture whole;
+  whole.name = tex;
+  whole.width = kV;
+  whole.height = kV;
+  whole.top_first = true;
+  surface.layers = {whole};
+  const auto out = DrawThrough(*compositor_, surface, kV, kV, EighthTurn(),
+                               2 * kV, 2 * kV, false, nullptr, nullptr);
+  int partial = 0;
+  int wrong = 0;
+  for (int y = 0; y < 2 * kV; ++y) {
+    for (int x = 0; x < 2 * kV; ++x) {
+      const uint8_t* got = &out[Px(x, y, 2 * kV)];
+      // White, premultiplied: every channel is the coverage.
+      EXPECT_NEAR(got[0], got[3], 1) << x << "," << y;
+      double corner = 0;
+      const double want = DiamondCoverage(x, y, &corner);
+      if (corner < 1.5) {
+        continue;
+      }
+      partial += want > 0.05 && want < 0.95 ? 1 : 0;
+      if (std::abs(got[3] / 255.0 - want) > 0.1 && wrong++ < 3) {
+        ADD_FAILURE() << "(" << x << ", " << y << ") covered " << got[3] / 255.0
+                      << ", want " << want;
+      }
+    }
+  }
+  EXPECT_GT(partial, 20);
+  EXPECT_EQ(wrong, 0);
+  glDeleteTextures(1, &tex);
+}
+
+// A smoothed edge is drawn a pixel past the layer. What is drawn there is the
+// layer's own edge, not the buffer beyond its crop: here red around a blue
+// crop. Sampling is held half a texel inside the crop, so a filtered sample
+// does not reach past it either.
+TEST_F(LayerDrawGl, ASmoothedEdgeShowsOnlyTheCrop) {
+  std::vector<uint8_t> img = Solid(kV, kV, 255, 0, 0);
+  for (int y = 2; y < 6; ++y) {
+    for (int x = 2; x < 6; ++x) {
+      uint8_t* p = &img[Px(x, y, kV)];
+      p[0] = 0;
+      p[2] = 255;
+    }
+  }
+  const GLuint tex = MakeTexture(kV, kV, img);
+  LayeredSurface surface;
+  ICompositorSurface::GlLayerTexture crop;
+  crop.name = tex;
+  crop.width = kV;
+  crop.height = kV;
+  crop.top_first = true;
+  crop.geometry.src = {2, 2, 4, 4};
+  surface.layers = {crop};
+  const auto out = DrawThrough(*compositor_, surface, kV, kV, EighthTurn(),
+                               2 * kV, 2 * kV, false, nullptr, nullptr);
+  int drawn = 0;
+  for (int y = 0; y < 2 * kV; ++y) {
+    for (int x = 0; x < 2 * kV; ++x) {
+      const uint8_t* got = &out[Px(x, y, 2 * kV)];
+      if (got[3] == 0) {
+        continue;
+      }
+      ++drawn;
+      EXPECT_EQ(got[0], 0) << "red at " << x << "," << y;
+    }
+  }
+  EXPECT_GT(drawn, 70);  // the diamond is 64 pixels, its edges add more
+  glDeleteTextures(1, &tex);
+}
+
+// Two layers that meet inside the view: the edges where they meet are left
+// hard, so nothing under them shows through the seam.
+TEST_F(LayerDrawGl, LayersThatMeetLeaveNoSeam) {
+  const GLuint tex = MakeTexture(kV, kV, Solid(kV, kV, 255, 255, 255));
+  LayeredSurface surface;
+  ICompositorSurface::GlLayerTexture left;
+  left.name = tex;
+  left.width = kV;
+  left.height = kV;
+  left.top_first = true;
+  left.geometry.src = {0, 0, kV / 2.0, kV};
+  left.geometry.dst = {0, 0, kV / 2, kV};
+  ICompositorSurface::GlLayerTexture right = left;
+  right.geometry.src = {kV / 2.0, 0, kV / 2.0, kV};
+  right.geometry.dst = {kV / 2, 0, kV / 2, kV};
+  surface.layers = {left, right};
+  const auto out = DrawThrough(*compositor_, surface, kV, kV, EighthTurn(),
+                               2 * kV, 2 * kV, false, nullptr, nullptr);
+  int inside = 0;
+  for (int y = 0; y < 2 * kV; ++y) {
+    for (int x = 0; x < 2 * kV; ++x) {
+      double corner = 0;
+      if (DiamondCoverage(x, y, &corner) < 1.0) {
+        continue;
+      }
+      ++inside;
+      EXPECT_EQ(out[Px(x, y, 2 * kV) + 3], 255) << x << "," << y;
+    }
+  }
+  EXPECT_GT(inside, 30);
   glDeleteTextures(1, &tex);
 }

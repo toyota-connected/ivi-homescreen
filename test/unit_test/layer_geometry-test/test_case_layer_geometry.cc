@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -428,8 +429,15 @@ TEST(LayerGeometry, PlaceThroughTheIdentityIsTheRect) {
                                 64, 32, ViewMap{}, &q));
   EXPECT_DOUBLE_EQ(q.At(1, 1)[0], 64);
   EXPECT_DOUBLE_EQ(q.At(1, 1)[1], 32);
-  EXPECT_EQ(q.bounds.w, 64);
-  EXPECT_EQ(q.bounds.h, 32);
+  // Each edge is the view's, smoothed and grown by a pixel, the bounds with it.
+  EXPECT_DOUBLE_EQ(q.grow[0], 1.0 / 64);
+  EXPECT_DOUBLE_EQ(q.grow[1], 1.0 / 64);
+  EXPECT_DOUBLE_EQ(q.grow[2], 1.0 / 32);
+  EXPECT_DOUBLE_EQ(q.grow[3], 1.0 / 32);
+  EXPECT_EQ(q.bounds.x, -1);
+  EXPECT_EQ(q.bounds.y, -1);
+  EXPECT_EQ(q.bounds.w, 66);
+  EXPECT_EQ(q.bounds.h, 34);
   EXPECT_TRUE(q.opaque);
 }
 
@@ -450,10 +458,11 @@ TEST(LayerGeometry, PlaceThroughATurnTurnsTheQuad) {
   EXPECT_DOUBLE_EQ(q.At(1, 0)[0], 200);  // s runs down the output
   EXPECT_DOUBLE_EQ(q.At(1, 0)[1], 300);
   EXPECT_DOUBLE_EQ(q.At(0, 1)[0], 100);  // and t to the left
-  EXPECT_EQ(q.bounds.x, 100);
-  EXPECT_EQ(q.bounds.y, 100);
-  EXPECT_EQ(q.bounds.w, 100);
-  EXPECT_EQ(q.bounds.h, 200);
+  // A pixel past each edge.
+  EXPECT_EQ(q.bounds.x, 99);
+  EXPECT_EQ(q.bounds.y, 99);
+  EXPECT_EQ(q.bounds.w, 102);
+  EXPECT_EQ(q.bounds.h, 202);
   // The texture coordinates still run over the layer, not the bounds.
   EXPECT_FLOAT_EQ(q.uv.U(1, 0), 1);
   EXPECT_FLOAT_EQ(q.uv.V(0, 1), 1);
@@ -472,11 +481,12 @@ TEST(LayerGeometry, PlaceThroughRoundsTheBoundsOutAndClipsThem) {
   QuadPlacement q;
   ASSERT_TRUE(PlaceLayerThrough({}, {}, BufferTransform::kNormal, false, 10, 10,
                                 10, 10, m, &q));
-  // Corners at x 50 - 7.07 .. 50 + 7.07, y 50 .. 50 + 14.14.
-  EXPECT_EQ(q.bounds.x, 42);
-  EXPECT_EQ(q.bounds.y, 50);
-  EXPECT_EQ(q.bounds.x + q.bounds.w, 58);
-  EXPECT_EQ(q.bounds.y + q.bounds.h, 65);
+  // Corners at x 50 - 7.07 .. 50 + 7.07, y 50 .. 50 + 14.14, each moved
+  // out along its diagonal by sqrt(2) as both its edges move out by 1.
+  EXPECT_EQ(q.bounds.x, 41);
+  EXPECT_EQ(q.bounds.y, 48);
+  EXPECT_EQ(q.bounds.x + q.bounds.w, 59);
+  EXPECT_EQ(q.bounds.y + q.bounds.h, 66);
   const RectI clip{0, 0, 100, 55};
   ASSERT_TRUE(PlaceLayerThrough({}, {}, BufferTransform::kNormal, false, 10, 10,
                                 10, 10, m, &q, &clip));
@@ -509,10 +519,155 @@ TEST(LayerGeometry, PlaceThroughAPerspectiveProjectsTheCorners) {
   EXPECT_DOUBLE_EQ(q.At(1, 0)[0], 50);
   EXPECT_DOUBLE_EQ(q.At(1, 1)[1], 25);
   EXPECT_DOUBLE_EQ(q.At(0, 1)[1], 50);
-  EXPECT_EQ(q.bounds.w, 50);
-  EXPECT_EQ(q.bounds.h, 50);
+  // Grown past every edge: by a pixel or more, more at an edge's near end,
+  // where a unit of s or t covers more of the output than at its far one.
+  EXPECT_LE(q.bounds.x, -1);
+  EXPECT_LE(q.bounds.y, -1);
+  EXPECT_GE(q.bounds.x + q.bounds.w, 51);
+  EXPECT_GE(q.bounds.y + q.bounds.h, 51);
   // The texture coordinates still run over the layer.
   EXPECT_FLOAT_EQ(q.uv.U(1, 0), 1);
+}
+
+// An eighth of a turn about (50, 50) of a 10x10 view: a diamond.
+ViewMap EighthTurn() {
+  const double k = std::sqrt(0.5);
+  ViewMap m;
+  m.a = k;
+  m.b = k;
+  m.c = -k;
+  m.d = k;
+  m.tx = 50;
+  m.ty = 50;
+  return m;
+}
+
+TEST(LayerGeometry, EdgeDistancesArePixelsToEachEdgeAboveZeroInside) {
+  QuadPlacement q;
+  ASSERT_TRUE(PlaceLayerThrough({}, {}, BufferTransform::kNormal, false, 10, 10,
+                                10, 10, EighthTurn(), &q));
+  // The quad's center is 5 pixels from each edge.
+  const auto mid = q.At(0.5, 0.5);
+  for (const double e : EdgeDistances(q, mid[0], mid[1])) {
+    EXPECT_NEAR(e, 5.0, 1e-9);
+  }
+  // The corner at (0, 0) is on the edges s = 0 and t = 0, and 10 pixels
+  // inside the other two.
+  const auto c = q.At(0, 0);
+  const auto e = EdgeDistances(q, c[0], c[1]);
+  EXPECT_NEAR(e[0], 0.0, 1e-9);
+  EXPECT_NEAR(e[1], 10.0, 1e-9);
+  EXPECT_NEAR(e[2], 0.0, 1e-9);
+  EXPECT_NEAR(e[3], 10.0, 1e-9);
+  // Above the top corner, outside two edges.
+  const auto out = EdgeDistances(q, 50, 48);
+  EXPECT_LT(std::min(out[0], out[2]), 0.0);
+}
+
+TEST(LayerGeometry, EdgeDistancesKeepTheirSignUnderAMirror) {
+  ViewMap m;
+  m.a = -1;
+  m.tx = 10;
+  QuadPlacement q;
+  ASSERT_TRUE(PlaceLayerThrough({}, {}, BufferTransform::kNormal, false, 10, 10,
+                                10, 10, m, &q));
+  for (const double e : EdgeDistances(q, 3, 4)) {
+    EXPECT_GT(e, 0.0);
+  }
+  EXPECT_LT(EdgeDistances(q, -0.5, 4)[1], 0.0);  // past s = 1, now at x = 0
+}
+
+TEST(LayerGeometry, PlaceThroughGrowsEachViewEdgeByAPixel) {
+  QuadPlacement q;
+  ASSERT_TRUE(PlaceLayerThrough({}, {}, BufferTransform::kNormal, false, 10, 10,
+                                10, 10, EighthTurn(), &q));
+  ASSERT_TRUE(q.Smoothed());
+  // Every grown corner is a pixel outside both edges it is on, and as far
+  // inside the other two as the quad is wide plus a pixel.
+  for (const auto& [s, t] : q.GrownCorners()) {
+    const auto p = q.At(s, t);
+    const auto e = EdgeDistances(q, p[0], p[1]);
+    EXPECT_NEAR(std::min({e[0], e[1], e[2], e[3]}), -1.0, 1e-9);
+    EXPECT_NEAR(std::max({e[0], e[1], e[2], e[3]}), 11.0, 1e-9);
+  }
+}
+
+TEST(LayerGeometry, PlaceThroughLeavesEdgesInsideTheViewHard) {
+  // A layer over the view's left half: its right edge meets the next layer's,
+  // which smoothing both would open into a seam.
+  QuadPlacement q;
+  ASSERT_TRUE(PlaceLayerThrough({}, {0, 0, 5, 10}, BufferTransform::kNormal,
+                                false, 10, 10, 10, 10, EighthTurn(), &q));
+  EXPECT_GT(q.grow[0], 0.0);
+  EXPECT_EQ(q.grow[1], 0.0);
+  EXPECT_GT(q.grow[2], 0.0);
+  EXPECT_GT(q.grow[3], 0.0);
+  // One clear of every edge is not smoothed at all.
+  ASSERT_TRUE(PlaceLayerThrough({}, {2, 2, 6, 6}, BufferTransform::kNormal,
+                                false, 10, 10, 10, 10, EighthTurn(), &q));
+  EXPECT_FALSE(q.Smoothed());
+  const RectI unrounded{41, 50, 17, 15};  // as before smoothing, rounded out
+  EXPECT_GE(q.bounds.x, unrounded.x);
+  EXPECT_LE(q.bounds.x + q.bounds.w, unrounded.x + unrounded.w);
+}
+
+TEST(LayerGeometry, PlaceThroughGrowsAPerspectiveByAPixelAtLeast) {
+  // w = 1 + x / 100: the right edge is at half its distance, so a unit of s
+  // or t is half as many pixels there.
+  ViewMap m;
+  m.g = 0.01;
+  QuadPlacement q;
+  ASSERT_TRUE(PlaceLayerThrough({}, {}, BufferTransform::kNormal, false, 100,
+                                50, 100, 50, m, &q));
+  for (const auto& [s, t] : q.GrownCorners()) {
+    EXPECT_GT(q.W(s, t), 0.0);
+    const auto p = q.At(s, t);
+    const auto e = EdgeDistances(q, p[0], p[1]);
+    // Outside both of its edges by about a pixel, well past the half a
+    // pixel the smoothing reaches (the grow is worked out from the rate at
+    // the edge, which a perspective changes a little over a pixel), and not
+    // by many.
+    std::array<double, 4> sorted = e;
+    std::sort(sorted.begin(), sorted.end());
+    EXPECT_LE(sorted[1], -0.9);
+    EXPECT_GE(sorted[0], -3.0);
+  }
+}
+
+TEST(LayerGeometry, GrowStaysInFrontOfTheViewer) {
+  // w = 1 - x / 101 on a 100 wide view: w at the right edge is 1/101, close
+  // to the horizon, where the view is stretched far across the output.
+  ViewMap m;
+  m.g = -1.0 / 101;
+  QuadPlacement q;
+  ASSERT_TRUE(PlaceLayerThrough({}, {}, BufferTransform::kNormal, false, 100,
+                                50, 100, 50, m, &q));
+  for (const auto& [s, t] : q.GrownCorners()) {
+    EXPECT_GT(
+        q.W(s, t),
+        0.5 * q.W(std::clamp(s, 0.0, 1.0), std::clamp(t, 0.0, 1.0)) - 1e-12);
+  }
+  // The right edge still moves out by a pixel.
+  const auto p = q.At(1.0 + q.grow[1], 0.5);
+  EXPECT_NEAR(EdgeDistances(q, p[0], p[1])[1], -1.0, 1e-3);
+}
+
+TEST(LayerGeometry, GrowAtAnEdgeWhereWFallsIsHeldToHalfOfIt) {
+  // w = 1 + x on a 1 pixel wide view scaled up 100 times, so a unit of s is
+  // under a pixel near nothing and growing s = 0 by a pixel would take w
+  // from 1 toward 0. Held to half.
+  ViewMap m;
+  m.a = 0.01;
+  m.d = 0.01;
+  m.g = 1.0;
+  m.h = 0.0;
+  QuadPlacement q;
+  ASSERT_TRUE(PlaceLayerThrough({}, {}, BufferTransform::kNormal, false, 1, 1,
+                                1, 1, m, &q));
+  EXPECT_GE(q.W(-q.grow[0], 0), 0.5 - 1e-12);
+  for (const auto& [s, t] : q.GrownCorners()) {
+    EXPECT_GT(q.W(s, t), 0.0);
+  }
 }
 
 TEST(LayerGeometry, PlaceThroughDropsALayerPastTheHorizon) {

@@ -35,21 +35,23 @@ const auto& d() {
 }
 
 // The per-draw push constants, laid out as the PC block in
-// shaders/composite.frag (the vertex shader reads the first part of it):
-// std430 puts each vec4 on a 16-byte boundary, so two pad floats follow alpha.
-// 112 bytes, inside the 128 every device guarantees.
+// shaders/composite.frag (the vertex shader reads the first part of it).
 struct LayerPush {
-  // The destination quad in clip space times w: its corner at (s, t) =
-  // (0, 0) and its edge along s, then (edge_t below) its edge along t; persp
-  // gives w as (w0, ws, wt, -). A rect has its edges along the axes and w 1,
-  // which makes it the rect in NDC.
+  // The destination quad in clip space times w, over w at its corner at
+  // (s, t) = (0, 0): that corner and its edge along s, then (edge_t below) its
+  // edge along t and w's steps along s and t, w being 1 at the corner. A rect
+  // has its edges along the axes and w 1, which makes it the rect in NDC.
   std::array<float, 4> rect;
-  std::array<float, 4> uv_u;  // (a, c, tx, -)
-  std::array<float, 4> uv_v;  // (b, d, ty, -)
-  float opaque;
-  float alpha;  // the view's opacity, scaling the premultiplied color
-  std::array<float, 2> edge_t;
-  std::array<float, 4> persp;
+  // (a, c, tx, opaque) and (b, d, ty, alpha): the texture coordinates' rows,
+  // then whether alpha is drawn as 1 and the view's opacity, which scales the
+  // premultiplied color.
+  std::array<float, 4> uv_u;
+  std::array<float, 4> uv_v;
+  std::array<float, 4> edge_t;  // (x, y, ws, wt)
+  // How far the quad is drawn past each of its edges (s = 0, s = 1, t = 0,
+  // t = 1), in s or t; one grown is smoothed. Read by the fragment shader only
+  // in the masked pipeline.
+  std::array<float, 4> grow;
   // The rounded clip in framebuffer pixels: its rect (left, top, right,
   // bottom), then its corner radii (x, y) upper left, upper right, lower left,
   // lower right. All radii zero is no clip.
@@ -63,13 +65,18 @@ static_assert(sizeof(LayerPush) == 128, "must match the shaders' PC block");
 constexpr VkShaderStageFlags kPushStages =
     VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
-// Precompiled SPIR-V (glslc -O -mfmt=c shaders/composite.{vert,frag}).
-// Regenerate with the same command if the .glsl sources change.
+// Precompiled SPIR-V (glslc -O -mfmt=c shaders/composite.{vert,frag}, and
+// glslc -O -mfmt=c -DIHS_YCBCR shaders/composite.frag -o
+// shaders/composite_ycbcr.frag.inc). Regenerate with the same commands if the
+// .glsl sources change.
 constexpr uint32_t kVertSpv[] =
 #include "shaders/composite.vert.inc"
     ;
 constexpr uint32_t kFragSpv[] =
 #include "shaders/composite.frag.inc"
+    ;
+constexpr uint32_t kFragYcbcrSpv[] =
+#include "shaders/composite_ycbcr.frag.inc"
     ;
 
 VkShaderModule MakeModule(VkDevice dev, const uint32_t* code, size_t bytes) {
@@ -93,15 +100,19 @@ bool IsYuvFormat(VkFormat format) {
 // dynamic viewport/scissor, positions from gl_VertexIndex, no vertex input) and
 // the same shaders; they differ only in the layout — the YUV one references the
 // immutable-ycbcr-sampler set layout, which bakes the conversion into sampling.
-// @p mask sets the fragment shader's kMask, which cuts the corners to a rounded
-// clip; without it that code is compiled out. Returns VK_NULL_HANDLE on
+// @p mask sets the fragment shader's kMask, which works out coverage (a rounded
+// clip, smoothed edges); without it that code is compiled out. @p ycbcr takes
+// the fragment shader built for a Y'CbCr sampler. Returns VK_NULL_HANDLE on
 // failure.
 VkPipeline MakePipeline(VkDevice device,
                         VkRenderPass render_pass,
                         VkPipelineLayout layout,
-                        bool mask) {
+                        bool mask,
+                        bool ycbcr) {
   VkShaderModule vs = MakeModule(device, kVertSpv, sizeof(kVertSpv));
-  VkShaderModule fs = MakeModule(device, kFragSpv, sizeof(kFragSpv));
+  VkShaderModule fs =
+      ycbcr ? MakeModule(device, kFragYcbcrSpv, sizeof(kFragYcbcrSpv))
+            : MakeModule(device, kFragSpv, sizeof(kFragSpv));
   std::array<VkPipelineShaderStageCreateInfo, 2> stages{};
   stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
   stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
@@ -304,7 +315,7 @@ std::unique_ptr<LayerCompositor> LayerCompositor::Create(VkDevice device,
   // blend, dynamic viewport/scissor, no vertex input. The YUV variants are
   // built lazily against their own layouts in GetOrCreateYuvProgram.
   c->pipeline_ = MakePipeline(device, c->render_pass_, c->pipeline_layout_,
-                              /*mask=*/false);
+                              /*mask=*/false, /*ycbcr=*/false);
   if (c->pipeline_ == VK_NULL_HANDLE) {
     err = "vkCreateGraphicsPipelines failed";
     return nullptr;
@@ -312,7 +323,8 @@ std::unique_ptr<LayerCompositor> LayerCompositor::Create(VkDevice device,
   // The same for a layer with a rounded clip. Not fatal: without it such a
   // layer is drawn with square corners.
   c->pipeline_mask_ =
-      MakePipeline(device, c->render_pass_, c->pipeline_layout_, /*mask=*/true);
+      MakePipeline(device, c->render_pass_, c->pipeline_layout_, /*mask=*/true,
+                   /*ycbcr=*/false);
 
   // One descriptor pool per ring slot, recycled in BeginFrame.
   for (auto& fr : c->ring_) {
@@ -569,9 +581,7 @@ void LayerCompositor::DrawLayer(VkCommandBuffer cmd,
   const auto fh = static_cast<float>(fb_height_);
   const RectI whole{dst_x, dst_y, dst_w, dst_h};
   LayerPush push{};
-  push.opaque = opaque ? 1.0f : 0.0f;
-  push.alpha = alpha;
-  push.persp = {1.0f, 0.0f, 0.0f, 0.0f};
+  const float opaque_f = opaque ? 1.0f : 0.0f;
   if (clip != nullptr) {
     const RectF& b = clip->rect;
     const auto& r = clip->radii;
@@ -598,17 +608,19 @@ void LayerCompositor::DrawLayer(VkCommandBuffer cmd,
                  2.0f * static_cast<float>(sub.x + sub.w) / fw - 1.0f - x0,
                  0.0f};
     push.edge_t = {0.0f,
-                   2.0f * static_cast<float>(sub.y + sub.h) / fh - 1.0f - y0};
+                   2.0f * static_cast<float>(sub.y + sub.h) / fh - 1.0f - y0,
+                   0.0f, 0.0f};
     const UvAffine u = SubUv(uv, whole, sub);
-    push.uv_u = {u.a, u.c, u.tx, 0.0f};
-    push.uv_v = {u.b, u.d, u.ty, 0.0f};
+    push.uv_u = {u.a, u.c, u.tx, opaque_f};
+    push.uv_v = {u.b, u.d, u.ty, alpha};
     d().vkCmdPushConstants(cmd, pipeline_layout, kPushStages, 0,
                            masked ? sizeof(push) : offsetof(LayerPush, rrect),
                            &push);
     d().vkCmdDraw(cmd, 4, 1, 0, 0);
   };
   // A layer of a transformed view is its quad, clipped by the scissor; a
-  // rounded clip is worked out over all of it. The scissor goes back to the
+  // rounded clip and smoothed edges are worked out over all of it. Without the
+  // masked pipeline its edges are left hard. The scissor goes back to the
   // whole framebuffer after, as BeginFrame left it.
   if (quad != nullptr) {
     const int32_t sx0 = std::max(0, quad->scissor.x);
@@ -624,7 +636,11 @@ void LayerCompositor::DrawLayer(VkCommandBuffer cmd,
         {sx0, sy0},
         {static_cast<uint32_t>(sx1 - sx0), static_cast<uint32_t>(sy1 - sy0)}};
     d().vkCmdSetScissor(cmd, 0, 1, &cut);
-    VkPipeline want = clip != nullptr ? pipeline_mask : pipeline;
+    const bool smooth = pipeline_mask != VK_NULL_HANDLE &&
+                        (quad->grow[0] > 0 || quad->grow[1] > 0 ||
+                         quad->grow[2] > 0 || quad->grow[3] > 0);
+    const bool masked = clip != nullptr || smooth;
+    VkPipeline want = masked ? pipeline_mask : pipeline;
     d().vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, want);
     // Pixels times w into clip space times w: x * w maps to
     // (2 x / fw - 1) * w, affine in (s, t) like x * w itself. All of it over
@@ -640,14 +656,19 @@ void LayerCompositor::DrawLayer(VkCommandBuffer cmd,
                  to_clip(quad->edge_s[0], fw, quad->ws),
                  to_clip(quad->edge_s[1], fh, quad->ws)};
     push.edge_t = {to_clip(quad->edge_t[0], fw, quad->wt),
-                   to_clip(quad->edge_t[1], fh, quad->wt)};
-    push.persp = {1.0f, static_cast<float>(quad->ws * k),
-                  static_cast<float>(quad->wt * k), 0.0f};
-    push.uv_u = {uv.a, uv.c, uv.tx, 0.0f};
-    push.uv_v = {uv.b, uv.d, uv.ty, 0.0f};
-    d().vkCmdPushConstants(
-        cmd, pipeline_layout, kPushStages, 0,
-        clip != nullptr ? sizeof(push) : offsetof(LayerPush, rrect), &push);
+                   to_clip(quad->edge_t[1], fh, quad->wt),
+                   static_cast<float>(quad->ws * k),
+                   static_cast<float>(quad->wt * k)};
+    if (smooth) {
+      for (size_t i = 0; i < push.grow.size(); ++i) {
+        push.grow[i] = static_cast<float>(quad->grow[i]);
+      }
+    }
+    push.uv_u = {uv.a, uv.c, uv.tx, opaque_f};
+    push.uv_v = {uv.b, uv.d, uv.ty, alpha};
+    d().vkCmdPushConstants(cmd, pipeline_layout, kPushStages, 0,
+                           masked ? sizeof(push) : offsetof(LayerPush, rrect),
+                           &push);
     d().vkCmdDraw(cmd, 4, 1, 0, 0);
     const VkRect2D all{{0, 0}, {fb_width_, fb_height_}};
     d().vkCmdSetScissor(cmd, 0, 1, &all);
@@ -809,7 +830,7 @@ const LayerCompositor::YuvProgram* LayerCompositor::GetOrCreateYuvProgram(
   }
 
   prog.pipeline = MakePipeline(device_, render_pass_, prog.pipeline_layout,
-                               /*mask=*/false);
+                               /*mask=*/false, /*ycbcr=*/true);
   if (prog.pipeline == VK_NULL_HANDLE) {
     d().vkDestroyPipelineLayout(device_, prog.pipeline_layout, nullptr);
     d().vkDestroyDescriptorSetLayout(device_, prog.set_layout, nullptr);
@@ -824,7 +845,7 @@ const LayerCompositor::YuvProgram* LayerCompositor::GetOrCreateYuvProgram(
 
   // As for RGB: not fatal, a rounded clip is then drawn square.
   prog.pipeline_mask = MakePipeline(device_, render_pass_, prog.pipeline_layout,
-                                    /*mask=*/true);
+                                    /*mask=*/true, /*ycbcr=*/true);
   prog.ok = true;
   yuv_programs_.push_back(prog);
   return &yuv_programs_.back();
