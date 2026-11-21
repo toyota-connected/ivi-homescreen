@@ -122,16 +122,22 @@ void GlCaps::Probe() {
     glGetIntegerv(kMaxSamples, &max_samples);
   }
 
-  // Resolve bind_sampler.
+  // Resolve bind_sampler and invalidate_framebuffer: ES3 core, through the
+  // resolver, since eglGetProcAddress may return null or an unusable pointer
+  // for a core function without EGL_KHR_get_all_proc_addresses.
   bind_sampler = nullptr;
+  invalidate_framebuffer = nullptr;
   if (is_es3) {
     bind_sampler = reinterpret_cast<BindSamplerFn>(Resolve("glBindSampler"));
+    invalidate_framebuffer = reinterpret_cast<InvalidateFramebufferFn>(
+        Resolve("glInvalidateFramebuffer"));
   }
 
   ihs::log::debug(
       "GlCaps: ES{}.{} rgb8={} packed_ds={} blit={} msaa_rb={} max_samples={} "
-      "fb0_samples={} bind_sampler={}",
+      "fb0_samples={} bind_sampler={} invalidate={}",
       context_major, context_minor, has_rgb8_rgba8, has_packed_depth_stencil,
       has_blit_framebuffer, has_multisampled_renderbuffer, max_samples,
-      default_fb_samples, bind_sampler != nullptr);
+      default_fb_samples, bind_sampler != nullptr,
+      invalidate_framebuffer != nullptr);
 }

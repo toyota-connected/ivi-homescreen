@@ -71,10 +71,15 @@ struct GlCaps {
                          GLsizei height);
 
   using BindSamplerFn = void(GL_APIENTRY*)(GLuint unit, GLuint sampler);
+  // glInvalidateFramebuffer: ES3 core only, so null on an ES2 context.
+  using InvalidateFramebufferFn = void(GL_APIENTRY*)(GLenum target,
+                                                     GLsizei num_attachments,
+                                                     const GLenum* attachments);
 
   BlitFramebufferFn blit_framebuffer{nullptr};
   RenderbufferStorageMultisampleFn renderbuffer_storage_multisample{nullptr};
   BindSamplerFn bind_sampler{nullptr};
+  InvalidateFramebufferFn invalidate_framebuffer{nullptr};
 
   /**
    * @brief Probe the current GL context. Safe to call more than once.

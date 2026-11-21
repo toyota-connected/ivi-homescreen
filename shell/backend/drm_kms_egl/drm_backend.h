@@ -196,6 +196,12 @@ struct DrmConfig {
   // whose planes cannot rotate. Flutter renders at the turned extent; the
   // scanout stays the full mode. Needs BUILD_COMPOSITOR.
   int rotation{0};
+
+  // [global] msaa_samples / --msaa-samples: samples per pixel in the backing
+  // stores Flutter renders into, under Impeller only (DrmCompositor). 0 or 1
+  // renders single-sample. The factory fills in kDefaultMsaaSamples when the
+  // key is unset; 0 here is only the default for a DrmConfig built by hand.
+  uint32_t msaa_samples{0};
 };
 
 // PrintDrmModes / ConnectorTypeName moved to display/drm_mode_list.h so the

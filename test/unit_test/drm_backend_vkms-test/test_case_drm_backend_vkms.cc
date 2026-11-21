@@ -41,6 +41,7 @@
 #include "configuration/configuration.h"
 #include "display/drm_display.h"
 #include "display/drm_mode_list.h"
+#include "engine_switches.h"
 #include "logging/logger.hpp"
 #include "platform/homescreen/flutter_desktop_engine_state.h"
 #include "platform/homescreen/flutter_desktop_view_controller_state.h"
@@ -1002,6 +1003,170 @@ TEST_F(DrmBackendVkmsFramed, TheViewsTextureReachesTheDisplay) {
   compositor_->UnregisterSurface(19);
 }
 #endif  // IHS_TEST_HAVE_CAPTURE
+
+// Multisampled backing stores under Impeller. The path runs unless the GL has
+// no multisample renderbuffers (llvmpipe has them: 4x). The startup line says
+// which, so the cases read it, and skip -- visibly -- only for that reason.
+class DrmBackendVkmsMsaa : public DrmBackendVkms {
+ protected:
+  static constexpr uint32_t kRed = 0x00FF0000u;
+  static constexpr uint32_t kGreen = 0x0000FF00u;
+
+  void Configure(DrmConfig& cfg) override {
+    DrmBackendVkms::Configure(cfg);
+    cfg.msaa_samples = 4;
+  }
+
+  // Read when the first store is created, so it has to be set before then.
+  void SetUp() override {
+    ihs::engine_switches::SetImpellerActive(true);
+    DrmBackendVkms::SetUp();
+  }
+
+  void TearDown() override {
+    DrmBackendVkms::TearDown();
+    ihs::engine_switches::SetImpellerActive(false);
+  }
+
+  // stderr, where the console sink writes, for as long as this lives. Taken
+  // back even when an assertion returns early, or the next case could not
+  // capture at all.
+  class LogCapture {
+   public:
+    LogCapture() { ::testing::internal::CaptureStderr(); }
+    ~LogCapture() {
+      if (!taken_) {
+        (void)Take();
+      }
+    }
+    LogCapture(const LogCapture&) = delete;
+    LogCapture& operator=(const LogCapture&) = delete;
+    std::string Take() {
+      ihs_log_flush();
+      taken_ = true;
+      return ::testing::internal::GetCapturedStderr();
+    }
+
+   private:
+    bool taken_{false};
+  };
+
+  // The line EnsureGlCapsProbed prints, or empty.
+  static std::string MsaaLine(const std::string& log) {
+    const size_t at = log.find("backing-store MSAA: ");
+    if (at == std::string::npos) {
+      return {};
+    }
+    return log.substr(at, log.find('\n', at) - at);
+  }
+
+  FlutterBackingStoreConfig StoreConfig(uint32_t w, uint32_t h) const {
+    FlutterBackingStoreConfig cfg{};
+    cfg.struct_size = sizeof(FlutterBackingStoreConfig);
+    cfg.size = FlutterSize{static_cast<double>(w), static_cast<double>(h)};
+    return cfg;
+  }
+
+  // Clear the store Flutter was handed to @p rgb, then present it alone.
+  void PresentSolid(FlutterBackingStore& bs,
+                    const FlutterBackingStoreConfig& cfg,
+                    uint32_t rgb) {
+    ASSERT_TRUE(backend_->MakeCurrent());
+    glBindFramebuffer(GL_FRAMEBUFFER, bs.open_gl.framebuffer.name);
+    glClearColor(static_cast<float>((rgb >> 16U) & 0xFFU) / 255.0F,
+                 static_cast<float>((rgb >> 8U) & 0xFFU) / 255.0F,
+                 static_cast<float>(rgb & 0xFFU) / 255.0F, 1.0F);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glFinish();
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    ASSERT_EQ(glGetError(), static_cast<GLenum>(GL_NO_ERROR));
+
+    FlutterLayer layer{};
+    layer.struct_size = sizeof(FlutterLayer);
+    layer.type = kFlutterLayerContentTypeBackingStore;
+    layer.backing_store = &bs;
+    layer.offset = FlutterPoint{0.0, 0.0};
+    layer.size = cfg.size;
+    const FlutterLayer* layers[] = {&layer};
+    ASSERT_TRUE(compositor_->PresentLayers(layers, 1));
+  }
+};
+
+// The trial resolve passes and the present resolves what Flutter drew into the
+// scanout buffer. Flutter renders into the multisampled FBO, so without the
+// resolve the panel would not show the color at all.
+TEST_F(DrmBackendVkmsMsaa, AFrameIsResolvedIntoTheScanoutBuffer) {
+  LogCapture capture;
+  const auto cfg = StoreConfig(content_w_, content_h_);
+  FlutterBackingStore bs{};
+  ASSERT_TRUE(compositor_->CreateBackingStore(&cfg, &bs));
+  PresentSolid(bs, cfg, kRed);
+  const std::string log = capture.Take();
+  std::cerr << log;
+
+  const std::string line = MsaaLine(log);
+  ASSERT_FALSE(line.empty()) << "no backing-store MSAA line in the log";
+  if (line.find("backing-store MSAA: off") != std::string::npos) {
+    // Off only when the GL cannot do it, never for the switch or the
+    // setting.
+    EXPECT_NE(line.find("(no multisample renderbuffers)"), std::string::npos)
+        << line;
+    compositor_->CollectBackingStore(&bs);
+    GTEST_SKIP() << "the MSAA path did not run on this driver: " << line;
+  }
+  EXPECT_NE(line.find("backing-store MSAA: 4x"), std::string::npos) << line;
+  EXPECT_EQ(log.find("MSAA resolve into"), std::string::npos)
+      << "the trial resolve failed";
+  EXPECT_EQ(log.find("MSAA framebuffer incomplete"), std::string::npos);
+
+#if IHS_TEST_HAVE_CAPTURE
+  ExpectCenterColor("msaa_frame", kRed);
+#endif
+
+  compositor_->CollectBackingStore(&bs);
+}
+
+// A store the last frame did not use gives its MSAA target up at the next
+// present, and builds it again when it is taken back from the pool.
+TEST_F(DrmBackendVkmsMsaa, AnIdleStoreFreesItsTargetAndGetsItBack) {
+  LogCapture capture;
+  const auto full = StoreConfig(content_w_, content_h_);
+  FlutterBackingStore bs{};
+  ASSERT_TRUE(compositor_->CreateBackingStore(&full, &bs));
+  PresentSolid(bs, full, kRed);
+  const std::string line = MsaaLine(capture.Take());
+  if (line.find("backing-store MSAA: 4x") == std::string::npos) {
+    compositor_->CollectBackingStore(&bs);
+    GTEST_SKIP() << "the MSAA path did not run on this driver: " << line;
+  }
+
+  // Back to the pool with its target, as after every present.
+  compositor_->CollectBackingStore(&bs);
+  EXPECT_EQ(compositor_->PooledMsaaTargetsForTest(), 1u);
+
+  // A frame drawn at another size leaves it in the pool, unused.
+  const auto half = StoreConfig(content_w_ / 2, content_h_ / 2);
+  FlutterBackingStore other{};
+  ASSERT_TRUE(compositor_->CreateBackingStore(&half, &other));
+  PresentSolid(other, half, kGreen);
+  EXPECT_EQ(compositor_->PooledMsaaTargetsForTest(), 0u)
+      << "an idle pooled store kept its MSAA target";
+  compositor_->CollectBackingStore(&other);
+
+  // Taken back: multisampled again, and the next frame still reaches the
+  // panel through it.
+  LogCapture again;
+  ASSERT_TRUE(compositor_->CreateBackingStore(&full, &bs));
+  PresentSolid(bs, full, kGreen);
+  const std::string log = again.Take();
+  EXPECT_EQ(log.find("MSAA resolve into"), std::string::npos) << log;
+  EXPECT_EQ(log.find("MSAA framebuffer incomplete"), std::string::npos) << log;
+#if IHS_TEST_HAVE_CAPTURE
+  ExpectCenterColor("msaa_frame_reused", kGreen);
+#endif
+
+  compositor_->CollectBackingStore(&bs);
+}
 
 // --drm-rotation on the EGL backend (#848): the GL composite turns the picture
 // onto the panel, no plane asked to rotate. Parameterized on the angle, 0
@@ -4389,6 +4554,9 @@ TEST_F(PvHostVkms, CapabilitiesReportWhenTheShellTakesAFrame) {
 }
 
 int main(int argc, char** argv) {
+  // The MSAA cases read the compositor's log from stderr, so the console sink
+  // unless the caller chose another. A build with DLT would default to it.
+  ::setenv("IHS_LOG_SINK", "console", 0);
   IHS_LOGGING_START("TEST", "drm_backend vkms test");
 #if IHS_TEST_HAVE_CAPTURE
   std::cerr << "frame readback: available\n";

@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -115,6 +116,17 @@ struct GbmBackingStore {
   // each frame; need not be multi-buffered).
   GLuint fbo = 0;
   GLuint depth_stencil_rb = 0;
+  // Multisampled target Flutter renders into instead of @c fbo, when the
+  // compositor enables MSAA (CreateMsaaTarget). Each present resolves it
+  // into the active slot through @c fbo, which then has no depth/stencil
+  // of its own. Zero when MSAA is off: Flutter renders into @c fbo.
+  GLuint msaa_fbo = 0;
+  GLuint msaa_color_rb = 0;
+  GLuint msaa_depth_stencil_rb = 0;
+  // The MSAA target was freed while the store sat idle in the pool, so
+  // taking it back builds one again. False on a store whose target could
+  // not be built at all, which is never retried.
+  bool msaa_released = false;
   uint32_t width = 0;
   uint32_t height = 0;
   uint32_t format = 0;
@@ -341,6 +353,23 @@ class DrmCompositor : public IFlipSink {
   // only participate in GL composition never invoke this — no AddFB2
   // per frame on framed-mode / GL-fallback paths.
   bool EnsureDrmFbId(GbmBackingStore& store) const;
+  // Give a Flutter backing store a multisampled color and depth/stencil
+  // target of msaa_samples_ samples, and drop the single-sample
+  // depth/stencil @c store.fbo no longer needs. False (and the store left
+  // single-sample) when the target cannot be built or resolved.
+  bool CreateMsaaTarget(GbmBackingStore& store) const;
+  // Free the multisampled target. @c store.fbo is left with no depth/stencil;
+  // CreateMsaaTarget or AttachDepthStencil gives it one again.
+  static void ReleaseMsaaTarget(GbmBackingStore& store);
+  // Free the MSAA target of every store still in store_pool_ when a frame
+  // presents, which that frame did not use.
+  void ReleaseIdleMsaaTargets();
+  // Give @c store.fbo, which must be bound, a single-sample depth/stencil
+  // renderbuffer.
+  void AttachDepthStencil(GbmBackingStore& store) const;
+  // Resolve every multisampled backing store in this frame into its active
+  // slot, before any path scans the slot out or composites it.
+  void ResolveMsaaStores(const FlutterLayer** layers, size_t layer_count) const;
 
   // Composite @p src_tex into @p target_fbo at the given destination rect.
   // Always a textured quad, never glBlitFramebuffer: a backing store here is
@@ -602,6 +631,14 @@ class DrmCompositor : public IFlipSink {
 
   GlCaps gl_caps_{};
   bool gl_caps_probed_{false};
+
+  // Samples per pixel in the target Flutter renders into: [global]
+  // msaa_samples (4 unless set), clamped to GL_MAX_SAMPLES; 0 when MSAA is off,
+  // as it always is under Skia. Impeller's OpenGL ES backend anti-aliases
+  // geometry only through MSAA, and it renders a single-sample backing store
+  // with none, so every edge it draws is aliased. The Windows embedder does
+  // the same (flutter/flutter#190256).
+  GLsizei msaa_samples_{0};
 
   // Says once, at info, which modifier a platform-view buffer imported with.
   // The producer allocates independently of the primary plane, so this is
@@ -1089,6 +1126,12 @@ class DrmCompositor : public IFlipSink {
   std::function<void()> on_commit_returned_;
   /// The output this compositor scans out on.
   [[nodiscard]] const DrmOutputContext& OutputForTest() const { return out_; }
+  /// Pooled stores that still hold an MSAA target.
+  [[nodiscard]] size_t PooledMsaaTargetsForTest() const {
+    return static_cast<size_t>(
+        std::count_if(store_pool_.begin(), store_pool_.end(),
+                      [](const auto& s) { return s && s->msaa_fbo != 0; }));
+  }
 
  private:
 #endif
