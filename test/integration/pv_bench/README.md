@@ -98,6 +98,7 @@ previous process has released DRM master gives a run that produces no report.
 | `PV_BENCH_RADIUS` | `0` | the app wraps its view in a `ClipRRect` with corners of this radius, in logical pixels |
 | `PV_BENCH_ROTATE` | `0` | the app wraps its view in `Transform.rotate` by this many degrees about its center |
 | `PV_BENCH_ROTATE_ANIM` | *(unset)* | `1`: the app wraps its view in a `RotationTransition` instead, one turn every eight seconds |
+| `PV_BENCH_PERSPECTIVE` | `0` | the app tilts its view this many degrees about its vertical axis, in perspective (`setEntry(3, 2, 0.001)`) |
 | `PV_BENCH_FADE` | *(unset)* | `1`: the app wraps its view in a `FadeTransition` instead: up from 0.2 to 1.0 over two seconds, a second at 1.0, and back down over two |
 
 `PV_BENCH_NO_PV=1` is the control: same Flutter content, no layer. The difference
@@ -153,6 +154,11 @@ the corner of its bounding box, is the bug in \#866. No plane turns by an
 arbitrary angle, so on a plane path the frame is composited instead. They go
 inside the clip and the rounded clip, so with `PV_BENCH_CLIP` or
 `PV_BENCH_RADIUS` the turned view is cut by an upright clip.
+
+`PV_BENCH_PERSPECTIVE` is the same kind of check for a perspective, also read
+by the app. At `PV_BENCH_PERSPECTIVE=30` the view should be a trapezoid,
+narrower than the output and taller on one side than the other. A view drawn
+flat is the bug in \#868. It sits inside the rotation, so the two combine.
 
 The app reports build/raster/total percentiles and exits. The producer reports
 submits per second and mean release-fence wait every second -- check that first.
