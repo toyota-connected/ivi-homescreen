@@ -44,6 +44,10 @@
 //                       one turn every eight seconds
 //   PV_BENCH_PERSPECTIVE tilt the view this many degrees about its vertical
 //                       axis, in perspective (default 0)
+//   PV_BENCH_VIEWS      how many platform views to show (1 to 8, default 1).
+//                       Past one, each is two thirds of the screen, and each
+//                       sits a twelfth of the screen right of and below the
+//                       last, with a spinner of its own over it
 
 import 'dart:async';
 import 'dart:ffi' as ffi;
@@ -165,7 +169,8 @@ class _PvBenchPageState extends State<PvBenchPage>
 
     final StringBuffer out = StringBuffer()
       ..writeln('[pv_bench] frames=${t.length} '
-          'platform_view=${widget.showPlatformView}')
+          'platform_view=${widget.showPlatformView} '
+          'views=${widget.showPlatformView ? _pvViews : 0}')
       ..writeln('[pv_bench] fps=${(1000.0 / meanTotal).toStringAsFixed(2)}')
       ..writeln('[pv_bench] build  p50=${pct(build, 0.5) / 1000.0} '
           'p90=${pct(build, 0.9) / 1000.0} p99=${pct(build, 0.99) / 1000.0} ms')
@@ -214,10 +219,10 @@ class _PvBenchPageState extends State<PvBenchPage>
       body: Stack(
         fit: StackFit.expand,
         children: <Widget>[
-          if (widget.showPlatformView)
-            Positioned.fill(
-                child: _faded(_rounded(_clipped(_rotated(
-                    _tilted(_scaled(const _BenchPlatformView())))))))
+          if (widget.showPlatformView && _pvViews > 1)
+            Positioned.fill(child: _ViewStack(spin: _spin))
+          else if (widget.showPlatformView)
+            Positioned.fill(child: _wrapped(const _BenchPlatformView()))
           else
             const Center(
               child: Text('no platform view',
@@ -225,22 +230,90 @@ class _PvBenchPageState extends State<PvBenchPage>
             ),
           // Flutter content over the view, so the engine has something to
           // raster every frame. A static overlay would let the engine idle and
-          // the comparison would be between two different workloads.
-          Center(
-            child: RotationTransition(
-              turns: _spin,
-              child: Container(
-                width: 160,
-                height: 160,
-                decoration: BoxDecoration(
-                  color: Colors.amber.withValues(alpha: 0.85),
-                  borderRadius: BorderRadius.circular(24),
-                ),
-              ),
-            ),
-          ),
+          // the comparison would be between two different workloads. With
+          // several views each has its own (_ViewStack).
+          if (!widget.showPlatformView || _pvViews == 1)
+            Center(child: _Spinner(turns: _spin)),
         ],
       ),
+    );
+  }
+}
+
+// Every view gets the same mutations, in the same order.
+Widget _wrapped(Widget view) =>
+    _faded(_rounded(_clipped(_rotated(_tilted(_scaled(view))))));
+
+class _Spinner extends StatelessWidget {
+  const _Spinner({required this.turns});
+
+  final Animation<double> turns;
+
+  @override
+  Widget build(BuildContext context) {
+    return RotationTransition(
+      turns: turns,
+      child: Container(
+        width: 160,
+        height: 160,
+        decoration: BoxDecoration(
+          color: Colors.amber.withValues(alpha: 0.85),
+          borderRadius: BorderRadius.circular(24),
+        ),
+      ),
+    );
+  }
+}
+
+// Several views cost the shell more than one in two ways: a buffer and a
+// composite per view, and a backing store per overlay. Flutter makes an
+// overlay for the content above a view only when that content meets a view
+// above it, and otherwise draws it in a later overlay or the root. So the
+// views overlap, and each spinner but the last sits on the left edge of the
+// next view, half under it, which gives each view an overlay of its own.
+final int _pvViews =
+    (int.tryParse(Platform.environment['PV_BENCH_VIEWS'] ?? '') ?? 1)
+        .clamp(1, 8);
+
+class _ViewStack extends StatelessWidget {
+  const _ViewStack({required this.spin});
+
+  final Animation<double> spin;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final double w = constraints.maxWidth;
+        final double h = constraints.maxHeight;
+        final double stepX = w / 12;
+        final double stepY = h / 12;
+        final double viewW = w * 2 / 3;
+        final double viewH = h * 2 / 3;
+        const double half = 80; // half the spinner
+        final List<Widget> children = <Widget>[];
+        for (int i = 0; i < _pvViews; ++i) {
+          final double left = stepX * i;
+          final double top = stepY * i;
+          final bool last = i == _pvViews - 1;
+          final double cx = last ? left + viewW / 2 : left + stepX;
+          final double cy = top + viewH / 2;
+          children
+            ..add(Positioned(
+              left: left,
+              top: top,
+              width: viewW,
+              height: viewH,
+              child: _wrapped(const _BenchPlatformView()),
+            ))
+            ..add(Positioned(
+              left: cx - half,
+              top: cy - half,
+              child: _Spinner(turns: spin),
+            ));
+        }
+        return Stack(children: children);
+      },
     );
   }
 }
