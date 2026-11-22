@@ -22,7 +22,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <utility>
+#include <vector>
 
 // Where a layer's pixels come from and where they land: a crop of its buffer,
 // a transform, and a destination rect. The same description drives the GL and
@@ -413,6 +415,203 @@ struct ViewMap {
   }
 };
 
+// The inverse of @p m, by its adjugate; empty when it has none.
+inline std::optional<ViewMap> InverseMap(const ViewMap& m) {
+  const double det = m.a * (m.d * m.i - m.ty * m.h) -
+                     m.c * (m.b * m.i - m.ty * m.g) +
+                     m.tx * (m.b * m.h - m.d * m.g);
+  if (!std::isfinite(det) || std::abs(det) < 1e-12) {
+    return std::nullopt;
+  }
+  ViewMap r;
+  r.a = (m.d * m.i - m.ty * m.h) / det;
+  r.c = (m.tx * m.h - m.c * m.i) / det;
+  r.tx = (m.c * m.ty - m.tx * m.d) / det;
+  r.b = (m.ty * m.g - m.b * m.i) / det;
+  r.d = (m.a * m.i - m.tx * m.g) / det;
+  r.ty = (m.tx * m.b - m.a * m.ty) / det;
+  r.g = (m.b * m.h - m.d * m.g) / det;
+  r.h = (m.c * m.g - m.a * m.h) / det;
+  r.i = (m.a * m.d - m.c * m.b) / det;
+  return r;
+}
+
+// A clip drawn by working out how much of each pixel it lets through: a
+// rounded rect (a rect when every radius is zero) in its own space, and the
+// map from output pixels to that space, projective in general. For a clip
+// that is not a rect on screen, or one of several rounded clips, which no
+// scissor and no single rounded mask in output pixels can show.
+struct ClipShape {
+  ViewMap to_shape;
+  RoundedRect shape;
+};
+
+// The clips of one view that are drawn as shapes. Each pixel is drawn with
+// the share of it every one of them lets through.
+struct ClipShapes {
+  static constexpr size_t kMax = 4;
+  std::array<ClipShape, kMax> items{};
+  size_t count{0};
+};
+
+// How far output pixel point (x, y) is outside @p c's shape, in output pixels:
+// below 0 inside. The shape's own field (the distance to the nearer side, or
+// how far past 1 its corner's ellipse puts the point) over how fast it changes
+// across the output, which is exact on a side and close enough within a pixel
+// or so of a corner. The shaders work it out the same way.
+inline double ClipShapeDistance(const ClipShape& c,
+                                const double x,
+                                const double y) {
+  const ViewMap& m = c.to_shape;
+  const double w = m.W(x, y);
+  if (!(w > 1e-12)) {
+    return std::numeric_limits<double>::infinity();  // past the horizon
+  }
+  const double qx = (m.a * x + m.c * y + m.tx) / w;
+  const double qy = (m.b * x + m.d * y + m.ty) / w;
+  // How the shape's space moves across the output: d(q)/d(x, y).
+  const double jxx = (m.a - qx * m.g) / w;
+  const double jxy = (m.c - qx * m.h) / w;
+  const double jyx = (m.b - qy * m.g) / w;
+  const double jyy = (m.d - qy * m.h) / w;
+  const RectF& r = c.shape.rect;
+  const double x0 = r.x;
+  const double y0 = r.y;
+  const double x1 = r.x + r.w;
+  const double y1 = r.y + r.h;
+  const bool left = qx < 0.5 * (x0 + x1);
+  const bool top = qy < 0.5 * (y0 + y1);
+  const auto& radius = c.shape.radii[top ? (left ? 0 : 1) : (left ? 3 : 2)];
+  const double rx = radius[0];
+  const double ry = radius[1];
+  double f = 0;
+  double nx = 0;
+  double ny = 0;
+  const double dx = qx - (left ? x0 + rx : x1 - rx);
+  const double dy = qy - (top ? y0 + ry : y1 - ry);
+  if (rx > 0 && ry > 0 && (left ? dx < 0 : dx > 0) && (top ? dy < 0 : dy > 0)) {
+    const double k = std::hypot(dx / rx, dy / ry);
+    f = k - 1.0;
+    nx = dx / (rx * rx * k);
+    ny = dy / (ry * ry * k);
+  } else {
+    const double ex = std::abs(qx - 0.5 * (x0 + x1)) - 0.5 * (x1 - x0);
+    const double ey = std::abs(qy - 0.5 * (y0 + y1)) - 0.5 * (y1 - y0);
+    if (ex > ey) {
+      f = ex;
+      nx = left ? -1.0 : 1.0;
+    } else {
+      f = ey;
+      ny = top ? -1.0 : 1.0;
+    }
+  }
+  // The field's rate across the output: its gradient through the map.
+  const double gx = jxx * nx + jyx * ny;
+  const double gy = jxy * nx + jyy * ny;
+  const double rate = std::hypot(gx, gy);
+  return rate > 1e-12 ? f / rate : (f > 0 ? 1e9 : -1e9);
+}
+
+// How many units of @p c's own space an output pixel spans at most over the
+// shape: the larger stretch of the map's derivative, at each corner of the
+// shape's rect. A shader takes a point more than this inside the straight
+// parts of the shape as wholly inside it, without working out how far.
+inline double ClipShapeUnit(const ClipShape& c) {
+  const auto to_out = InverseMap(c.to_shape);
+  if (!to_out) {
+    return std::numeric_limits<double>::infinity();
+  }
+  const ViewMap& m = c.to_shape;
+  const RectF& b = c.shape.rect;
+  double unit = 0;
+  for (const auto& [sx, sy] :
+       {std::pair{b.x, b.y}, std::pair{b.x + b.w, b.y},
+        std::pair{b.x, b.y + b.h}, std::pair{b.x + b.w, b.y + b.h}}) {
+    if (!(to_out->W(sx, sy) > 1e-12)) {
+      return std::numeric_limits<double>::infinity();
+    }
+    const auto p = to_out->Map(sx, sy);
+    const double w = m.W(p[0], p[1]);
+    const double qx = sx;
+    const double qy = sy;
+    const double jxx = (m.a - qx * m.g) / w;
+    const double jxy = (m.c - qx * m.h) / w;
+    const double jyx = (m.b - qy * m.g) / w;
+    const double jyy = (m.d - qy * m.h) / w;
+    // The largest singular value of the 2x2.
+    const double s2 = jxx * jxx + jxy * jxy + jyx * jyx + jyy * jyy;
+    const double det = jxx * jyy - jxy * jyx;
+    const double root = std::sqrt(std::max(0.0, s2 * s2 - 4 * det * det));
+    unit = std::max(unit, std::sqrt(0.5 * (s2 + root)));
+  }
+  return unit;
+}
+
+// The share of the output pixel centered on (x, y) that @p c lets through.
+inline double ClipShapeCoverage(const ClipShape& c,
+                                const double x,
+                                const double y) {
+  return std::clamp(0.5 - ClipShapeDistance(c, x, y), 0.0, 1.0);
+}
+
+// A convex polygon in output pixels, as its corners in order (either way
+// round).
+using ConvexPolygon = std::vector<std::array<double, 2>>;
+
+// @p poly cut down to the side of the line through @p a and @p b that @p
+// inside is on, moved @p inset pixels further in.
+inline ConvexPolygon CutPolygon(const ConvexPolygon& poly,
+                                const std::array<double, 2>& a,
+                                const std::array<double, 2>& b,
+                                const std::array<double, 2>& inside,
+                                const double inset) {
+  double nx = a[1] - b[1];
+  double ny = b[0] - a[0];
+  const double len = std::hypot(nx, ny);
+  if (!(len > 1e-12)) {
+    return poly;
+  }
+  nx /= len;
+  ny /= len;
+  if (nx * (inside[0] - a[0]) + ny * (inside[1] - a[1]) < 0) {
+    nx = -nx;
+    ny = -ny;
+  }
+  const auto side = [&](const std::array<double, 2>& p) {
+    return nx * (p[0] - a[0]) + ny * (p[1] - a[1]) - inset;
+  };
+  ConvexPolygon out;
+  for (size_t i = 0; i < poly.size(); ++i) {
+    const auto& p = poly[i];
+    const auto& q = poly[(i + 1) % poly.size()];
+    const double sp = side(p);
+    const double sq = side(q);
+    if (sp >= 0) {
+      out.push_back(p);
+    }
+    if ((sp >= 0) != (sq >= 0)) {
+      const double k = sp / (sp - sq);
+      out.push_back({p[0] + k * (q[0] - p[0]), p[1] + k * (q[1] - p[1])});
+    }
+  }
+  return out;
+}
+
+// @p poly cut down to the inside of the convex quad @p q (its corners in
+// order), moved @p inset pixels in from each of its sides.
+inline ConvexPolygon CutPolygonToQuad(
+    ConvexPolygon poly,
+    const std::array<std::array<double, 2>, 4>& q,
+    const double inset) {
+  const std::array<double, 2> mid = {
+      (q[0][0] + q[1][0] + q[2][0] + q[3][0]) / 4,
+      (q[0][1] + q[1][1] + q[2][1] + q[3][1]) / 4};
+  for (size_t i = 0; i < 4 && !poly.empty(); ++i) {
+    poly = CutPolygon(poly, q[i], q[(i + 1) % 4], mid, inset);
+  }
+  return poly;
+}
+
 // Where one layer of a transformed view lands: a quad on the output, in
 // homogeneous output pixels. Its corner at (s, t) = (0, 0) and its edges
 // along s and t give the point times w, and w0, ws and wt give w, both
@@ -519,6 +718,222 @@ inline std::array<double, 4> EdgeDistances(const QuadPlacement& q,
   return {dist(c00, c01, mid), dist(c10, c11, mid), dist(c00, c10, mid),
           dist(c01, c11, mid)};
 }
+
+// A part of a layer drawn with clips that are not rects on screen: a rect in
+// output pixels, and whether their coverage is worked out there (mask) or
+// every pixel of it is drawn whole.
+struct ClipPiece {
+  RectI rect;
+  bool mask{false};
+};
+
+// Cut @p bounds into the parts where @p shapes and @p quad's edges (when given)
+// need their coverage worked out, and the parts they leave whole, so the cost
+// of working it out falls only near their edges. @p bounds is cut into cells of
+// @p cell pixels. A cell is left out where it is clearly outside the quad or
+// one of the shapes, drawn whole where all its corners are more than a pixel
+// and a half inside them all (they are convex, so then is all of it), and
+// masked otherwise. Neighboring cells alike are joined into rects, along each
+// row and then down rows that match. Replaces @p out's contents.
+inline void ClipPieces(const ClipShapes& shapes,
+                       const QuadPlacement* quad,
+                       const RectI& bounds,
+                       std::vector<ClipPiece>* out,
+                       const int32_t cell = 16) {
+  out->clear();
+  if (bounds.w <= 0 || bounds.h <= 0 || cell <= 0) {
+    return;
+  }
+  const int32_t nx = (bounds.w + cell - 1) / cell;
+  const int32_t ny = (bounds.h + cell - 1) / cell;
+  // Each grid point's distance inside everything: the least, over the
+  // quad's edges and the shapes, of how far inside it is.
+  std::vector<double> inside(static_cast<size_t>(nx + 1) * (ny + 1));
+  const auto px = [&](const int32_t i) {
+    return static_cast<double>(
+        std::min(bounds.x + i * cell, bounds.x + bounds.w));
+  };
+  const auto py = [&](const int32_t j) {
+    return static_cast<double>(
+        std::min(bounds.y + j * cell, bounds.y + bounds.h));
+  };
+  const auto depth = [&](const double x, const double y) {
+    double d = std::numeric_limits<double>::infinity();
+    if (quad != nullptr) {
+      for (const double e : EdgeDistances(*quad, x, y)) {
+        d = std::min(d, e);
+      }
+    }
+    for (size_t k = 0; k < shapes.count; ++k) {
+      d = std::min(d, -ClipShapeDistance(shapes.items[k], x, y));
+    }
+    return d;
+  };
+  // How far outside a point must be for a cell around it to be left out. The
+  // quad's edges are lines, whose distance is exact; a shape's is the field
+  // over its rate, which away from the edge can be off by up to a corner's
+  // aspect, or anything under a perspective, so only a shape without one
+  // counts, and by its aspect.
+  double stretch = 1.0;
+  bool shapes_cull = true;
+  for (size_t k = 0; k < shapes.count; ++k) {
+    const ClipShape& c = shapes.items[k];
+    if (c.to_shape.g != 0.0 || c.to_shape.h != 0.0) {
+      shapes_cull = false;
+    }
+    for (const auto& r : c.shape.radii) {
+      if (r[0] > 0 && r[1] > 0) {
+        stretch = std::max(
+            stretch, static_cast<double>(std::max(r[0] / r[1], r[1] / r[0])));
+      }
+    }
+  }
+  const auto outside = [&](const double x, const double y, const double by) {
+    if (quad != nullptr) {
+      for (const double e : EdgeDistances(*quad, x, y)) {
+        if (e < -by) {
+          return true;
+        }
+      }
+    }
+    if (!shapes_cull) {
+      return false;
+    }
+    for (size_t k = 0; k < shapes.count; ++k) {
+      if (ClipShapeDistance(shapes.items[k], x, y) > stretch * by) {
+        return true;
+      }
+    }
+    return false;
+  };
+  for (int32_t j = 0; j <= ny; ++j) {
+    for (int32_t i = 0; i <= nx; ++i) {
+      inside[static_cast<size_t>(j) * (nx + 1) + i] = depth(px(i), py(j));
+    }
+  }
+  // 0 left out, 1 whole, 2 masked.
+  const auto classify = [&](const int32_t i, const int32_t j) {
+    const double x0 = px(i);
+    const double y0 = py(j);
+    const double x1 = px(i + 1);
+    const double y1 = py(j + 1);
+    double least = std::numeric_limits<double>::infinity();
+    for (const int32_t dj : {0, 1}) {
+      for (const int32_t di : {0, 1}) {
+        least = std::min(
+            least, inside[static_cast<size_t>(j + dj) * (nx + 1) + i + di]);
+      }
+    }
+    if (least > 1.5) {
+      return 1;
+    }
+    // Clearly outside: the center further out than the cell reaches.
+    const double reach = 0.5 * std::hypot(x1 - x0, y1 - y0);
+    if (outside(0.5 * (x0 + x1), 0.5 * (y0 + y1), 1.5 * reach + 2.0)) {
+      return 0;
+    }
+    return 2;
+  };
+  // Rows of runs, joined down rows where a run matches one above.
+  struct Open {
+    int32_t i0;
+    int32_t i1;
+    int kind;
+    int32_t j0;
+  };
+  std::vector<Open> open;
+  std::vector<Open> next;
+  std::vector<int> kinds(static_cast<size_t>(nx));
+  const auto emit = [&](const Open& o, const int32_t j1) {
+    if (o.kind == 0) {
+      return;
+    }
+    const auto x0 = static_cast<int32_t>(px(o.i0));
+    const auto y0 = static_cast<int32_t>(py(o.j0));
+    const auto x1 = static_cast<int32_t>(px(o.i1));
+    const auto y1 = static_cast<int32_t>(py(j1));
+    out->push_back({{x0, y0, x1 - x0, y1 - y0}, o.kind == 2});
+  };
+  for (int32_t j = 0; j < ny; ++j) {
+    next.clear();
+    for (int32_t i = 0; i < nx; ++i) {
+      kinds[static_cast<size_t>(i)] = classify(i, j);
+    }
+    int32_t i = 0;
+    while (i < nx) {
+      const int kind = kinds[static_cast<size_t>(i)];
+      int32_t e = i + 1;
+      while (e < nx && kinds[static_cast<size_t>(e)] == kind) {
+        ++e;
+      }
+      next.push_back({i, e, kind, j});
+      i = e;
+    }
+    // A run that matches one still open carries it down.
+    for (Open& n : next) {
+      for (Open& o : open) {
+        if (o.i0 == n.i0 && o.i1 == n.i1 && o.kind == n.kind && o.j0 >= 0) {
+          n.j0 = o.j0;
+          o.j0 = -1;  // taken
+          break;
+        }
+      }
+    }
+    for (const Open& o : open) {
+      if (o.j0 >= 0) {
+        emit(o, j);
+      }
+    }
+    open.swap(next);
+  }
+  for (const Open& o : open) {
+    emit(o, ny);
+  }
+}
+
+// ClipPieces for the last inputs it was given, worked out again only when they
+// change: a view that holds still is cut once, not every frame.
+class ClipPiecesCache {
+ public:
+  const std::vector<ClipPiece>& Get(const ClipShapes& shapes,
+                                    const QuadPlacement* quad,
+                                    const RectI& bounds) {
+    next_.clear();
+    next_.push_back(static_cast<double>(shapes.count));
+    for (size_t k = 0; k < shapes.count; ++k) {
+      const ClipShape& c = shapes.items[k];
+      const ViewMap& m = c.to_shape;
+      next_.insert(next_.end(), {m.a, m.b, m.c, m.d, m.tx, m.ty, m.g, m.h, m.i,
+                                 c.shape.rect.x, c.shape.rect.y, c.shape.rect.w,
+                                 c.shape.rect.h});
+      for (const auto& r : c.shape.radii) {
+        next_.insert(next_.end(), {r[0], r[1]});
+      }
+    }
+    next_.push_back(quad != nullptr ? 1.0 : 0.0);
+    if (quad != nullptr) {
+      next_.insert(
+          next_.end(),
+          {quad->origin[0], quad->origin[1], quad->edge_s[0], quad->edge_s[1],
+           quad->edge_t[0], quad->edge_t[1], quad->w0, quad->ws, quad->wt,
+           quad->grow[0], quad->grow[1], quad->grow[2], quad->grow[3]});
+    }
+    next_.insert(
+        next_.end(),
+        {static_cast<double>(bounds.x), static_cast<double>(bounds.y),
+         static_cast<double>(bounds.w), static_cast<double>(bounds.h)});
+    if (next_ != key_) {
+      key_.swap(next_);
+      ClipPieces(shapes, quad, bounds, &pieces_);
+    }
+    return pieces_;
+  }
+
+ private:
+  std::vector<double> key_;
+  std::vector<double> next_;
+  std::vector<ClipPiece> pieces_;
+};
 
 // How far past each of the quad's edges flagged in @p edges (bit 0 s = 0,
 // bit 1 s = 1, bit 2 t = 0, bit 3 t = 1) it must be drawn for the edge to

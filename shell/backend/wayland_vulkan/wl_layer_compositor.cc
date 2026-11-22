@@ -16,8 +16,10 @@
 
 #include "backend/wayland_vulkan/wl_layer_compositor.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstring>
 
 #include "logging/logging.h"
 
@@ -65,10 +67,20 @@ static_assert(sizeof(LayerPush) == 128, "must match the shaders' PC block");
 constexpr VkShaderStageFlags kPushStages =
     VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
-// Precompiled SPIR-V (glslc -O -mfmt=c shaders/composite.{vert,frag}, and
-// glslc -O -mfmt=c -DIHS_YCBCR shaders/composite.frag -o
-// shaders/composite_ycbcr.frag.inc). Regenerate with the same commands if the
-// .glsl sources change.
+// The clips a view draws as shapes, laid out as the Clips block (std140) in
+// shaders/composite.frag: per clip its map's three rows, its rect, its radii.
+struct ClipBlock {
+  std::array<int32_t, 4> count;
+  std::array<std::array<float, 4>, 3 * ClipShapes::kMax> map;
+  std::array<std::array<float, 4>, ClipShapes::kMax> rect;
+  std::array<std::array<float, 4>, 2 * ClipShapes::kMax> radii;
+};
+static_assert(sizeof(ClipBlock) == 400, "must match the shader's Clips block");
+
+// Precompiled SPIR-V: glslc -O -mfmt=c shaders/composite.{vert,frag}, and
+// composite.frag again with -DIHS_YCBCR (-o shaders/composite_ycbcr.frag.inc),
+// -DIHS_CLIPS (composite_clips.frag.inc) and both (composite_ycbcr_clips).
+// Regenerate with the same commands if the .glsl sources change.
 constexpr uint32_t kVertSpv[] =
 #include "shaders/composite.vert.inc"
     ;
@@ -77,6 +89,12 @@ constexpr uint32_t kFragSpv[] =
     ;
 constexpr uint32_t kFragYcbcrSpv[] =
 #include "shaders/composite_ycbcr.frag.inc"
+    ;
+constexpr uint32_t kFragClipsSpv[] =
+#include "shaders/composite_clips.frag.inc"
+    ;
+constexpr uint32_t kFragYcbcrClipsSpv[] =
+#include "shaders/composite_ycbcr_clips.frag.inc"
     ;
 
 VkShaderModule MakeModule(VkDevice dev, const uint32_t* code, size_t bytes) {
@@ -102,17 +120,25 @@ bool IsYuvFormat(VkFormat format) {
 // immutable-ycbcr-sampler set layout, which bakes the conversion into sampling.
 // @p mask sets the fragment shader's kMask, which works out coverage (a rounded
 // clip, smoothed edges); without it that code is compiled out. @p ycbcr takes
-// the fragment shader built for a Y'CbCr sampler. Returns VK_NULL_HANDLE on
-// failure.
+// the fragment shader built for a Y'CbCr sampler, and @p clips the one that
+// draws clips as shapes (with @p mask, and a layout with their set). Returns
+// VK_NULL_HANDLE on failure.
 VkPipeline MakePipeline(VkDevice device,
                         VkRenderPass render_pass,
                         VkPipelineLayout layout,
                         bool mask,
-                        bool ycbcr) {
+                        bool ycbcr,
+                        bool clips = false) {
   VkShaderModule vs = MakeModule(device, kVertSpv, sizeof(kVertSpv));
-  VkShaderModule fs =
-      ycbcr ? MakeModule(device, kFragYcbcrSpv, sizeof(kFragYcbcrSpv))
-            : MakeModule(device, kFragSpv, sizeof(kFragSpv));
+  VkShaderModule fs = VK_NULL_HANDLE;
+  if (clips) {
+    fs = ycbcr ? MakeModule(device, kFragYcbcrClipsSpv,
+                            sizeof(kFragYcbcrClipsSpv))
+               : MakeModule(device, kFragClipsSpv, sizeof(kFragClipsSpv));
+  } else {
+    fs = ycbcr ? MakeModule(device, kFragYcbcrSpv, sizeof(kFragYcbcrSpv))
+               : MakeModule(device, kFragSpv, sizeof(kFragSpv));
+  }
   std::array<VkPipelineShaderStageCreateInfo, 2> stages{};
   stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
   stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
@@ -194,10 +220,12 @@ VkPipeline MakePipeline(VkDevice device,
 
 }  // namespace
 
-std::unique_ptr<LayerCompositor> LayerCompositor::Create(VkDevice device,
-                                                         VkFormat color_format,
-                                                         std::string& err,
-                                                         ContentMode mode) {
+std::unique_ptr<LayerCompositor> LayerCompositor::Create(
+    VkDevice device,
+    VkFormat color_format,
+    std::string& err,
+    ContentMode mode,
+    VkPhysicalDevice physical) {
   std::unique_ptr<LayerCompositor> c(new LayerCompositor(device));
   c->color_format_ = color_format;
 
@@ -326,23 +354,127 @@ std::unique_ptr<LayerCompositor> LayerCompositor::Create(VkDevice device,
       MakePipeline(device, c->render_pass_, c->pipeline_layout_, /*mask=*/true,
                    /*ycbcr=*/false);
 
-  // One descriptor pool per ring slot, recycled in BeginFrame.
+  // One descriptor pool per ring slot, recycled in BeginFrame: a layer's
+  // source, and a view's clips where it draws them as shapes.
   for (auto& fr : c->ring_) {
-    VkDescriptorPoolSize ps{};
-    ps.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    ps.descriptorCount = kMaxLayersPerFrame;
+    std::array<VkDescriptorPoolSize, 2> ps{};
+    ps[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    ps[0].descriptorCount = kMaxLayersPerFrame;
+    ps[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    ps[1].descriptorCount = kMaxLayersPerFrame;
     VkDescriptorPoolCreateInfo pi{};
     pi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    pi.maxSets = kMaxLayersPerFrame;
-    pi.poolSizeCount = 1;
-    pi.pPoolSizes = &ps;
+    pi.maxSets = 2 * kMaxLayersPerFrame;
+    pi.poolSizeCount = static_cast<uint32_t>(ps.size());
+    pi.pPoolSizes = ps.data();
     if (d().vkCreateDescriptorPool(device, &pi, nullptr, &fr.pool) !=
         VK_SUCCESS) {
       err = "vkCreateDescriptorPool failed";
       return nullptr;
     }
   }
+  // Not fatal: without them, clips that need shapes are drawn as before.
+  if (physical != VK_NULL_HANDLE) {
+    c->BuildClips(physical);
+  }
   return c;
+}
+
+bool LayerCompositor::BuildClips(VkPhysicalDevice physical) {
+  VkPhysicalDeviceProperties props{};
+  d().vkGetPhysicalDeviceProperties(physical, &props);
+  const VkDeviceSize align =
+      std::max<VkDeviceSize>(1, props.limits.minUniformBufferOffsetAlignment);
+  clip_stride_ = (sizeof(ClipBlock) + align - 1) / align * align;
+  VkPhysicalDeviceMemoryProperties mem{};
+  d().vkGetPhysicalDeviceMemoryProperties(physical, &mem);
+
+  VkDescriptorSetLayoutBinding b{};
+  b.binding = 0;
+  b.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+  b.descriptorCount = 1;
+  b.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+  VkDescriptorSetLayoutCreateInfo sl{};
+  sl.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+  sl.bindingCount = 1;
+  sl.pBindings = &b;
+  if (d().vkCreateDescriptorSetLayout(device_, &sl, nullptr,
+                                      &clip_set_layout_) != VK_SUCCESS) {
+    clip_set_layout_ = VK_NULL_HANDLE;
+    return false;
+  }
+  pipeline_layout_clips_ = MakeClipsLayout(set_layout_);
+  if (pipeline_layout_clips_ == VK_NULL_HANDLE) {
+    return false;
+  }
+  for (auto& fr : ring_) {
+    VkBufferCreateInfo bi{};
+    bi.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bi.size = clip_stride_ * kMaxLayersPerFrame;
+    bi.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+    bi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    if (d().vkCreateBuffer(device_, &bi, nullptr, &fr.clips) != VK_SUCCESS) {
+      fr.clips = VK_NULL_HANDLE;
+      return false;
+    }
+    VkMemoryRequirements req{};
+    d().vkGetBufferMemoryRequirements(device_, fr.clips, &req);
+    constexpr VkMemoryPropertyFlags kWant =
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    uint32_t type = UINT32_MAX;
+    for (uint32_t i = 0; i < mem.memoryTypeCount; ++i) {
+      if ((req.memoryTypeBits & (1U << i)) != 0 &&
+          (mem.memoryTypes[i].propertyFlags & kWant) == kWant) {
+        type = i;
+        break;
+      }
+    }
+    if (type == UINT32_MAX) {
+      return false;
+    }
+    VkMemoryAllocateInfo ai{};
+    ai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    ai.allocationSize = req.size;
+    ai.memoryTypeIndex = type;
+    if (d().vkAllocateMemory(device_, &ai, nullptr, &fr.clips_mem) !=
+        VK_SUCCESS) {
+      fr.clips_mem = VK_NULL_HANDLE;
+      return false;
+    }
+    if (d().vkBindBufferMemory(device_, fr.clips, fr.clips_mem, 0) !=
+            VK_SUCCESS ||
+        d().vkMapMemory(device_, fr.clips_mem, 0, VK_WHOLE_SIZE, 0,
+                        &fr.clips_ptr) != VK_SUCCESS) {
+      fr.clips_ptr = nullptr;
+      return false;
+    }
+  }
+  pipeline_clips_ =
+      MakePipeline(device_, render_pass_, pipeline_layout_clips_,
+                   /*mask=*/true, /*ycbcr=*/false, /*clips=*/true);
+  return pipeline_clips_ != VK_NULL_HANDLE;
+}
+
+VkPipelineLayout LayerCompositor::MakeClipsLayout(
+    VkDescriptorSetLayout source) const {
+  const std::array<VkDescriptorSetLayout, 2> sets = {source, clip_set_layout_};
+  VkPushConstantRange pc{};
+  pc.stageFlags = kPushStages;
+  pc.offset = 0;
+  pc.size = sizeof(LayerPush);
+  VkPipelineLayoutCreateInfo pl{};
+  pl.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  pl.setLayoutCount = static_cast<uint32_t>(sets.size());
+  pl.pSetLayouts = sets.data();
+  pl.pushConstantRangeCount = 1;
+  pl.pPushConstantRanges = &pc;
+  VkPipelineLayout layout = VK_NULL_HANDLE;
+  if (d().vkCreatePipelineLayout(device_, &pl, nullptr, &layout) !=
+      VK_SUCCESS) {
+    return VK_NULL_HANDLE;
+  }
+  return layout;
 }
 
 LayerCompositor::~LayerCompositor() {
@@ -356,6 +488,12 @@ LayerCompositor::~LayerCompositor() {
     if (fr.pool != VK_NULL_HANDLE) {
       d().vkDestroyDescriptorPool(device_, fr.pool, nullptr);
     }
+    if (fr.clips != VK_NULL_HANDLE) {
+      d().vkDestroyBuffer(device_, fr.clips, nullptr);
+    }
+    if (fr.clips_mem != VK_NULL_HANDLE) {
+      d().vkFreeMemory(device_, fr.clips_mem, nullptr);  // unmaps it
+    }
   }
   for (const YuvProgram& p : yuv_programs_) {
     // A cached negative result (ok == false) holds only null handles; guard
@@ -366,6 +504,12 @@ LayerCompositor::~LayerCompositor() {
     }
     if (p.pipeline_mask != VK_NULL_HANDLE) {
       d().vkDestroyPipeline(device_, p.pipeline_mask, nullptr);
+    }
+    if (p.pipeline_clips != VK_NULL_HANDLE) {
+      d().vkDestroyPipeline(device_, p.pipeline_clips, nullptr);
+    }
+    if (p.pipeline_layout_clips != VK_NULL_HANDLE) {
+      d().vkDestroyPipelineLayout(device_, p.pipeline_layout_clips, nullptr);
     }
     if (p.pipeline_layout != VK_NULL_HANDLE) {
       d().vkDestroyPipelineLayout(device_, p.pipeline_layout, nullptr);
@@ -385,6 +529,15 @@ LayerCompositor::~LayerCompositor() {
   }
   if (pipeline_mask_ != VK_NULL_HANDLE) {
     d().vkDestroyPipeline(device_, pipeline_mask_, nullptr);
+  }
+  if (pipeline_clips_ != VK_NULL_HANDLE) {
+    d().vkDestroyPipeline(device_, pipeline_clips_, nullptr);
+  }
+  if (pipeline_layout_clips_ != VK_NULL_HANDLE) {
+    d().vkDestroyPipelineLayout(device_, pipeline_layout_clips_, nullptr);
+  }
+  if (clip_set_layout_ != VK_NULL_HANDLE) {
+    d().vkDestroyDescriptorSetLayout(device_, clip_set_layout_, nullptr);
   }
   if (pipeline_layout_ != VK_NULL_HANDLE) {
     d().vkDestroyPipelineLayout(device_, pipeline_layout_, nullptr);
@@ -465,6 +618,7 @@ bool LayerCompositor::BeginFrame(VkCommandBuffer cmd,
     d().vkDestroyImageView(device_, v, nullptr);
   }
   fr.views.clear();
+  fr.clips_used = 0;
   d().vkResetDescriptorPool(device_, fr.pool, 0);
 
   VkFramebuffer fb = GetOrCreateFramebuffer(slot_view, width, height);
@@ -508,10 +662,12 @@ void LayerCompositor::DrawLayer(VkCommandBuffer cmd,
                                 bool opaque,
                                 float alpha,
                                 const RoundedRect* rounded,
-                                const Quad* quad) {
+                                const Quad* quad,
+                                const ClipShapes* shapes) {
   if (fb_width_ == 0 || fb_height_ == 0) {
     return;
   }
+  auto& fr = ring_[cur_ring_];
 
   // RGB layers use the shared pipeline/sampler; a YUV layer resolves (or
   // builds) the program whose immutable ycbcr sampler bakes the conversion, and
@@ -526,7 +682,9 @@ void LayerCompositor::DrawLayer(VkCommandBuffer cmd,
   }
   VkPipeline pipeline = pipeline_;
   VkPipeline pipeline_mask = pipeline_mask_;
+  VkPipeline pipeline_clips = pipeline_clips_;
   VkPipelineLayout pipeline_layout = pipeline_layout_;
+  VkPipelineLayout pipeline_layout_clips = pipeline_layout_clips_;
   VkDescriptorSetLayout set_layout = set_layout_;
   VkSampler sampler = sampler_;
   VkSamplerYcbcrConversion conversion = VK_NULL_HANDLE;
@@ -542,10 +700,28 @@ void LayerCompositor::DrawLayer(VkCommandBuffer cmd,
     }
     pipeline = prog->pipeline;
     pipeline_mask = prog->pipeline_mask;
+    pipeline_clips = prog->pipeline_clips;
     pipeline_layout = prog->pipeline_layout;
+    pipeline_layout_clips = prog->pipeline_layout_clips;
     set_layout = prog->set_layout;
     sampler = VK_NULL_HANDLE;  // immutable in the layout
     conversion = prog->conversion;
+  }
+
+  // Clips drawn as shapes take the place of the rounded clip, through the
+  // pipeline built for them and the next slot of this frame's buffer. Where
+  // that cannot be had, the rounded clip is drawn as before.
+  const bool use_shapes =
+      shapes != nullptr && shapes->count > 0 &&
+      shapes->count <= ClipShapes::kMax && pipeline_clips != VK_NULL_HANDLE &&
+      fr.clips_ptr != nullptr && fr.clips_used < kMaxLayersPerFrame;
+  if (shapes != nullptr && shapes->count > 0 && !use_shapes) {
+    WarnNoClips();
+  }
+  if (use_shapes) {
+    clip = nullptr;
+    pipeline_mask = pipeline_clips;
+    pipeline_layout = pipeline_layout_clips;
   }
 
   VkImageView view = CreateSourceView(src_image, src_format, conversion);
@@ -574,8 +750,58 @@ void LayerCompositor::DrawLayer(VkCommandBuffer cmd,
   w.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
   w.pImageInfo = &ii;
   d().vkUpdateDescriptorSets(device_, 1, &w, 0, nullptr);
+  std::array<VkDescriptorSet, 2> sets = {set, VK_NULL_HANDLE};
+  if (use_shapes) {
+    const VkDeviceSize offset = clip_stride_ * fr.clips_used;
+    ClipBlock block{};
+    block.count = {static_cast<int32_t>(shapes->count), 0, 0, 0};
+    for (size_t k = 0; k < shapes->count; ++k) {
+      const ClipShape& c = shapes->items[k];
+      const ViewMap& m = c.to_shape;
+      // A pixel's span in the shape's space, padded: the shader takes a
+      // point that far inside the straight parts as wholly inside.
+      const double unit = std::min(1.5 * ClipShapeUnit(c), 1e30);
+      block.map[3 * k] = {static_cast<float>(m.a), static_cast<float>(m.c),
+                          static_cast<float>(m.tx), static_cast<float>(unit)};
+      block.map[3 * k + 1] = {static_cast<float>(m.b), static_cast<float>(m.d),
+                              static_cast<float>(m.ty), 0.0f};
+      block.map[3 * k + 2] = {static_cast<float>(m.g), static_cast<float>(m.h),
+                              static_cast<float>(m.i), 0.0f};
+      const RectF& b = c.shape.rect;
+      block.rect[k] = {static_cast<float>(b.x), static_cast<float>(b.y),
+                       static_cast<float>(b.x + b.w),
+                       static_cast<float>(b.y + b.h)};
+      const auto& r = c.shape.radii;
+      block.radii[2 * k] = {r[0][0], r[0][1], r[1][0], r[1][1]};
+      block.radii[2 * k + 1] = {r[3][0], r[3][1], r[2][0], r[2][1]};
+    }
+    std::memcpy(static_cast<uint8_t*>(fr.clips_ptr) + offset, &block,
+                sizeof(block));
+    VkDescriptorSetAllocateInfo ci{};
+    ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    ci.descriptorPool = fr.pool;
+    ci.descriptorSetCount = 1;
+    ci.pSetLayouts = &clip_set_layout_;
+    if (d().vkAllocateDescriptorSets(device_, &ci, &sets[1]) != VK_SUCCESS) {
+      return;
+    }
+    ++fr.clips_used;
+    VkDescriptorBufferInfo bi{};
+    bi.buffer = fr.clips;
+    bi.offset = offset;
+    bi.range = sizeof(ClipBlock);
+    VkWriteDescriptorSet cw{};
+    cw.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    cw.dstSet = sets[1];
+    cw.dstBinding = 0;
+    cw.descriptorCount = 1;
+    cw.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    cw.pBufferInfo = &bi;
+    d().vkUpdateDescriptorSets(device_, 1, &cw, 0, nullptr);
+  }
   d().vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                              pipeline_layout, 0, 1, &set, 0, nullptr);
+                              pipeline_layout, 0, use_shapes ? 2U : 1U,
+                              sets.data(), 0, nullptr);
 
   const auto fw = static_cast<float>(fb_width_);
   const auto fh = static_cast<float>(fb_height_);
@@ -639,7 +865,7 @@ void LayerCompositor::DrawLayer(VkCommandBuffer cmd,
     const bool smooth = pipeline_mask != VK_NULL_HANDLE &&
                         (quad->grow[0] > 0 || quad->grow[1] > 0 ||
                          quad->grow[2] > 0 || quad->grow[3] > 0);
-    const bool masked = clip != nullptr || smooth;
+    const bool masked = clip != nullptr || smooth || use_shapes;
     VkPipeline want = masked ? pipeline_mask : pipeline;
     d().vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, want);
     // Pixels times w into clip space times w: x * w maps to
@@ -669,13 +895,49 @@ void LayerCompositor::DrawLayer(VkCommandBuffer cmd,
     d().vkCmdPushConstants(cmd, pipeline_layout, kPushStages, 0,
                            masked ? sizeof(push) : offsetof(LayerPush, rrect),
                            &push);
-    d().vkCmdDraw(cmd, 4, 1, 0, 0);
+    // Clips drawn as shapes cost every pixel they are worked out at, so the
+    // quad's bounds are cut into pieces (ClipPieces): those inside every clip
+    // and the quad are drawn with the plain pipeline, which needs neither,
+    // those near an edge with the clips, and those clearly outside not at
+    // all. Each is the same quad, cut by its own scissor.
+    if (use_shapes) {
+      QuadPlacement placed;
+      placed.origin = quad->origin;
+      placed.edge_s = quad->edge_s;
+      placed.edge_t = quad->edge_t;
+      placed.w0 = quad->w0;
+      placed.ws = quad->ws;
+      placed.wt = quad->wt;
+      VkPipeline bound_piece = want;
+      for (const ClipPiece& piece : piece_cache_.Get(
+               *shapes, &placed, {sx0, sy0, sx1 - sx0, sy1 - sy0})) {
+        const RectI& r = piece.rect;
+        const VkRect2D cut_piece{
+            {r.x, r.y},
+            {static_cast<uint32_t>(r.w), static_cast<uint32_t>(r.h)}};
+        d().vkCmdSetScissor(cmd, 0, 1, &cut_piece);
+        VkPipeline p = piece.mask ? want : pipeline;
+        if (p != bound_piece) {
+          d().vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
+          bound_piece = p;
+        }
+        d().vkCmdDraw(cmd, 4, 1, 0, 0);
+      }
+    } else {
+      d().vkCmdDraw(cmd, 4, 1, 0, 0);
+    }
     const VkRect2D all{{0, 0}, {fb_width_, fb_height_}};
     d().vkCmdSetScissor(cmd, 0, 1, &all);
     return;
   }
   // Only the boxes around a rounded clip's corners take the mask, which costs
   // every pixel it covers; the rest draws with the plain pipeline.
+  if (clip == nullptr && use_shapes) {
+    for (const ClipPiece& piece : piece_cache_.Get(*shapes, nullptr, whole)) {
+      draw(piece.rect, piece.mask);
+    }
+    return;
+  }
   if (clip == nullptr) {
     draw(whole, false);
     return;
@@ -846,9 +1108,29 @@ const LayerCompositor::YuvProgram* LayerCompositor::GetOrCreateYuvProgram(
   // As for RGB: not fatal, a rounded clip is then drawn square.
   prog.pipeline_mask = MakePipeline(device_, render_pass_, prog.pipeline_layout,
                                     /*mask=*/true, /*ycbcr=*/true);
+  // And clips that need shapes are drawn as their bounding boxes.
+  if (clip_set_layout_ != VK_NULL_HANDLE && pipeline_clips_ != VK_NULL_HANDLE) {
+    prog.pipeline_layout_clips = MakeClipsLayout(prog.set_layout);
+    if (prog.pipeline_layout_clips != VK_NULL_HANDLE) {
+      prog.pipeline_clips =
+          MakePipeline(device_, render_pass_, prog.pipeline_layout_clips,
+                       /*mask=*/true, /*ycbcr=*/true, /*clips=*/true);
+    }
+  }
   prog.ok = true;
   yuv_programs_.push_back(prog);
   return &yuv_programs_.back();
+}
+
+void LayerCompositor::WarnNoClips() {
+  if (warned_no_clips_) {
+    return;
+  }
+  warned_no_clips_ = true;
+  ihs::log::warn(
+      "[wl_vulkan] a platform view's clips are not rects on screen, and the "
+      "pipeline that draws them as shapes is not there; they are drawn as "
+      "their bounding boxes");
 }
 
 void LayerCompositor::WarnNoMask() {

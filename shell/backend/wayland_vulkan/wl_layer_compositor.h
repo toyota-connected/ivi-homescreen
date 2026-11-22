@@ -53,11 +53,14 @@ class LayerCompositor {
 
   // Build the render pass / pipeline / sampler for @p color_format (the slot
   // format). Returns nullptr and sets @p err on failure.
+  // @p physical, when given, lets clips that are not rects on screen be drawn
+  // as shapes (DrawLayer's @p shapes); without it they are not.
   static std::unique_ptr<LayerCompositor> Create(
       VkDevice device,
       VkFormat color_format,
       std::string& err,
-      ContentMode mode = ContentMode::kClear);
+      ContentMode mode = ContentMode::kClear,
+      VkPhysicalDevice physical = VK_NULL_HANDLE);
   ~LayerCompositor();
   LayerCompositor(const LayerCompositor&) = delete;
   LayerCompositor& operator=(const LayerCompositor&) = delete;
@@ -113,6 +116,12 @@ class LayerCompositor {
   //
   // @p quad, when given, is drawn instead of the destination rect: a layer of
   // a transformed view. @p uv then maps the quad's (s, t).
+  //
+  // @p shapes, when given, are the view's clips that are not rects on screen,
+  // or are one of several rounded clips (ClipShapesOf), in framebuffer
+  // pixels: each pixel is drawn with the share of it they let through, and
+  // @p rounded is not drawn. Where the compositor cannot draw them (no
+  // physical device given to Create), @p rounded is drawn as before.
   void DrawLayer(VkCommandBuffer cmd,
                  VkImage src_image,
                  VkFormat src_format,
@@ -126,7 +135,8 @@ class LayerCompositor {
                  bool opaque = false,
                  float alpha = 1.0f,
                  const RoundedRect* rounded = nullptr,
-                 const Quad* quad = nullptr);
+                 const Quad* quad = nullptr,
+                 const ClipShapes* shapes = nullptr);
 
   static void EndFrame(VkCommandBuffer cmd);
 
@@ -164,6 +174,8 @@ class LayerCompositor {
     VkPipelineLayout pipeline_layout{VK_NULL_HANDLE};
     VkPipeline pipeline{VK_NULL_HANDLE};
     VkPipeline pipeline_mask{VK_NULL_HANDLE};  // with a rounded clip
+    VkPipelineLayout pipeline_layout_clips{VK_NULL_HANDLE};
+    VkPipeline pipeline_clips{VK_NULL_HANDLE};  // with clips as shapes
     // False for a cached negative result: the device could not build the
     // program (no samplerYcbcrConversion / no linear ycbcr filtering), so the
     // handles are null and the lookup returns nullptr without reattempting the
@@ -188,6 +200,22 @@ class LayerCompositor {
   // Says once that a rounded clip is being drawn square.
   void WarnNoMask();
   bool warned_no_mask_{false};
+  // Clips drawn as shapes (DrawLayer's @p shapes): their descriptor set
+  // layout (set 1, a uniform buffer), the RGB pipeline and its layout, and
+  // each slot's stride in a frame's buffer. Null where they could not be
+  // built; such clips are then drawn as their bounding boxes.
+  bool BuildClips(VkPhysicalDevice physical);
+  [[nodiscard]] VkPipelineLayout MakeClipsLayout(
+      VkDescriptorSetLayout source) const;
+  void WarnNoClips();
+  bool warned_no_clips_{false};
+  VkDescriptorSetLayout clip_set_layout_{VK_NULL_HANDLE};
+  VkPipelineLayout pipeline_layout_clips_{VK_NULL_HANDLE};
+  VkPipeline pipeline_clips_{VK_NULL_HANDLE};
+  VkDeviceSize clip_stride_{0};
+  // The pieces a view with such clips is drawn in, cut again only when it
+  // moves.
+  ClipPiecesCache piece_cache_;
   VkSampler sampler_{VK_NULL_HANDLE};
   std::vector<YuvProgram> yuv_programs_;
 
@@ -206,6 +234,12 @@ class LayerCompositor {
   struct FrameResources {
     VkDescriptorPool pool{VK_NULL_HANDLE};
     std::vector<VkImageView> views;  // per-source views created this cycle
+    // Clips drawn as shapes this cycle, one slot (clip_stride_) per draw, in
+    // host-coherent memory mapped for the compositor's lifetime.
+    VkBuffer clips{VK_NULL_HANDLE};
+    VkDeviceMemory clips_mem{VK_NULL_HANDLE};
+    void* clips_ptr{nullptr};
+    uint32_t clips_used{0};
   };
   std::vector<FrameResources> ring_{kRing};
   uint32_t cur_ring_{0};

@@ -677,3 +677,144 @@ TEST(LayerGeometry, PlaceThroughDropsALayerPastTheHorizon) {
   EXPECT_FALSE(PlaceLayerThrough({}, {}, BufferTransform::kNormal, false, 100,
                                  50, 100, 50, m, &q));
 }
+
+namespace {
+
+ClipShape RoundedShape(double x, double y, double w, double h, float r) {
+  ClipShape c;
+  c.shape.rect = {x, y, w, h};
+  for (auto& corner : c.shape.radii) {
+    corner = {r, r};
+  }
+  return c;
+}
+
+// Checks @p pieces against the coverage of @p shapes (and @p quad's edges)
+// at every pixel of @p bounds: each pixel is in at most one piece; one in a
+// whole piece is covered whole; one in no piece is not covered at all; one
+// partly covered is in a masked piece. Returns the pixels in each kind.
+struct PieceCounts {
+  int whole{0};
+  int masked{0};
+  int left_out{0};
+};
+PieceCounts CheckPieces(const ClipShapes& shapes,
+                        const QuadPlacement* quad,
+                        const RectI& bounds,
+                        const std::vector<ClipPiece>& pieces) {
+  PieceCounts n;
+  for (int y = bounds.y; y < bounds.y + bounds.h; ++y) {
+    for (int x = bounds.x; x < bounds.x + bounds.w; ++x) {
+      const ClipPiece* in = nullptr;
+      for (const ClipPiece& p : pieces) {
+        const RectI& r = p.rect;
+        if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) {
+          EXPECT_EQ(in, nullptr) << "two pieces at " << x << "," << y;
+          in = &p;
+        }
+      }
+      double cover = 1.0;
+      for (size_t k = 0; k < shapes.count; ++k) {
+        cover = std::min(cover,
+                         ClipShapeCoverage(shapes.items[k], x + 0.5, y + 0.5));
+      }
+      if (quad != nullptr) {
+        for (const double e : EdgeDistances(*quad, x + 0.5, y + 0.5)) {
+          cover = std::min(cover, std::clamp(e + 0.5, 0.0, 1.0));
+        }
+      }
+      if (in == nullptr) {
+        ++n.left_out;
+        EXPECT_EQ(cover, 0.0) << "left out at " << x << "," << y;
+      } else if (!in->mask) {
+        ++n.whole;
+        EXPECT_EQ(cover, 1.0) << "drawn whole at " << x << "," << y;
+      } else {
+        ++n.masked;
+      }
+    }
+  }
+  return n;
+}
+
+}  // namespace
+
+TEST(LayerGeometry, ClipPiecesMaskOnlyNearTheEdges) {
+  // Nested rounded clips on an untransformed view: the mask is worked out in
+  // the corners and along the inner clip's sides, and most of the view is
+  // drawn whole.
+  ClipShapes shapes;
+  shapes.count = 2;
+  shapes.items[0] = RoundedShape(0, 0, 400, 320, 150);
+  shapes.items[1] = RoundedShape(5, 5, 390, 310, 8);
+  const RectI bounds{5, 5, 390, 310};
+  std::vector<ClipPiece> pieces;
+  ClipPieces(shapes, nullptr, bounds, &pieces);
+  const PieceCounts n = CheckPieces(shapes, nullptr, bounds, pieces);
+  EXPECT_GT(n.whole, n.masked * 2);
+  EXPECT_GT(n.left_out, 0) << "the outer clip's corners";
+  // Joined into rects, not one per cell.
+  EXPECT_LT(pieces.size(), 60U);
+}
+
+TEST(LayerGeometry, ClipPiecesFollowATurnedView) {
+  // A 100x60 view turned 30 degrees about (100, 100), its clip around it.
+  const double r = M_PI / 6;
+  ViewMap m;
+  m.a = std::cos(r);
+  m.b = std::sin(r);
+  m.c = -std::sin(r);
+  m.d = std::cos(r);
+  m.tx = 100 - (m.a * 50 + m.c * 30);
+  m.ty = 100 - (m.b * 50 + m.d * 30);
+  QuadPlacement q;
+  ASSERT_TRUE(PlaceLayerThrough({}, {}, BufferTransform::kNormal, false, 100,
+                                60, 100, 60, m, &q));
+  ClipShapes shapes;
+  shapes.count = 1;
+  shapes.items[0] = RoundedShape(0, 0, 100, 60, 12);
+  shapes.items[0].to_shape = *InverseMap(m);
+  std::vector<ClipPiece> pieces;
+  ClipPieces(shapes, &q, q.bounds, &pieces);
+  const PieceCounts n = CheckPieces(shapes, &q, q.bounds, pieces);
+  EXPECT_GT(n.whole, 0);
+  EXPECT_GT(n.left_out, 0) << "the corners of the bounds";
+}
+
+TEST(LayerGeometry, ClipPiecesUnderAPerspectiveLeaveNothingOut) {
+  // A shape under a perspective has no distance to trust far from it, so
+  // nothing is left out for it; what is left out is outside the quad.
+  ViewMap m;
+  m.g = 0.004;
+  QuadPlacement q;
+  ASSERT_TRUE(PlaceLayerThrough({}, {}, BufferTransform::kNormal, false, 100,
+                                80, 100, 80, m, &q));
+  ClipShapes shapes;
+  shapes.count = 1;
+  shapes.items[0] = RoundedShape(0, 0, 100, 80, 20);
+  shapes.items[0].to_shape = *InverseMap(m);
+  std::vector<ClipPiece> pieces;
+  ClipPieces(shapes, &q, q.bounds, &pieces);
+  const PieceCounts n = CheckPieces(shapes, &q, q.bounds, pieces);
+  EXPECT_GT(n.whole, 0);
+}
+
+TEST(LayerGeometry, TheCacheFollowsItsInputs) {
+  ClipShapes shapes;
+  shapes.count = 1;
+  shapes.items[0] = RoundedShape(0, 0, 200, 100, 40);
+  ClipPiecesCache cache;
+  std::vector<ClipPiece> direct;
+  ClipPieces(shapes, nullptr, {0, 0, 200, 100}, &direct);
+  ASSERT_EQ(cache.Get(shapes, nullptr, {0, 0, 200, 100}).size(), direct.size());
+  EXPECT_EQ(cache.Get(shapes, nullptr, {0, 0, 200, 100}).size(), direct.size());
+  // Moved: cut again, to match.
+  shapes.items[0].to_shape.tx = -10;
+  ClipPieces(shapes, nullptr, {10, 0, 200, 100}, &direct);
+  const auto& moved = cache.Get(shapes, nullptr, {10, 0, 200, 100});
+  ASSERT_EQ(moved.size(), direct.size());
+  for (size_t k = 0; k < moved.size(); ++k) {
+    EXPECT_EQ(moved[k].rect.x, direct[k].rect.x);
+    EXPECT_EQ(moved[k].mask, direct[k].mask);
+  }
+}

@@ -276,12 +276,14 @@ class LayerDrawVk : public ::testing::Test {
       const std::array<float, 4>* backdrop = nullptr,
       float alpha = 1.0f,
       const RoundedRect* rounded = nullptr,
-      const wl_vulkan::LayerCompositor::Quad* quad = nullptr) {
+      const wl_vulkan::LayerCompositor::Quad* quad = nullptr,
+      const ClipShapes* shapes = nullptr) {
     std::string err;
     auto comp = wl_vulkan::LayerCompositor::Create(
         device_, kFormat, err,
         backdrop != nullptr ? wl_vulkan::LayerCompositor::ContentMode::kPreserve
-                            : wl_vulkan::LayerCompositor::ContentMode::kClear);
+                            : wl_vulkan::LayerCompositor::ContentMode::kClear,
+        physical_);
     EXPECT_NE(comp, nullptr) << err;
     if (comp == nullptr) {
       return {};
@@ -345,7 +347,7 @@ class LayerDrawVk : public ::testing::Test {
     comp->DrawLayer(cmd, src, kFormat,
                     VK_SAMPLER_YCBCR_MODEL_CONVERSION_RGB_IDENTITY,
                     VK_SAMPLER_YCBCR_RANGE_ITU_FULL, 0, 0, kW, kH, uv, opaque,
-                    alpha, rounded, quad);
+                    alpha, rounded, quad, shapes);
     wl_vulkan::LayerCompositor::EndFrame(cmd);
     // The render pass leaves the target in GENERAL.
     Barrier(cmd, dst, VK_IMAGE_LAYOUT_GENERAL,
@@ -695,4 +697,46 @@ TEST_F(LayerDrawVk, ASmoothedQuadSamplesOnlyItsCrop) {
     }
   }
   EXPECT_GT(blue, 8);
+}
+
+// Clips drawn as shapes: a rounded rect turned 30 degrees about the target's
+// center, and a rect around all but its last column. Each pixel is covered in
+// the share ClipShapeCoverage gives, the least of the two. A rounded clip
+// given as well is not drawn: here it would cut everything away.
+TEST_F(LayerDrawVk, ClipShapesCoverEachPixelInTheirShare) {
+  const std::array<float, 4> white = {1, 1, 1, 1};
+  const double r = M_PI / 6;
+  ViewMap turn;  // output pixels into the turned shape's space
+  turn.a = std::cos(r);
+  turn.c = std::sin(r);
+  turn.b = -std::sin(r);
+  turn.d = std::cos(r);
+  turn.tx = -(turn.a * kW / 2.0 + turn.c * kH / 2.0);
+  turn.ty = -(turn.b * kW / 2.0 + turn.d * kH / 2.0);
+  ClipShapes shapes;
+  shapes.count = 2;
+  shapes.items[0].to_shape = turn;
+  shapes.items[0].shape.rect = {-2.2, -1.1, 4.4, 2.2};
+  for (auto& c : shapes.items[0].shape.radii) {
+    c = {0.9f, 0.9f};
+  }
+  shapes.items[1].shape.rect = {0, 0, kW - 1, kH};
+  RoundedRect away;
+  away.rect = {100, 100, 1, 1};
+  const auto out = Draw(kW, kH, SolidBuffer(0, 0, 0), UvAffine{},
+                        /*opaque=*/true, &white, 1.0f, &away, nullptr, &shapes);
+  ASSERT_EQ(out.size(), static_cast<size_t>(kW) * kH * 4);
+  int partial = 0;
+  for (int y = 0; y < kH; ++y) {
+    for (int x = 0; x < kW; ++x) {
+      const double cover =
+          std::min(ClipShapeCoverage(shapes.items[0], x + 0.5, y + 0.5),
+                   ClipShapeCoverage(shapes.items[1], x + 0.5, y + 0.5));
+      partial += cover > 0.05 && cover < 0.95 ? 1 : 0;
+      // The backdrop's share is what is left uncovered.
+      EXPECT_NEAR(At(out, x, y)[1], 255 * (1 - cover), 3) << x << "," << y;
+    }
+  }
+  EXPECT_GT(partial, 3);
+  EXPECT_EQ(At(out, kW - 1, 1)[1], 0xff) << "past the rect";
 }

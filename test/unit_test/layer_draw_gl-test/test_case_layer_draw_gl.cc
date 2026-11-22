@@ -1305,3 +1305,240 @@ TEST_F(LayerDrawGl, LayersThatMeetLeaveNoSeam) {
   EXPECT_GT(inside, 30);
   glDeleteTextures(1, &tex);
 }
+
+namespace {
+
+// Draw `surface`, a view of view_w x view_h, into a w x h window target with
+// `shapes`, through `map` when not null, and read it back top row first.
+std::vector<uint8_t> DrawShapes(GlCompositor& compositor,
+                                const ICompositorSurface& surface,
+                                int view_w,
+                                int view_h,
+                                const ViewMap* map,
+                                int w,
+                                int h,
+                                const ClipShapes& shapes,
+                                const RoundedRect* rounded = nullptr) {
+  GLuint target = 0;
+  glGenTextures(1, &target);
+  glBindTexture(GL_TEXTURE_2D, target);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+               nullptr);
+  GLuint fbo = 0;
+  glGenFramebuffers(1, &fbo);
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                         target, 0);
+  glClearColor(0, 0, 0, 0);
+  glClear(GL_COLOR_BUFFER_BIT);
+  compositor.CompositeSurfaceLayers(fbo, surface, {0, 0, view_w, view_h}, h,
+                                    /*target_top_first=*/true,
+                                    /*blend_first=*/false, nullptr, nullptr,
+                                    nullptr, nullptr, 1.0f, rounded, map,
+                                    &shapes);
+  std::vector<uint8_t> rows(Px(0, h, w));
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+  glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, rows.data());
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  glDeleteFramebuffers(1, &fbo);
+  glDeleteTextures(1, &target);
+  return rows;
+}
+
+// The inverse of an affine map (no perspective).
+ViewMap Inverse(const ViewMap& m) {
+  const double det = m.a * m.d - m.b * m.c;
+  ViewMap r;
+  r.a = m.d / det;
+  r.b = -m.b / det;
+  r.c = -m.c / det;
+  r.d = m.a / det;
+  r.tx = (m.c * m.ty - m.d * m.tx) / det;
+  r.ty = (m.b * m.tx - m.a * m.ty) / det;
+  return r;
+}
+
+bool InRounded(const RoundedRect& rr, double x, double y) {
+  const RectF& b = rr.rect;
+  if (x < b.x || y < b.y || x > b.x + b.w || y > b.y + b.h) {
+    return false;
+  }
+  const bool left = x < b.x + b.w / 2;
+  const bool top = y < b.y + b.h / 2;
+  const auto& r = rr.radii[top ? (left ? 0 : 1) : (left ? 3 : 2)];
+  const double cx = left ? b.x + r[0] : b.x + b.w - r[0];
+  const double cy = top ? b.y + r[1] : b.y + b.h - r[1];
+  if ((left ? x >= cx : x <= cx) || (top ? y >= cy : y <= cy) || r[0] <= 0 ||
+      r[1] <= 0) {
+    return true;
+  }
+  return std::hypot((x - cx) / r[0], (y - cy) / r[1]) <= 1.0;
+}
+
+RoundedRect Rounded(double x, double y, double w, double h, float r) {
+  RoundedRect rr;
+  rr.rect = {x, y, w, h};
+  for (auto& c : rr.radii) {
+    c = {r, r};
+  }
+  return rr;
+}
+
+// Each pixel's alpha against the exact share `inside` lets through, from
+// 16 x 16 samples. Counts the pixels off by more than a tenth, and the ones
+// partly covered.
+void CheckCoverage(const std::vector<uint8_t>& out,
+                   int w,
+                   int h,
+                   const std::function<bool(double, double)>& inside,
+                   int* wrong,
+                   int* partial) {
+  *wrong = 0;
+  *partial = 0;
+  for (int y = 0; y < h; ++y) {
+    for (int x = 0; x < w; ++x) {
+      int n = 0;
+      for (int j = 0; j < 16; ++j) {
+        for (int i = 0; i < 16; ++i) {
+          n += inside(x + (i + 0.5) / 16, y + (j + 0.5) / 16) ? 1 : 0;
+        }
+      }
+      const double want = n / 256.0;
+      const double got = out[Px(x, y, w) + 3] / 255.0;
+      *partial += want > 0.05 && want < 0.95 ? 1 : 0;
+      if (std::abs(got - want) > 0.1 && (*wrong)++ < 3) {
+        ADD_FAILURE() << "(" << x << ", " << y << ") covered " << got
+                      << ", want " << want;
+      }
+    }
+  }
+}
+
+}  // namespace
+
+// A rounded clip inside a turn: the view and its clip turn together, so the
+// clip's corners are arcs on a diamond, which no rounded rect on the output
+// is. Each pixel is covered in the share of it inside both.
+TEST_F(LayerDrawGl, ARoundedClipTurnsWithItsView) {
+  constexpr int kS = 16;
+  const GLuint tex = MakeTexture(kS, kS, Solid(kS, kS, 255, 255, 255));
+  LayeredSurface surface;
+  ICompositorSurface::GlLayerTexture whole;
+  whole.name = tex;
+  whole.width = kS;
+  whole.height = kS;
+  whole.top_first = true;
+  surface.layers = {whole};
+  const double k = std::sqrt(0.5);
+  ViewMap map;
+  map.a = k;
+  map.b = k;
+  map.c = -k;
+  map.d = k;
+  map.tx = kS;
+  map.ty = kS - k * kS;
+  ClipShapes shapes;
+  shapes.count = 1;
+  shapes.items[0].to_shape = Inverse(map);
+  shapes.items[0].shape = Rounded(0, 0, kS, kS, 5);
+  const auto out =
+      DrawShapes(*compositor_, surface, kS, kS, &map, 2 * kS, 2 * kS, shapes);
+  const ViewMap back = Inverse(map);
+  int wrong = 0;
+  int partial = 0;
+  CheckCoverage(
+      out, 2 * kS, 2 * kS,
+      [&](double x, double y) {
+        const auto q = back.Map(x, y);
+        return InRounded(shapes.items[0].shape, q[0], q[1]);
+      },
+      &wrong, &partial);
+  EXPECT_GT(partial, 40);
+  EXPECT_EQ(wrong, 0);
+  glDeleteTextures(1, &tex);
+}
+
+// Two rounded clips on a view that is not transformed: the outer one's large
+// corners cut into the inner one's small ones. Both are drawn.
+TEST_F(LayerDrawGl, NestedRoundedClipsAreBothDrawn) {
+  constexpr int kS = 20;
+  const GLuint tex = MakeTexture(kS, kS, Solid(kS, kS, 255, 255, 255));
+  LayeredSurface surface;
+  ICompositorSurface::GlLayerTexture whole;
+  whole.name = tex;
+  whole.width = kS;
+  whole.height = kS;
+  whole.top_first = true;
+  surface.layers = {whole};
+  ClipShapes shapes;
+  shapes.count = 2;
+  shapes.items[0].shape = Rounded(0, 0, kS, kS, 9);
+  shapes.items[1].shape = Rounded(1, 1, kS - 2, kS - 2, 1);
+  // The inner one alone is what a single rounded mask shows; it is not drawn
+  // when the shapes are.
+  const RoundedRect inner = shapes.items[1].shape;
+  const auto out = DrawShapes(*compositor_, surface, kS, kS, nullptr, kS, kS,
+                              shapes, &inner);
+  int wrong = 0;
+  int partial = 0;
+  CheckCoverage(
+      out, kS, kS,
+      [&](double x, double y) {
+        return InRounded(shapes.items[0].shape, x, y) &&
+               InRounded(shapes.items[1].shape, x, y);
+      },
+      &wrong, &partial);
+  EXPECT_GE(partial, 16);
+  EXPECT_EQ(wrong, 0);
+  glDeleteTextures(1, &tex);
+}
+
+// A larger view turned 30 degrees with its rounded clip: large enough that it
+// is drawn in pieces, the inside of the clip without it worked out, the parts
+// near its edges with, and the corners of the bounds not at all. The pieces
+// meet without a seam and cover each pixel as before.
+TEST_F(LayerDrawGl, ATurnedClipDrawnInPiecesLeavesNoSeam) {
+  constexpr int kS = 48;
+  constexpr int kT = 80;
+  const GLuint tex = MakeTexture(kS, kS, Solid(kS, kS, 255, 255, 255));
+  LayeredSurface surface;
+  ICompositorSurface::GlLayerTexture whole;
+  whole.name = tex;
+  whole.width = kS;
+  whole.height = kS;
+  whole.top_first = true;
+  surface.layers = {whole};
+  const double r = M_PI / 6;
+  ViewMap map;
+  map.a = std::cos(r);
+  map.b = std::sin(r);
+  map.c = -std::sin(r);
+  map.d = std::cos(r);
+  map.tx = kT / 2.0 - (map.a * kS / 2.0 + map.c * kS / 2.0);
+  map.ty = kT / 2.0 - (map.b * kS / 2.0 + map.d * kS / 2.0);
+  ClipShapes shapes;
+  shapes.count = 1;
+  shapes.items[0].to_shape = Inverse(map);
+  shapes.items[0].shape = Rounded(0, 0, kS, kS, 8);
+  QuadPlacement q;
+  ASSERT_TRUE(PlaceLayerThrough({}, {}, BufferTransform::kNormal, true, kS, kS,
+                                kS, kS, map, &q));
+  std::vector<ClipPiece> pieces;
+  ClipPieces(shapes, &q, q.bounds, &pieces);
+  ASSERT_GT(pieces.size(), 1U) << "drawn in pieces";
+  const auto out =
+      DrawShapes(*compositor_, surface, kS, kS, &map, kT, kT, shapes);
+  const ViewMap back = Inverse(map);
+  int wrong = 0;
+  int partial = 0;
+  CheckCoverage(
+      out, kT, kT,
+      [&](double x, double y) {
+        const auto p = back.Map(x, y);
+        return InRounded(shapes.items[0].shape, p[0], p[1]);
+      },
+      &wrong, &partial);
+  EXPECT_GT(partial, 100);
+  EXPECT_EQ(wrong, 0);
+  glDeleteTextures(1, &tex);
+}

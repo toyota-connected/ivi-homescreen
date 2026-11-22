@@ -219,8 +219,9 @@ inline std::optional<RoundedRect> RoundedClipIn(
  * of @c ClipRectOf either way; this adds only the corners.
  *
  * With more than one rounded clip, or one under a rotation or skew, this is
- * the innermost one still a rounded rect on screen, and some corners are
- * drawn square (see @c ComposedMutation::rounded_clip_exact).
+ * the innermost one still a rounded rect on screen, which alone draws some
+ * corners square; @c ClipShapesOf then gives them all, and a compositor that
+ * draws those leaves this out.
  */
 inline std::optional<RoundedRect> RoundedClipOf(const FlutterLayer& layer) {
   if (layer.type != kFlutterLayerContentTypePlatformView ||
@@ -278,7 +279,7 @@ inline std::optional<RectI> ClipRectIn(const ComposedMutation& composed,
  * away. Edges are rounded to the nearest pixel.
  *
  * A clip under a rotation or skew is not a rect on screen; its bounding box is
- * used (see @c ComposedMutation::clip_exact).
+ * used here, and @c ClipShapesOf gives the clip itself.
  */
 inline std::optional<RectI> ClipRectOf(const FlutterLayer& layer) {
   if (layer.type != kFlutterLayerContentTypePlatformView ||
@@ -290,6 +291,85 @@ inline std::optional<RectI> ClipRectOf(const FlutterLayer& layer) {
       MutationStack::Compose(layer.platform_view),
       {layer.offset.x, layer.offset.y, layer.offset.x + layer.size.width,
        layer.offset.y + layer.size.height});
+}
+
+/**
+ * @brief The clips of @p composed drawn as shapes, in output pixels: each
+ * rounded clip, and each clip that is not a rect on screen, with the map from
+ * output pixels back to the space it was pushed in.
+ *
+ * Empty when @c ClipRectIn and @c RoundedClipIn already draw the view's
+ * clips exactly, which a caller keeps for that case: then this adds nothing.
+ * Otherwise it holds every rounded clip, so a caller that draws these does not
+ * also draw @c RoundedClipIn's. Also empty when more clips were pushed than it
+ * holds, or one cannot be mapped back; those views are drawn as before, with
+ * some corners square.
+ */
+inline std::optional<ClipShapes> ClipShapesIn(
+    const ComposedMutation& composed) {
+  if ((composed.clip_exact && composed.rounded_clip_exact) ||
+      composed.shapes_overflow || composed.shape_count == 0 ||
+      composed.shape_count > ClipShapes::kMax) {
+    return std::nullopt;
+  }
+  ClipShapes out;
+  for (size_t k = 0; k < composed.shape_count; ++k) {
+    const ClipShapeRecord& r = composed.shapes[k];
+    ViewMap placed;
+    placed.a = r.a;
+    placed.b = r.b;
+    placed.c = r.c;
+    placed.d = r.d;
+    placed.tx = r.tx;
+    placed.ty = r.ty;
+    placed.g = r.g;
+    placed.h = r.h;
+    placed.i = r.i;
+    const std::optional<ViewMap> inverse = InverseMap(placed);
+    if (!inverse) {
+      return std::nullopt;
+    }
+    const ViewMap& m = *inverse;
+    for (const double e : {m.a, m.b, m.c, m.d, m.tx, m.ty, m.g, m.h, m.i}) {
+      if (!std::isfinite(e)) {
+        return std::nullopt;
+      }
+    }
+    const FlutterRoundedRect& rr = r.shape;
+    const FlutterRect& c = rr.rect;
+    const std::array<FlutterSize, 4> radii = {
+        rr.upper_left_corner_radius, rr.upper_right_corner_radius,
+        rr.lower_right_corner_radius, rr.lower_left_corner_radius};
+    if (!std::isfinite(c.left) || !std::isfinite(c.top) ||
+        !std::isfinite(c.right) || !std::isfinite(c.bottom)) {
+      return std::nullopt;
+    }
+    ClipShape& shape = out.items[out.count++];
+    shape.to_shape = m;
+    shape.shape.rect = {c.left, c.top, c.right - c.left, c.bottom - c.top};
+    for (size_t i = 0; i < radii.size(); ++i) {
+      const FlutterSize& sz = radii[i];
+      if (!std::isfinite(sz.width) || !std::isfinite(sz.height)) {
+        return std::nullopt;
+      }
+      shape.shape.radii[i] = {static_cast<float>(std::max(0.0, sz.width)),
+                              static_cast<float>(std::max(0.0, sz.height))};
+    }
+  }
+  return out;
+}
+
+/**
+ * @brief The clips on @p layer's view drawn as shapes, in output pixels. See
+ * @c ClipShapesIn.
+ */
+inline std::optional<ClipShapes> ClipShapesOf(const FlutterLayer& layer) {
+  if (layer.type != kFlutterLayerContentTypePlatformView ||
+      layer.platform_view == nullptr ||
+      layer.platform_view->mutations_count == 0) {
+    return std::nullopt;
+  }
+  return ClipShapesIn(MutationStack::Compose(layer.platform_view));
 }
 
 /// A view that reaches the output through a rotation, skew, mirror or

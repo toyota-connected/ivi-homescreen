@@ -44,6 +44,9 @@
 //                       one turn every eight seconds
 //   PV_BENCH_PERSPECTIVE tilt the view this many degrees about its vertical
 //                       axis, in perspective (default 0)
+//   PV_BENCH_INNER_RADIUS wrap the view itself in a ClipRRect with corners of
+//                       this radius, inside every transform, so the clip
+//                       turns, tilts and scales with it (default 0, no clip)
 //   PV_BENCH_VIEWS      how many platform views to show (1 to 8, default 1).
 //                       Past one, each is two thirds of the screen, and each
 //                       sits a twelfth of the screen right of and below the
@@ -241,8 +244,8 @@ class _PvBenchPageState extends State<PvBenchPage>
 }
 
 // Every view gets the same mutations, in the same order.
-Widget _wrapped(Widget view) =>
-    _faded(_rounded(_clipped(_rotated(_tilted(_scaled(view))))));
+Widget _wrapped(Widget view) => _faded(
+    _rounded(_clipped(_rotated(_tilted(_scaled(_innerRounded(view)))))));
 
 class _Spinner extends StatelessWidget {
   const _Spinner({required this.turns});
@@ -401,6 +404,23 @@ Widget _rounded(Widget child) {
   }
   return ClipRRect(
     borderRadius: BorderRadius.circular(_pvRadius),
+    child: child,
+  );
+}
+
+// A rounded clip inside the view's transforms is not a rounded rect on screen
+// once they turn or tilt it, and with PV_BENCH_RADIUS the view has two, so a
+// run can check that each backend draws its clips as they are (#885).
+final double _pvInnerRadius =
+    double.tryParse(Platform.environment['PV_BENCH_INNER_RADIUS'] ?? '') ??
+        0.0;
+
+Widget _innerRounded(Widget child) {
+  if (_pvInnerRadius <= 0.0) {
+    return child;
+  }
+  return ClipRRect(
+    borderRadius: BorderRadius.circular(_pvInnerRadius),
     child: child,
   );
 }

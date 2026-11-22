@@ -21,6 +21,7 @@
 #include <array>
 #include <cstddef>
 #include <functional>
+#include <vector>
 
 #include "view/compositor_surface_interface.h"
 #include "view/display_rotation.h"
@@ -59,9 +60,10 @@ class GlCompositor {
     UvAffine pos{};
     RoundedRect rect{};
     // Where the quad is drawn as pieces, each a rect of its (s, t) and whether
-    // it is a box around a corner, the only place the mask can cut. The pieces
-    // go in one draw, and outside the corner boxes the mask is not worked out.
-    // With none, the mask is worked out over the whole quad.
+    // the mask is worked out there: a box around a corner, or near a clip
+    // drawn as a shape (ClipPieces). The pieces go in one draw, and outside
+    // them the mask is not worked out. With none, it is worked out over the
+    // whole quad.
     struct Part {
       float s0{0};
       float t0{0};
@@ -69,8 +71,7 @@ class GlCompositor {
       float t1{0};
       bool corner{false};
     };
-    std::array<Part, 7> parts{};
-    size_t part_count{0};
+    std::vector<Part> parts;
     // Or the quad as two triangles given outright: each vertex in the
     // viewport's NDC, at (s, t) of the quad, with m 1 where the mask is worked
     // out, w its homogeneous w (1 without a perspective) and edge its distance
@@ -87,10 +88,22 @@ class GlCompositor {
       float w{1};
       std::array<float, 4> edge{kNoEdge, kNoEdge, kNoEdge, kNoEdge};
     };
-    std::array<Vertex, 6> verts{};
-    size_t vert_count{0};
+    // Two triangles for a whole quad, or more for one drawn in pieces.
+    std::vector<Vertex> verts;
     // Where (s, t) is held when sampled: s0, t0, s1, t1 (SampleClamp).
     std::array<float, 4> st_clamp{0, 0, 1, 1};
+    // Clips drawn as shapes, in the same space as rect; none by default.
+    ClipShapes shapes{};
+
+    // Back to none of the above, keeping the vectors' storage.
+    void Reset() {
+      pos = {};
+      rect = {};
+      parts.clear();
+      verts.clear();
+      st_clamp = {0, 0, 1, 1};
+      shapes = {};
+    }
   };
 
   explicit GlCompositor(const GlCaps* caps);
@@ -203,6 +216,12 @@ class GlCompositor {
    *                    this, and each layer is drawn as the quad it makes
    *                    there, clipped to @p clip. Null draws each layer as a
    *                    rect in @p view.
+   * @param shapes      The view's clips that are not rects on screen, or are
+   *                    one of several rounded clips (ClipShapesOf), in the
+   *                    same space as @p view: each pixel is drawn with the
+   *                    share of it they let through, and @p rounded is not
+   *                    drawn. Where the programs cannot take that many, they
+   *                    are left out and @p rounded is drawn as before.
    * @return            The number of layers drawn.
    *
    * Imports each layer's latest frame (GetLayerGlTexture), so it runs on the
@@ -222,7 +241,8 @@ class GlCompositor {
       const RectI* clip = nullptr,
       float alpha = 1.0f,
       const RoundedRect* rounded = nullptr,
-      const ViewMap* map = nullptr);
+      const ViewMap* map = nullptr,
+      const ClipShapes* shapes = nullptr);
 
   /**
    * @brief Whether CompositeToFbo may take the glBlitFramebuffer path.
@@ -289,6 +309,12 @@ class GlCompositor {
   // The vertices of a quad drawn as pieces (QuadMask::parts), rewritten for
   // each such draw.
   GLuint parts_vbo_{0};
+  // Reused from layer to layer, so drawing in pieces does not allocate each
+  // frame: the mask, the pieces it is cut into, and the vertices sent.
+  QuadMask scratch_mask_;
+  std::vector<ClipPiece> scratch_pieces_;
+  ClipPiecesCache piece_cache_;
+  std::vector<GLfloat> scratch_verts_;
   // The vertex array object the self-contained programs draw with, where the
   // context has them. See CompositeViaQuadProgram.
   GLuint quad_vao_{0};
@@ -314,6 +340,10 @@ class GlCompositor {
     GLint radii_top{-1};
     GLint radii_bottom{-1};
     GLint st_clamp{-1};
+    GLint clip_map{-1};
+    GLint clip_rect{-1};
+    GLint clip_radii{-1};
+    GLint clip_count{-1};
   };
   // A quad program drawn outside the frame-batched path: the external-sampler
   // one, and the two built to cut corners to a rounded clip. id 0 is a program
@@ -335,7 +365,7 @@ class GlCompositor {
   // Builds mask_, and when the driver has GL_OES_EGL_image_external, external_
   // and external_mask_. One that cannot be built is left at id 0.
   void BuildSelfContainedPrograms();
-  static QuadProgram BuildQuadProgram(bool external, bool mask);
+  static QuadProgram BuildQuadProgram(bool external, bool mask, size_t clips);
   // Draws with @p p, its texture bound to @p target, setting up and tearing
   // down all of its own state.
   void CompositeViaQuadProgram(const QuadProgram& p,
@@ -362,7 +392,8 @@ class GlCompositor {
                              const RectI* clip,
                              float alpha,
                              const RoundedRect* rounded,
-                             const ViewMap& map);
+                             const ViewMap& map,
+                             const ClipShapes* shapes);
   // @external selects the samplerExternalOES program and the
   // GL_TEXTURE_EXTERNAL_OES bind target, which planar YUV requires.
   void CompositeViaQuad(GLuint src_color_tex,
@@ -406,4 +437,6 @@ class GlCompositor {
   // program_ and external_ built to cut corners to a rounded clip.
   QuadProgram mask_;
   QuadProgram external_mask_;
+  // How many clip shapes the masked programs take (ClipShapes::kMax at most).
+  size_t clip_slots_{0};
 };
