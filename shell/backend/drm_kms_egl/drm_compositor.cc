@@ -4180,6 +4180,17 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
           // submits meanwhile belongs to the present it nudged. Importing it
           // here leaves that present no new frame either, and so on: every
           // present composited, none on a plane.
+          //
+          // Unless it keeps happening. With several views, one is all but
+          // always between frames, so the frame never reaches a plane and
+          // the held views show every frame twice. Back off then, and
+          // composite each view's newest frame until the plane path is
+          // tried again.
+          if (++scene_hold_streak_ >= kSceneHoldLimit) {
+            scene_hold_streak_ = 0;
+            scene_backoff_.Rejected(frame_shape);
+            return PresentViaGlFallback(layers, layer_count);
+          }
           surface->HoldGlFrames(true);
           const bool presented = PresentViaGlFallback(layers, layer_count);
           surface->HoldGlFrames(false);
@@ -4251,6 +4262,9 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       }
     }
   }
+
+  // Every view had a frame to place, or none needed one.
+  scene_hold_streak_ = 0;
 
   // No backing store under the platform views: the background goes under
   // them, on the primary, as the frame's bottom (UI) layer.
