@@ -4373,7 +4373,10 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
         drm::span<const drm::scene::ExternalPlaneInfo>(planes.data(), np),
         std::move(acquire));
     // A retired key only holds the last frame this present; anything else is a
-    // buffer KMS will not take.
+    // buffer KMS will not take. A caller backs the plane path off then, as for
+    // a frame the allocator turned down: the next import of that producer's
+    // buffers is refused the same way, and each attempt takes the view's
+    // frame and hands it back before the frame is composited after all.
     if (!taken &&
         taken.error() !=
             std::make_error_code(std::errc::resource_unavailable_try_again)) {
@@ -4499,6 +4502,7 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
               if (fl.pv_surface) {
                 fl.pv_surface->OnScanoutRelease(db.buffer_id);
               }
+              scene_backoff_.Rejected(frame_shape);
               return PresentViaGlFallback(layers, layer_count);
             }
             if (fl.pv_surface) {
@@ -4524,6 +4528,7 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
                   if (fl.pv_surface) {
                     fl.pv_surface->OnScanoutRelease(db.buffer_id);
                   }
+                  scene_backoff_.Rejected(frame_shape);
                   return PresentViaGlFallback(layers, layer_count);
                 }
                 if (fl.pv_surface) {
@@ -4599,6 +4604,7 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
         if (fl.pv_surface) {
           fl.pv_surface->OnScanoutRelease(db.buffer_id);
         }
+        scene_backoff_.Rejected(frame_shape);
         return PresentViaGlFallback(layers, layer_count);
       }
       auto* pool_raw = pool.value().get();
@@ -4608,6 +4614,7 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
         if (fl.pv_surface) {
           fl.pv_surface->OnScanoutRelease(db.buffer_id);
         }
+        scene_backoff_.Rejected(frame_shape);
         return PresentViaGlFallback(layers, layer_count);
       }
       drm::scene::LayerDesc desc{};
