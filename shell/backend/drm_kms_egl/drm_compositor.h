@@ -768,6 +768,14 @@ class DrmCompositor : public IFlipSink {
   // seconds at 60 Hz.
   static constexpr uint64_t kScenePlaneRetryPresents = 120;
   PlanePathBackoff scene_backoff_{kScenePlaneRetryPresents};
+  // Presents in a row composited with a view's frames held, because a view
+  // not yet in the scene had no new frame (PresentLayersViaScene). One such
+  // present lets the next take the view onto a plane. Several views whose
+  // producers submit out of step can leave one without a new frame on every
+  // present, and then every present holds: the held views show each frame
+  // twice. Past kSceneHoldLimit the plane path backs off instead.
+  static constexpr unsigned kSceneHoldLimit = 3;
+  unsigned scene_hold_streak_{0};
   // Close every fd a platform-view offer handed over, each distinct one once.
   static void CloseDmabufFds(ICompositorSurface::Dmabuf* db);
 
