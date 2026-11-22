@@ -75,15 +75,35 @@ add_library(toolchain::toolchain ALIAS toolchain)
 
 target_compile_definitions(toolchain INTERFACE "${LLVM_DEFINITIONS}")
 
-if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 14)
-    message(STATUS "stdlib ................. libc++")
-    set(STDLIB libc++)
+# libc++ from clang 14 on, unless the target cannot have it. A sysroot with no
+# libc++ headers is one: the flatpak SDK, for one, ships only GCC's libstdc++,
+# and its runtime has no libc++.so, so a libc++ build neither compiles against
+# it nor runs on it. The host LLVM's c++/v1 is this machine's, not the
+# target's, so it is no substitute.
+set(IVI_CLANG_STDLIB "auto" CACHE STRING
+        "C++ standard library for a clang build: auto, libc++ or libstdc++")
+set_property(CACHE IVI_CLANG_STDLIB PROPERTY STRINGS auto libc++ libstdc++)
+if (IVI_CLANG_STDLIB STREQUAL "auto")
+    if (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 14)
+        set(STDLIB libstdc++)
+    elseif (CMAKE_SYSROOT AND NOT EXISTS "${CMAKE_SYSROOT}/usr/include/c++/v1")
+        message(STATUS "no libc++ in ${CMAKE_SYSROOT}; using libstdc++")
+        set(STDLIB libstdc++)
+    else ()
+        set(STDLIB libc++)
+    endif ()
+elseif (IVI_CLANG_STDLIB MATCHES "^(libc\\+\\+|libstdc\\+\\+)$")
+    set(STDLIB ${IVI_CLANG_STDLIB})
 else ()
-    message(STATUS "stdlib ................. libstdc++")
-    set(STDLIB libstdc++)
+    message(FATAL_ERROR
+            "IVI_CLANG_STDLIB=${IVI_CLANG_STDLIB}: expected auto, libc++ or libstdc++")
 endif ()
+message(STATUS "stdlib ................. ${STDLIB}")
 
-target_compile_options(toolchain INTERFACE -stdlib=${STDLIB} -isystem"${LLVM_INCLUDE_DIRS}/c++/v1/")
+target_compile_options(toolchain INTERFACE -stdlib=${STDLIB})
+if (STDLIB STREQUAL "libc++")
+    target_compile_options(toolchain INTERFACE -isystem"${LLVM_INCLUDE_DIRS}/c++/v1/")
+endif ()
 
 if (ENABLE_STATIC_LINK)
     if (STDLIB STREQUAL "libc++")
