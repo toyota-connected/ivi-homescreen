@@ -1,0 +1,55 @@
+# ivi-homescreen built against the flatpak SDK -- the project layer for emb's
+# flatpak-sdk provider.
+#
+# The provider compiles with the host clang against org.freedesktop.Sdk for the
+# target architecture, so the result links the runtime's glibc and libraries,
+# not this machine's. That makes it a cross build to CMake, even for x86_64 on
+# x86_64, and cmake/wayland_cxx.cmake then resolves wayland-cxx-scanner with
+# find_program rather than building it in-tree. These targets carry what the
+# board targets carry for that: the scanner, built host-native, and its host
+# build dep.
+#
+# Not used on its own: an app's packaging repo extends one of these and names
+# the runtime (`emb init flatpak --sdk <arch>`):
+#
+#   targets:
+#     sdk-x86_64:
+#       extends: source#flatpak-sdk-x86_64
+#       provider: flatpak-sdk
+#
+# The extending target names the provider again: an app manifest's shared
+# `cross.provider` (arm-gnu in an `emb init` repo) otherwise wins over this one.
+#
+# Wayland only. DRM/KMS has no place in a flatpak sandbox, and every backend
+# built is packaged under its own app id.
+cross:
+  targets:
+    flatpak-sdk-x86_64:
+      provider: flatpak-sdk
+      triple: x86_64-flatpak-linux-gnu
+      augment: &augment_scanner
+        # As in raspberry-pi.emb.yaml: host: true builds it with the build
+        # machine's toolchain and puts it on the cross build's PATH.
+        # TOOL_ONLY ships just the exe.
+        - pkg: wayland-cxx-scanner
+          url: https://github.com/jwinarske/wayland-cxx-scanner/archive/9c86b8e7e87e2c9d5ff34939d044df4053e70970.tar.gz
+          build: cmake
+          host: true
+          defines:
+            WAYLAND_CXX_SCANNER_BUILD_TOOL: 'ON'
+            WAYLAND_CXX_SCANNER_TOOL_ONLY: 'ON'
+      # The host scanner's build dep.
+      host_dev_packages: &host_dev_pugixml
+        - libpugixml-dev
+      backends: &backends_flatpak
+        wayland-egl:
+          BUILD_BACKEND_WAYLAND_EGL: 'ON'
+          BUILD_BACKEND_WAYLAND_VULKAN: 'OFF'
+          BUILD_BACKEND_DRM_KMS_EGL: 'OFF'
+          BUILD_BACKEND_SOFTWARE: 'OFF'
+    flatpak-sdk-aarch64:
+      provider: flatpak-sdk
+      triple: aarch64-flatpak-linux-gnu
+      augment: *augment_scanner
+      host_dev_packages: *host_dev_pugixml
+      backends: *backends_flatpak
