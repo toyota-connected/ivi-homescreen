@@ -100,6 +100,7 @@ previous process has released DRM master gives a run that produces no report.
 | `PV_BENCH_ROTATE_ANIM` | *(unset)* | `1`: the app wraps its view in a `RotationTransition` instead, one turn every eight seconds |
 | `PV_BENCH_PERSPECTIVE` | `0` | the app tilts its view this many degrees about its vertical axis, in perspective (`setEntry(3, 2, 0.001)`) |
 | `PV_BENCH_FADE` | *(unset)* | `1`: the app wraps its view in a `FadeTransition` instead: up from 0.2 to 1.0 over two seconds, a second at 1.0, and back down over two |
+| `PV_BENCH_VIEWS` | `1` | platform views to show, 1 to 8. Past one, each view is two thirds of the screen, offset a twelfth of the screen right and down from the last, with a spinner of its own over it; see below |
 
 `PV_BENCH_NO_PV=1` is the control: same Flutter content, no layer. The difference
 between the two runs is what the layer costs.
@@ -159,6 +160,16 @@ inside the clip and the rounded clip, so with `PV_BENCH_CLIP` or
 by the app. At `PV_BENCH_PERSPECTIVE=30` the view should be a trapezoid,
 narrower than the output and taller on one side than the other. A view drawn
 flat is the bug in \#868. It sits inside the rotation, so the two combine.
+
+`PV_BENCH_VIEWS` is for what a screen with several views costs, which grows
+with the views in two ways: each one is a buffer of its own for the shell to
+import and draw, and the Flutter content above each one goes into a backing
+store of its own. Flutter gives content above a view an overlay of its own only
+when the content meets a later view, so the views overlap, and each spinner
+but the last sits on the left edge of the next view, half under it. Expect one
+store for the root and one per view; the `-d` pool log says how many are live.
+Every view gets the transforms, clips and opacity the other switches set. A
+producer is created per view, and each logs its own rate.
 
 The app reports build/raster/total percentiles and exits. The producer reports
 submits per second and mean release-fence wait every second -- check that first.
