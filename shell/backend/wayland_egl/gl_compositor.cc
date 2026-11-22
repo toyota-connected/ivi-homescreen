@@ -24,6 +24,7 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -93,12 +94,20 @@ constexpr char kFragPrecision[] = "precision mediump float;\n";
 // Uv() is the pixel's texture coordinates, with (s, t) held to u_st_clamp
 // (SampleClamp): past a smoothed edge the quad is drawn a pixel wider, and
 // what is drawn there is the edge's own texels, not the buffer's beyond a
-// crop. Coverage() is the share of the pixel inside the quad's smoothed
-// edges, half a pixel either side of each, times Round(). Round() is the share
-// inside a rounded rect, for a pixel the quad's crop has already put inside
-// its bounding box: only the corners are left to cut, with about a pixel of
-// edge. v_mask is 0 on the pieces of the quad no corner reaches
-// (QuadMask::parts), which skip it. A corner with a zero radius is square.
+// crop.
+//
+// Coverage() is the share of the pixel the view shows. The shares inside the
+// quad's smoothed edges, half a pixel either side of each, multiply, which is
+// right at its corners. A clip's share is taken as the least of it and
+// theirs, which is right where the clip runs along an edge of the view, as a
+// clip around the view does, and near enough where one crosses it. Round() is
+// the share inside a rounded rect in output pixels, for a pixel the quad's
+// crop has already put inside its bounding box: only the corners are left to
+// cut, with about a pixel of edge. v_mask is 0 on the pieces of the quad no
+// corner reaches (QuadMask::parts), which skip it. A corner with a zero
+// radius is square. Clips() is the share inside clips drawn as shapes
+// (ClipShapeDistance in view/layer_geometry.h, worked out the same way), up
+// to IHS_CLIPS of them, as many as the fragment stage has uniforms for.
 // Positions are in pixels, up to a few thousand, which mediump cannot place
 // to a pixel, so the masked build works in highp where the GPU has it.
 // Without the mask, Coverage() is 1.
@@ -126,10 +135,13 @@ constexpr char kMaskSrc[] =
     "                       1.0);\n"
     "  return vec2(dot(u_uv_u, st), dot(u_uv_v, st));\n"
     "}\n"
+    "MASKP vec2 Pos() {\n"
+    "  MASKP vec3 st = St();\n"
+    "  return vec2(dot(u_pos_u, st), dot(u_pos_v, st)) * v_stq.z;\n"
+    "}\n"
     "float Round() {\n"
     "  if (v_mask < 0.5) return 1.0;\n"
-    "  MASKP vec3 st = St();\n"
-    "  MASKP vec2 p = vec2(dot(u_pos_u, st), dot(u_pos_v, st)) * v_stq.z;\n"
+    "  MASKP vec2 p = Pos();\n"
     "  bool left = p.x < 0.5 * (u_rrect.x + u_rrect.z);\n"
     "  bool top = p.y < 0.5 * (u_rrect.y + u_rrect.w);\n"
     "  MASKP vec4 pair = top ? u_radii_top : u_radii_bottom;\n"
@@ -142,9 +154,77 @@ constexpr char kMaskSrc[] =
     "  MASKP float k = length(d / r);\n"
     "  return clamp(0.5 - (k - 1.0) * min(r.x, r.y), 0.0, 1.0);\n"
     "}\n"
+    "#if IHS_CLIPS > 0\n"
+    "uniform MASKP vec4 u_clip_map[3 * IHS_CLIPS];\n"  // x, y, w rows; unit
+    "uniform MASKP vec4 u_clip_rect[IHS_CLIPS];\n"     // left top right bottom
+    "uniform MASKP vec4 u_clip_radii[2 * IHS_CLIPS];\n"  // as u_radii_*
+    "uniform int u_clip_count;\n"
+    "float Clips() {\n"
+    "  float cover = 1.0;\n"
+    "  MASKP vec3 p = vec3(Pos(), 1.0);\n"
+    "  for (int k = 0; k < IHS_CLIPS; ++k) {\n"
+    "    if (k >= u_clip_count) break;\n"
+    "    MASKP vec4 mx4 = u_clip_map[3 * k];\n"
+    "    MASKP vec3 mx = mx4.xyz;\n"
+    "    MASKP vec3 my = u_clip_map[3 * k + 1].xyz;\n"
+    "    MASKP vec3 mw = u_clip_map[3 * k + 2].xyz;\n"
+    "    MASKP float w = dot(mw, p);\n"
+    "    if (w <= 0.0) return 0.0;\n"
+    "    MASKP vec2 q = vec2(dot(mx, p), dot(my, p)) / w;\n"
+    "    MASKP vec4 b = u_clip_rect[k];\n"
+    "    MASKP vec4 top2 = u_clip_radii[2 * k];\n"
+    "    MASKP vec4 bottom2 = u_clip_radii[2 * k + 1];\n"
+    // More than a pixel (mx4.w) inside the straight parts: wholly inside.
+    "    MASKP float m = mx4.w;\n"
+    "    MASKP vec2 lo = b.xy + m;\n"
+    "    MASKP vec2 hi = b.zw - m;\n"
+    "    MASKP vec2 lo_r = lo + vec2(max(top2.x, bottom2.x),\n"
+    "                                max(top2.y, top2.w));\n"
+    "    MASKP vec2 hi_r = hi - vec2(max(top2.z, bottom2.z),\n"
+    "                                max(bottom2.y, bottom2.w));\n"
+    "    if ((q.x > lo.x && q.x < hi.x && q.y > lo_r.y && q.y < hi_r.y) ||\n"
+    "        (q.y > lo.y && q.y < hi.y && q.x > lo_r.x && q.x < hi_r.x)) {\n"
+    "      continue;\n"
+    "    }\n"
+    "    MASKP vec2 jx = (vec2(mx.x, my.x) - q * mw.x) / w;\n"
+    "    MASKP vec2 jy = (vec2(mx.y, my.y) - q * mw.y) / w;\n"
+    "    bool left = q.x < 0.5 * (b.x + b.z);\n"
+    "    bool top = q.y < 0.5 * (b.y + b.w);\n"
+    "    MASKP vec4 pair = top ? top2 : bottom2;\n"
+    "    MASKP vec2 r = left ? pair.xy : pair.zw;\n"
+    "    MASKP vec2 d = q - vec2(left ? b.x + r.x : b.z - r.x,\n"
+    "                            top ? b.y + r.y : b.w - r.y);\n"
+    "    MASKP float f;\n"
+    "    MASKP vec2 n;\n"
+    "    if (r.x > 0.0 && r.y > 0.0 && (left ? d.x < 0.0 : d.x > 0.0) &&\n"
+    "        (top ? d.y < 0.0 : d.y > 0.0)) {\n"
+    "      MASKP float e = length(d / r);\n"
+    "      f = e - 1.0;\n"
+    "      n = d / (r * r * e);\n"
+    "    } else {\n"
+    "      MASKP vec2 e = abs(q - 0.5 * (b.xy + b.zw)) - 0.5 * (b.zw - b.xy);\n"
+    "      if (e.x > e.y) {\n"
+    "        f = e.x;\n"
+    "        n = vec2(left ? -1.0 : 1.0, 0.0);\n"
+    "      } else {\n"
+    "        f = e.y;\n"
+    "        n = vec2(0.0, top ? -1.0 : 1.0);\n"
+    "      }\n"
+    "    }\n"
+    "    MASKP float rate = max(length(vec2(dot(jx, n), dot(jy, n))), 1e-6);\n"
+    "    cover = min(cover, clamp(0.5 - f / rate, 0.0, 1.0));\n"
+    "    if (cover <= 0.0) break;\n"
+    "  }\n"
+    "  return cover;\n"
+    "}\n"
+    "#else\n"
+    "float Clips() { return 1.0; }\n"
+    "#endif\n"
     "float Coverage() {\n"
     "  MASKP vec4 e = clamp(v_edge + 0.5, 0.0, 1.0);\n"
-    "  return e.x * e.y * e.z * e.w * Round();\n"
+    "  float edges = e.x * e.y * e.z * e.w;\n"
+    "  if (edges <= 0.0 || v_mask < 0.5) return edges;\n"
+    "  return min(edges, min(Round(), Clips()));\n"
     "}\n"
     "#else\n"
     "varying vec2 v_uv;\n"
@@ -189,9 +269,10 @@ std::string VertSource(const bool mask) {
   return std::string("#define IHS_MASK ") + (mask ? "1" : "0") + "\n" +
          kVertSrc;
 }
-std::string FragSource(const bool external, const bool mask) {
+std::string FragSource(const bool external, const bool mask, const int clips) {
   return std::string(external ? kFragExtension : "") + "#define IHS_MASK " +
-         (mask ? "1" : "0") + "\n" + kFragPrecision + kMaskSrc +
+         (mask ? "1" : "0") + "\n#define IHS_CLIPS " + std::to_string(clips) +
+         "\n" + kFragPrecision + kMaskSrc +
          (external ? kFragBodyExternal : kFragBody);
 }
 
@@ -250,7 +331,7 @@ bool GlCompositor::EnsureQuad() {
       CompileShader(GL_VERTEX_SHADER, VertSource(/*mask=*/false).c_str());
   const GLuint fs =
       CompileShader(GL_FRAGMENT_SHADER,
-                    FragSource(/*external=*/false, /*mask=*/false).c_str());
+                    FragSource(/*external=*/false, /*mask=*/false, 0).c_str());
   if (!vs || !fs) {
     if (vs)
       glDeleteShader(vs);
@@ -317,7 +398,17 @@ bool GlCompositor::EnsureQuad() {
 }
 
 void GlCompositor::BuildSelfContainedPrograms() {
-  mask_ = BuildQuadProgram(/*external=*/false, /*mask=*/true);
+  // Clip shapes take six uniform vectors each, on top of the eleven the
+  // masked build has; as many as the fragment stage holds, up to the most a
+  // view keeps. ES2 promises only 16, which leaves none.
+  GLint vectors = 0;
+  glGetIntegerv(GL_MAX_FRAGMENT_UNIFORM_VECTORS, &vectors);
+  clip_slots_ = static_cast<size_t>(
+      std::clamp((vectors - 12) / 6, 0, static_cast<int>(ClipShapes::kMax)));
+  mask_ = BuildQuadProgram(/*external=*/false, /*mask=*/true, clip_slots_);
+  if (mask_.id != 0 && clip_slots_ > 0 && mask_.mask.clip_count < 0) {
+    clip_slots_ = 0;  // optimized away: not there to set
+  }
   // Optional: a driver without the extension keeps the packed-format path, and
   // a planar frame is then simply not composited rather than mis-sampled.
   const auto* exts = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
@@ -327,18 +418,21 @@ void GlCompositor::BuildSelfContainedPrograms() {
     // arrive, is emitted where the composite is refused.
     return;
   }
-  external_ = BuildQuadProgram(/*external=*/true, /*mask=*/false);
+  external_ = BuildQuadProgram(/*external=*/true, /*mask=*/false, 0);
   if (external_.id != 0) {
-    external_mask_ = BuildQuadProgram(/*external=*/true, /*mask=*/true);
+    external_mask_ =
+        BuildQuadProgram(/*external=*/true, /*mask=*/true, clip_slots_);
   }
 }
 
 GlCompositor::QuadProgram GlCompositor::BuildQuadProgram(const bool external,
-                                                         const bool mask) {
+                                                         const bool mask,
+                                                         const size_t clips) {
   QuadProgram p;
   const GLuint vs = CompileShader(GL_VERTEX_SHADER, VertSource(mask).c_str());
-  const GLuint fs =
-      CompileShader(GL_FRAGMENT_SHADER, FragSource(external, mask).c_str());
+  const GLuint fs = CompileShader(
+      GL_FRAGMENT_SHADER,
+      FragSource(external, mask, mask ? static_cast<int>(clips) : 0).c_str());
   if (!vs || !fs) {
     if (vs) {
       glDeleteShader(vs);
@@ -393,6 +487,10 @@ GlCompositor::MaskUniforms GlCompositor::GetMaskUniforms(const GLuint program) {
   u.radii_top = glGetUniformLocation(program, "u_radii_top");
   u.radii_bottom = glGetUniformLocation(program, "u_radii_bottom");
   u.st_clamp = glGetUniformLocation(program, "u_st_clamp");
+  u.clip_map = glGetUniformLocation(program, "u_clip_map");
+  u.clip_rect = glGetUniformLocation(program, "u_clip_rect");
+  u.clip_radii = glGetUniformLocation(program, "u_clip_radii");
+  u.clip_count = glGetUniformLocation(program, "u_clip_count");
   return u;
 }
 
@@ -418,6 +516,41 @@ void GlCompositor::SetMaskUniforms(const MaskUniforms& u, const QuadMask& m) {
   if (u.st_clamp >= 0) {
     glUniform4f(u.st_clamp, m.st_clamp[0], m.st_clamp[1], m.st_clamp[2],
                 m.st_clamp[3]);
+  }
+  if (u.clip_count >= 0) {
+    const auto n = static_cast<GLsizei>(m.shapes.count);
+    glUniform1i(u.clip_count, n);
+    if (n > 0) {
+      std::array<GLfloat, 12 * ClipShapes::kMax> map{};
+      std::array<GLfloat, 4 * ClipShapes::kMax> rect{};
+      std::array<GLfloat, 8 * ClipShapes::kMax> radii{};
+      for (size_t k = 0; k < m.shapes.count; ++k) {
+        const ClipShape& c = m.shapes.items[k];
+        const ViewMap& t = c.to_shape;
+        // A pixel's span in the shape's space, padded, rides in the first
+        // row's w; past the float range it turns the quick test off.
+        const double unit = std::min(1.5 * ClipShapeUnit(c), 1e30);
+        const std::array<double, 12> rows = {t.a,  t.c, t.tx, unit, t.b, t.d,
+                                             t.ty, 0,   t.g,  t.h,  t.i, 0};
+        for (size_t i = 0; i < rows.size(); ++i) {
+          map[12 * k + i] = static_cast<GLfloat>(rows[i]);
+        }
+        const RectF& b = c.shape.rect;
+        rect[4 * k] = static_cast<GLfloat>(b.x);
+        rect[4 * k + 1] = static_cast<GLfloat>(b.y);
+        rect[4 * k + 2] = static_cast<GLfloat>(b.x + b.w);
+        rect[4 * k + 3] = static_cast<GLfloat>(b.y + b.h);
+        const auto& r = c.shape.radii;
+        const std::array<float, 8> rr = {r[0][0], r[0][1], r[1][0], r[1][1],
+                                         r[3][0], r[3][1], r[2][0], r[2][1]};
+        for (size_t i = 0; i < rr.size(); ++i) {
+          radii[8 * k + i] = rr[i];
+        }
+      }
+      glUniform4fv(u.clip_map, 3 * n, map.data());
+      glUniform4fv(u.clip_rect, n, rect.data());
+      glUniform4fv(u.clip_radii, 2 * n, radii.data());
+    }
   }
 }
 
@@ -586,8 +719,8 @@ void GlCompositor::CompositeViaQuadProgram(const QuadProgram& p,
   // and edge its distance to each smoothed edge. A whole quad is the shared
   // strip, and a masked program reads m and w as 1 over all of it, and its
   // edges as hard.
-  const bool given = mask != nullptr && mask->vert_count > 0;
-  const bool parts = given || (mask != nullptr && mask->part_count > 0);
+  const bool given = mask != nullptr && !mask->verts.empty();
+  const bool parts = given || (mask != nullptr && !mask->parts.empty());
   GLsizei count = 4;
   GLenum mode = GL_TRIANGLE_STRIP;
   GLsizei stride = 4 * sizeof(GLfloat);
@@ -596,9 +729,11 @@ void GlCompositor::CompositeViaQuadProgram(const QuadProgram& p,
       glGenBuffers(1, &parts_vbo_);
     }
     constexpr size_t kPerVertex = 10;
-    std::array<GLfloat, 7 * 6 * kPerVertex> verts{};
+    std::vector<GLfloat>& verts = scratch_verts_;
+    verts.resize(kPerVertex *
+                 (given ? mask->verts.size() : 6 * mask->parts.size()));
     size_t n = 0;
-    for (size_t i = 0; given && i < mask->vert_count; ++i) {
+    for (size_t i = 0; given && i < mask->verts.size(); ++i) {
       const QuadMask::Vertex& v = mask->verts[i];
       verts[n++] = v.x;
       verts[n++] = v.y;
@@ -610,7 +745,7 @@ void GlCompositor::CompositeViaQuadProgram(const QuadProgram& p,
         verts[n++] = e;
       }
     }
-    for (size_t i = 0; !given && i < mask->part_count; ++i) {
+    for (size_t i = 0; !given && i < mask->parts.size(); ++i) {
       const QuadMask::Part& q = mask->parts[i];
       const GLfloat m = q.corner ? 1.0f : 0.0f;
       // (s, t) runs over the viewport with t down; a_uv's v and NDC y run up.
@@ -936,7 +1071,8 @@ bool GlCompositor::CompositeLayerThrough(
     const RectI* clip,
     const float alpha,
     const RoundedRect* rounded,
-    const ViewMap& map) {
+    const ViewMap& map,
+    const ClipShapes* shapes) {
   const auto& g = t.geometry;
   QuadPlacement q;
   if (!PlaceLayerThrough(
@@ -951,9 +1087,13 @@ bool GlCompositor::CompositeLayerThrough(
   // own (s, t), which no turn of the display changes: only where the quad's
   // corners land does. The viewport is the quad's bounds, so the quad is
   // clipped to them, and to the clip with them.
-  QuadMask mask;
+  QuadMask& mask = scratch_mask_;
+  mask.Reset();
   if (rounded != nullptr) {
     mask.rect = *rounded;
+  }
+  if (shapes != nullptr) {
+    mask.shapes = *shapes;
   }
   // The point times w, over w at the corner at (0, 0): the shader scales it
   // by that corner's w over the pixel's, which leaves the point.
@@ -967,13 +1107,9 @@ bool GlCompositor::CompositeLayerThrough(
   if (rotation != nullptr) {
     vp = rotation->ToPanel(vp);
   }
-  const float m = rounded != nullptr ? 1.0f : 0.0f;
-  // The quad as drawn, grown past its smoothed edges, as two triangles.
-  const auto corners = q.GrownCorners();
-  size_t n = 0;
-  for (const size_t k : {0U, 1U, 2U, 2U, 1U, 3U}) {
-    const double s = corners[k][0];
-    const double tt = corners[k][1];
+  const float m = rounded != nullptr || shapes != nullptr ? 1.0f : 0.0f;
+  // One vertex at (s, tt) of the quad, with the mask worked out there or not.
+  const auto emit = [&](const double s, const double tt, const float vm) {
     const auto p = q.At(s, tt);
     double px = p[0];
     double py = p[1];
@@ -982,14 +1118,14 @@ bool GlCompositor::CompositeLayerThrough(
     }
     // Panel pixels, top-left origin, into the viewport's NDC. On a target
     // whose GL y = 0 is its top row, NDC y runs down the panel; otherwise up.
-    QuadMask::Vertex& v = mask.verts[n++];
+    QuadMask::Vertex& v = mask.verts.emplace_back();
     v.x = static_cast<float>(2.0 * (px - vp.x) / vp.w - 1.0);
     v.y = static_cast<float>(target_top_first
                                  ? 2.0 * (py - vp.y) / vp.h - 1.0
                                  : 2.0 * (vp.y + vp.h - py) / vp.h - 1.0);
     v.s = static_cast<float>(s);
     v.t = static_cast<float>(tt);
-    v.m = m;
+    v.m = vm;
     // Relative to the corner at (0, 0), as the mask's position is.
     v.w = static_cast<float>(q.W(s, tt) / q.w0);
     // In output pixels, which a turn of the display does not change.
@@ -997,8 +1133,60 @@ bool GlCompositor::CompositeLayerThrough(
     for (size_t i = 0; i < e.size(); ++i) {
       v.edge[i] = q.grow[i] > 0 ? static_cast<float>(e[i]) : kNoEdge;
     }
+  };
+  // The quad as drawn, grown past its smoothed edges.
+  const auto corners = q.GrownCorners();
+  // Clips drawn as shapes cost every pixel they are worked out at, so the
+  // quad's bounds are cut into pieces (ClipPieces): those inside every clip
+  // and the quad are drawn without them, those near an edge with, cut to the
+  // quad as drawn, and those clearly outside not at all. Still one draw,
+  // since each draw of an imported buffer can cost a copy of it (see the
+  // pieces below).
+  std::optional<ViewMap> to_st;
+  if (shapes != nullptr) {
+    // The quad's map, (s, t, 1) to the output point times w, undone.
+    ViewMap quad_map;
+    quad_map.a = q.edge_s[0];
+    quad_map.c = q.edge_t[0];
+    quad_map.tx = q.origin[0];
+    quad_map.b = q.edge_s[1];
+    quad_map.d = q.edge_t[1];
+    quad_map.ty = q.origin[1];
+    quad_map.g = q.ws;
+    quad_map.h = q.wt;
+    quad_map.i = q.w0;
+    to_st = InverseMap(quad_map);
   }
-  mask.vert_count = n;
+  if (to_st) {
+    const std::vector<ClipPiece>& pieces =
+        piece_cache_.Get(*shapes, &q, q.bounds);
+    const std::array<std::array<double, 2>, 4> grown = {
+        q.At(corners[0][0], corners[0][1]), q.At(corners[1][0], corners[1][1]),
+        q.At(corners[3][0], corners[3][1]), q.At(corners[2][0], corners[2][1])};
+    for (const ClipPiece& piece : pieces) {
+      const RectI& r = piece.rect;
+      ConvexPolygon poly = {
+          {static_cast<double>(r.x), static_cast<double>(r.y)},
+          {static_cast<double>(r.x + r.w), static_cast<double>(r.y)},
+          {static_cast<double>(r.x + r.w), static_cast<double>(r.y + r.h)},
+          {static_cast<double>(r.x), static_cast<double>(r.y + r.h)}};
+      if (piece.mask) {
+        poly = CutPolygonToQuad(poly, grown, 0.0);
+      }
+      const float vm = piece.mask ? 1.0f : 0.0f;
+      for (size_t i = 1; i + 1 < poly.size(); ++i) {
+        for (const auto& p : {poly[0], poly[i], poly[i + 1]}) {
+          const auto st = to_st->Map(p[0], p[1]);
+          emit(st[0], st[1], vm);
+        }
+      }
+    }
+  }
+  if (mask.verts.empty()) {
+    for (const size_t k : {0U, 1U, 2U, 2U, 1U, 3U}) {
+      emit(corners[k][0], corners[k][1], m);
+    }
+  }
   const auto held = SampleClamp(q, static_cast<uint32_t>(t.width),
                                 static_cast<uint32_t>(t.height));
   for (size_t i = 0; i < held.size(); ++i) {
@@ -1008,8 +1196,9 @@ bool GlCompositor::CompositeLayerThrough(
   // Outside the quad nothing is drawn, so inside it the rule is a rect's: an
   // opaque layer overwrites what is under it unless the view is translucent,
   // its corners are cut or its edges smoothed.
-  const bool blend = under && (!q.opaque || alpha < 1.0f ||
-                               rounded != nullptr || q.Smoothed());
+  const bool blend =
+      under && (!q.opaque || alpha < 1.0f || rounded != nullptr ||
+                shapes != nullptr || q.Smoothed());
   CompositeLayerToFbo(dst_fbo, t.name, t.external, q.uv, vp.x, gl_y, vp.w, vp.h,
                       blend, q.opaque, alpha, &mask);
   return true;
@@ -1029,7 +1218,31 @@ size_t GlCompositor::CompositeSurfaceLayers(
     const RectI* clip,
     float alpha,
     const RoundedRect* rounded,
-    const ViewMap* map) {
+    const ViewMap* map,
+    const ClipShapes* shapes) {
+  // Clips drawn as shapes take the place of the rounded clip. More than the
+  // programs take leaves the rounded clip as it was, with some corners
+  // square.
+  if (shapes != nullptr && shapes->count == 0) {
+    shapes = nullptr;
+  }
+  // The programs are built on first use, which sets how many they take.
+  if (shapes != nullptr &&
+      (!EnsureQuad() || mask_.id == 0 || shapes->count > clip_slots_)) {
+    static bool warned = false;
+    if (!warned) {
+      warned = true;
+      ihs::log::warn(
+          "GlCompositor: a platform view has {} clips that are not rects on "
+          "screen, more than the {} this context's programs take; they are "
+          "drawn as their bounding boxes",
+          shapes->count, clip_slots_);
+    }
+    shapes = nullptr;
+  }
+  if (shapes != nullptr) {
+    rounded = nullptr;
+  }
   // A transformed view is drawn through the self-contained programs. Without
   // them it falls back to the rect, as it was drawn before.
   if (map != nullptr && (!EnsureQuad() || mask_.id == 0)) {
@@ -1053,7 +1266,7 @@ size_t GlCompositor::CompositeSurfaceLayers(
     if (map != nullptr && (!t.external || external_mask_.id != 0)) {
       if (CompositeLayerThrough(dst_fbo, t, view, fb_height, target_top_first,
                                 blend_first || drawn > 0, rotation, clip, alpha,
-                                rounded, *map)) {
+                                rounded, *map, shapes)) {
         ++drawn;
         if (on_drawn) {
           on_drawn(t);
@@ -1084,12 +1297,24 @@ size_t GlCompositor::CompositeSurfaceLayers(
     // buffer, since it cannot know whether the producer wrote it. As separate
     // draws, a 1280x1440 view on a Pi 5 took seven copies a frame and fell to
     // 30 frames a second.
-    QuadMask mask;
-    std::array<RoundedPiece, 7> pieces;
-    size_t piece_count = 0;
+    QuadMask& mask = scratch_mask_;
+    mask.Reset();
+    std::vector<ClipPiece>& pieces = scratch_pieces_;
+    pieces.clear();
     if (rounded != nullptr) {
-      piece_count = SplitRoundedCorners(p.dst, *rounded, pieces);
+      std::array<RoundedPiece, 7> corners;
+      const size_t count = SplitRoundedCorners(p.dst, *rounded, corners);
+      for (size_t k = 0; k < count; ++k) {
+        pieces.push_back({corners[k].rect, corners[k].corner});
+      }
       mask.rect = *rounded;
+    }
+    // Clips drawn as shapes are worked out only near their edges.
+    if (shapes != nullptr) {
+      mask.shapes = *shapes;
+      pieces = piece_cache_.Get(*shapes, nullptr, p.dst);
+    }
+    if (rounded != nullptr || shapes != nullptr) {
       mask.pos.a = static_cast<float>(p.dst.w);
       mask.pos.b = 0.0f;
       mask.pos.c = 0.0f;
@@ -1118,40 +1343,41 @@ size_t GlCompositor::CompositeSurfaceLayers(
     // Each piece into the quad's (s, t) as drawn: the mask's position affine
     // takes (s, t) to render pixels, so its inverse brings a piece back. Turns
     // and row flips keep a rect a rect.
-    if (rounded != nullptr) {
+    if (rounded != nullptr || shapes != nullptr) {
       const UvAffine& m = mask.pos;
       const double det =
           static_cast<double>(m.a) * m.d - static_cast<double>(m.b) * m.c;
-      if (std::abs(det) > 1e-12 && piece_count > 0) {
+      if (std::abs(det) > 1e-12 && !pieces.empty()) {
         const auto st = [&](const double x, const double y) {
           const double dx = x - m.tx;
           const double dy = y - m.ty;
           return std::array<double, 2>{(m.d * dx - m.c * dy) / det,
                                        (m.a * dy - m.b * dx) / det};
         };
-        for (size_t k = 0; k < piece_count; ++k) {
-          const RectI& r = pieces[k].rect;
+        for (const ClipPiece& piece : pieces) {
+          const RectI& r = piece.rect;
           const auto a = st(r.x, r.y);
           const auto b = st(r.x + r.w, r.y + r.h);
-          QuadMask::Part& q = mask.parts[k];
+          QuadMask::Part& q = mask.parts.emplace_back();
           q.s0 = static_cast<float>(std::clamp(std::min(a[0], b[0]), 0.0, 1.0));
           q.s1 = static_cast<float>(std::clamp(std::max(a[0], b[0]), 0.0, 1.0));
           q.t0 = static_cast<float>(std::clamp(std::min(a[1], b[1]), 0.0, 1.0));
           q.t1 = static_cast<float>(std::clamp(std::max(a[1], b[1]), 0.0, 1.0));
-          q.corner = pieces[k].corner;
+          q.corner = piece.mask;
         }
-        mask.part_count = piece_count;
       }
     }
     // A layer that covers its rect overwrites what is under it, unless the
     // view is translucent or its corners are cut: then it blends like any
     // other. The first layer with nothing under it still overwrites; its
     // premultiplied output is what blending onto a cleared target would give.
-    const bool blend = (blend_first || drawn > 0) &&
-                       (!p.opaque || alpha < 1.0f || rounded != nullptr);
-    CompositeLayerToFbo(dst_fbo, t.name, t.external, p.uv, p.dst.x, gl_y,
-                        p.dst.w, p.dst.h, blend, p.opaque, alpha,
-                        rounded != nullptr ? &mask : nullptr);
+    const bool blend =
+        (blend_first || drawn > 0) &&
+        (!p.opaque || alpha < 1.0f || rounded != nullptr || shapes != nullptr);
+    CompositeLayerToFbo(
+        dst_fbo, t.name, t.external, p.uv, p.dst.x, gl_y, p.dst.w, p.dst.h,
+        blend, p.opaque, alpha,
+        rounded != nullptr || shapes != nullptr ? &mask : nullptr);
     ++drawn;
     if (on_drawn) {
       on_drawn(t);

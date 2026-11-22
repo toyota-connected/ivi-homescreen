@@ -488,6 +488,7 @@ bool DrmCompositor::IsWholeImage(
   return t && t->name != 0 && t->geometry.IsWhole() && !t->geometry.opaque &&
          !ihs::platform_view::ClipRectOf(layer) &&
          !ihs::platform_view::RoundedClipOf(layer) &&
+         !ihs::platform_view::ClipShapesOf(layer) &&
          ihs::platform_view::OpacityOf(layer) >= 1.0f &&
          !ihs::platform_view::IsTransformed(layer);
 }
@@ -518,6 +519,9 @@ bool DrmCompositor::CompositeLayeredSurface(
   const std::optional<RoundedRect> rounded =
       transformed ? transformed->rounded
                   : ihs::platform_view::RoundedClipOf(*layer);
+  // Clips that are not rects on screen, drawn as shapes.
+  const std::optional<ClipShapes> shapes =
+      ihs::platform_view::ClipShapesOf(*layer);
   return gl_compositor_->CompositeSurfaceLayers(
              target_fbo, *surface, view, fb_height, target_top_first, blend,
              [this, &surface](const ICompositorSurface::GlLayerTexture& t) {
@@ -526,7 +530,8 @@ bool DrmCompositor::CompositeLayeredSurface(
              layer0, rotation, clip ? &*clip : nullptr,
              ihs::platform_view::OpacityOf(*layer),
              rounded ? &*rounded : nullptr,
-             transformed ? &transformed->map : nullptr) > 0;
+             transformed ? &transformed->map : nullptr,
+             shapes ? &*shapes : nullptr) > 0;
 }
 
 std::optional<DisplayRotation> DrmCompositor::GpuRotation() const {
@@ -3976,8 +3981,9 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   // Checked before any view's frame is taken.
   //
   // A plane has no rounded corners at all, so a view whose rounded clip cuts
-  // into it is composited too, as is one under a rotation, skew, mirror or
-  // perspective, which a plane cannot turn to.
+  // into it is composited too, as is one with a clip that is not a rect on
+  // screen, or under a rotation, skew, mirror or perspective, which a plane
+  // cannot turn to.
   const bool all_alpha = plane_formats_.AllHaveAlpha();
   for (size_t i = 0; i < layer_count; ++i) {
     if (layers[i] == nullptr) {
@@ -3985,6 +3991,7 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
     }
     if ((!all_alpha && ihs::platform_view::OpacityOf(*layers[i]) < 1.0f) ||
         ihs::platform_view::RoundedClipOf(*layers[i]) ||
+        ihs::platform_view::ClipShapesOf(*layers[i]) ||
         ihs::platform_view::IsTransformed(*layers[i])) {
       return PresentViaGlFallback(layers, layer_count);
     }

@@ -1215,14 +1215,16 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
     } else if (layer->type == kFlutterLayerContentTypePlatformView &&
                layer->platform_view) {
       const auto composed = MutationStack::Compose(layer->platform_view);
-      // Opacity, clips, every transform and one rounded clip are drawn
-      // below; these are not.
-      if (!composed.rounded_clip_exact) {
+      // Opacity, every transform and every clip are drawn below, up to
+      // ClipShapes::kMax clips that are not rects on screen; past that,
+      // some are drawn as their bounding boxes.
+      if (!(composed.clip_exact && composed.rounded_clip_exact) &&
+          !ihs::platform_view::ClipShapesIn(composed)) {
         ihs::log::debug(
-            "EGL compositor: platform view {} has mutations the compositor "
-            "does not draw (rounded_exact={}); plugin OnPresent must apply "
-            "them.",
-            layer->platform_view->identifier, composed.rounded_clip_exact);
+            "EGL compositor: platform view {} has more clips that are not "
+            "rects on screen than the compositor draws; some are drawn as "
+            "their bounding boxes",
+            layer->platform_view->identifier);
       }
       // Snapshot the shared_ptr under the lock, drop the lock before the
       // OnPresent callback. Holding the mutex across plugin GL work would
@@ -1260,10 +1262,13 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
         const std::optional<RoundedRect> rounded =
             transformed ? transformed->rounded
                         : ihs::platform_view::RoundedClipOf(*layer);
+        // Clips that are not rects on screen, drawn as shapes.
+        const std::optional<ClipShapes> shapes =
+            ihs::platform_view::ClipShapesOf(*layer);
         const float alpha = ihs::platform_view::OpacityOf(*layer);
         if (first.name != 0 && first.geometry.IsWhole() &&
-            !first.geometry.opaque && !clip && !rounded && alpha >= 1.0f &&
-            !transformed) {
+            !first.geometry.opaque && !clip && !rounded && !shapes &&
+            alpha >= 1.0f && !transformed) {
           NoteSampled(surface_sp, first);
           EnsureGlCapsProbed();
           const auto tex = first.name;
@@ -1321,7 +1326,8 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
                   },
                   one_layer ? &first : nullptr, /*rotation=*/nullptr,
                   clip ? &*clip : nullptr, alpha, rounded ? &*rounded : nullptr,
-                  transformed ? &transformed->map : nullptr) > 0) {
+                  transformed ? &transformed->map : nullptr,
+                  shapes ? &*shapes : nullptr) > 0) {
             composited_any = true;
           }
         }

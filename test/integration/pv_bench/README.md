@@ -96,6 +96,7 @@ previous process has released DRM master gives a run that produces no report.
 | `PV_BENCH_CLIP` | *(unset)* | `1`: the app wraps its view in a `ClipRect` that keeps the middle of the screen, half its width and height |
 | `PV_BENCH_OPACITY` | `1` | the app wraps its view in `Opacity` at this value |
 | `PV_BENCH_RADIUS` | `0` | the app wraps its view in a `ClipRRect` with corners of this radius, in logical pixels |
+| `PV_BENCH_INNER_RADIUS` | `0` | the same, inside every transform, so the clip turns, tilts and scales with the view |
 | `PV_BENCH_ROTATE` | `0` | the app wraps its view in `Transform.rotate` by this many degrees about its center |
 | `PV_BENCH_ROTATE_ANIM` | *(unset)* | `1`: the app wraps its view in a `RotationTransition` instead, one turn every eight seconds |
 | `PV_BENCH_PERSPECTIVE` | `0` | the app tilts its view this many degrees about its vertical axis, in perspective (`setEntry(3, 2, 0.001)`) |
@@ -160,6 +161,14 @@ inside the clip and the rounded clip, so with `PV_BENCH_CLIP` or
 by the app. At `PV_BENCH_PERSPECTIVE=30` the view should be a trapezoid,
 narrower than the output and taller on one side than the other. A view drawn
 flat is the bug in \#868. It sits inside the rotation, so the two combine.
+
+`PV_BENCH_INNER_RADIUS` is a rounded clip inside every transform, also read by
+the app: it turns, tilts and scales with the view. With `PV_BENCH_ROTATE=30`
+and `PV_BENCH_SCALE=0.6`, so the corners are on the output, the view should be
+a turned rounded rect, each corner cut along an arc. Square corners there, or
+an upright rounded rect around the turned view, are the bug in \#885. With
+`PV_BENCH_RADIUS` as well the view has two rounded clips, and both should cut
+it.
 
 `PV_BENCH_VIEWS` is for what a screen with several views costs, which grows
 with the views in two ways: each one is a buffer of its own for the shell to

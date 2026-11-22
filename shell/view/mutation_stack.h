@@ -17,6 +17,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -43,6 +44,25 @@
  * engine gives each clip in the space it was pushed in, under the transforms
  * outside it, so each is mapped through those before it is intersected.
  */
+/**
+ * @brief A clip as it was pushed: its shape in its own space, a rect when every
+ * radius is zero, and the transform outside it, which takes that space to the
+ * composed one. Kept for a clip that is not a rect, or not a rect on screen,
+ * so a compositor that can work out coverage per pixel can draw it exactly.
+ */
+struct ClipShapeRecord {
+  FlutterRoundedRect shape{};
+  double a{1.0};
+  double b{0.0};
+  double c{0.0};
+  double d{1.0};
+  double tx{0.0};
+  double ty{0.0};
+  double g{0.0};
+  double h{0.0};
+  double i{1.0};
+};
+
 struct ComposedMutation {
   // Composed transform: the whole 3x3 matrix. @c has_perspective says
   // whether any mutation had a perspective row.
@@ -80,10 +100,19 @@ struct ComposedMutation {
   //
   // Two rounded clips do not intersect into one, and one under a rotation,
   // skew or perspective is not a rounded rect on screen, so in either case
-  // @c rounded_clip_exact is cleared: some corners are drawn square.
+  // @c rounded_clip_exact is cleared: this one alone would draw some corners
+  // square. @c shapes then holds them all.
   FlutterRoundedRect rounded_clip{};
   bool has_rounded_mask{false};
   bool rounded_clip_exact{true};
+
+  // Every rounded clip, and every clip that is not a rect on screen, as it
+  // was pushed (ClipShapeRecord), outermost first, up to kMaxClipShapes.
+  // @c shapes_overflow says more were pushed than are kept here.
+  static constexpr size_t kMaxClipShapes = 4;
+  std::array<ClipShapeRecord, kMaxClipShapes> shapes{};
+  size_t shape_count{0};
+  bool shapes_overflow{false};
 
   /// True when the composed transform is a pure translation + positive
   /// axis-aligned scale. Wayland subsurface + viewport can model this
@@ -170,6 +199,29 @@ class MutationStack {
   }
 
   /**
+   * @brief Keep @p shape, given in the space under @p r's transform so far,
+   * with that transform (ComposedMutation::shapes).
+   */
+  static void RecordShape(ComposedMutation& r,
+                          const FlutterRoundedRect& shape) {
+    if (r.shape_count == ComposedMutation::kMaxClipShapes) {
+      r.shapes_overflow = true;
+      return;
+    }
+    ClipShapeRecord& s = r.shapes[r.shape_count++];
+    s.shape = shape;
+    s.a = r.a;
+    s.b = r.b;
+    s.c = r.c;
+    s.d = r.d;
+    s.tx = r.tx;
+    s.ty = r.ty;
+    s.g = r.g;
+    s.h = r.h;
+    s.i = r.i;
+  }
+
+  /**
    * @brief Intersect @p clip, given in the space under @p r's transform so
    * far, into @p r's clip_rect.
    */
@@ -185,6 +237,19 @@ class MutationStack {
     if (!keeps_rect || r.has_perspective) {
       r.clip_exact = false;
     }
+  }
+
+  /// A clip rect is kept as a shape only where its bounding box is not it.
+  static void ClipRect(ComposedMutation& r, const FlutterRect& clip) {
+    const bool was_exact = r.clip_exact;
+    r.clip_exact = true;
+    IntersectClip(r, clip);
+    if (!r.clip_exact) {
+      FlutterRoundedRect shape{};
+      shape.rect = clip;
+      RecordShape(r, shape);
+    }
+    r.clip_exact = r.clip_exact && was_exact;
   }
 
   /**
@@ -208,11 +273,12 @@ class MutationStack {
           r.opacity *= m->opacity;
           break;
         case kFlutterPlatformViewMutationTypeClipRect:
-          IntersectClip(r, m->clip_rect);
+          ClipRect(r, m->clip_rect);
           break;
         case kFlutterPlatformViewMutationTypeClipRoundedRect: {
           const FlutterRoundedRect& rr = m->clip_rounded_rect;
           IntersectClip(r, rr.rect);
+          RecordShape(r, rr);
           if (r.has_rounded_clip) {
             r.rounded_clip_exact = false;  // a second one: see rounded_clip
           }

@@ -2113,7 +2113,8 @@ void WaylandVulkanBackend::CreateSurface(size_t /* index */,
       {
         std::string comp_err;
         layer_compositor_ = wl_vulkan::LayerCompositor::Create(
-            device_, VK_FORMAT_B8G8R8A8_UNORM, comp_err);
+            device_, VK_FORMAT_B8G8R8A8_UNORM, comp_err,
+            wl_vulkan::LayerCompositor::ContentMode::kClear, physical_device_);
         if (!layer_compositor_) {
           ihs::log::warn(
               "[WaylandVulkanBackend] layer compositor unavailable ({}); "
@@ -2639,7 +2640,8 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
   if (has_platform_view && !layer_compositor_ && !layer_compositor_failed_) {
     std::string comp_err;
     layer_compositor_ = wl_vulkan::LayerCompositor::Create(
-        device_, surface_format_.format, comp_err);
+        device_, surface_format_.format, comp_err,
+        wl_vulkan::LayerCompositor::ContentMode::kClear, physical_device_);
     if (!layer_compositor_) {
       layer_compositor_failed_ = true;
       ihs::log::warn(
@@ -3031,13 +3033,16 @@ void WaylandVulkanBackend::WarnMissingPlatformView(
 
 bool WaylandVulkanBackend::PresentPlatformView(const FlutterLayer* layer) {
   const auto composed = MutationStack::Compose(layer->platform_view);
-  // Opacity, clips, every transform and one rounded clip are drawn by the
-  // compositor; these are not.
-  if (!composed.rounded_clip_exact) {
+  // Opacity, every transform and every clip are drawn by the compositor, up
+  // to ClipShapes::kMax clips that are not rects on screen; past that, some
+  // are drawn as their bounding boxes.
+  if (!(composed.clip_exact && composed.rounded_clip_exact) &&
+      !ihs::platform_view::ClipShapesIn(composed)) {
     ihs::log::debug(
-        "Vulkan compositor: platform view {} has mutations the compositor "
-        "does not draw (rounded_exact={}); plugin OnPresent must apply them.",
-        layer->platform_view->identifier, composed.rounded_clip_exact);
+        "Vulkan compositor: platform view {} has more clips that are not "
+        "rects on screen than the compositor draws; some are drawn as their "
+        "bounding boxes",
+        layer->platform_view->identifier);
   }
   std::shared_ptr<ICompositorSurface> surface;
   {
@@ -3199,6 +3204,8 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
     std::optional<RoundedRect> rounded{};
     // A layer of a transformed view is drawn as this quad, not the rect.
     std::optional<wl_vulkan::LayerCompositor::Quad> quad{};
+    // The view's clips that are not rects on screen, drawn as shapes.
+    std::optional<ClipShapes> shapes{};
   };
   std::vector<Draw> draws;
   draws.reserve(count);
@@ -3287,6 +3294,8 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
       const std::optional<RoundedRect> rounded =
           transformed ? transformed->rounded
                       : ihs::platform_view::RoundedClipOf(*layer);
+      const std::optional<ClipShapes> shapes =
+          ihs::platform_view::ClipShapesOf(*layer);
       const float alpha = ihs::platform_view::OpacityOf(*layer);
       for (size_t li = 0, n = surface->GetLayerCount(); li < n; ++li) {
         const auto img = surface->GetLayerVulkanImage(li);
@@ -3374,7 +3383,7 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
              place.dst.h, nullptr,
              static_cast<VkSamplerYcbcrModelConversion>(img.ycbcr_model),
              static_cast<VkSamplerYcbcrRange>(img.ycbcr_range), place.uv,
-             place.opaque, alpha, rounded, quad});
+             place.opaque, alpha, rounded, quad, shapes});
       }
       if (const int64_t us = ivi::pv_latency::FirstCompositeLatencyUs(
               layer->platform_view->identifier);
@@ -3396,7 +3405,8 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
       layer_compositor_->DrawLayer(
           cmd, dr.src, dr.format, dr.ycbcr_model, dr.ycbcr_range, dr.dx, dr.dy,
           dr.dw, dr.dh, dr.uv, dr.opaque, dr.alpha,
-          dr.rounded ? &*dr.rounded : nullptr, dr.quad ? &*dr.quad : nullptr);
+          dr.rounded ? &*dr.rounded : nullptr, dr.quad ? &*dr.quad : nullptr,
+          dr.shapes ? &*dr.shapes : nullptr);
     }
     wl_vulkan::LayerCompositor::EndFrame(cmd);
   } else {

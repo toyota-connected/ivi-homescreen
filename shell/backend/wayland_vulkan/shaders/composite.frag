@@ -21,6 +21,15 @@
 // through a Y'CbCr conversion, which may only be sampled: there the texture's
 // size cannot be asked, and (s, t) is held at the edge itself.
 //
+// Built with IHS_CLIPS defined (with and without IHS_YCBCR), for a view whose
+// clips are drawn as shapes (ClipShapes in view/layer_geometry.h): up to four
+// rounded rects, each in its own space, with the map from framebuffer pixels
+// to that space, in a uniform buffer at set 1. Their share of the pixel is
+// worked out as ClipShapeDistance does. The shares of the quad's edges
+// multiply, which is right at its corners; a clip's is taken as the least of
+// it and theirs, which is right where the clip runs along an edge of the view,
+// as a clip around the view does, and near enough where one crosses it.
+//
 // The rounded clip is in framebuffer pixels, which is where the quad is drawn,
 // so gl_FragCoord is the pixel's position in it. The quad's crop has already
 // put the pixel inside its bounding box: only the corners are left to cut,
@@ -41,6 +50,81 @@ layout(push_constant) uniform PC {
 layout(location = 0) in vec2 v_uv;
 layout(location = 1) in vec2 v_st;
 layout(location = 0) out vec4 o_color;
+
+#ifdef IHS_CLIPS
+layout(set = 1, binding = 0) uniform Clips {
+  ivec4 count;    // x: how many
+  vec4 map[12];   // per clip: its x, y and w rows (xyz); first w a pixel's span
+  vec4 rect[4];   // left, top, right, bottom
+  vec4 radii[8];  // per clip: as radii_top, then radii_bottom
+} u_clips;
+
+float Shapes(vec2 px) {
+  float cover = 1.0;
+  vec3 p = vec3(px, 1.0);
+  for (int k = 0; k < 4; ++k) {
+    if (k >= u_clips.count.x) {
+      break;
+    }
+    vec3 mx = u_clips.map[3 * k].xyz;
+    vec3 my = u_clips.map[3 * k + 1].xyz;
+    vec3 mw = u_clips.map[3 * k + 2].xyz;
+    float w = dot(mw, p);
+    if (w <= 0.0) {
+      return 0.0;
+    }
+    vec2 q = vec2(dot(mx, p), dot(my, p)) / w;
+    vec4 b = u_clips.rect[k];
+    vec4 top2 = u_clips.radii[2 * k];
+    vec4 bottom2 = u_clips.radii[2 * k + 1];
+    // More than a pixel inside the straight parts: wholly inside.
+    float m = u_clips.map[3 * k].w;
+    vec2 lo = b.xy + m;
+    vec2 hi = b.zw - m;
+    vec2 lo_r = lo + vec2(max(top2.x, bottom2.x), max(top2.y, top2.w));
+    vec2 hi_r = hi - vec2(max(top2.z, bottom2.z), max(bottom2.y, bottom2.w));
+    if ((q.x > lo.x && q.x < hi.x && q.y > lo_r.y && q.y < hi_r.y) ||
+        (q.y > lo.y && q.y < hi.y && q.x > lo_r.x && q.x < hi_r.x)) {
+      continue;
+    }
+    vec2 jx = (vec2(mx.x, my.x) - q * mw.x) / w;
+    vec2 jy = (vec2(mx.y, my.y) - q * mw.y) / w;
+    bool left = q.x < 0.5 * (b.x + b.z);
+    bool top = q.y < 0.5 * (b.y + b.w);
+    vec4 pair = top ? top2 : bottom2;
+    vec2 r = left ? pair.xy : pair.zw;
+    vec2 d = q - vec2(left ? b.x + r.x : b.z - r.x,
+                      top ? b.y + r.y : b.w - r.y);
+    float f;
+    vec2 n;
+    if (r.x > 0.0 && r.y > 0.0 && (left ? d.x < 0.0 : d.x > 0.0) &&
+        (top ? d.y < 0.0 : d.y > 0.0)) {
+      float e = length(d / r);
+      f = e - 1.0;
+      n = d / (r * r * e);
+    } else {
+      vec2 e = abs(q - 0.5 * (b.xy + b.zw)) - 0.5 * (b.zw - b.xy);
+      if (e.x > e.y) {
+        f = e.x;
+        n = vec2(left ? -1.0 : 1.0, 0.0);
+      } else {
+        f = e.y;
+        n = vec2(0.0, top ? -1.0 : 1.0);
+      }
+    }
+    float rate = max(length(vec2(dot(jx, n), dot(jy, n))), 1e-6);
+    cover = min(cover, clamp(0.5 - f / rate, 0.0, 1.0));
+    if (cover <= 0.0) {
+      break;
+    }
+  }
+  return cover;
+}
+#else
+float Shapes(vec2 px) {
+  return 1.0;
+}
+#endif
 
 float Round(vec2 p) {
   bool left = p.x < 0.5 * (pc.rrect.x + pc.rrect.z);
@@ -87,7 +171,12 @@ void main() {
 #endif
     vec3 st = vec3(clamp(v_st, lo, hi), 1.0);
     uv = vec2(dot(pc.uv_u.xyz, st), dot(pc.uv_v.xyz, st));
-    coverage = Edges() * Round(gl_FragCoord.xy);
+    // Outside the quad's edges nothing is left to cut.
+    coverage = Edges();
+    if (coverage > 0.0) {
+      coverage = min(coverage,
+                     min(Round(gl_FragCoord.xy), Shapes(gl_FragCoord.xy)));
+    }
   }
   vec4 c = texture(u_tex, uv);
   o_color = vec4(c.rgb, mix(c.a, 1.0, pc.uv_u.w)) * (pc.uv_v.w * coverage);
