@@ -159,6 +159,10 @@ make install -j
 
 ### Clang/libc++ Build
 
+clang 14 and later build against libc++, except into a sysroot that has no
+libc++ headers (`<sysroot>/usr/include/c++/v1`), such as the flatpak SDK, which
+gets libstdc++. `-DIVI_CLANG_STDLIB=libc++` or `libstdc++` overrides the choice.
+
 Toolchain setup:
 
 ```bash
