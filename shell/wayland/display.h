@@ -506,10 +506,34 @@ class Display : public IDisplay,
 
   struct FlutterDesktopViewControllerState* m_view_controller_state{};
 
+  // The first seat advertised. text_input_ binds to it after the startup
+  // roundtrip, so never repoint it; m_all_seats holds the others.
   struct wl_seat* m_seat{};
+
+  // All bound seats; weston's RDP/VNC backends add one per remote client.
+  struct seat_info {
+    uint32_t global_id;
+    uint32_t version;
+    struct wl_seat* seat;
+  };
+  std::vector<seat_info> m_all_seats;
+
+  // The seat each input object came from; a capabilities event may only
+  // release objects of its own seat.
+  struct wl_seat* m_pointer_seat{};
+  struct wl_seat* m_keyboard_seat{};
+  struct wl_seat* m_touch_seat{};
+
+  /**
+   * @brief Release the pointer/keyboard/touch obtained from a seat that is
+   * going away. Leaves objects owned by other seats untouched.
+   */
+  void ReleaseSeatInputs(struct wl_seat* seat);
+
   // wl_keyboard wrapped in the scanner's CRTP handler: owns its own xkb
-  // context/keymap/state and the repeat timerfd. Bound off the shared wl_seat
-  // in seat_handle_capabilities (pointer + touch stay raw).
+  // context/keymap/state and the repeat timerfd. Bound off the seat that
+  // announced the capability in seat_handle_capabilities (pointer + touch stay
+  // raw).
   wl::WlPtr<wl::KeyboardHandler<Display>> keyboard_;
 
   // Text-input backend (selected at build time): owns the per-seat

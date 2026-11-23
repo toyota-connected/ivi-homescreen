@@ -322,10 +322,17 @@ void Display::HandleGlobal(wl::CRegistry& reg,
     IHS_DEBUG("Wayland: Output [{}]", d->m_all_outputs.size());
     d->m_all_outputs.push_back(oi);
   } else if (iface == wl_seat_interface.name) {
-    d->m_seat = static_cast<wl_seat*>(
-        wl_registry_bind(registry, name, &wl_seat_interface,
-                         std::min(static_cast<uint32_t>(5), version)));
-    wl_seat_add_listener(d->m_seat, &seat_listener, d);
+    const uint32_t seat_version = std::min(static_cast<uint32_t>(5), version);
+    auto* seat = static_cast<wl_seat*>(
+        wl_registry_bind(registry, name, &wl_seat_interface, seat_version));
+    // Keep the first seat as the primary one; text_input_ is bound against it
+    // after the startup roundtrip and must not follow a later arrival.
+    if (d->m_seat == nullptr) {
+      d->m_seat = seat;
+    }
+    d->m_all_seats.push_back({name, seat_version, seat});
+    IHS_DEBUG("Wayland: Seat [{}]", d->m_all_seats.size());
+    wl_seat_add_listener(seat, &seat_listener, d);
   } else if (iface ==
              viewporter::client::wp_viewporter_traits::interface_name) {
     d->m_viewporter = static_cast<wl_proxy*>(wl_registry_bind(
@@ -465,15 +472,17 @@ void Display::seat_handle_capabilities(void* data,
     if ((caps & WL_SEAT_CAPABILITY_POINTER) && !d->m_pointer.wl_pointer) {
       ihs::log::debug("Pointer Present");
       d->m_pointer.wl_pointer = wl_seat_get_pointer(seat);
+      d->m_pointer_seat = seat;
       wl_pointer_add_listener(d->m_pointer.wl_pointer, &pointer_listener, d);
       d->input_timestamps_.AttachPointer(d->m_pointer.wl_pointer);
     } else if (!(caps & WL_SEAT_CAPABILITY_POINTER) &&
-               d->m_pointer.wl_pointer) {
+               d->m_pointer.wl_pointer && d->m_pointer_seat == seat) {
       // Detach (destroys the subscription proxy) before releasing the device
       // it references.
       d->input_timestamps_.AttachPointer(nullptr);
       wl_pointer_release(d->m_pointer.wl_pointer);
       d->m_pointer.wl_pointer = nullptr;
+      d->m_pointer_seat = nullptr;
     }
   }
 
@@ -487,12 +496,14 @@ void Display::seat_handle_capabilities(void* data,
       wl_keyboard* raw = wl_seat_get_keyboard(seat);
       if (wl::SetupHandler(d->keyboard_, reinterpret_cast<wl_proxy*>(raw))) {
         d->keyboard_.Get()->app_ = d;
+        d->m_keyboard_seat = seat;
         d->ArmRepeatFd();
       }
     } else if (!(caps & WL_SEAT_CAPABILITY_KEYBOARD) &&
-               !d->keyboard_.IsNull()) {
+               !d->keyboard_.IsNull() && d->m_keyboard_seat == seat) {
       d->ReleaseRepeatFd();
       d->keyboard_.Reset();
+      d->m_keyboard_seat = nullptr;
     }
   }
 
@@ -500,15 +511,18 @@ void Display::seat_handle_capabilities(void* data,
     if ((caps & WL_SEAT_CAPABILITY_TOUCH) && !d->m_touch.touch) {
       ihs::log::debug("Touch Present");
       d->m_touch.touch = wl_seat_get_touch(seat);
+      d->m_touch_seat = seat;
       wl_touch_set_user_data(d->m_touch.touch, d);
       wl_touch_add_listener(d->m_touch.touch, &touch_listener, d);
       d->input_timestamps_.AttachTouch(d->m_touch.touch);
-    } else if (!(caps & WL_SEAT_CAPABILITY_TOUCH) && d->m_touch.touch) {
+    } else if (!(caps & WL_SEAT_CAPABILITY_TOUCH) && d->m_touch.touch &&
+               d->m_touch_seat == seat) {
       // Detach (destroys the subscription proxy) before releasing the device
       // it references.
       d->input_timestamps_.AttachTouch(nullptr);
       wl_touch_release(d->m_touch.touch);
       d->m_touch.touch = nullptr;
+      d->m_touch_seat = nullptr;
     }
   }
 }
@@ -1282,7 +1296,48 @@ void Display::EmitOutputDone(output_info_t* oi) {
   }
 }
 
+void Display::ReleaseSeatInputs(struct wl_seat* seat) {
+  if (m_pointer.wl_pointer && m_pointer_seat == seat) {
+    m_pointer_seat = nullptr;
+    // Detach (destroys the subscription proxy) before releasing the device it
+    // references.
+    input_timestamps_.AttachPointer(nullptr);
+    wl_pointer_release(m_pointer.wl_pointer);
+    m_pointer.wl_pointer = nullptr;
+  }
+  if (!keyboard_.IsNull() && m_keyboard_seat == seat) {
+    m_keyboard_seat = nullptr;
+    ReleaseRepeatFd();
+    keyboard_.Reset();
+  }
+  if (m_touch.touch && m_touch_seat == seat) {
+    m_touch_seat = nullptr;
+    input_timestamps_.AttachTouch(nullptr);
+    wl_touch_release(m_touch.touch);
+    m_touch.touch = nullptr;
+  }
+}
+
 void Display::HandleGlobalRemove(const uint32_t global_name) {
+  // A seat can go at runtime: weston destroys the per-client seat when a remote
+  // RDP or VNC peer disconnects. Drop only what that seat owned.
+  for (auto it = m_all_seats.begin(); it != m_all_seats.end(); ++it) {
+    if (it->global_id != global_name) {
+      continue;
+    }
+    ReleaseSeatInputs(it->seat);
+    if (m_seat == it->seat) {
+      m_seat = nullptr;
+    }
+    if (it->version >= WL_SEAT_RELEASE_SINCE_VERSION) {
+      wl_seat_release(it->seat);
+    } else {
+      wl_seat_destroy(it->seat);
+    }
+    m_all_seats.erase(it);
+    return;
+  }
+
   // global_remove fires for every global; act only on a matching wl_output.
   for (auto it = m_all_outputs.begin(); it != m_all_outputs.end(); ++it) {
     const auto& oi = *it;
