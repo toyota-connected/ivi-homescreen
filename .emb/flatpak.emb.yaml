@@ -17,8 +17,10 @@
 #       extends: source#flatpak-sdk-x86_64
 #       provider: flatpak-sdk
 #
-# The extending target names the provider again: an app manifest's shared
-# `cross.provider` (arm-gnu in an `emb init` repo) otherwise wins over this one.
+# emb 0.7.0 and later take the provider from the target extended, over an app
+# manifest's shared `cross.provider` (arm-gnu in an `emb init` repo). Earlier
+# versions let the shared one win, so `emb init` still names it again; it is
+# harmless either way.
 #
 # Wayland only. DRM/KMS has no place in a flatpak sandbox, and every backend
 # built is packaged under its own app id.
