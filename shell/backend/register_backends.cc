@@ -508,6 +508,9 @@ std::shared_ptr<Backend> MakeDrmEglBackend(const Configuration::Config& config,
   // Turned on the GPU (#848): by the compositor's last pass, or without one by
   // the engine or at present (DrmBackend::GetRenderConfig).
   cfg.rotation = config.view.drm_rotation.value_or(0);
+  // Off unless set, whatever BUILD_EGL_ENABLE_MULTISAMPLE says: the cost is
+  // per backing store (see the backend README), so it is the user's call.
+  cfg.msaa_samples = config.msaa_samples;
   // Leased tier: the compositor chose the connector, and the lease can be
   // revoked under us. Both are inert (0 / empty) on the direct tiers, which is
   // what makes this factory serve the leased descriptor unchanged.

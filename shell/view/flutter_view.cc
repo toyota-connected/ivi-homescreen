@@ -165,9 +165,18 @@ std::shared_ptr<Backend> Backend::Create(
                        key);
     return nullptr;
   }
-  if (config.msaa_samples.has_value() && descriptor->key != "wayland-egl") {
-    // Only Wayland EGL reads it. Said here rather than in each factory, which
-    // would each have to remember to.
+#if BUILD_COMPOSITOR
+  const bool drm_egl = descriptor->key == "drm-kms-egl" ||
+                       descriptor->key == "wayland-leased-drm-egl";
+#else
+  // DRM EGL multisamples the compositor's backing stores; without the
+  // compositor it has none.
+  const bool drm_egl = false;
+#endif
+  if (config.msaa_samples.has_value() && descriptor->key != "wayland-egl" &&
+      !drm_egl) {
+    // Only Wayland EGL, and DRM EGL with the compositor, read it. Said here
+    // rather than in each factory, which would each have to remember to.
     ihs::log::warn("msaa_samples = {} is ignored by the {} backend",
                    *config.msaa_samples, descriptor->key);
   }

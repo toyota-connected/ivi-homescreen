@@ -196,6 +196,14 @@ struct DrmConfig {
   // whose planes cannot rotate. Flutter renders at the turned extent; the
   // scanout stays the full mode. Needs BUILD_COMPOSITOR.
   int rotation{0};
+
+  // [global] msaa_samples / --msaa-samples: samples per pixel in the backing
+  // stores Flutter renders into, under Impeller only (DrmCompositor). Unset,
+  // 0 or 1 renders single-sample. Off unless set: every backing store pays
+  // for its own samples and resolve, and each overlay above a platform view
+  // is a store of its own. Unset is told apart from 0 so the startup log can
+  // say that Impeller is drawing without anti-aliasing.
+  std::optional<uint32_t> msaa_samples{};
 };
 
 // PrintDrmModes / ConnectorTypeName moved to display/drm_mode_list.h so the
