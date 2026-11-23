@@ -574,6 +574,11 @@ class Display : public IDisplay,
   // historical behavior.
   ivi::InputTimestamps input_timestamps_;
 
+  /**
+   * @brief Hide the pointer. Needs m_pointer.wl_pointer.
+   */
+  void HideCursor() const;
+
   bool m_enable_cursor;
   struct wl_surface* m_cursor_surface{};
   std::string m_cursor_theme_name;

@@ -159,10 +159,6 @@ constexpr double kDefaultPixelRatio = 1.0;
 
 // Cursor
 constexpr int kCursorSize = 24;
-constexpr char kCursorKindBasic[] = "left_ptr";
-constexpr char kCursorKindClick[] = "hand";
-constexpr char kCursorKindText[] = "left_ptr";
-constexpr char kCursorKindForbidden[] = "pirate";
 
 // Mouse/Touch
 static constexpr int kMaxTouchFinger = 10;
