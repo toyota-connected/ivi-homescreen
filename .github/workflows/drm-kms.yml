@@ -42,6 +42,11 @@ jobs:
           # existed, because nothing built it. No Vulkan dev package is needed --
           # the backend resolves the loader at runtime, which is why the
           # coverage job builds it without one either.
+          #
+          # The unit tests are built here too, since they have compositor-only
+          # cases of their own to keep behind the guard: two slipped out of it
+          # and the configuration stopped compiling with tests on, with
+          # nothing to notice. They are built, not run.
           - compiler: gcc-nocompositor
             cc: gcc-14
             cxx: g++-14
@@ -50,6 +55,7 @@ jobs:
             vulkan: 'ON'
             session_arg: ''
             expect_libseat: 'yes'
+            unit_tests: 'ON'
           # The no-libseat configuration, for an image with no libseat.so.1.
           # It was unbuildable until #795: cmake/drm_kms.cmake FORCEd
           # DRM_CXX_SESSION ON, and -D only seeds the cache, so the opt-out
@@ -106,6 +112,7 @@ jobs:
             -D BUILD_BACKEND_WAYLAND_VULKAN=OFF \
             -D BUILD_COMPOSITOR=${{ matrix.compositor }} \
             -D BUILD_BACKEND_DRM_KMS_VULKAN=${{ matrix.vulkan }} \
+            -D BUILD_UNIT_TESTS=${{ matrix.unit_tests || 'OFF' }} \
             ${{ matrix.session_arg }} \
             -D BUILD_NUMBER=${GITHUB_RUN_ID}
 

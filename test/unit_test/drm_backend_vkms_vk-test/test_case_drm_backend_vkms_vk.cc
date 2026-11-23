@@ -1803,7 +1803,8 @@ TEST_F(PvHostVkmsVkPlanes, ABottomUpFrameIsBlendedNotScannedOut) {
 }
 #endif
 
-#if IVI_HAVE_EGL
+// EglDmabufImporter is built with the compositor, as the platform views are.
+#if IVI_HAVE_EGL && BUILD_COMPOSITOR
 namespace {
 
 // A dma-buf of device-local memory on the backend's Vulkan device, which the
@@ -1972,6 +1973,9 @@ TEST_F(VulkanDrmVkms, ACpuRendererRefusesADmabufItCannotMap) {
 }
 #endif
 
+// Both cases below run on PvHostVkmsVk, which exists only with the
+// compositor.
+#if BUILD_COMPOSITOR
 // A producer that paces its own frames reads when the shell takes them: the
 // repaint window before each vblank, and 0 once presents no longer wait for
 // one. A caller built against the 1.22 header, whose struct stops short of the
@@ -2170,3 +2174,4 @@ TEST_F(PvHostVkmsVk, AFrameSubmittedJustAfterTheFlipMakesTheNextVblank) {
       << "compositing at once shows it a refresh later; if it no longer does, "
          "this case no longer measures the window";
 }
+#endif  // BUILD_COMPOSITOR
