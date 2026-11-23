@@ -101,6 +101,8 @@ previous process has released DRM master gives a run that produces no report.
 | `PV_BENCH_ROTATE_ANIM` | *(unset)* | `1`: the app wraps its view in a `RotationTransition` instead, one turn every eight seconds |
 | `PV_BENCH_PERSPECTIVE` | `0` | the app tilts its view this many degrees about its vertical axis, in perspective (`setEntry(3, 2, 0.001)`) |
 | `PV_BENCH_FADE` | *(unset)* | `1`: the app wraps its view in a `FadeTransition` instead: up from 0.2 to 1.0 over two seconds, a second at 1.0, and back down over two |
+| `PV_BENCH_MIRROR` | *(unset)* | `x` or `y`: the app mirrors its view about its vertical (`x`) or horizontal (`y`) center line |
+| `PV_BENCH_MARK` | *(unset)* | `1`: the producer draws the top-left quarter of each side of its buffer white, so where that corner shows says which way the view was turned or mirrored |
 | `PV_BENCH_VIEWS` | `1` | platform views to show, 1 to 8. Past one, each view is two thirds of the screen, offset a twelfth of the screen right and down from the last, with a spinner of its own over it; see below |
 
 `PV_BENCH_NO_PV=1` is the control: same Flutter content, no layer. The difference
@@ -161,6 +163,15 @@ inside the clip and the rounded clip, so with `PV_BENCH_CLIP` or
 by the app. At `PV_BENCH_PERSPECTIVE=30` the view should be a trapezoid,
 narrower than the output and taller on one side than the other. A view drawn
 flat is the bug in \#868. It sits inside the rotation, so the two combine.
+
+`PV_BENCH_MIRROR` is the same kind of check for a mirror, also read by the
+app, and goes with `PV_BENCH_MARK=1`: the producer's bands run across the view,
+so a mirror about the vertical line would not show without the corner. With
+`PV_BENCH_MIRROR=x` the white corner should be at the top right, with `y` at the
+bottom left, and with `PV_BENCH_ROTATE=180` at the bottom right. A view turned
+by a multiple of 90 degrees or mirrored is still a rect, so on drm-kms-egl and
+drm-kms-vulkan it stays on its plane where the plane can turn the buffer that
+way (the producer's zero-copy share says so), and is composited where not.
 
 `PV_BENCH_INNER_RADIUS` is a rounded clip inside every transform, also read by
 the app: it turns, tilts and scales with the view. With `PV_BENCH_ROTATE=30`

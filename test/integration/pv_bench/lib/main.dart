@@ -44,6 +44,8 @@
 //                       one turn every eight seconds
 //   PV_BENCH_PERSPECTIVE tilt the view this many degrees about its vertical
 //                       axis, in perspective (default 0)
+//   PV_BENCH_MIRROR     x or y: mirror the view about its vertical (x) or
+//                       horizontal (y) center line (default none)
 //   PV_BENCH_INNER_RADIUS wrap the view itself in a ClipRRect with corners of
 //                       this radius, inside every transform, so the clip
 //                       turns, tilts and scales with it (default 0, no clip)
@@ -244,8 +246,8 @@ class _PvBenchPageState extends State<PvBenchPage>
 }
 
 // Every view gets the same mutations, in the same order.
-Widget _wrapped(Widget view) => _faded(
-    _rounded(_clipped(_rotated(_tilted(_scaled(_innerRounded(view)))))));
+Widget _wrapped(Widget view) => _faded(_rounded(
+    _clipped(_rotated(_mirrored(_tilted(_scaled(_innerRounded(view))))))));
 
 class _Spinner extends StatelessWidget {
   const _Spinner({required this.turns});
@@ -439,6 +441,22 @@ Widget _rotated(Widget child) {
     return child;
   }
   return Transform.rotate(angle: _pvRotate * math.pi / 180.0, child: child);
+}
+
+// A mirror on the view puts a transform with a negative scale on its layer,
+// which a plane can show by reflecting the buffer.
+final String _pvMirror = Platform.environment['PV_BENCH_MIRROR'] ?? '';
+
+Widget _mirrored(Widget child) {
+  if (_pvMirror != 'x' && _pvMirror != 'y') {
+    return child;
+  }
+  return Transform(
+    alignment: Alignment.center,
+    transform: Matrix4.diagonal3Values(
+        _pvMirror == 'x' ? -1.0 : 1.0, _pvMirror == 'y' ? -1.0 : 1.0, 1.0),
+    child: child,
+  );
 }
 
 // A perspective on the view puts a transform with a perspective row on its
