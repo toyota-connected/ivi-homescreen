@@ -29,6 +29,7 @@
 #include <utility>
 
 #include "config/common.h"
+#include "cursor_kind.h"
 
 #include "fractional_scale_v1_client.hpp"
 #include "viewporter_client.hpp"
@@ -1358,6 +1359,41 @@ void Display::HandleGlobalRemove(const uint32_t global_name) {
   }
 }
 
+namespace {
+
+// Themes that ship only the X11 names lack the CSS ones: try the legacy name,
+// then the arrow.
+wl_cursor* GetCursorOrFallback(wl_cursor_theme* theme, const char* name) {
+  static constexpr std::pair<std::string_view, const char*> kLegacyNames[] = {
+      {"pointer", "hand2"},
+      {"text", "xterm"},
+      {"wait", "watch"},
+  };
+  auto cursor = wl_cursor_theme_get_cursor(theme, name);
+  for (const auto& [css_name, legacy_name] : kLegacyNames) {
+    if (cursor == nullptr && css_name == name) {
+      cursor = wl_cursor_theme_get_cursor(theme, legacy_name);
+    }
+  }
+  if (cursor == nullptr) {
+    cursor = wl_cursor_theme_get_cursor(theme, "left_ptr");
+  }
+  return cursor;
+}
+
+}  // namespace
+
+void Display::HideCursor() const {
+  wl_pointer_set_cursor(m_pointer.wl_pointer, m_pointer.serial, nullptr, 0, 0);
+  // The surface exists only when the compositor is v3 or better and shm
+  // arrived; hiding the pointer does not need it, and this is now reached on
+  // every pointer enter rather than once.
+  if (m_cursor_surface) {
+    wl_surface_damage(m_cursor_surface, 0, 0, 0, 0);
+    wl_surface_commit(m_cursor_surface);
+  }
+}
+
 bool Display::ActivateSystemCursor(const int32_t device,
                                    const std::string& kind) const {
   (void)device;
@@ -1370,15 +1406,7 @@ bool Display::ActivateSystemCursor(const int32_t device,
     if (!m_pointer.wl_pointer) {
       return true;
     }
-    wl_pointer_set_cursor(m_pointer.wl_pointer, m_pointer.serial, nullptr, 0,
-                          0);
-    // The surface exists only when the compositor is v3 or better and shm
-    // arrived; hiding the pointer does not need it, and this is now reached on
-    // every pointer enter rather than once.
-    if (m_cursor_surface) {
-      wl_surface_damage(m_cursor_surface, 0, 0, 0, 0);
-      wl_surface_commit(m_cursor_surface);
-    }
+    HideCursor();
     return true;
   }
 
@@ -1394,21 +1422,13 @@ bool Display::ActivateSystemCursor(const int32_t device,
   }
 
   if (m_pointer.wl_pointer) {
-    const char* cursor_name;
-    if (kind == "basic") {
-      cursor_name = kCursorKindBasic;
-    } else if (kind == "click") {
-      cursor_name = kCursorKindClick;
-    } else if (kind == "text") {
-      cursor_name = kCursorKindText;
-    } else if (kind == "forbidden") {
-      cursor_name = kCursorKindForbidden;
-    } else {
-      IHS_DEBUG("Cursor Kind = {}", kind);
-      return false;
+    const char* const cursor_name = homescreen::CursorKindToXcursorName(kind);
+    if (cursor_name == nullptr) {  // "none" -- hide the cursor.
+      HideCursor();
+      return true;
     }
 
-    const auto cursor = wl_cursor_theme_get_cursor(m_cursor_theme, cursor_name);
+    const auto cursor = GetCursorOrFallback(m_cursor_theme, cursor_name);
     if (cursor == nullptr) {
       IHS_DEBUG("Cursor [{}] not found", cursor_name);
       return false;
