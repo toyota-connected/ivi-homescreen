@@ -29,6 +29,7 @@
 #include <utility>
 
 #include "config/common.h"
+#include "cursor_kind.h"
 
 #include "fractional_scale_v1_client.hpp"
 #include "viewporter_client.hpp"
@@ -1339,18 +1340,15 @@ bool Display::ActivateSystemCursor(const int32_t device,
   }
 
   if (m_pointer.wl_pointer) {
-    const char* cursor_name;
-    if (kind == "basic") {
-      cursor_name = kCursorKindBasic;
-    } else if (kind == "click") {
-      cursor_name = kCursorKindClick;
-    } else if (kind == "text") {
-      cursor_name = kCursorKindText;
-    } else if (kind == "forbidden") {
-      cursor_name = kCursorKindForbidden;
-    } else {
-      IHS_DEBUG("Cursor Kind = {}", kind);
-      return false;
+    const char* const cursor_name = homescreen::CursorKindToXcursorName(kind);
+    if (cursor_name == nullptr) {  // "none" -- hide the cursor.
+      wl_pointer_set_cursor(m_pointer.wl_pointer, m_pointer.serial, nullptr, 0,
+                            0);
+      if (m_cursor_surface) {
+        wl_surface_damage(m_cursor_surface, 0, 0, 0, 0);
+        wl_surface_commit(m_cursor_surface);
+      }
+      return true;
     }
 
     const auto cursor = wl_cursor_theme_get_cursor(m_cursor_theme, cursor_name);
