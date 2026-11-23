@@ -2763,12 +2763,18 @@ bool VulkanDrmBackend::ReconcilePlatformViewLayers(
     }
   }
 
-  const RectI view{static_cast<int32_t>(fl.offset.x),
-                   static_cast<int32_t>(fl.offset.y),
-                   static_cast<int32_t>(fl.size.width),
-                   static_cast<int32_t>(fl.size.height)};
+  // A turned or mirrored view covers a rect of its own, not the one the engine
+  // gives its layer: under a quarter turn its width and height swap.
+  const std::optional<ihs::platform_view::TurnedView> turned =
+      ihs::platform_view::TurnedViewOf(fl, PresentPixelRatio());
+  const RectI view = turned ? turned->rect
+                            : RectI{static_cast<int32_t>(fl.offset.x),
+                                    static_cast<int32_t>(fl.offset.y),
+                                    static_cast<int32_t>(fl.size.width),
+                                    static_cast<int32_t>(fl.size.height)};
   // Each layer's plane is cropped to the view's clip.
-  const std::optional<RectI> clip = ihs::platform_view::ClipRectOf(fl);
+  const std::optional<RectI> clip =
+      turned ? turned->clip : ihs::platform_view::ClipRectOf(fl);
   // And shown at the view's opacity, through the plane's "alpha". A plane
   // without one would show the view opaque, so then the blend draws it.
   const float alpha = ihs::platform_view::OpacityOf(fl);
@@ -2778,10 +2784,13 @@ bool VulkanDrmBackend::ReconcilePlatformViewLayers(
   // A plane has no rounded corners: a view whose rounded clip cuts into it,
   // or with a clip that is not a rect on screen, is drawn by the blend, which
   // has them. Nor does it turn by any angle or skew, so a view under a
-  // rotation, skew, mirror or perspective is drawn by the blend too.
+  // rotation, skew or perspective is drawn by the blend too. A view turned by
+  // a multiple of 90 degrees or mirrored is still a rect; its plane turns the
+  // buffer, where the plane can (the allocator leaves it to the blend where
+  // not).
   if (ihs::platform_view::RoundedClipOf(fl) ||
       ihs::platform_view::ClipShapesOf(fl) ||
-      ihs::platform_view::IsTransformed(fl)) {
+      (ihs::platform_view::IsTransformed(fl) && !turned)) {
     return false;
   }
   const auto plane_alpha =
@@ -2847,9 +2856,14 @@ bool VulkanDrmBackend::ReconcilePlatformViewLayers(
       return false;
     }
     LayerPlane place;
-    if (!PlaceLayerOnPlane(ld.geometry.src, ld.geometry.dst,
-                           ld.geometry.transform, buf_w, buf_h, view, &place,
-                           clip ? &*clip : nullptr)) {
+    if (!PlaceLayerOnPlane(
+            ld.geometry.src,
+            turned
+                ? ihs::platform_view::TurnedLayerDst(*turned, ld.geometry.dst)
+                : ld.geometry.dst,
+            turned ? ComposeTurn(ld.geometry.transform, turned->turn)
+                   : ld.geometry.transform,
+            buf_w, buf_h, view, &place, clip ? &*clip : nullptr)) {
       // Nothing of it shows: no plane for it this present (a layer already in
       // the scene is pruned), and a frame it was handed goes straight back.
       if (have_db) {

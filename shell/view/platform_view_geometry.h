@@ -482,6 +482,95 @@ inline std::optional<TransformedView> TransformedViewOf(
   return v;
 }
 
+/// A view turned by a multiple of 90 degrees, mirrored, or both, under any
+/// scale: still a rect on the output, which a plane can show by turning the
+/// buffer it scans out.
+struct TurnedView {
+  /// Where the view lands, in output pixels.
+  RectI rect;
+  /// How the view's rect maps onto @c rect.
+  ViewTurn turn;
+  /// The view's own pixels to output pixels, and its size in them.
+  ViewMap map;
+  int32_t width{0};
+  int32_t height{0};
+  /// Its clip in output pixels, tested against @c rect.
+  std::optional<RectI> clip;
+};
+
+/**
+ * @brief How @p layer's view lands on the output when its transform turns it
+ * by a multiple of 90 degrees or mirrors it, with no skew or perspective.
+ *
+ * Empty for any other view, including one a plain rect already shows (a
+ * positive scale, @c ScaleLayer), and when @c TransformedViewOf is.
+ */
+inline std::optional<TurnedView> TurnedViewOf(const FlutterLayer& layer,
+                                              const double pixel_ratio) {
+  const std::optional<TransformedView> v =
+      TransformedViewOf(layer, pixel_ratio);
+  if (!v) {
+    return std::nullopt;
+  }
+  const ViewMap& m = v->map;
+  if (std::abs(m.g) > 1e-9 || std::abs(m.h) > 1e-9 ||
+      std::abs(m.i - 1.0) > 1e-9) {
+    return std::nullopt;
+  }
+  // Each axis of the view lands on one axis of the output: the map is
+  // diagonal, or a quarter turn makes it anti-diagonal.
+  const auto zero = [](const double e) { return std::abs(e) < 1e-6; };
+  TurnedView out;
+  if (zero(m.b) && zero(m.c) && !zero(m.a) && !zero(m.d)) {
+    out.turn = {false, m.a < 0, m.d < 0};
+  } else if (zero(m.a) && zero(m.d) && !zero(m.b) && !zero(m.c)) {
+    out.turn = {true, m.c < 0, m.b < 0};
+  } else {
+    return std::nullopt;
+  }
+  const auto [x0, y0] = m.Map(0, 0);
+  const auto [x1, y1] = m.Map(v->width, v->height);
+  const auto px = [](const double e) {
+    return static_cast<int32_t>(std::lround(e));
+  };
+  const int32_t left = px(std::min(x0, x1));
+  const int32_t top = px(std::min(y0, y1));
+  out.rect = {left, top, px(std::max(x0, x1)) - left,
+              px(std::max(y0, y1)) - top};
+  if (out.rect.w <= 0 || out.rect.h <= 0) {
+    return std::nullopt;
+  }
+  out.map = m;
+  out.width = v->width;
+  out.height = v->height;
+  out.clip = ClipRectIn(
+      MutationStack::Compose(layer.platform_view),
+      {static_cast<double>(out.rect.x), static_cast<double>(out.rect.y),
+       static_cast<double>(out.rect.x + out.rect.w),
+       static_cast<double>(out.rect.y + out.rect.h)});
+  return out;
+}
+
+/**
+ * @brief Where a layer of a turned view lands, relative to the view's rect on
+ * the output: @p dst, in the view's own pixels (a zero-size one meaning the
+ * whole view), carried through the turn and any scale.
+ */
+inline RectI TurnedLayerDst(const TurnedView& view, RectI dst) {
+  if (dst.w <= 0 || dst.h <= 0) {
+    dst = {0, 0, view.width, view.height};
+  }
+  const auto [x0, y0] = view.map.Map(dst.x, dst.y);
+  const auto [x1, y1] = view.map.Map(dst.x + dst.w, dst.y + dst.h);
+  const auto px = [](const double e) {
+    return static_cast<int32_t>(std::lround(e));
+  };
+  const int32_t left = px(std::min(x0, x1));
+  const int32_t top = px(std::min(y0, y1));
+  return {left - view.rect.x, top - view.rect.y, px(std::max(x0, x1)) - left,
+          px(std::max(y0, y1)) - top};
+}
+
 /**
  * @brief Scales a frame's platform view layers to their drawn size.
  *

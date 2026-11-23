@@ -198,6 +198,63 @@ inline bool TransformSwapsAxes(const BufferTransform transform) {
   }
 }
 
+// How a view turned by a multiple of 90 degrees, or mirrored, lands on the
+// output: the map from the view's rect, normalized, to the rect it covers on
+// the output, normalized. @c swaps when the view's x runs along the output's
+// y (a quarter turn); @c flip_s and @c flip_t when the output's x and y run
+// against the view's axis that lands on them.
+struct ViewTurn {
+  bool swaps{false};
+  bool flip_s{false};
+  bool flip_t{false};
+
+  [[nodiscard]] bool IsIdentity() const { return !swaps && !flip_s && !flip_t; }
+};
+
+// The buffer transform whose TransformedCoord is @p f, a right-angle map of
+// the unit square onto itself. One always matches: the eight transforms are
+// every such map.
+template <typename F>
+inline BufferTransform BufferTransformMatching(const F& f) {
+  constexpr std::array<BufferTransform, 8> kAll = {
+      BufferTransform::kNormal,     BufferTransform::k90,
+      BufferTransform::k180,        BufferTransform::k270,
+      BufferTransform::kFlipped,    BufferTransform::kFlipped90,
+      BufferTransform::kFlipped180, BufferTransform::kFlipped270};
+  for (const BufferTransform candidate : kAll) {
+    bool same = true;
+    // An affine map of the square is fixed by three of its corners.
+    for (const auto& [s, t] :
+         {std::pair{0.0, 0.0}, std::pair{1.0, 0.0}, std::pair{0.0, 1.0}}) {
+      double u = 0, v = 0, fu = 0, fv = 0;
+      TransformedCoord(candidate, s, t, &u, &v);
+      f(s, t, &fu, &fv);
+      same = same && std::abs(u - fu) < 1e-9 && std::abs(v - fv) < 1e-9;
+    }
+    if (same) {
+      return candidate;
+    }
+  }
+  return BufferTransform::kNormal;
+}
+
+// The transform that draws a layer with transform @p layer onto the output
+// through a view turned by @p turn: from a point of the view's rect on the
+// output back through the turn into the view, then through the layer's own
+// transform into its buffer.
+inline BufferTransform ComposeTurn(const BufferTransform layer,
+                                   const ViewTurn& turn) {
+  return BufferTransformMatching(
+      [&](const double s, const double t, double* u, double* v) {
+        const double a = turn.flip_s ? 1 - s : s;
+        const double b = turn.flip_t ? 1 - t : t;
+        // The view's own normalized point.
+        const double p = turn.swaps ? b : a;
+        const double q = turn.swaps ? a : b;
+        TransformedCoord(layer, p, q, u, v);
+      });
+}
+
 // Clip a layer to @p bounds, in the same coordinates as @p dst, and crop @p src
 // to the part still shown. A zero-size @p src means the whole buffer and is
 // made explicit first. Returns false when nothing of the layer is left, in
