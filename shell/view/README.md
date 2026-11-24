@@ -21,8 +21,8 @@ class MyPlatformView : public ICompositorSurface {
   }
   bool OnCollectBackingStore(const FlutterBackingStore*) override { return true; }
   bool OnPresent(const FlutterLayer* layer) override {
-    // Draw / swap your native surface here. The compositor has already
-    // reconciled the Wayland subsurface Z-order before this call.
+    // Draw / swap your native surface here. The compositor draws the view
+    // after this call returns.
     return true;
   }
   FlutterPlatformViewIdentifier GetIdentifier() const override { return id_; }

@@ -42,7 +42,6 @@ To test the output of rendering functions, it may be necessary to compare the te
 Three backend-agnostic test drivers cover the compositor primitives:
 
 - `backing_store_pool-test` — `BackingStorePool<T>` acquire/release/cap/flush.
-- `present_layer_sequencer-test` — Wayland subsurface Z-order reconciliation (uses an injected placer hook; no real Wayland needed).
 - `compositor_registry-test` — polymorphic `Backend::{Register,Unregister,Resize}CompositorSurface` dispatch and `ICompositorSurface::OnResize`. Only compiled when `-DBUILD_COMPOSITOR=ON`.
 
 Run with sanitizers:

@@ -70,8 +70,6 @@ endif ()
 
 # Wayland-specific TUs:
 #   - wayland/display.cc + wayland/window.cc            — Display/Window
-#   - view/present_layer_sequencer.cc                   — wl_subsurface
-#                                                         layer-ordering
 # All call sites in the main shell are already
 # #if-gated on a Wayland backend. Skipping these for non-Wayland
 # binaries drops the libwayland-client + libwayland-cursor link/runtime
@@ -84,7 +82,6 @@ if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN)
             # touch_frame-test); display.cc needs a live compositor.
             wayland/touch_frame.cc
             wayland/window.cc
-            view/present_layer_sequencer.cc
             # Compositor-protocol shell layer (xdg/agl/ivi/simple) + factory.
             wayland/shell/shells.cc
             # wp_presentation vsync provider (scanner presentation-time C++).

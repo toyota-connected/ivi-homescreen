@@ -60,7 +60,6 @@
 #include "backend/wayland_vulkan/vulkan_backing_store.h"
 #include "view/compositor_surface_interface.h"
 #include "view/mutation_stack.h"
-#include "view/present_layer_sequencer.h"
 #endif
 
 class Display;
@@ -511,7 +510,6 @@ class WaylandVulkanBackend final : public Backend {
   VulkanStoreExportPlan store_export_plan_{};
 
   BackingStorePool<VulkanBackingStore> m_store_pool;
-  PresentLayerSequencer m_sequencer;
   // See the matching comment in WaylandEglBackend — Register/Unregister
   // fire on the platform thread, PresentLayers reads on the rasterizer
   // thread. Held only across map access; plugin callbacks run lock-free.
@@ -531,12 +529,9 @@ class WaylandVulkanBackend final : public Backend {
 
   /// Composite one platform-view layer via its ICompositorSurface (texture
   /// route), applying its mutation stack. Shared by the swapchain and dma-buf
-  /// present paths. Returns the surface's OnPresent result, or true when the
-  /// view takes the subsurface route (no compositor surface registered).
+  /// present paths. Returns the surface's OnPresent result, or true, with a
+  /// warning, when no compositor surface is registered for the view.
   bool PresentPlatformView(const FlutterLayer* layer);
-  /// Sequencer missing-view handler: warn only when a platform view has neither
-  /// a subsurface nor a compositor surface registered.
-  void WarnMissingPlatformView(FlutterPlatformViewIdentifier id);
 
 #if BUILD_COMPOSITOR
   /// Composite a Vulkan platform view into the dma-buf slot: if the layer's

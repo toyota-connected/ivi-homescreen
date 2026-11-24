@@ -51,7 +51,6 @@ class TaskRunner;
 #include "backend/wayland_egl/gl_compositor.h"
 #include "view/compositor_surface_interface.h"
 #include "view/mutation_stack.h"
-#include "view/present_layer_sequencer.h"
 #endif
 
 class Backend;
@@ -316,7 +315,6 @@ class WaylandEglBackend : public Egl, public Backend {
   std::unique_ptr<GlCompositor> m_gl_compositor;
   BackingStorePool<EglFboBackingStore> m_fbo_pool;
   BackingStorePool<EglTextureBackingStore> m_texture_pool;
-  PresentLayerSequencer m_sequencer;
 
 #if BUILD_HUD
   // Debug HUD (imgui GL). Lazily created on the first present when IVI_HUD is

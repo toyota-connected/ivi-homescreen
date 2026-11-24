@@ -320,10 +320,9 @@ endif ()
 add_subdirectory(shared_library-test)
 add_subdirectory(backing_store_pool-test)
 add_subdirectory(gl_compositor_can_blit-test)
-# PresentLayerSequencer orders wl_subsurfaces, so it exists only in a Wayland
-# build -- same reasoning as gl_process_resolver-test above.
+# The wayland vsync grid exists only in a Wayland build -- same reasoning as
+# gl_process_resolver-test above.
 if (BUILD_BACKEND_WAYLAND_EGL OR BUILD_BACKEND_WAYLAND_VULKAN)
-    add_subdirectory(present_layer_sequencer-test)
     add_subdirectory(wayland_vsync_grid-test)
 endif ()
 if (BUILD_BACKEND_DRM_KMS_VULKAN)

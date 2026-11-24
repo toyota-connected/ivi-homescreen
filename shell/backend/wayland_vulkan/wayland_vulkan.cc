@@ -2655,12 +2655,6 @@ bool WaylandVulkanBackend::PresentLayersImpl(const FlutterLayer** layers,
   }
   const bool blend = has_platform_view && layer_compositor_;
 
-  // Sequence platform-view subsurface Z-order for this frame.
-  m_sequencer.Present(layers, count, nullptr,
-                      [this](FlutterPlatformViewIdentifier id) {
-                        WarnMissingPlatformView(id);
-                      });
-
   bool ok = true;
   if (blend) {
     // Alpha-blend the whole stack (backing stores + platform views) straight
@@ -3018,20 +3012,6 @@ void WaylandVulkanBackend::ReassertOpaqueRegionIfStale() {
   }
 }
 
-void WaylandVulkanBackend::WarnMissingPlatformView(
-    FlutterPlatformViewIdentifier id) {
-  // A platform view may take the wl_subsurface route (handled by the sequencer)
-  // or the ICompositorSurface texture route (PresentPlatformView). Warn only
-  // when neither is registered for it.
-  std::lock_guard<std::mutex> lock(m_compositor_surfaces_mu_);
-  if (m_compositor_surfaces.find(id) == m_compositor_surfaces.end()) {
-    ihs::log::warn(
-        "Vulkan compositor: platform view {} has no registered subsurface or "
-        "compositor surface",
-        id);
-  }
-}
-
 bool WaylandVulkanBackend::PresentPlatformView(const FlutterLayer* layer) {
   const auto composed = MutationStack::Compose(layer->platform_view);
   // Opacity, every transform and every clip are drawn by the compositor, up
@@ -3054,10 +3034,15 @@ bool WaylandVulkanBackend::PresentPlatformView(const FlutterLayer* layer) {
       surface = it->second;
     }
   }
-  // No compositor surface = the subsurface route (or an unregistered PV,
-  // already warned via the sequencer). Treat as success so it doesn't fail the
-  // present.
-  return surface ? surface->OnPresent(layer) : true;
+  if (!surface) {
+    // Nothing to draw. Not a failed present: the rest of the frame is fine.
+    ihs::log::warn(
+        "Vulkan compositor: platform view {} has no registered compositor "
+        "surface",
+        layer->platform_view->identifier);
+    return true;
+  }
+  return surface->OnPresent(layer);
 }
 
 void WaylandVulkanBackend::CollectAcquireWait(ICompositorSurface* surface,
@@ -3766,14 +3751,6 @@ bool WaylandVulkanBackend::PresentLayersDmabuf(const FlutterLayer** layers,
   ++acquire_wait_seq_;
   frame_acquire_waits_.clear();
   frame_pv_surfaces_.clear();
-
-  // Sequence platform-view subsurface Z-order for this frame (both paths): the
-  // backing-store layers compose into the dma-buf image, platform views
-  // composite via their own subsurfaces (sequencer) or their VkImage (below).
-  m_sequencer.Present(layers, count, nullptr,
-                      [this](FlutterPlatformViewIdentifier id) {
-                        WarnMissingPlatformView(id);
-                      });
 
   bool ok = true;
   if (layer_compositor_) {

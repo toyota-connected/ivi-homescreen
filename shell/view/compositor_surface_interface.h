@@ -59,9 +59,9 @@ class ICompositorSurface {
   /**
    * @brief Present a frame for this surface.
    *
-   * The compositor has already reconciled the Wayland subsurface Z-order
-   * before this call. The implementation should draw into or swap its native
-   * surface.
+   * Called once per present for each layer that shows this view, before the
+   * compositor draws it. The implementation should draw into or swap its
+   * native surface.
    */
   virtual bool OnPresent(const FlutterLayer* layer) = 0;
 
