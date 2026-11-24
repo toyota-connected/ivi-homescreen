@@ -219,12 +219,19 @@ constexpr size_t MixShape(const size_t h, const uint64_t v) {
 // of the same shape go straight to composition instead of paying again for a
 // TEST_ONLY commit -- and, where the rejected layers are torn down, for fresh
 // imports -- to hear the same answer. Frames of another shape are tried at
-// once; the same shape is retried every @p retry_after presents, since what
+// once; the same shape is retried after @p retry_after presents, since what
 // the allocator can place also turns on things the shape does not capture (a
-// producer's format, another output's claim on a shared plane). Raster
-// thread only.
+// producer's format, another output's claim on a shared plane). Each retry
+// the same shape fails doubles the wait, up to kMaxDoublings times: a refusal
+// that never lifts, such as a display controller that will not import a
+// producer's buffers, otherwise costs a frame every few seconds for good.
+// Raster thread only.
 class PlanePathBackoff {
  public:
+  // At 60 Hz and a @p retry_after of 120, the longest wait is about two
+  // minutes.
+  static constexpr uint32_t kMaxDoublings = 6;
+
   explicit PlanePathBackoff(const uint64_t retry_after)
       : retry_after_(retry_after) {}
 
@@ -235,8 +242,15 @@ class PlanePathBackoff {
     if (!rejected_) {
       return true;
     }
-    if (shape != shape_ || presents_ - rejected_at_ >= retry_after_) {
+    if (shape != shape_) {
       rejected_ = false;
+      retrying_ = false;
+      doublings_ = 0;
+      return true;
+    }
+    if (presents_ - rejected_at_ >= (retry_after_ << doublings_)) {
+      rejected_ = false;
+      retrying_ = true;
       return true;
     }
     return false;
@@ -244,13 +258,21 @@ class PlanePathBackoff {
 
   // The plane path turned a frame of shape @p shape down.
   void Rejected(const size_t shape) {
+    doublings_ = retrying_ && shape == shape_
+                     ? std::min(doublings_ + 1, kMaxDoublings)
+                     : 0;
+    retrying_ = false;
     rejected_ = true;
     shape_ = shape;
     rejected_at_ = presents_;
   }
 
   // The plane path took a frame.
-  void Accepted() { rejected_ = false; }
+  void Accepted() {
+    rejected_ = false;
+    retrying_ = false;
+    doublings_ = 0;
+  }
 
   [[nodiscard]] bool backing_off() const { return rejected_; }
 
@@ -259,5 +281,8 @@ class PlanePathBackoff {
   uint64_t presents_{0};
   uint64_t rejected_at_{0};
   size_t shape_{0};
+  uint32_t doublings_{0};
   bool rejected_{false};
+  // The last try was a retry of a rejected shape, not a first try.
+  bool retrying_{false};
 };
