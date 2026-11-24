@@ -36,6 +36,7 @@
 #include "profiling/pv_latency.h"
 #include "shell/platform/homescreen/flutter_desktop_texture_registrar.h"
 #include "task_runner.h"
+#include "view/paint_region.h"
 #include "view/platform_view_geometry.h"
 #include "wayland/display.h"
 
@@ -3255,14 +3256,41 @@ bool WaylandVulkanBackend::CompositeLayersBlend(VkCommandBuffer cmd,
         continue;
       }
       VulkanBackingStore* store = baton->store;
+      // Over something already drawn, only what Flutter painted of the store
+      // needs blending: the rest is transparent. The bottom store is drawn
+      // whole, over the cleared target.
+      const std::optional<std::vector<RectI>> painted =
+          !draws.empty() && store->Width() == dw && store->Height() == dh
+              ? PaintRects(*layer, dw, dh)
+              : std::nullopt;
+      if (painted && painted->empty()) {
+        continue;
+      }
       barrier(store->Image(), store->Layout(),
               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
               VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
               VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
               VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
       store->SetLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-      draws.push_back(
-          {store->Image(), VulkanBackingStore::kFormat, dx, dy, dw, dh, store});
+      if (!painted) {
+        draws.push_back({store->Image(), VulkanBackingStore::kFormat, dx, dy,
+                         dw, dh, store});
+        continue;
+      }
+      // One draw per rect. Only the first hands the store back to the engine
+      // in phase 3.
+      for (size_t r = 0; r < painted->size(); ++r) {
+        const RectI& pr = (*painted)[r];
+        Draw dr{store->Image(),
+                VulkanBackingStore::kFormat,
+                dx + pr.x,
+                dy + pr.y,
+                pr.w,
+                pr.h,
+                r == 0 ? store : nullptr};
+        dr.uv = UvForRect(pr, dw, dh);
+        draws.push_back(dr);
+      }
     } else if (layer->type == kFlutterLayerContentTypePlatformView &&
                layer->platform_view) {
       ok = PresentPlatformView(layer) && ok;
