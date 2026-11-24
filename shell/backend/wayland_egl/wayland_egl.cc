@@ -1161,22 +1161,8 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
     return BlitBackingStoreToWindow(layers[0]->backing_store);
   }
 
-  // General path: Wayland subsurface Z-order is reconciled by the sequencer;
-  // each Flutter layer is blitted onto the window, each platform view is
-  // dispatched to its registered ICompositorSurface.
-  m_sequencer.Present(
-      layers, count, nullptr, [this](FlutterPlatformViewIdentifier id) {
-        // PVs may choose the wl_subsurface route (sequencer)
-        // or the ICompositorSurface texture route (below).
-        // Only warn when *neither* is registered.
-        std::lock_guard<std::mutex> lock(m_compositor_surfaces_mu_);
-        if (m_compositor_surfaces.find(id) == m_compositor_surfaces.end()) {
-          ihs::log::warn(
-              "EGL compositor: platform view {} has no "
-              "registered subsurface or compositor surface",
-              id);
-        }
-      });
+  // General path: each Flutter layer is blitted onto the window, each platform
+  // view is dispatched to its registered ICompositorSurface.
 
   // Clear the window backbuffer before compositing. Without this, stale
   // pixels from the driver's swapchain rotation remain wherever no opaque
@@ -1368,6 +1354,11 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
             composited_any = true;
           }
         }
+      } else {
+        ihs::log::warn(
+            "EGL compositor: platform view {} has no registered compositor "
+            "surface",
+            layer->platform_view->identifier);
       }
     }
   }
