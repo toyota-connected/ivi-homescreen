@@ -62,6 +62,7 @@
 #include "profiling/frame_profile.h"
 #include "view/compositor_surface_interface.h"
 #include "view/layer_scanout.h"
+#include "view/paint_region.h"
 #include "view/platform_view_geometry.h"
 
 namespace {
@@ -2212,6 +2213,10 @@ bool DrmCompositor::PresentViaGlFallback(const FlutterLayer** layers,
       auto* baton = static_cast<StoreBaton*>(layer->backing_store->user_data);
       if (baton && baton->store) {
         const auto* s = baton->store;
+        if (blend && DrawPaintedStore(0, target_h, /*top_first=*/false, nullptr,
+                                      *s, *layer)) {
+          continue;
+        }
         // A quad, not a blit: see CompositeLayerIntoFbo.
         gl_compositor_->CompositeToDefault(
             /*src_fbo=*/0, s->active().color_tex,
@@ -2342,6 +2347,38 @@ void DrmCompositor::DrawTurned(const GLuint fbo,
                                       p.h, blend, /*opaque=*/false);
 }
 
+bool DrmCompositor::DrawPaintedStore(const GLuint fbo,
+                                     const GLint target_h,
+                                     const bool top_first,
+                                     const DisplayRotation* const rot,
+                                     const GbmBackingStore& store,
+                                     const FlutterLayer& layer) {
+  const auto sw = static_cast<int32_t>(store.width);
+  const auto sh = static_cast<int32_t>(store.height);
+  if (sw != static_cast<int32_t>(layer.size.width) ||
+      sh != static_cast<int32_t>(layer.size.height)) {
+    return false;
+  }
+  const std::optional<std::vector<RectI>> painted = PaintRects(layer, sw, sh);
+  if (!painted) {
+    return false;
+  }
+  const DisplayRotation none{0, static_cast<int32_t>(out_.width()),
+                             static_cast<int32_t>(out_.height()),
+                             static_cast<int32_t>(out_.width()),
+                             static_cast<int32_t>(out_.height())};
+  const auto ox = static_cast<int32_t>(layer.offset.x);
+  const auto oy = static_cast<int32_t>(layer.offset.y);
+  for (const RectI& r : *painted) {
+    // A GL render target: its first row is the picture's bottom.
+    DrawTurned(fbo, target_h, top_first, rot != nullptr ? *rot : none,
+               store.active().color_tex, RectI{ox + r.x, oy + r.y, r.w, r.h},
+               FlipRows(UvForRect(r, sw, sh)), /*blend=*/true,
+               /*external=*/false);
+  }
+  return true;
+}
+
 bool DrmCompositor::CompositeLayersTurned(const GLuint fbo,
                                           const GLint target_h,
                                           const bool top_first,
@@ -2367,6 +2404,10 @@ bool DrmCompositor::CompositeLayersTurned(const GLuint fbo,
         layer->backing_store) {
       auto* baton = static_cast<StoreBaton*>(layer->backing_store->user_data);
       if (baton && baton->store) {
+        if (blend && DrawPaintedStore(fbo, target_h, top_first, &rot,
+                                      *baton->store, *layer)) {
+          continue;
+        }
         // A GL render target: its first row is the picture's bottom.
         DrawTurned(fbo, target_h, top_first, rot,
                    baton->store->active().color_tex, rect_of(layer),
@@ -2875,6 +2916,12 @@ bool DrmCompositor::PresentFramed(const FlutterLayer** layers,
               "offset=({:.1f},{:.1f}) size={:.1f}x{:.1f} blend={}",
               i, s->width, s->height, layer->offset.x, layer->offset.y,
               layer->size.width, layer->size.height, blend);
+        }
+        // comp.fbo is scanned out top row first.
+        if (blend &&
+            DrawPaintedStore(comp.fbo, static_cast<GLint>(out_.height()),
+                             /*top_first=*/true, nullptr, *s, *layer)) {
+          continue;
         }
         CompositeLayerIntoFbo(comp.fbo, s->active().color_tex,
                               static_cast<GLsizei>(s->width),
@@ -3772,6 +3819,11 @@ bool DrmCompositor::PresentLayersLocked(const FlutterLayer** layers,
       }
       const bool blend = any_composited;
       if (store) {
+        if (blend &&
+            DrawPaintedStore(comp.fbo, static_cast<GLint>(out_.height()),
+                             /*top_first=*/true, nullptr, *store, *flutter)) {
+          continue;
+        }
         CompositeLayerIntoFbo(comp.fbo, store->active().color_tex,
                               static_cast<GLsizei>(store->width),
                               static_cast<GLsizei>(store->height),

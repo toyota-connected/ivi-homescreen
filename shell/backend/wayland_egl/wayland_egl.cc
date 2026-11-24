@@ -36,6 +36,7 @@
 #include "shell/platform/homescreen/flutter_desktop_engine_state.h"
 #include "shell/platform/homescreen/flutter_desktop_texture_registrar.h"
 #include "task_runner.h"
+#include "view/paint_region.h"
 #include "view/platform_view_geometry.h"
 #include "wayland/display.h"
 
@@ -1027,7 +1028,8 @@ void WaylandEglBackend::CompositeLayer(const FlutterBackingStore* store,
                                        GLint dst_y,
                                        GLsizei dst_w,
                                        GLsizei dst_h,
-                                       bool blend) {
+                                       bool blend,
+                                       const FlutterLayer* layer) {
   auto* baton = static_cast<StoreBaton*>(store->user_data);
   if (!baton) {
     ihs::log::error("WaylandEglBackend: present layer missing baton");
@@ -1053,6 +1055,11 @@ void WaylandEglBackend::CompositeLayer(const FlutterBackingStore* store,
         return;
       }
     }
+    if (blend && layer != nullptr &&
+        DrawPaintedStore(fbo->ColorTexture(), fbo->Width(), fbo->Height(),
+                         *layer)) {
+      return;
+    }
     m_gl_compositor->CompositeToDefault(src_fbo, fbo->ColorTexture(),
                                         fbo->Width(), fbo->Height(), dst_x,
                                         dst_y, dst_w, dst_h, blend);
@@ -1064,6 +1071,10 @@ void WaylandEglBackend::CompositeLayer(const FlutterBackingStore* store,
   // a scratch FBO and use the blit path, or (b) use the quad path directly.
   // Favor the blit path when available since it's a fixed-function copy.
   auto* tex = baton->tex_store;
+  if (blend && layer != nullptr &&
+      DrawPaintedStore(tex->Texture(), tex->Width(), tex->Height(), *layer)) {
+    return;
+  }
   if (!blend && m_gl_caps.has_blit_framebuffer) {
     if (!m_texture_blit_fbo_) {
       glGenFramebuffers(1, &m_texture_blit_fbo_);
@@ -1083,6 +1094,32 @@ void WaylandEglBackend::CompositeLayer(const FlutterBackingStore* store,
                                         tex->Height(), dst_x, dst_y, dst_w,
                                         dst_h, blend);
   }
+}
+
+bool WaylandEglBackend::DrawPaintedStore(const GLuint tex,
+                                         const GLsizei tex_w,
+                                         const GLsizei tex_h,
+                                         const FlutterLayer& layer) {
+  if (tex_w != static_cast<GLsizei>(layer.size.width) ||
+      tex_h != static_cast<GLsizei>(layer.size.height)) {
+    return false;
+  }
+  const std::optional<std::vector<RectI>> painted =
+      PaintRects(layer, tex_w, tex_h);
+  if (!painted) {
+    return false;
+  }
+  const auto ox = static_cast<GLint>(layer.offset.x);
+  const auto oy = static_cast<GLint>(layer.offset.y);
+  for (const RectI& r : *painted) {
+    // FBO 0 is bottom-left origin, and so is the store: its first row is the
+    // picture's bottom.
+    m_gl_compositor->CompositeLayerToFbo(
+        0, tex, /*external=*/false, FlipRows(UvForRect(r, tex_w, tex_h)),
+        ox + r.x, static_cast<GLint>(m_initial_height) - (oy + r.y) - r.h, r.w,
+        r.h, /*blend=*/true, /*opaque=*/false);
+  }
+  return true;
 }
 
 bool WaylandEglBackend::BlitBackingStoreToWindow(
@@ -1210,7 +1247,7 @@ bool WaylandEglBackend::PresentLayers(const FlutterLayer** layers,
       const auto dy = static_cast<GLint>(layer->offset.y);
       const auto dw = static_cast<GLsizei>(layer->size.width);
       const auto dh = static_cast<GLsizei>(layer->size.height);
-      CompositeLayer(layer->backing_store, dx, dy, dw, dh, blend);
+      CompositeLayer(layer->backing_store, dx, dy, dw, dh, blend, layer);
       composited_any = true;
     } else if (layer->type == kFlutterLayerContentTypePlatformView &&
                layer->platform_view) {
