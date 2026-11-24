@@ -1,6 +1,7 @@
 # Phase 4 follow-up: walk FlutterPlatformView::mutations.
 set(TESTCASE_NAME "homescreen_mutation_stack_ut_test_driver")
-set(TESTCASE_CC test_case_mutation_stack.cc test_case_platform_view_geometry.cc)
+set(TESTCASE_CC test_case_mutation_stack.cc test_case_platform_view_geometry.cc
+        test_case_paint_region.cc)
 
 add_executable(${TESTCASE_NAME} ${TESTCASE_CC})
 add_sanitizers(${TESTCASE_NAME})
