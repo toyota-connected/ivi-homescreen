@@ -73,6 +73,7 @@
 #include "vsync/wayland_vsync_provider.h"
 #include "wayland/input_timestamps.h"
 #include "wayland/shell/wayland_shell.h"
+#include "wayland/text_input_seats.h"
 #include "wayland/touch_frame.h"
 
 class Engine;
@@ -156,9 +157,9 @@ class Display : public IDisplay,
 
   // ── Text-input drivers, called FROM the engine platform strand ────────────
   // (TextInputPlugin -> Display). Each posts onto the reactor io_context so the
-  // text_input_ proxy is only ever touched on the reactor thread. All no-op
-  // gracefully when zwp_text_input_manager_v3 was never advertised (the backend
-  // guards on its proxy being bound).
+  // text_input proxies are only ever touched on the reactor thread, and goes to
+  // every seat's (TextInputSeats). All no-op gracefully when
+  // zwp_text_input_manager_v3 was never advertised (there are none).
 
   /**
    * @brief Enable text-input for the focused field: set content type + cursor
@@ -506,10 +507,6 @@ class Display : public IDisplay,
 
   struct FlutterDesktopViewControllerState* m_view_controller_state{};
 
-  // The first seat advertised. text_input_ binds to it after the startup
-  // roundtrip, so never repoint it; m_all_seats holds the others.
-  struct wl_seat* m_seat{};
-
   // All bound seats; weston's RDP/VNC backends add one per remote client.
   struct seat_info {
     uint32_t global_id;
@@ -536,11 +533,24 @@ class Display : public IDisplay,
   // raw).
   wl::WlPtr<wl::KeyboardHandler<Display>> keyboard_;
 
-  // Text-input backend (selected at build time): owns the per-seat
-  // zwp_text_input_v3 + manager proxies. Bound after the startup registry
-  // roundtrip once m_seat exists; touched only on the reactor thread. A no-op
-  // (unbound) when the compositor never advertised the manager global.
-  wl::ime::SelectedTextInput text_input_;
+  // Text input (backend selected at build time), one per seat: each owns its
+  // zwp_text_input_v3 and a manager proxy. Bound for every seat after the
+  // startup registry roundtrip, and for a seat that arrives later as it is
+  // bound; dropped with its seat. Touched only on the reactor thread. Empty
+  // when the compositor never advertised the manager global.
+  TextInputSeats<wl::ime::SelectedTextInput> text_inputs_;
+  // The manager global, recorded for each seat's Bind. 0 when not advertised.
+  uint32_t text_input_manager_name_{0};
+  uint32_t text_input_manager_version_{0};
+  // Set once the startup roundtrip has bound the seats there were then; a seat
+  // advertised after that gets its text input as it is bound.
+  bool text_inputs_bound_{false};
+
+  /**
+   * @brief Create @p seat's text input. No-op when the compositor has no
+   * text-input manager.
+   */
+  void BindTextInput(struct wl_seat* seat);
 
   /**
    * @brief Arm the Wayland display fd on the reactor (prepare_read / flush /
@@ -827,7 +837,7 @@ class Display : public IDisplay,
    * CRegistry::OnGlobal). Keeps the existing per-global raw binds (compositor /
    * shm / subcompositor / output / seat + their listeners), the dmabuf/wl_drm
    * capability flags, and the vsync + shells TryBindGlobal chain; additionally
-   * records the text-input manager global for text_input_.Bind().
+   * records the text-input manager global for each seat's text input.
    * @param[in,out] reg The owning registry; reg.Get() yields the raw
    * wl_registry* the shells/vsync still bind through.
    * @param[in] name Identifier ID on the Wayland server.
