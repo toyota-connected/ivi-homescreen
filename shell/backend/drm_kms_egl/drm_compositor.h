@@ -522,6 +522,17 @@ class DrmCompositor : public IFlipSink {
                              const DisplayRotation& rot,
                              const FlutterLayer** layers,
                              size_t count);
+  // Blends only what Flutter painted of overlay store @p store, drawn for
+  // @p layer, into @p fbo as DrawTurned does; @p rot null for none. Everything
+  // outside the paint region is transparent, so the rest would blend to
+  // nothing. False, with nothing drawn, when the whole store has to be: no
+  // paint region, or a store not drawn at its own size.
+  bool DrawPaintedStore(GLuint fbo,
+                        GLint target_h,
+                        bool top_first,
+                        const DisplayRotation* rot,
+                        const GbmBackingStore& store,
+                        const FlutterLayer& layer);
   // One texture across render rect @p dst, turned onto @p fbo. @p uv maps the
   // rect to the texture (see UvAffine).
   void DrawTurned(GLuint fbo,

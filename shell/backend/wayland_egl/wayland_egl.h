@@ -380,13 +380,24 @@ class WaylandEglBackend : public Egl, public Backend {
   /// When @p blend is true, the composite alpha-blends with premultiplied
   /// alpha so transparent pixels preserve underlying framebuffer content —
   /// required for overlay layers stacked on top of platform views or other
-  /// backing stores.
+  /// backing stores. Blending, only what Flutter painted of the store is
+  /// drawn, when @p layer reports it: the rest is transparent.
   void CompositeLayer(const FlutterBackingStore* store,
                       GLint dst_x,
                       GLint dst_y,
                       GLsizei dst_w,
                       GLsizei dst_h,
-                      bool blend = false);
+                      bool blend = false,
+                      const FlutterLayer* layer = nullptr);
+
+  /// Blends the rects of @p tex, a @p tex_w x @p tex_h store, that Flutter
+  /// painted for @p layer onto FBO 0. False, with nothing drawn, when the
+  /// whole store has to be: no paint region, or a store not drawn at its own
+  /// size.
+  bool DrawPaintedStore(GLuint tex,
+                        GLsizei tex_w,
+                        GLsizei tex_h,
+                        const FlutterLayer& layer);
 
   /// True when the requested size equals the view's root dimensions.
   /// Used to pick FBO vs texture subtype at create time.
