@@ -250,6 +250,42 @@ TEST(LayerScanout, BackoffSkipsARejectedShapeUntilTheRetry) {
   EXPECT_TRUE(backoff.ShouldTry(7));
 }
 
+TEST(LayerScanout, BackoffWaitsLongerEachTimeTheSameShapeFailsAgain) {
+  PlanePathBackoff backoff(2);
+  const auto presents_until_retry = [&backoff] {
+    int n = 1;
+    while (!backoff.ShouldTry(7)) {
+      ++n;
+    }
+    return n;
+  };
+  ASSERT_TRUE(backoff.ShouldTry(7));
+  backoff.Rejected(7);
+  EXPECT_EQ(presents_until_retry(), 2);
+  backoff.Rejected(7);
+  EXPECT_EQ(presents_until_retry(), 4);
+  backoff.Rejected(7);
+  EXPECT_EQ(presents_until_retry(), 8);
+  for (uint32_t i = 0; i < PlanePathBackoff::kMaxDoublings; ++i) {
+    backoff.Rejected(7);
+    (void)presents_until_retry();
+  }
+  backoff.Rejected(7);
+  EXPECT_EQ(presents_until_retry(), 2 << PlanePathBackoff::kMaxDoublings);
+
+  // A frame the planes take starts the wait over.
+  backoff.Accepted();
+  backoff.Rejected(7);
+  EXPECT_EQ(presents_until_retry(), 2);
+  // So does a frame of another shape.
+  backoff.Rejected(7);
+  EXPECT_EQ(presents_until_retry(), 4);
+  backoff.Rejected(7);
+  EXPECT_TRUE(backoff.ShouldTry(8));
+  backoff.Rejected(7);
+  EXPECT_EQ(presents_until_retry(), 2);
+}
+
 TEST(LayerScanout, PlaneIsCroppedToTheClip) {
   // A 1920 x 1080 buffer drawn into a 960 x 540 view at (0, 100), clipped to
   // the rows y >= 370 of the output: the view's bottom half.
