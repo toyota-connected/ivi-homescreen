@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "gtest/gtest.h"
+#include "view/layer_scanout.h"
 #include "view/platform_view_geometry.h"
 
 namespace pv = ihs::platform_view;
@@ -564,4 +565,189 @@ TEST(PlatformViewGeometry, MoreClipsThanShapesHoldAreLeftAsTheyWere) {
   ViewLayer v(m, {0, 0}, {100, 100});
   EXPECT_FALSE(pv::ClipShapesOf(v.layer).has_value());
   EXPECT_TRUE(pv::RoundedClipOf(v.layer).has_value());
+}
+
+namespace {
+
+// Where view pixel (@p x, @p y) of a layer covering the whole @p w x @p h view
+// with @p transform samples a @p bw x @p bh buffer, the way the composite path
+// draws it: normalized over the view, then through the layer's transform.
+std::pair<double, double> CompositeSample(const BufferTransform transform,
+                                          const double x,
+                                          const double y,
+                                          const int32_t w,
+                                          const int32_t h,
+                                          const double bw,
+                                          const double bh) {
+  double u = 0, v = 0;
+  TransformedCoord(transform, x / w, y / h, &u, &v);
+  return {u * bw, v * bh};
+}
+
+// The same, the way a plane shows it: the output point, normalized over the
+// plane's destination, through the plane's transform into its source crop.
+std::pair<double, double> PlaneSample(const BufferTransform transform,
+                                      const LayerPlane& place,
+                                      const double ox,
+                                      const double oy) {
+  double u = 0, v = 0;
+  TransformedCoord(transform, (ox - place.dst.x) / place.dst.w,
+                   (oy - place.dst.y) / place.dst.h, &u, &v);
+  return {place.src.x / 65536.0 + u * place.src.w / 65536.0,
+          place.src.y / 65536.0 + v * place.src.h / 65536.0};
+}
+
+constexpr std::array<BufferTransform, 8> kTransforms = {
+    BufferTransform::kNormal,     BufferTransform::k90,
+    BufferTransform::k180,        BufferTransform::k270,
+    BufferTransform::kFlipped,    BufferTransform::kFlipped90,
+    BufferTransform::kFlipped180, BufferTransform::kFlipped270};
+
+}  // namespace
+
+TEST(PlatformViewGeometry, OnlyARightAngleTurnOrMirrorIsTurned) {
+  ViewLayer plain({}, {10, 20}, {300, 200});
+  EXPECT_FALSE(pv::TurnedViewOf(plain.layer, 1.0).has_value());
+  ViewLayer scaled({Scale(2, 2), Translate(5, 5), Scale(0.5, 0.5)}, {10, 10},
+                   {200, 100});
+  EXPECT_FALSE(pv::TurnedViewOf(scaled.layer, 2.0).has_value());
+  ViewLayer turned30({Translate(150, 100), Rotate(30)}, {0, 0}, {300, 200});
+  EXPECT_FALSE(pv::TurnedViewOf(turned30.layer, 1.0).has_value());
+  ViewLayer skewed({Transform(1, 0.5, 0, 0, 1, 0)}, {0, 0}, {300, 200});
+  EXPECT_FALSE(pv::TurnedViewOf(skewed.layer, 1.0).has_value());
+  ViewLayer persp({Transform(-1, 0, 300, 0, 1, 0, 0.001, 0, 1)}, {0, 0},
+                  {300, 200});
+  EXPECT_FALSE(pv::TurnedViewOf(persp.layer, 1.0).has_value());
+}
+
+TEST(PlatformViewGeometry, AQuarterTurnedViewSwapsItsSides) {
+  // As in ARotatedViewMapsItsOwnPixels: own pixel (x, y) lands at
+  // (200 - y, 100 + x), so the 200x100 view covers (100, 100) to (200, 300).
+  ViewLayer v({Scale(2, 2), Translate(100, 50), QuarterTurn()}, {100, 100},
+              {200, 100});
+  const auto t = pv::TurnedViewOf(v.layer, 2.0);
+  ASSERT_TRUE(t.has_value());
+  EXPECT_EQ(t->rect.x, 100);
+  EXPECT_EQ(t->rect.y, 100);
+  EXPECT_EQ(t->rect.w, 100);
+  EXPECT_EQ(t->rect.h, 200);
+  EXPECT_TRUE(t->turn.swaps);
+  EXPECT_TRUE(t->turn.flip_s);
+  EXPECT_FALSE(t->turn.flip_t);
+  // Its top-left quarter, (0, 0) to (100, 50), lands from (150, 100) to
+  // (200, 200): the right half of the rect, top half.
+  const RectI q = pv::TurnedLayerDst(*t, {0, 0, 100, 50});
+  EXPECT_EQ(q.x, 50);
+  EXPECT_EQ(q.y, 0);
+  EXPECT_EQ(q.w, 50);
+  EXPECT_EQ(q.h, 100);
+  // A zero-size destination is the whole view.
+  const RectI all = pv::TurnedLayerDst(*t, {0, 0, 0, 0});
+  EXPECT_EQ(all.x, 0);
+  EXPECT_EQ(all.y, 0);
+  EXPECT_EQ(all.w, 100);
+  EXPECT_EQ(all.h, 200);
+}
+
+TEST(PlatformViewGeometry, MirrorsAndAHalfTurnKeepTheirSides) {
+  ViewLayer mx({Translate(300, 0), Scale(-1, 1)}, {0, 0}, {300, 200});
+  const auto x = pv::TurnedViewOf(mx.layer, 1.0);
+  ASSERT_TRUE(x.has_value());
+  EXPECT_FALSE(x->turn.swaps);
+  EXPECT_TRUE(x->turn.flip_s);
+  EXPECT_FALSE(x->turn.flip_t);
+  EXPECT_EQ(x->rect.w, 300);
+  EXPECT_EQ(x->rect.h, 200);
+  ViewLayer my({Translate(0, 200), Scale(1, -1)}, {0, 0}, {300, 200});
+  const auto y = pv::TurnedViewOf(my.layer, 1.0);
+  ASSERT_TRUE(y.has_value());
+  EXPECT_FALSE(y->turn.flip_s);
+  EXPECT_TRUE(y->turn.flip_t);
+  ViewLayer half({Translate(300, 200), Rotate(180)}, {0, 0}, {300, 200});
+  const auto h = pv::TurnedViewOf(half.layer, 1.0);
+  ASSERT_TRUE(h.has_value());
+  EXPECT_FALSE(h->turn.swaps);
+  EXPECT_TRUE(h->turn.flip_s);
+  EXPECT_TRUE(h->turn.flip_t);
+  EXPECT_EQ(h->rect.x, 0);
+  EXPECT_EQ(h->rect.y, 0);
+}
+
+TEST(PlatformViewGeometry, AScaledTurnCoversItsScaledRect) {
+  // Turned a quarter and halved: the 200x100 view covers 50x100.
+  ViewLayer v({Translate(100, 0), Rotate(90), Scale(0.5, 0.5)}, {50, 0},
+              {200, 100});
+  const auto t = pv::TurnedViewOf(v.layer, 1.0);
+  ASSERT_TRUE(t.has_value());
+  EXPECT_EQ(t->rect.x, 50);
+  EXPECT_EQ(t->rect.y, 0);
+  EXPECT_EQ(t->rect.w, 50);
+  EXPECT_EQ(t->rect.h, 100);
+}
+
+TEST(PlatformViewGeometry, ATurnedViewIsClippedWhereItReallyIs) {
+  // As in ATransformedViewIsClippedWhereItReallyIs: the clip at y = 250 cuts
+  // the turned view, which the engine's rect would say it misses.
+  ViewLayer v(
+      {Scale(2, 2), Clip(0, 0, 500, 125), Translate(100, 50), QuarterTurn()},
+      {100, 100}, {200, 100});
+  const auto t = pv::TurnedViewOf(v.layer, 2.0);
+  ASSERT_TRUE(t.has_value());
+  ASSERT_TRUE(t->clip.has_value());
+  EXPECT_EQ(t->clip->y + t->clip->h, 250);
+}
+
+// The plane must sample, for every pixel the view covers, the buffer pixel the
+// composite path draws there: for every turn, and every transform the layer
+// itself may carry.
+TEST(PlatformViewGeometry, APlaneShowsATurnedViewAsTheCompositeDraws) {
+  struct Case {
+    const char* name;
+    std::vector<FlutterPlatformViewMutation> mutations;
+  };
+  const std::vector<Case> cases = {
+      {"quarter", {Translate(200, 0), Rotate(90)}},
+      {"half", {Translate(300, 200), Rotate(180)}},
+      {"three quarters", {Translate(0, 300), Rotate(270)}},
+      {"mirror x", {Translate(300, 0), Scale(-1, 1)}},
+      {"mirror y", {Translate(0, 200), Scale(1, -1)}},
+      {"quarter mirrored", {Translate(200, 300), Rotate(90), Scale(-1, 1)}},
+      {"quarter scaled", {Translate(100, 0), Rotate(90), Scale(0.5, 0.5)}},
+  };
+  constexpr int32_t kW = 300;
+  constexpr int32_t kH = 200;
+  constexpr uint32_t kBw = 64;
+  constexpr uint32_t kBh = 48;
+  for (const Case& c : cases) {
+    ViewLayer v(c.mutations, {0, 0}, {kW, kH});
+    const auto t = pv::TurnedViewOf(v.layer, 1.0);
+    ASSERT_TRUE(t.has_value()) << c.name;
+    for (const BufferTransform transform : kTransforms) {
+      // The buffer as the layer's transform lays it on the view.
+      const bool swap = TransformSwapsAxes(transform);
+      const uint32_t bw = swap ? kBh : kBw;
+      const uint32_t bh = swap ? kBw : kBh;
+      LayerPlane place;
+      ASSERT_TRUE(PlaceLayerOnPlane({}, pv::TurnedLayerDst(*t, {}),
+                                    ComposeTurn(transform, t->turn), bw, bh,
+                                    t->rect, &place))
+          << c.name;
+      EXPECT_EQ(place.rotation,
+                DrmRotationFor(ComposeTurn(transform, t->turn)));
+      for (const auto& [x, y] :
+           {std::pair{0.5, 0.5}, std::pair{299.5, 0.5}, std::pair{0.5, 199.5},
+            std::pair{299.5, 199.5}, std::pair{37.5, 151.5}}) {
+        const auto want = CompositeSample(transform, x, y, kW, kH, bw, bh);
+        const auto o = t->map.Map(x, y);
+        const auto got =
+            PlaneSample(ComposeTurn(transform, t->turn), place, o[0], o[1]);
+        EXPECT_NEAR(got.first, want.first, 1e-6)
+            << c.name << " transform " << static_cast<int>(transform) << " at "
+            << x << "," << y;
+        EXPECT_NEAR(got.second, want.second, 1e-6)
+            << c.name << " transform " << static_cast<int>(transform) << " at "
+            << x << "," << y;
+      }
+    }
+  }
 }

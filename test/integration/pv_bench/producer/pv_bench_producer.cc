@@ -146,6 +146,9 @@ class BenchView {
       const long n = std::strtol(env, nullptr, 10);  // junk reads as 0 -> 1
       layers_ = n < 1 ? 1u : n > 3 ? 3u : static_cast<uint32_t>(n);
     }
+    if (const char* env = ::getenv("PV_BENCH_MARK"); env != nullptr) {
+      mark_ = std::strcmp(env, "1") == 0;
+    }
     // The shell this runs in may predate layer lists; say so rather than
     // measuring something other than what was asked for.
     if (layers_ > 1 && ihs_pv_submit_layers == nullptr) {
@@ -595,6 +598,13 @@ class BenchView {
       for (uint32_t x = 0; x < width_; ++x) {
         row[x] = color;
       }
+      // PV_BENCH_MARK: the top-left corner white, a quarter of each side, so
+      // where it shows on the output says which way the view was turned.
+      if (mark_ && y < height_ / 4) {
+        for (uint32_t x = 0; x < width_ / 4; ++x) {
+          row[x] = 0xffffffffu;
+        }
+      }
     }
   }
 
@@ -840,6 +850,8 @@ class BenchView {
   uint32_t layers_ = 1;
   // PV_BENCH_SHM=1: the host's SOFTWARE_SHM buffers.
   bool shm_ = false;
+  // PV_BENCH_MARK=1: the buffer's top-left corner drawn white.
+  bool mark_ = false;
 };
 
 void OnResize(void* user_data, double w, double h) {

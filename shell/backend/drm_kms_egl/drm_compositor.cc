@@ -4180,9 +4180,12 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
   //
   // A plane has no rounded corners at all, so a view whose rounded clip cuts
   // into it is composited too, as is one with a clip that is not a rect on
-  // screen, or under a rotation, skew, mirror or perspective, which a plane
-  // cannot turn to.
+  // screen, or under a rotation, skew or perspective, which a plane cannot
+  // turn to. A view turned by a multiple of 90 degrees or mirrored is still a
+  // rect; its plane turns the buffer, where the plane can (the allocator
+  // composites it where not).
   const bool all_alpha = plane_formats_.AllHaveAlpha();
+  const double pixel_ratio = backend_->PresentPixelRatio();
   for (size_t i = 0; i < layer_count; ++i) {
     if (layers[i] == nullptr) {
       continue;
@@ -4190,7 +4193,8 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
     if ((!all_alpha && ihs::platform_view::OpacityOf(*layers[i]) < 1.0f) ||
         ihs::platform_view::RoundedClipOf(*layers[i]) ||
         ihs::platform_view::ClipShapesOf(*layers[i]) ||
-        ihs::platform_view::IsTransformed(*layers[i])) {
+        (ihs::platform_view::IsTransformed(*layers[i]) &&
+         !ihs::platform_view::TurnedViewOf(*layers[i], pixel_ratio))) {
       return PresentViaGlFallback(layers, layer_count);
     }
   }
@@ -4295,13 +4299,21 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
       surface->OnResize(static_cast<int32_t>(content.width),
                         static_cast<int32_t>(content.height));
       RetireScanoutKeys(*surface);
-      const RectI view_rect{static_cast<int32_t>(fl->offset.x),
-                            static_cast<int32_t>(fl->offset.y),
-                            static_cast<int32_t>(fl->size.width),
-                            static_cast<int32_t>(fl->size.height)};
+      // A turned or mirrored view covers a rect of its own, not the one the
+      // engine gives its layer: under a quarter turn its width and height
+      // swap.
+      const std::optional<ihs::platform_view::TurnedView> turned =
+          ihs::platform_view::TurnedViewOf(*fl, pixel_ratio);
+      const RectI view_rect =
+          turned ? turned->rect
+                 : RectI{static_cast<int32_t>(fl->offset.x),
+                         static_cast<int32_t>(fl->offset.y),
+                         static_cast<int32_t>(fl->size.width),
+                         static_cast<int32_t>(fl->size.height)};
       // Each layer's plane is cropped to the view's clip, and shown at the
       // view's opacity.
-      const std::optional<RectI> clip = ihs::platform_view::ClipRectOf(*fl);
+      const std::optional<RectI> clip =
+          turned ? turned->clip : ihs::platform_view::ClipRectOf(*fl);
       const auto pv_alpha = static_cast<uint16_t>(std::lround(
           static_cast<double>(ihs::platform_view::OpacityOf(*fl)) * 0xFFFF));
       // One scene layer per layer of the view, bottom to top, each on a plane
@@ -4438,9 +4450,14 @@ bool DrmCompositor::PresentLayersViaScene(const FlutterLayer** layers,
           return PresentViaGlFallback(layers, layer_count);
         }
         LayerPlane place;
-        if (!PlaceLayerOnPlane(ld.geometry.src, ld.geometry.dst,
-                               ld.geometry.transform, buf_w, buf_h, view_rect,
-                               &place, clip ? &*clip : nullptr)) {
+        if (!PlaceLayerOnPlane(
+                ld.geometry.src,
+                turned ? ihs::platform_view::TurnedLayerDst(*turned,
+                                                            ld.geometry.dst)
+                       : ld.geometry.dst,
+                turned ? ComposeTurn(ld.geometry.transform, turned->turn)
+                       : ld.geometry.transform,
+                buf_w, buf_h, view_rect, &place, clip ? &*clip : nullptr)) {
           // Nothing of it shows. It takes no plane this present (a reused
           // layer is pruned below), and a frame it was handed goes straight
           // back: it will never be scanned out.
