@@ -1703,7 +1703,14 @@ int VulkanDrmBackend::AcquireScanoutSlot(const uint32_t w, const uint32_t h) {
   }
 
   if (slot < 0) {
-    if (c.slots.size() >= CompositorState::kMaxRing) {
+    // The plane path holds every store of the frame on screen and every
+    // store of the frame waiting to flip, so its slots come on top of what
+    // the engine cycles through: with one store per layer, a frame of four
+    // layers holds eight.
+    const size_t cap = CompositorState::kMaxRing +
+                       c.plane_scanning_slots.size() +
+                       c.plane_pending_slots.size();
+    if (c.slots.size() >= cap) {
       ihs::log::error(
           "[VulkanDrmBackend] scanout ring exhausted ({} buffers); dropping "
           "frame",
