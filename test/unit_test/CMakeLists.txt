@@ -169,6 +169,8 @@ add_subdirectory(cache_dir-test)
 add_subdirectory(vk_external_texture-test)
 # wl_touch frame batching; no compositor needed (see that dir's CMakeLists).
 add_subdirectory(touch_frame-test)
+# One text input per Wayland seat; fake backend, no compositor needed.
+add_subdirectory(text_input_seats-test)
 # Watchdog shutdown latency (the systemctl stop hang).
 add_subdirectory(watchdog_shutdown-test)
 # xdg_toplevel.close ends the shell; mock compositor, no GPU.

@@ -114,13 +114,12 @@ Display::Display(const bool enable_cursor,
   wl_display_dispatch(m_display);
   wl_display_roundtrip(m_display);
 
-  // Adopt the text-input backend now that the seat (if any) is bound. Bind is a
-  // graceful no-op returning true when zwp_text_input_manager_v3 was never
-  // advertised; it creates the per-seat text_input from m_seat otherwise.
-  if (m_seat &&
-      !text_input_.Bind(registry_, this, reinterpret_cast<wl_proxy*>(m_seat))) {
-    ihs::log::warn("[Display] text-input manager advertised but bind failed");
+  // A text input for each seat bound so far; one that arrives later gets its
+  // own as it is bound (HandleGlobal).
+  for (const auto& si : m_all_seats) {
+    BindTextInput(si.seat);
   }
+  text_inputs_bound_ = true;
 
   // AGL's window-management facet maps output indices to wl_outputs owned here.
   for (auto& s : shells_) {
@@ -181,8 +180,9 @@ Display::~Display() {
   // release() — never close() — them before the optionals are destroyed.
   ReleaseRepeatFd();
   ReleaseWaylandFd();
-  // Tear down the text_input/manager proxies before the seat + display go away.
-  text_input_.Release();
+  // Tear down the text_input/manager proxies before the seats + display go
+  // away.
+  text_inputs_.Clear();
   // Send wl_keyboard teardown + free the handler's xkb objects/timerfd.
   keyboard_.Reset();
   // Destroy the zwp_input_timestamps_v1 subscriptions + manager while the
@@ -326,14 +326,13 @@ void Display::HandleGlobal(wl::CRegistry& reg,
     const uint32_t seat_version = std::min(static_cast<uint32_t>(5), version);
     auto* seat = static_cast<wl_seat*>(
         wl_registry_bind(registry, name, &wl_seat_interface, seat_version));
-    // Keep the first seat as the primary one; text_input_ is bound against it
-    // after the startup roundtrip and must not follow a later arrival.
-    if (d->m_seat == nullptr) {
-      d->m_seat = seat;
-    }
     d->m_all_seats.push_back({name, seat_version, seat});
     IHS_DEBUG("Wayland: Seat [{}]", d->m_all_seats.size());
     wl_seat_add_listener(seat, &seat_listener, d);
+    // Seats there at startup get theirs after the roundtrip.
+    if (d->text_inputs_bound_) {
+      d->BindTextInput(seat);
+    }
   } else if (iface ==
              viewporter::client::wp_viewporter_traits::interface_name) {
     d->m_viewporter = static_cast<wl_proxy*>(wl_registry_bind(
@@ -350,11 +349,12 @@ void Display::HandleGlobal(wl::CRegistry& reg,
                      wp_fractional_scale_manager_v1_traits::version,
                  version)));
   }
-  // zwp_text_input_manager_v3 — recorded for text_input_.Bind() after the
-  // startup roundtrip (the per-seat text_input needs m_seat). If the compositor
-  // never advertises it, text_input_ stays unbound and all IME paths no-op.
+  // zwp_text_input_manager_v3 — recorded for each seat's text input, made
+  // after the startup roundtrip. If the compositor never advertises it, there
+  // are none and all IME paths no-op.
   else if (iface == "zwp_text_input_manager_v3") {
-    d->text_input_.Record(name, version);
+    d->text_input_manager_name_ = name;
+    d->text_input_manager_version_ = version;
   }
   // wp_presentation is owned by the vsync provider;
   // zwp_input_timestamps_manager_v1 by the input-timestamps provider (which
@@ -768,8 +768,12 @@ void Display::OnKeyboardLeave() {
 // touched on that strand.
 
 void Display::OnEnter() {
-  // The field gained IME focus. Activation intent is driven from the plugin
-  // (TextInput.show), and the backend auto-enables on enter; nothing to do.
+  // A seat's text input entered. The backend has made its enable pending, and
+  // enable resets the content type, cursor rectangle and surrounding text, so
+  // they go again with the commit that applies it. Nothing else would send
+  // them: the engine only calls on a change of its own, which focus moving
+  // between surfaces or seats is not.
+  text_inputs_.OnEnter();
 }
 
 void Display::OnLeave() {
@@ -839,8 +843,8 @@ void Display::OnDeleteSurroundingText(uint32_t before_bytes,
 
 // ── Text-input drivers (engine strand -> reactor thread) ─────────────────────
 //
-// Posted onto the reactor io_context so the text_input_ proxy is only mutated
-// on the reactor thread. All are graceful no-ops while text_input_ is unbound.
+// Posted onto the reactor io_context so the text_input proxies are only mutated
+// on the reactor thread. All are graceful no-ops while there are none.
 
 void Display::ActivateTextInput(uint32_t hint,
                                 uint32_t purpose,
@@ -852,11 +856,9 @@ void Display::ActivateTextInput(uint32_t hint,
     return;
   }
   asio::post(*ioc_, [this, hint, purpose, x, y, width, height]() {
-    text_input_.SetContentType(static_cast<wl::ime::ContentHint>(hint),
-                               static_cast<wl::ime::ContentPurpose>(purpose));
-    text_input_.SetCursorRectangle(x, y, width, height);
-    text_input_.Activate();
-    text_input_.Commit();
+    text_inputs_.Activate(static_cast<wl::ime::ContentHint>(hint),
+                          static_cast<wl::ime::ContentPurpose>(purpose), x, y,
+                          width, height);
   });
 }
 
@@ -864,10 +866,7 @@ void Display::DeactivateTextInput() {
   if (!ioc_) {
     return;
   }
-  asio::post(*ioc_, [this]() {
-    text_input_.Deactivate();
-    text_input_.Commit();
-  });
+  asio::post(*ioc_, [this]() { text_inputs_.Deactivate(); });
 }
 
 void Display::UpdateTextInputCursorRect(int32_t x,
@@ -878,8 +877,7 @@ void Display::UpdateTextInputCursorRect(int32_t x,
     return;
   }
   asio::post(*ioc_, [this, x, y, width, height]() {
-    text_input_.SetCursorRectangle(x, y, width, height);
-    text_input_.Commit();
+    text_inputs_.SetCursorRectangle(x, y, width, height);
   });
 }
 
@@ -890,8 +888,7 @@ void Display::UpdateTextInputSurrounding(const std::string& utf8,
     return;
   }
   asio::post(*ioc_, [this, utf8, cursor, anchor]() {
-    text_input_.SetSurroundingText(utf8, cursor, anchor);
-    text_input_.Commit();
+    text_inputs_.SetSurroundingText(utf8, cursor, anchor);
   });
 }
 
@@ -1297,6 +1294,19 @@ void Display::EmitOutputDone(output_info_t* oi) {
   }
 }
 
+void Display::BindTextInput(struct wl_seat* seat) {
+  if (text_input_manager_name_ == 0 || seat == nullptr) {
+    return;
+  }
+  auto ti = std::make_unique<wl::ime::SelectedTextInput>();
+  ti->Record(text_input_manager_name_, text_input_manager_version_);
+  if (!ti->Bind(registry_, this, reinterpret_cast<wl_proxy*>(seat))) {
+    ihs::log::warn("[Display] text-input manager advertised but bind failed");
+    return;
+  }
+  text_inputs_.Add(seat, std::move(ti));
+}
+
 void Display::ReleaseSeatInputs(struct wl_seat* seat) {
   if (m_pointer.wl_pointer && m_pointer_seat == seat) {
     m_pointer_seat = nullptr;
@@ -1327,9 +1337,8 @@ void Display::HandleGlobalRemove(const uint32_t global_name) {
       continue;
     }
     ReleaseSeatInputs(it->seat);
-    if (m_seat == it->seat) {
-      m_seat = nullptr;
-    }
+    // Its text input was made from it, so goes first.
+    text_inputs_.Remove(it->seat);
     if (it->version >= WL_SEAT_RELEASE_SINCE_VERSION) {
       wl_seat_release(it->seat);
     } else {
