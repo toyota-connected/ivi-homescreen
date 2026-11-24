@@ -369,6 +369,15 @@ a few seconds. The base is `IVI_DRM_REPAINT_WINDOW_US`, and
 `IVI_DRM_REPAINT_WINDOW_ADAPT=0` keeps the window fixed at it. Producers read
 the current window as `IhsPvCapabilities::latch_lead_ns`.
 
+The window also leaves room for the composite. Each present reads how long the
+last composite took on the GPU, from when its fence signaled, and waits for no
+less than that plus 1.5 ms for the commit. A composite that needs more than
+three quarters of a refresh fits no window, so then the present composites as
+soon as it arrives, which leaves it most of the refresh. A Raspberry Pi 5
+blending three platform views and their overlays into a 1280x1440 frame takes
+about 12.5 ms; with a window it misses every vblank and runs at 30 Hz, and
+without one it holds 60.
+
 It applies to the blend path. The plane-layer path (`IVI_DRMVK_PLANE_LAYERS`)
 picks platform-view buffers when it plans the frame, and does not wait.
 
