@@ -64,6 +64,7 @@
 #include "backend/common/sync_file_time.h"
 #include "backend/drm_kms_egl/drm_cursor.h"
 #include "backend/drm_kms_egl/scene_layer_source_vk.h"
+#include "view/paint_region.h"
 #if BUILD_HUD
 #include "backend/hud/vulkan_hud.h"
 #endif
@@ -3327,6 +3328,19 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
       if (store == nullptr || store->image() == target_image) {
         continue;  // the base store, already resident in the target
       }
+      // Only what Flutter painted: everything else in the store is
+      // transparent. An overlay above a platform view is full-screen and
+      // usually holds a few small widgets, and copying and blending all of it
+      // cost a v3d at 1280x1440 several milliseconds a store. A store with
+      // nothing painted is left out, and keeps the layout the engine left it
+      // in.
+      const auto store_w = static_cast<int32_t>(store->width());
+      const auto store_h = static_cast<int32_t>(store->height());
+      const std::optional<std::vector<RectI>> painted =
+          PaintRects(*layer, store_w, store_h);
+      if (painted && painted->empty()) {
+        continue;
+      }
       // Where the GPU refused SAMPLED, copy the store into an image that can
       // be sampled and draw that instead (#617). Reached when no modifier the
       // scanout plane accepts also supports sampling, so the store cannot be
@@ -3352,13 +3366,30 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0,
                   VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                   VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
-          VkImageCopy region{};
-          region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-          region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-          region.extent = {store->width(), store->height(), 1};
-          d().vkCmdCopyImage(cmd, store->image(),
-                             VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, scratch,
-                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+          // The painted rects, a pixel wider so filtering at their edges reads
+          // copied texels; the whole store when there is no region.
+          std::vector<VkImageCopy> regions;
+          const auto add_region = [&](const RectI& r) {
+            VkImageCopy region{};
+            region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+            region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+            region.srcOffset = {r.x, r.y, 0};
+            region.dstOffset = {r.x, r.y, 0};
+            region.extent = {static_cast<uint32_t>(r.w),
+                             static_cast<uint32_t>(r.h), 1};
+            regions.push_back(region);
+          };
+          if (painted) {
+            for (const RectI& r : *painted) {
+              add_region(PadRect(r, 1, store_w, store_h));
+            }
+          } else {
+            add_region({0, 0, store_w, store_h});
+          }
+          d().vkCmdCopyImage(
+              cmd, store->image(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+              scratch, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+              static_cast<uint32_t>(regions.size()), regions.data());
           barrier(scratch, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                   VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -3389,10 +3420,37 @@ bool VulkanDrmBackend::CompositeOverlays(VkCommandBuffer cmd,
                 VK_ACCESS_SHADER_READ_BIT,
                 VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
       }
-      draws.push_back({sampled, store->vk_format(), dx, dy, dw, dh,
-                       store->image(), leaves_store_in,
-                       VK_SAMPLER_YCBCR_MODEL_CONVERSION_RGB_IDENTITY,
-                       VK_SAMPLER_YCBCR_RANGE_ITU_NARROW});
+      if (!painted) {
+        draws.push_back({sampled, store->vk_format(), dx, dy, dw, dh,
+                         store->image(), leaves_store_in,
+                         VK_SAMPLER_YCBCR_MODEL_CONVERSION_RGB_IDENTITY,
+                         VK_SAMPLER_YCBCR_RANGE_ITU_NARROW});
+      } else {
+        // One draw per painted rect, placed where it is in the layer. The
+        // first hands the store back to the engine afterwards; once is enough.
+        const double sx = static_cast<double>(dw) / store_w;
+        const double sy = static_cast<double>(dh) / store_h;
+        bool first = true;
+        for (const RectI& r : *painted) {
+          const auto rx0 = static_cast<int32_t>(std::floor(r.x * sx));
+          const auto ry0 = static_cast<int32_t>(std::floor(r.y * sy));
+          const auto rx1 = static_cast<int32_t>(std::ceil((r.x + r.w) * sx));
+          const auto ry1 = static_cast<int32_t>(std::ceil((r.y + r.h) * sy));
+          Draw dr{sampled,
+                  store->vk_format(),
+                  dx + rx0,
+                  dy + ry0,
+                  rx1 - rx0,
+                  ry1 - ry0,
+                  first ? store->image() : VK_NULL_HANDLE,
+                  leaves_store_in,
+                  VK_SAMPLER_YCBCR_MODEL_CONVERSION_RGB_IDENTITY,
+                  VK_SAMPLER_YCBCR_RANGE_ITU_NARROW};
+          dr.uv = UvForRect(r, store_w, store_h);
+          draws.push_back(dr);
+          first = false;
+        }
+      }
     } else if (layer->type == kFlutterLayerContentTypePlatformView &&
                layer->platform_view != nullptr) {
       std::shared_ptr<ICompositorSurface> surface;
