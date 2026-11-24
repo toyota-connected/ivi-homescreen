@@ -468,64 +468,25 @@ void Display::seat_handle_capabilities(void* data,
                                        struct wl_seat* seat,
                                        uint32_t caps) {
   auto* d = static_cast<Display*>(data);
-
-  if (!d->m_wayland_event_mask.pointer) {
-    if ((caps & WL_SEAT_CAPABILITY_POINTER) && !d->m_pointer.wl_pointer) {
-      ihs::log::debug("Pointer Present");
-      d->m_pointer.wl_pointer = wl_seat_get_pointer(seat);
-      d->m_pointer_seat = seat;
-      wl_pointer_add_listener(d->m_pointer.wl_pointer, &pointer_listener, d);
-      d->input_timestamps_.AttachPointer(d->m_pointer.wl_pointer);
-    } else if (!(caps & WL_SEAT_CAPABILITY_POINTER) &&
-               d->m_pointer.wl_pointer && d->m_pointer_seat == seat) {
-      // Detach (destroys the subscription proxy) before releasing the device
-      // it references.
-      d->input_timestamps_.AttachPointer(nullptr);
-      wl_pointer_release(d->m_pointer.wl_pointer);
-      d->m_pointer.wl_pointer = nullptr;
-      d->m_pointer_seat = nullptr;
+  for (auto& si : d->m_all_seats) {
+    if (si.seat == seat) {
+      si.caps = caps;
     }
   }
 
-  if (!d->m_wayland_event_mask.keyboard) {
-    if ((caps & WL_SEAT_CAPABILITY_KEYBOARD) && d->keyboard_.IsNull()) {
-      ihs::log::debug("Keyboard Present");
-      // Wrap the raw wl_keyboard in the scanner's CRTP handler (installs its
-      // listener); set the back-pointer and register its repeat timerfd on the
-      // reactor. This runs on the reactor thread during wl dispatch, so OnKey,
-      // the keyboard events and DispatchRepeat all share one thread.
-      wl_keyboard* raw = wl_seat_get_keyboard(seat);
-      if (wl::SetupHandler(d->keyboard_, reinterpret_cast<wl_proxy*>(raw))) {
-        d->keyboard_.Get()->app_ = d;
-        d->m_keyboard_seat = seat;
-        d->ArmRepeatFd();
-      }
-    } else if (!(caps & WL_SEAT_CAPABILITY_KEYBOARD) &&
-               !d->keyboard_.IsNull() && d->m_keyboard_seat == seat) {
-      d->ReleaseRepeatFd();
-      d->keyboard_.Reset();
-      d->m_keyboard_seat = nullptr;
-    }
+  // Drop what this seat held and no longer offers.
+  if (!(caps & WL_SEAT_CAPABILITY_POINTER) && d->m_pointer_seat == seat) {
+    d->ReleasePointer();
   }
-
-  if (!d->m_wayland_event_mask.touch) {
-    if ((caps & WL_SEAT_CAPABILITY_TOUCH) && !d->m_touch.touch) {
-      ihs::log::debug("Touch Present");
-      d->m_touch.touch = wl_seat_get_touch(seat);
-      d->m_touch_seat = seat;
-      wl_touch_set_user_data(d->m_touch.touch, d);
-      wl_touch_add_listener(d->m_touch.touch, &touch_listener, d);
-      d->input_timestamps_.AttachTouch(d->m_touch.touch);
-    } else if (!(caps & WL_SEAT_CAPABILITY_TOUCH) && d->m_touch.touch &&
-               d->m_touch_seat == seat) {
-      // Detach (destroys the subscription proxy) before releasing the device
-      // it references.
-      d->input_timestamps_.AttachTouch(nullptr);
-      wl_touch_release(d->m_touch.touch);
-      d->m_touch.touch = nullptr;
-      d->m_touch_seat = nullptr;
-    }
+  if (!(caps & WL_SEAT_CAPABILITY_KEYBOARD) && d->m_keyboard_seat == seat) {
+    d->ReleaseKeyboard();
   }
+  if (!(caps & WL_SEAT_CAPABILITY_TOUCH) && d->m_touch_seat == seat) {
+    d->ReleaseTouch();
+  }
+  // Take what nothing holds, from this seat or, for what it just dropped,
+  // another that has it.
+  d->AdoptSeatInputs();
 }
 
 void Display::seat_handle_name(void* /* data */,
@@ -557,6 +518,7 @@ void Display::pointer_handle_enter(void* data,
   d->m_pointer.event.surface_x = wl_fixed_to_double(sx);
   d->m_pointer.event.surface_y = wl_fixed_to_double(sy);
   d->m_pointer.serial = serial;
+  d->m_pointer.inside = true;
 
   // The cursor image is undefined on enter until the client sets it with this
   // enter's serial, so a shape set once survives only until the pointer leaves
@@ -578,6 +540,7 @@ void Display::pointer_handle_leave(void* data,
   auto* d = static_cast<Display*>(data);
 
   d->m_pointer.serial = serial;
+  d->m_pointer.inside = false;
 
   if (d->m_active_engine) {
     d->m_active_engine->CoalesceMouseEvent(kFlutterPointerSignalKindNone,
@@ -1308,24 +1271,104 @@ void Display::BindTextInput(struct wl_seat* seat) {
 }
 
 void Display::ReleaseSeatInputs(struct wl_seat* seat) {
-  if (m_pointer.wl_pointer && m_pointer_seat == seat) {
-    m_pointer_seat = nullptr;
-    // Detach (destroys the subscription proxy) before releasing the device it
-    // references.
-    input_timestamps_.AttachPointer(nullptr);
-    wl_pointer_release(m_pointer.wl_pointer);
-    m_pointer.wl_pointer = nullptr;
+  if (m_pointer_seat == seat) {
+    ReleasePointer();
   }
-  if (!keyboard_.IsNull() && m_keyboard_seat == seat) {
-    m_keyboard_seat = nullptr;
-    ReleaseRepeatFd();
-    keyboard_.Reset();
+  if (m_keyboard_seat == seat) {
+    ReleaseKeyboard();
   }
-  if (m_touch.touch && m_touch_seat == seat) {
-    m_touch_seat = nullptr;
-    input_timestamps_.AttachTouch(nullptr);
-    wl_touch_release(m_touch.touch);
-    m_touch.touch = nullptr;
+  if (m_touch_seat == seat) {
+    ReleaseTouch();
+  }
+}
+
+void Display::BindPointer(struct wl_seat* seat) {
+  ihs::log::debug("Pointer Present");
+  m_pointer.wl_pointer = wl_seat_get_pointer(seat);
+  m_pointer_seat = seat;
+  wl_pointer_add_listener(m_pointer.wl_pointer, &pointer_listener, this);
+  input_timestamps_.AttachPointer(m_pointer.wl_pointer);
+}
+
+void Display::ReleasePointer() {
+  if (!m_pointer.wl_pointer) {
+    return;
+  }
+  // Released over the surface, it sends no leave: tell the engine it went, as
+  // leave does, or the next pointer's enter adds a device it still has.
+  if (m_pointer.inside && m_active_engine) {
+    m_active_engine->CoalesceMouseEvent(kFlutterPointerSignalKindNone, kRemove,
+                                        0.0, 0.0, 0.0, 0.0, 0);
+  }
+  m_pointer.inside = false;
+  m_pointer.buttons = 0;
+  // Detach (destroys the subscription proxy) before releasing the device it
+  // references.
+  input_timestamps_.AttachPointer(nullptr);
+  wl_pointer_release(m_pointer.wl_pointer);
+  m_pointer.wl_pointer = nullptr;
+  m_pointer_seat = nullptr;
+}
+
+void Display::BindKeyboard(struct wl_seat* seat) {
+  ihs::log::debug("Keyboard Present");
+  // Wrap the raw wl_keyboard in the scanner's CRTP handler (installs its
+  // listener); set the back-pointer and register its repeat timerfd on the
+  // reactor. This runs on the reactor thread during wl dispatch, so OnKey,
+  // the keyboard events and DispatchRepeat all share one thread.
+  wl_keyboard* raw = wl_seat_get_keyboard(seat);
+  if (wl::SetupHandler(keyboard_, reinterpret_cast<wl_proxy*>(raw))) {
+    keyboard_.Get()->app_ = this;
+    m_keyboard_seat = seat;
+    ArmRepeatFd();
+  }
+}
+
+void Display::ReleaseKeyboard() {
+  if (keyboard_.IsNull()) {
+    return;
+  }
+  ReleaseRepeatFd();
+  keyboard_.Reset();
+  m_keyboard_seat = nullptr;
+}
+
+void Display::BindTouch(struct wl_seat* seat) {
+  ihs::log::debug("Touch Present");
+  m_touch.touch = wl_seat_get_touch(seat);
+  m_touch_seat = seat;
+  wl_touch_set_user_data(m_touch.touch, this);
+  wl_touch_add_listener(m_touch.touch, &touch_listener, this);
+  input_timestamps_.AttachTouch(m_touch.touch);
+}
+
+void Display::ReleaseTouch() {
+  if (!m_touch.touch) {
+    return;
+  }
+  // Detach (destroys the subscription proxy) before releasing the device it
+  // references.
+  input_timestamps_.AttachTouch(nullptr);
+  wl_touch_release(m_touch.touch);
+  m_touch.touch = nullptr;
+  m_touch_seat = nullptr;
+}
+
+void Display::AdoptSeatInputs() {
+  if (!m_wayland_event_mask.pointer && !m_pointer.wl_pointer) {
+    if (auto* seat = SeatOffering(m_all_seats, WL_SEAT_CAPABILITY_POINTER)) {
+      BindPointer(seat);
+    }
+  }
+  if (!m_wayland_event_mask.keyboard && keyboard_.IsNull()) {
+    if (auto* seat = SeatOffering(m_all_seats, WL_SEAT_CAPABILITY_KEYBOARD)) {
+      BindKeyboard(seat);
+    }
+  }
+  if (!m_wayland_event_mask.touch && !m_touch.touch) {
+    if (auto* seat = SeatOffering(m_all_seats, WL_SEAT_CAPABILITY_TOUCH)) {
+      BindTouch(seat);
+    }
   }
 }
 
@@ -1345,6 +1388,8 @@ void Display::HandleGlobalRemove(const uint32_t global_name) {
       wl_seat_destroy(it->seat);
     }
     m_all_seats.erase(it);
+    // Another seat that still has what this one held takes over.
+    AdoptSeatInputs();
     return;
   }
 

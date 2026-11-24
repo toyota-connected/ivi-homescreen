@@ -171,6 +171,8 @@ add_subdirectory(vk_external_texture-test)
 add_subdirectory(touch_frame-test)
 # One text input per Wayland seat; fake backend, no compositor needed.
 add_subdirectory(text_input_seats-test)
+# Which seat input is taken from when another drops it; no compositor needed.
+add_subdirectory(seat_offering-test)
 # Watchdog shutdown latency (the systemctl stop hang).
 add_subdirectory(watchdog_shutdown-test)
 # xdg_toplevel.close ends the shell; mock compositor, no GPU.
