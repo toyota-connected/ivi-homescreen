@@ -72,6 +72,7 @@
 #include "profiling/motion_to_photon.h"
 #include "vsync/wayland_vsync_provider.h"
 #include "wayland/input_timestamps.h"
+#include "wayland/seat_offering.h"
 #include "wayland/shell/wayland_shell.h"
 #include "wayland/text_input_seats.h"
 #include "wayland/touch_frame.h"
@@ -512,6 +513,8 @@ class Display : public IDisplay,
     uint32_t global_id;
     uint32_t version;
     struct wl_seat* seat;
+    // WL_SEAT_CAPABILITY_* from its last capabilities event.
+    uint32_t caps{0};
   };
   std::vector<seat_info> m_all_seats;
 
@@ -526,6 +529,22 @@ class Display : public IDisplay,
    * going away. Leaves objects owned by other seats untouched.
    */
   void ReleaseSeatInputs(struct wl_seat* seat);
+
+  // One pointer, keyboard and touch at a time, each from one seat. Bind takes
+  // it from @p seat; Release drops the one held.
+  void BindPointer(struct wl_seat* seat);
+  void ReleasePointer();
+  void BindKeyboard(struct wl_seat* seat);
+  void ReleaseKeyboard();
+  void BindTouch(struct wl_seat* seat);
+  void ReleaseTouch();
+
+  /**
+   * @brief Take each of pointer, keyboard and touch that nothing holds from
+   * the first seat that offers it (SeatOffering). Run after a seat drops a
+   * device or is removed, so another seat that still has one takes over.
+   */
+  void AdoptSeatInputs();
 
   // wl_keyboard wrapped in the scanner's CRTP handler: owns its own xkb
   // context/keymap/state and the repeat timerfd. Bound off the seat that
@@ -670,6 +689,9 @@ class Display : public IDisplay,
 
     uint32_t buttons;
     uint32_t state;
+    // Between enter and leave. A pointer released in between gets no leave,
+    // so the engine is told it went (ReleasePointer).
+    bool inside;
   } m_pointer{};
 
   struct touch_point {
