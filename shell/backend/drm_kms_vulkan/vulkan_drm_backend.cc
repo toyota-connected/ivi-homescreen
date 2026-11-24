@@ -23,6 +23,7 @@
 
 #include <drm_fourcc.h>
 #include <drm_mode.h>  // DRM_MODE_ROTATE_*
+#include <fcntl.h>
 
 #include <algorithm>
 #include <array>
@@ -60,6 +61,7 @@
 
 #include "backend/common/flip_arm.h"
 #include "backend/common/repaint_window.h"
+#include "backend/common/sync_file_time.h"
 #include "backend/drm_kms_egl/drm_cursor.h"
 #include "backend/drm_kms_egl/scene_layer_source_vk.h"
 #if BUILD_HUD
@@ -753,6 +755,10 @@ struct VulkanDrmBackend::CompositorState {
     if (flip_pending.load(std::memory_order_acquire)) {
       WaitForFlip(device.fd(), evctx);
     }
+    if (composite_fence >= 0) {
+      ::close(composite_fence);
+      composite_fence = -1;
+    }
     if (vk_device != VK_NULL_HANDLE) {
       ihs::vulkan::QueueInterposer::DeviceWaitIdle(vk_device,
                                                    d().vkDeviceWaitIdle);
@@ -949,6 +955,16 @@ struct VulkanDrmBackend::CompositorState {
   std::atomic<uint64_t> repaint_window_base_ns{0};
   bool repaint_window_adapts = true;
   std::atomic<uint64_t> commit_target_ns{0};
+  // How long the blend path's composite takes on the GPU (TrackCompositeNs),
+  // which the window has to leave room for; and, on the explicit-sync path,
+  // the last composite's sync_file and when it was submitted, read by the next
+  // present once its flip has landed. Raster thread only.
+  uint64_t composite_ns = 0;
+  int composite_fence = -1;
+  uint64_t composite_submit_ns = 0;
+  // The window presents wait for now: repaint_window_ns, widened to fit the
+  // composite (EffectiveRepaintWindowNs). Published as the latch lead.
+  std::atomic<uint64_t> effective_window_ns{0};
   // What PlatformViewLatchLeadNs reports, kept here so another thread never
   // reads the raster thread's plane-path flags.
   std::atomic<uint32_t> pv_latch_lead_ns{0};
@@ -1504,6 +1520,8 @@ bool VulkanDrmBackend::SetupCompositor(std::string& err) {
                                             std::memory_order_relaxed);
   compositor_->repaint_window_adapts = RepaintWindowAdaptsFromEnv();
   compositor_->repaint_window_ns.store(window_base, std::memory_order_relaxed);
+  compositor_->effective_window_ns.store(window_base,
+                                         std::memory_order_relaxed);
   PublishLatchLead();
   vsync_.SetPeriodNs(period_ns);
   vsync_.SetPaceToVblank(ivi::IVsyncProvider::PaceEnabledByEnv());
@@ -1864,6 +1882,8 @@ void VulkanDrmBackend::SetRepaintWindowForTest(const uint64_t window_ns) {
     compositor_->repaint_window_base_ns.store(window_ns,
                                               std::memory_order_relaxed);
     compositor_->repaint_window_ns.store(window_ns, std::memory_order_relaxed);
+    compositor_->effective_window_ns.store(window_ns,
+                                           std::memory_order_relaxed);
     PublishLatchLead();
   }
 }
@@ -4094,10 +4114,24 @@ bool VulkanDrmBackend::PresentSlot(const size_t slot,
   // that overruns it counts as a miss; 0 for one that arrived after its window
   // opened, which a wider window would not have helped.
   uint64_t judged_target = 0;
+  // The last composite has retired by now -- its flip has landed -- so its
+  // fence says how long it took. The window must leave that much room.
+  if (c.composite_fence >= 0) {
+    const uint64_t done = SyncFileSignaledNs(c.composite_fence);
+    if (done > c.composite_submit_ns) {
+      c.composite_ns =
+          TrackCompositeNs(c.composite_ns, done - c.composite_submit_ns);
+    }
+    ::close(c.composite_fence);
+    c.composite_fence = -1;
+  }
+  const uint64_t window = EffectiveRepaintWindowNs(
+      c.repaint_window_ns.load(std::memory_order_relaxed), c.composite_ns,
+      c.period_ns);
+  c.effective_window_ns.store(window, std::memory_order_relaxed);
   if (!c.first_commit) {
     const uint64_t arrival = MonotonicNs();
     const uint64_t last_flip = c.last_flip_ns.load(std::memory_order_acquire);
-    const uint64_t window = c.repaint_window_ns.load(std::memory_order_relaxed);
     const uint64_t delay =
         RepaintDelayNs(arrival, last_flip, c.period_ns, window);
     if (delay > 0) {
@@ -4115,10 +4149,20 @@ bool VulkanDrmBackend::PresentSlot(const size_t slot,
   // Owned here so every exit below closes it exactly once --- the early returns
   // during layer creation included. Platform views composite here, from the
   // newest buffer each producer has submitted.
+  const uint64_t composite_start = MonotonicNs();
   const ScopedFd scanout_fence(
       SubmitScanoutBarrier(c, store->image(), store->view(), store->width(),
                            store->height(), layers, count));
   const uint64_t t2 = stage_profile_enabled ? MonotonicNs() : 0;
+  // Measure the composite: on the CPU-fence path it has retired by now, and
+  // on the explicit-sync path a copy of its fence is read by the next present.
+  if (scanout_fence.get() >= 0) {
+    c.composite_fence = ::fcntl(scanout_fence.get(), F_DUPFD_CLOEXEC, 0);
+    c.composite_submit_ns = composite_start;
+  } else {
+    c.composite_ns =
+        TrackCompositeNs(c.composite_ns, MonotonicNs() - composite_start);
+  }
 
   // Create the single presenting layer once the ring has a slot; thereafter the
   // ring source rotates which slot's framebuffer the layer scans out.
@@ -4784,7 +4828,7 @@ void VulkanDrmBackend::PublishLatchLead() {
   c.pv_latch_lead_ns.store(
       planes ? 0U
              : static_cast<uint32_t>(std::min<uint64_t>(
-                   c.repaint_window_ns.load(std::memory_order_relaxed),
+                   c.effective_window_ns.load(std::memory_order_relaxed),
                    UINT32_MAX)),
       std::memory_order_release);
 }

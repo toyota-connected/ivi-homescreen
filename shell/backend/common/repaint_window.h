@@ -145,6 +145,49 @@ enum class FlipVerdict { kUnjudged, kOnTime, kMissed };
   return step >= excess ? base_ns : window_ns - step;
 }
 
+// Room after the composite for the commit to make its vblank: the commit
+// itself, and the time the kernel needs before the vblank to take a flip.
+inline constexpr uint64_t kCommitMarginNs = 1'500'000;
+
+// How long the composite takes on the GPU, smoothed: @estimate_ns follows a
+// slower @sample_ns at once, so the next window already allows for it, and a
+// faster one by a sixteenth of the difference, so a single quick frame does not
+// shrink the window under the next slow one. A sample of 0 (none measured)
+// leaves it alone.
+[[nodiscard]] constexpr uint64_t TrackCompositeNs(const uint64_t estimate_ns,
+                                                  const uint64_t sample_ns) {
+  if (sample_ns == 0) {
+    return estimate_ns;
+  }
+  if (sample_ns >= estimate_ns) {
+    return sample_ns;
+  }
+  return estimate_ns - (estimate_ns - sample_ns) / 16;
+}
+
+// The window a present waits for: the adapted @window_ns, but never less than
+// the composite takes (@composite_ns) and the commit after it. A window the
+// composite does not fit in starts it too late, and every flip misses its
+// vblank. The miss-driven widening in AdaptRepaintWindowNs stops at three
+// quarters of a refresh; a composite that needs more than that fits no window,
+// so 0: it starts as soon as the present arrives, which leaves it most of the
+// refresh. A v3d blending three platform views and their overlays into a
+// 1280x1440 frame takes about 12.5 ms, and holds 60 Hz that way where any
+// window halves it. The window as given when it is off or nothing is measured.
+[[nodiscard]] constexpr uint64_t EffectiveRepaintWindowNs(
+    const uint64_t window_ns,
+    const uint64_t composite_ns,
+    const uint64_t period_ns) {
+  if (window_ns == 0 || period_ns == 0 || composite_ns == 0) {
+    return window_ns;
+  }
+  const uint64_t needed = composite_ns + kCommitMarginNs;
+  if (needed > period_ns / 4 * 3) {
+    return 0;
+  }
+  return needed > window_ns ? needed : window_ns;
+}
+
 // Whether the window adapts: on unless IVI_DRM_REPAINT_WINDOW_ADAPT=0.
 [[nodiscard]] inline bool RepaintWindowAdaptsFromEnv() {
   const char* env = std::getenv("IVI_DRM_REPAINT_WINDOW_ADAPT");

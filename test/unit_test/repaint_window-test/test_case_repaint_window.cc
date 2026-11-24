@@ -23,6 +23,7 @@
 #include <cstdlib>
 
 #include "backend/common/repaint_window.h"
+#include "backend/common/sync_file_time.h"
 
 namespace {
 
@@ -184,4 +185,42 @@ TEST(RepaintWindow, AFlipIsJudgedAgainstItsOwnTargetOnly) {
   // flip's.
   EXPECT_EQ(JudgeFlip(target, target + 5 * kPeriod, kPeriod),
             FlipVerdict::kUnjudged);
+}
+
+TEST(RepaintWindow, TheCompositeEstimateRisesAtOnceAndFallsSlowly) {
+  EXPECT_EQ(TrackCompositeNs(0, 6'000'000), 6'000'000U);
+  // A slower composite is allowed for from the next present on.
+  EXPECT_EQ(TrackCompositeNs(6'000'000, 12'000'000), 12'000'000U);
+  // A faster one moves it a sixteenth of the way.
+  EXPECT_EQ(TrackCompositeNs(12'000'000, 4'000'000), 11'500'000U);
+  // Nothing measured leaves it alone.
+  EXPECT_EQ(TrackCompositeNs(12'000'000, 0), 12'000'000U);
+}
+
+TEST(RepaintWindow, TheWindowLeavesRoomForTheComposite) {
+  constexpr uint64_t kBase = 5'000'000;
+  // Nothing measured, or a composite that fits: the window as it is.
+  EXPECT_EQ(EffectiveRepaintWindowNs(kBase, 0, kPeriod), kBase);
+  EXPECT_EQ(EffectiveRepaintWindowNs(kBase, 2'000'000, kPeriod), kBase);
+  // One that does not: widened to the composite and the commit after it.
+  EXPECT_EQ(EffectiveRepaintWindowNs(kBase, 6'400'000, kPeriod),
+            6'400'000 + kCommitMarginNs);
+  // An adapted window wider than that is kept.
+  EXPECT_EQ(EffectiveRepaintWindowNs(10'000'000, 6'400'000, kPeriod),
+            10'000'000U);
+}
+
+TEST(RepaintWindow, ACompositeThatFitsNoWindowGoesAtOnce) {
+  // 12.5 ms and the commit is more than three quarters of a refresh: no window
+  // fits it, so it starts as soon as the present arrives.
+  EXPECT_EQ(EffectiveRepaintWindowNs(5'000'000, 12'500'000, kPeriod), 0U);
+  EXPECT_EQ(EffectiveRepaintWindowNs(12'500'000, 12'500'000, kPeriod), 0U);
+  // A window that is off stays off.
+  EXPECT_EQ(EffectiveRepaintWindowNs(0, 2'000'000, kPeriod), 0U);
+}
+
+TEST(RepaintWindow, ASyncFileThatCannotBeReadHasNoTime) {
+  EXPECT_EQ(SyncFileSignaledNs(-1), 0U);
+  // Not a sync_file at all.
+  EXPECT_EQ(SyncFileSignaledNs(0), 0U);
 }
