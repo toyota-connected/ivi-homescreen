@@ -96,6 +96,9 @@ cross:
         # cross build's PATH.
         - pkg: wayland-cxx-scanner
           url: https://github.com/jwinarske/wayland-cxx-scanner/archive/9c86b8e7e87e2c9d5ff34939d044df4053e70970.tar.gz
+          # GitHub's archive of that commit: a URL names the source, the digest
+          # pins the bytes, so a substituted tarball fails the build.
+          sha256: 51786928c4589157992d9ba9607a96daf34c2fb23f2e52e020f4231ea915140c
           build: cmake
           host: true
           defines:
