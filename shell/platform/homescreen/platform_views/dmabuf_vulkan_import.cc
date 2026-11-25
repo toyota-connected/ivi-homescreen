@@ -19,6 +19,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <mutex>
@@ -347,6 +348,28 @@ bool DmabufVulkanImporter::Import(const IhsFrame& frame,
   return true;
 }
 
+VkDeviceSize DmabufVulkanImporter::ImageExtent(VkImage image,
+                                               bool linear_tiling,
+                                               uint32_t plane_count) const {
+  if (get_image_subresource_layout_ == nullptr) {
+    return 0;
+  }
+  static constexpr std::array<VkImageAspectFlagBits, 2> kPlanes = {
+      VK_IMAGE_ASPECT_MEMORY_PLANE_0_BIT_EXT,
+      VK_IMAGE_ASPECT_MEMORY_PLANE_1_BIT_EXT};
+  const uint32_t planes =
+      linear_tiling ? 1 : std::min<uint32_t>(plane_count, kPlanes.size());
+  VkDeviceSize extent = 0;
+  for (uint32_t p = 0; p < planes; ++p) {
+    VkImageSubresource sub{};
+    sub.aspectMask = linear_tiling ? VK_IMAGE_ASPECT_COLOR_BIT : kPlanes[p];
+    VkSubresourceLayout layout{};
+    get_image_subresource_layout_(device_, image, &sub, &layout);
+    extent = std::max(extent, layout.offset + layout.size);
+  }
+  return extent;
+}
+
 bool DmabufVulkanImporter::ImportNew(const IhsFrame& frame,
                                      ImportedImage* out) const {
   bool is_yuv = false;
@@ -548,22 +571,37 @@ bool DmabufVulkanImporter::ImportNew(const IhsFrame& frame,
   if (alloc_rc == VK_ERROR_INVALID_EXTERNAL_HANDLE && import_padding_ != 0) {
     const off_t held = ::lseek(frame.plane_fd[0], 0, SEEK_END);
     ::lseek(frame.plane_fd[0], 0, SEEK_SET);
-    const VkDeviceSize ask =
-        held < 0 ? 0
-                 : ShortImportSize(req.size, static_cast<VkDeviceSize>(held),
-                                   import_padding_);
+    VkDeviceSize ask = 0;
+    if (held >= 0) {
+      ask = ExtentImportSize(
+          req.size, ImageExtent(image, linear_tiling, frame.plane_count),
+          static_cast<VkDeviceSize>(held), import_padding_);
+      if (ask == 0) {
+        ask = ShortImportSize(req.size, static_cast<VkDeviceSize>(held),
+                              import_padding_);
+      }
+    }
     if (ask != 0) {
       // Out of spec, deliberately. VUID-vkBindImageMemory-size-01049 and
       // VUID-VkMemoryDedicatedAllocateInfo-image-02964 both want
       // allocationSize == req.size, and at that size v3dv requires a dma-buf a
       // page larger than the one v3d's own GBM allocator hands a client for
       // the same image, so such a frame cannot be imported in spec at all
-      // (#723, mesa/mesa#16524). The bo v3dv ends up with is still
-      // align(req.size, 4096): the short ask drops only the read-ahead slack
-      // the GL driver never had either, and the image stays fully backed.
+      // (#723, mesa/mesa#16524). With the short ask the bo v3dv ends up with
+      // is still align(req.size, 4096): the short ask drops only the
+      // read-ahead slack the GL driver never had either, and the image stays
+      // fully backed.
+      // With the extent ask from ImageExtent, the requirement already holds
+      // the 64 bytes, and the bo is the producer's dma-buf: it holds the
+      // image but not the read-ahead. v3dv pads "to avoid invalid reads done
+      // by the TFU after the end of the last allocated memory page", so a
+      // view that goes through the TFU may read up to 64 bytes past the end
+      // of this dma-buf, and nothing in spec avoids that for such a buffer.
+      // On a Pi 5 with full-screen views through the TFU, dmesg showed no v3d
+      // MMU errors.
       // Validation flags both VUIDs on every frame that takes this path.
       static std::once_flag warned;
-      std::call_once(warned, [padding = import_padding_] {
+      std::call_once(warned, [shortfall = req.size - ask] {
         ihs::log::warn(
             "[ihs_pv] dma-buf import: v3dv refuses a dma-buf sized to its own "
             "image, so importing it {} bytes short of the requirement -- out "
@@ -571,7 +609,7 @@ bool DmabufVulkanImporter::ImportNew(const IhsFrame& frame,
             "VUID-vkBindImageMemory-size-01049 and "
             "VUID-VkMemoryDedicatedAllocateInfo-image-02964 on every such "
             "frame (#723)",
-            padding);
+            shortfall);
       });
       mai.allocationSize = ask;
       alloc_rc = allocate_memory_(device_, &mai, nullptr, &memory);
