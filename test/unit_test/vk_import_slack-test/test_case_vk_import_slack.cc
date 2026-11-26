@@ -129,4 +129,48 @@ TEST(VkImportSlack, PageIsAParameter) {
             16384u - kReadahead);
 }
 
+// A v3dv that puts the read-ahead in the requirement checks the dma-buf
+// against allocationSize alone. Measured on a Pi 5: a 576x896 XR24 frame,
+// stride 2304, wants 2064448 bytes for a 2064384-byte image in a 2064384-byte
+// dma-buf. ShortImportSize declines it; asking the image's own size imports
+// it.
+TEST(VkImportSlack, ReadaheadInTheRequirementAsksForTheImage) {
+  constexpr VkDeviceSize kImage = 2304 * 896;
+  constexpr VkDeviceSize kWants = kImage + kReadahead;
+  EXPECT_EQ(Importer::ShortImportSize(kWants, BoBytes(kImage), kReadahead), 0u);
+  EXPECT_EQ(
+      Importer::ExtentImportSize(kWants, kImage, BoBytes(kImage), kReadahead),
+      kImage);
+}
+
+// Where the requirement holds no padding, the extent path stays out of it.
+TEST(VkImportSlack, ExtentImportNeedsPaddingInTheRequirement) {
+  EXPECT_EQ(Importer::ExtentImportSize(7372800, 7372800, 7372800, kReadahead),
+            0u);
+  EXPECT_EQ(Importer::ExtentImportSize(7372800, 0, 7372800, kReadahead), 0u);
+}
+
+// A dma-buf that does not hold the image is never imported short of it.
+TEST(VkImportSlack, ExtentImportNeedsTheImageInTheDmabuf) {
+  constexpr VkDeviceSize kImage = 2304 * 896;
+  EXPECT_EQ(Importer::ExtentImportSize(kImage + kReadahead, kImage, kImage - 1,
+                                       kReadahead),
+            0u);
+}
+
+// A requirement more than the read-ahead past the extent is a difference the
+// read-ahead does not explain: refused, not imported short.
+TEST(VkImportSlack, ExtentImportOnlyDropsTheReadahead) {
+  constexpr VkDeviceSize kImage = 2304 * 896;
+  EXPECT_EQ(Importer::ExtentImportSize(kImage + kReadahead, kImage,
+                                       BoBytes(kImage), kReadahead),
+            kImage);
+  EXPECT_EQ(Importer::ExtentImportSize(kImage + kReadahead + 1, kImage,
+                                       BoBytes(kImage), kReadahead),
+            0u);
+  EXPECT_EQ(Importer::ExtentImportSize(kImage + kPage, kImage, BoBytes(kImage),
+                                       kReadahead),
+            0u);
+}
+
 }  // namespace

@@ -176,14 +176,10 @@ class DmabufVulkanImporter {
   // retry merely because the shorter ask would be backed would hand the
   // driver an image whose last bytes are outside the buffer.
   //
-  // Where Mesa main will need more than this: it reports the read-ahead inside
-  // VkMemoryRequirements::size instead of adding it at allocation time, so
-  // @image_bytes arrives 64 bytes past the modifier's layout and this declines
-  // the retry -- correctly, on what it can see, since nothing here can tell
-  // scratch padding from image. Deciding it needs the image's real extent from
-  // vkGetImageSubresourceLayout (offset + size over the memory planes) in
-  // place of req.size. Not done while the hardware we run is on 25.0.7, where
-  // the two are equal.
+  // A v3dv that puts the read-ahead in VkMemoryRequirements::size instead of
+  // adding it at allocation is ExtentImportSize's case: there @image_bytes is
+  // 64 bytes past the image, and this declines the retry, since nothing here
+  // can tell scratch padding from image.
   [[nodiscard]] static constexpr VkDeviceSize ShortImportSize(
       VkDeviceSize image_bytes,
       VkDeviceSize held,
@@ -194,6 +190,29 @@ class DmabufVulkanImporter {
     }
     const VkDeviceSize ask = image_bytes - padding;
     return held >= ImportFootprint(ask, padding, page) ? ask : 0;
+  }
+
+  // The allocationSize to retry a refused import with when the driver puts
+  // its read-ahead in @image_bytes (VkMemoryRequirements::size) rather than
+  // adding it at allocation: the driver then checks the dma-buf against
+  // allocationSize alone. @extent is the image's own size from its
+  // subresource layouts (offset + size over the memory planes); asking that
+  // much imports a dma-buf that holds the image, which is all a producer
+  // that is not v3d's own GBM allocates. Unlike ShortImportSize, nothing
+  // here backs the read-ahead: see ImportNew. 0 when the requirement has no
+  // padding in it, when it is more than @padding past the extent (a
+  // difference the read-ahead does not explain), or when the dma-buf does
+  // not hold the image. Out of spec as ShortImportSize is (#723).
+  [[nodiscard]] static constexpr VkDeviceSize ExtentImportSize(
+      VkDeviceSize image_bytes,
+      VkDeviceSize extent,
+      VkDeviceSize held,
+      VkDeviceSize padding) {
+    if (extent == 0 || extent >= image_bytes ||
+        image_bytes - extent > padding) {
+      return 0;
+    }
+    return held >= extent ? extent : 0;
   }
 
  private:
@@ -242,6 +261,13 @@ class DmabufVulkanImporter {
   static bool KeyOf(const IhsFrame& frame, PoolKey* out);
 
   bool ImportNew(const IhsFrame& frame, ImportedImage* out) const;
+
+  // The bytes @image occupies by its subresource layouts: the furthest
+  // offset + size over its @plane_count memory planes (the color aspect for a
+  // LINEAR-tiled image). 0 if the device cannot say.
+  VkDeviceSize ImageExtent(VkImage image,
+                           bool linear_tiling,
+                           uint32_t plane_count) const;
   void Free(ImportedImage* image) const;
 
   mutable std::mutex pool_mu_;
